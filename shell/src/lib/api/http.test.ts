@@ -279,6 +279,40 @@ describe('settings', () => {
   });
 });
 
+describe('apps', () => {
+  const app = { id: 'wall-follower', name: 'Wall follower', enabled: true };
+
+  it('lists apps, turns them on and off and picks their parts', async () => {
+    const f = fakeFetch([
+      { path: '/api/v0/apps', body: [app] },
+      { method: 'POST', path: '/api/v0/apps/wall-follower/enable', body: app },
+      { method: 'POST', path: '/api/v0/apps/wall-follower/disable', body: app },
+      { method: 'PUT', path: '/api/v0/apps/wall-follower/roles', body: app },
+    ]);
+    const http = createHttp(f.fetch);
+    expect(await http.getApps()).toEqual([app]);
+    await http.setAppEnabled('wall-follower', true);
+    await http.setAppEnabled('wall-follower', false);
+    await http.setAppRoles('wall-follower', { lidar: 'lidar', front: ['a', 'b'] });
+    expect(f.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      'GET /api/v0/apps',
+      'POST /api/v0/apps/wall-follower/enable',
+      'POST /api/v0/apps/wall-follower/disable',
+      'PUT /api/v0/apps/wall-follower/roles',
+    ]);
+    expect(f.calls[3]!.body).toEqual({ roles: { lidar: 'lidar', front: ['a', 'b'] } });
+  });
+
+  it('reads a signal once, an app’s derived one too', async () => {
+    const reading = { capability: 'distance@1', reading: { tUs: 1, meters: 0.3, status: 'ok' } };
+    const value = { address: 'app:wall-follower/wall-distance', capability: 'distance@1', reading };
+    const f = fakeFetch([
+      { path: '/api/v0/signals/app%3Awall-follower/wall-distance', body: value },
+    ]);
+    expect(await createHttp(f.fetch).getSignal('app:wall-follower/wall-distance')).toEqual(value);
+  });
+});
+
 describe('driving', () => {
   const grant = {
     lease: 'L1',

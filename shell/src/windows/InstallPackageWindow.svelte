@@ -1,22 +1,24 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { useCore } from '../lib/state/context';
-  import type { ErrorBody, PackagePreview } from '../lib/state/types';
+  import type { AppPackagePreview, ErrorBody, PackagePreview } from '../lib/state/types';
   import { kindWords, touchWords } from '../lib/desktop/packages';
   import { useDesktop } from '../components/desktopController.svelte';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
   import Markdown from '../components/Markdown.svelte';
+  import InstallApp from './InstallApp.svelte';
   import { droppedPackage, forgetDropped } from '../components/installWindow';
   import type { WindowProps } from '../components/windowDefs';
   import { t } from '../lib/i18n';
 
   /**
-   * Install a connector package (docs/packages.md §1): what it is, who made it, what it can
-   * touch and its README, checked in full by the core before anything is installed. Nothing is
-   * checked by the Faber registry yet (Phase 7), and the window says so.
+   * Install a package (docs/packages.md §1): what it is, who made it, what it can touch and its
+   * README, checked in full by the core before anything is installed. Nothing is checked by the
+   * Faber registry yet (Phase 7), and the window says so. An app's package shows its own pane
+   * (InstallApp), with a part picked for each of its roles.
    */
-  let { win }: WindowProps = $props();
+  let { win, visible }: WindowProps = $props();
 
   const core = useCore();
   const desktop = useDesktop();
@@ -24,6 +26,7 @@
   const name = $derived(win.params.name ?? '');
   let file = $state.raw<Blob | null>(null);
   let preview = $state.raw<PackagePreview | null>(null);
+  let appPreview = $state.raw<AppPackagePreview | null>(null);
   let error = $state.raw<ErrorBody | null>(null);
   let phase = $state<'loading' | 'ready' | 'installing' | 'done' | 'missing'>('loading');
   /**
@@ -50,6 +53,7 @@
     phase = 'loading';
     error = null;
     preview = null;
+    appPreview = null;
     let blob: Blob | undefined;
     if (win.params.path) {
       const r = await core.downloadFile(win.params.path);
@@ -66,8 +70,9 @@
     }
     file = blob;
     const p = await core.previewPackage(blob, name);
-    if (p.ok) preview = p.value;
-    else error = p.error;
+    if (!p.ok) error = p.error;
+    else if ('app' in p.value) appPreview = p.value;
+    else preview = p.value;
     phase = 'ready';
   }
 
@@ -96,6 +101,8 @@
     <p class="muted" role="status">{t('install.loading')}</p>
   {:else if phase === 'missing'}
     <p class="muted">{t('install.noFile')}</p>
+  {:else if appPreview && file}
+    <InstallApp {win} {visible} preview={appPreview} {file} {name} />
   {:else if phase === 'done' && preview}
     <div class="done" role="status">
       <Icon name="check" size={28} />

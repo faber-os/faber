@@ -5,6 +5,10 @@ import type { ConnectorInfo } from './generated/ConnectorInfo';
 import type { ConnectorProblem } from './generated/ConnectorProblem';
 import type { PackageInfo } from './generated/PackageInfo';
 import type { PackagePreview } from './generated/PackagePreview';
+import type { AppInfo } from './generated/AppInfo';
+import type { AppPackagePreview } from './generated/AppPackagePreview';
+import type { RoleParts } from './generated/RoleParts';
+import type { SignalValue } from './generated/SignalValue';
 import type { ErrorBody } from './generated/ErrorBody';
 import type { NewPart } from './generated/NewPart';
 import type { PartInfo } from './generated/PartInfo';
@@ -53,12 +57,26 @@ export interface CoreHttp {
   getConnectorProblems(): Promise<ConnectorProblem[]>;
   /** Installed connector packages (docs/api.md, "Packages"). */
   getPackages(): Promise<PackageInfo[]>;
-  /** Checks a package file in full and says what it would install, installing nothing. */
-  previewPackage(file: Uint8Array | Blob, name: string): Promise<PackagePreview>;
+  /**
+   * Checks a package file in full and says what it would install, installing nothing: a
+   * connector's package answers a `PackagePreview`, an app's an `AppPackagePreview`.
+   */
+  previewPackage(
+    file: Uint8Array | Blob,
+    name: string,
+  ): Promise<PackagePreview | AppPackagePreview>;
   /** Installs a package file; `name` is remembered as where it came from. */
   installPackage(file: Uint8Array | Blob, name: string): Promise<PackageInfo>;
   /** `409 package-in-use` while a part uses its connector (the message names them). */
   uninstallPackage(id: string): Promise<void>;
+  /** The installed apps (docs/api.md, "Apps"). */
+  getApps(): Promise<AppInfo[]>;
+  /** Turns an app on (`true`) or off; off ends its leases before it answers. */
+  setAppEnabled(id: string, enabled: boolean): Promise<AppInfo>;
+  /** Exactly these parts for these roles; roles left out get none. */
+  setAppRoles(id: string, roles: Record<string, RoleParts>): Promise<AppInfo>;
+  /** The newest reading of a signal (`part/name`, or an app's `app:<id>/<name>`). */
+  getSignal(address: string): Promise<SignalValue>;
   getPorts(): Promise<PortInfo[]>;
   /**
    * Asks a free port whether a FaberLink board is on it (a few seconds). Only when the user asks:
@@ -240,6 +258,12 @@ export function createHttp(
       answer('POST', `/packages?mode=preview&${named(name)}`, { raw: file }),
     installPackage: (file, name) => answer('POST', `/packages?${named(name)}`, { raw: file }),
     uninstallPackage: (id) => request('DELETE', `/packages/${encodeURIComponent(id)}`),
+    getApps: () => request('GET', '/apps'),
+    setAppEnabled: (id, enabled) =>
+      request('POST', `/apps/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`),
+    setAppRoles: (id, roles) => request('PUT', `/apps/${encodeURIComponent(id)}/roles`, { roles }),
+    getSignal: (address) =>
+      request('GET', `/signals/${address.split('/').map(encodeURIComponent).join('/')}`),
     getPorts: () => request('GET', '/ports'),
     checkBoard: (port) => request('POST', '/ports/check-board', { port }),
     getFlasherBoards: () => request('GET', '/flasher/boards'),

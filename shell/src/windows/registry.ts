@@ -1,6 +1,8 @@
 import type { WindowDef } from '../components/windowDefs';
 import { t } from '../lib/i18n';
 import AboutWindow from './AboutWindow.svelte';
+import AppWindow from './AppWindow.svelte';
+import AppsWindow from './AppsWindow.svelte';
 import DistanceWindow from './DistanceWindow.svelte';
 import DriveWindow from './DriveWindow.svelte';
 import FilesWindow from './FilesWindow.svelte';
@@ -100,6 +102,43 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 480, h: 340 },
     minSize: { w: 320, h: 280 },
     component: PlanarBaseWindow,
+  },
+  {
+    // Installed apps: on and off, their parts, their windows (docs/apps.md).
+    kind: 'apps',
+    get title() {
+      return t('programs.apps.title');
+    },
+    get description() {
+      return t('programs.apps.description');
+    },
+    icon: 'grid',
+    menu: 'tools',
+    program: 'tool:apps',
+    onDesktop: true,
+    colour: 'parts',
+    multiple: false,
+    defaultSize: { w: 620, h: 600 },
+    minSize: { w: 340, h: 320 },
+    component: AppsWindow,
+  },
+  {
+    // One app's own window: its UI in a sandboxed frame (docs/apps.md §9). Opened from Apps;
+    // its title, size and icon come from the app.
+    kind: 'app',
+    get title() {
+      return t('programs.app.title');
+    },
+    get description() {
+      return t('programs.app.description');
+    },
+    icon: 'grid',
+    menu: null,
+    colour: 'parts',
+    multiple: true,
+    defaultSize: { w: 480, h: 360 },
+    minSize: { w: 240, h: 180 },
+    component: AppWindow,
   },
   {
     kind: 'drive',

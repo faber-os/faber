@@ -1,5 +1,5 @@
 import { t } from '../lib/i18n';
-import type { PartInfo, SignalInfo } from '../lib/state/types';
+import type { AppSignal, PartInfo, SignalInfo } from '../lib/state/types';
 import type { DesktopController } from './desktopController.svelte';
 
 /** Opens the Drive window (there is one) on `part`, or as it was. */
@@ -32,5 +32,21 @@ export function openViewer(desktop: DesktopController, p: PartInfo, s: SignalInf
     key: s.address,
     title: v.title(p.name),
     params: { address: s.address, part: p.name },
+  });
+}
+
+/** Whether Faber can draw a signal of this capability (an app's derived signals too). */
+export function hasViewer(capability: string): boolean {
+  return capability in VIEWERS;
+}
+
+/** Opens the viewer of an app's derived signal (D24), titled after the app. */
+export function openDerivedViewer(desktop: DesktopController, app: string, s: AppSignal): void {
+  const v = VIEWERS[s.capability];
+  if (!v) return;
+  desktop.open(v.kind, {
+    key: s.address,
+    title: v.title(`${app} · ${s.name}`),
+    params: { address: s.address, part: s.address.split('/')[0] ?? '' },
   });
 }

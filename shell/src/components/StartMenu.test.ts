@@ -30,6 +30,7 @@ describe('Start menu', () => {
         .map((m) => m.textContent?.trim()),
     ).toEqual([
       'Parts',
+      'Apps',
       'Drive',
       'World',
       'Serial monitor',

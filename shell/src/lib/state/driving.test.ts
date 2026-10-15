@@ -115,6 +115,20 @@ describe('LeaseKeeper', () => {
     expect(c.calls.filter((x) => x.startsWith('renew'))).toHaveLength(3);
   });
 
+  it('without autoRenew, only renew() and commands keep it alive (an app window’s page)', async () => {
+    const c = fakeClient();
+    const k = new LeaseKeeper(c.client, 'base', 'app:x', () => {}, { autoRenew: false });
+    expect(await k.renew()).toBeNull();
+    await k.acquire();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(c.calls.filter((x) => x.startsWith('renew'))).toEqual([]);
+    expect((await k.renew())?.ok).toBe(true);
+    expect(c.calls.filter((x) => x.startsWith('renew'))).toEqual(['renew base L1']);
+    c.answers.renew = fail('lease-ended', 'It expired.');
+    await k.renew();
+    expect(k.status).toMatchObject({ kind: 'ended' });
+  });
+
   it('does not renew while commands keep it alive', async () => {
     const { k, c } = keeper();
     await k.acquire();

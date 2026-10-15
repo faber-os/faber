@@ -72,6 +72,8 @@ export interface OpenRequest {
   params?: Record<string, string>;
   /** Geometry remembered from last time. */
   saved?: Rect;
+  /** A size of its own instead of the kind's (an app's `[window]` width and height). */
+  size?: Size;
 }
 
 const CASCADE_STEP = 28;
@@ -140,7 +142,7 @@ export function openWindow(
   if (existing) return { state: focusWindow(state, existing.id), id: existing.id };
 
   const id = `w${state.nextId}`;
-  const chosen = req.saved ?? cascadeRect(state, req.kind.defaultSize, area);
+  const chosen = req.saved ?? cascadeRect(state, req.size ?? req.kind.defaultSize, area);
   const rect = clampRect(chosen, req.kind.minSize, area);
   const win: WindowState = {
     id,

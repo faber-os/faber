@@ -9,6 +9,7 @@
   import Taskbar from './Taskbar.svelte';
   import type { WindowDef } from './windowDefs';
   import WindowFrame from './WindowFrame.svelte';
+  import { windowIcon } from './appWindow';
 
   let { defs }: { defs: WindowDef[] } = $props();
 
@@ -32,7 +33,7 @@
       {@const def = byKind.get(win.kind)}
       {#if def}
         {@const Content = def.component}
-        <WindowFrame {win} icon={def.icon}>
+        <WindowFrame {win} icon={def.icon} iconSrc={windowIcon(core, win)}>
           <Content {win} visible={!win.minimised} />
         </WindowFrame>
       {/if}

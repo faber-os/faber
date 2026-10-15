@@ -94,11 +94,16 @@ export class LeaseKeeper {
   private lastActivity = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
 
+  /**
+   * `autoRenew: false` leaves keeping the lease alive to whoever drives (`renew()` and commands):
+   * an app window's page renews it itself, so a page that hangs lets it lapse and the part stops.
+   */
   constructor(
     private readonly client: LeaseClient,
     readonly part: string,
     readonly holder: string,
     private readonly onChange: (status: LeaseStatus) => void = () => {},
+    private readonly options: { autoRenew?: boolean } = {},
   ) {}
 
   get held(): boolean {
@@ -129,7 +134,8 @@ export class LeaseKeeper {
       this.firstDeadlineUs = r.value.deadlineUs;
       this.lastActivity = Date.now();
       this.set({ kind: 'held', grant: r.value });
-      this.timer = setInterval(() => this.renewIfQuiet(), RENEW_MS);
+      if (this.options.autoRenew !== false)
+        this.timer = setInterval(() => this.renewIfQuiet(), RENEW_MS);
       return true;
     });
     return this.requesting;
@@ -141,6 +147,16 @@ export class LeaseKeeper {
     const lease = this.status.grant.lease;
     this.lastActivity = Date.now();
     const r = await this.run(() => this.client.command(this.part, lease, command));
+    if (!r.ok) this.refusedWith(lease, r.error);
+    return r;
+  }
+
+  /** Renews the lease now. `null` without a lease. */
+  async renew(): Promise<Result<LeaseGrant> | null> {
+    if (this.status.kind !== 'held') return null;
+    const lease = this.status.grant.lease;
+    this.lastActivity = Date.now();
+    const r = await this.run(() => this.client.renewLease(this.part, lease));
     if (!r.ok) this.refusedWith(lease, r.error);
     return r;
   }

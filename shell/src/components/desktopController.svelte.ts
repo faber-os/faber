@@ -14,6 +14,7 @@ import {
   type Area,
   type DesktopState,
   type Rect,
+  type Size,
   type WindowKind,
   type WindowState,
 } from '../lib/desktop/windows';
@@ -47,6 +48,8 @@ export interface OpenOptions {
   key?: string;
   title?: string;
   params?: Record<string, string>;
+  /** A size of its own the first time it opens (an app's `[window]` size). */
+  size?: Size;
 }
 
 /**
@@ -120,6 +123,7 @@ export class DesktopController {
         title: opts.title,
         params: opts.params,
         saved: this.geometry[geometryKey(k, key)],
+        size: opts.size,
       },
       this.area,
       { compact: this.compact },
