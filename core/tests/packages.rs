@@ -268,7 +268,7 @@ async fn a_load_problem_names_the_package_file_and_the_file_inside_it() {
         assert!(!message.contains("connectors/"), "{mode}: {message}");
     }
     // A wasm package whose faber.toml only the full reader refuses (the header reads fine).
-    let wasm = SENSOR.replace("declarative", "wasm").replace("type = \"connector\"", "type = \"app\"");
+    let wasm = SENSOR.replace("declarative", "wasm").replace("type = \"connector\"", "type = \"widget\"");
     let files: BTreeMap<String, Vec<u8>> = [
         ("faber.toml", wasm.as_bytes()),
         ("README.md", b"# My sensor".as_slice()),
