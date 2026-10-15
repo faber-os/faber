@@ -36,6 +36,10 @@ const SERVER_TYPE_LIST: Record<ServerMessage['type'], true> = {
   'serial-recording-stopped': true,
   settings: true,
   'files-changed': true,
+  leases: true,
+  'lease-granted': true,
+  'lease-ended': true,
+  estop: true,
   error: true,
 };
 const SERVER_TYPES = new Set<string>(Object.keys(SERVER_TYPE_LIST));

@@ -75,7 +75,11 @@ describe('decodeServerMessage', () => {
     const msg = decodeServerMessage(JSON.stringify(scanJson), 'json');
     expect(msg.type).toBe('signal');
     if (msg.type !== 'signal') return;
-    expect(msg.reading.reading.ranges).toEqual([1.5, Infinity, 2]);
+    expect(msg.reading.capability === 'laser-scan@1' ? msg.reading.reading.ranges : null).toEqual([
+      1.5,
+      Infinity,
+      2,
+    ]);
   });
 
   it('keeps real Infinity from msgpack', () => {
@@ -87,7 +91,11 @@ describe('decodeServerMessage', () => {
       'msgpack',
     );
     if (msg.type !== 'signal') throw new Error('expected signal');
-    expect(msg.reading.reading.ranges).toEqual([1.5, Infinity, 2]);
+    expect(msg.reading.capability === 'laser-scan@1' ? msg.reading.reading.ranges : null).toEqual([
+      1.5,
+      Infinity,
+      2,
+    ]);
   });
 
   it('turns JSON byte arrays into Uint8Array', () => {

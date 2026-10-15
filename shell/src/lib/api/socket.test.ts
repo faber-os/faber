@@ -212,7 +212,10 @@ describe('CoreSocket', () => {
     );
     const m = got[0];
     if (m?.type !== 'signal') throw new Error('expected a signal');
-    expect(m.reading.reading.ranges).toEqual([Infinity, 1]);
+    expect(m.reading.capability === 'laser-scan@1' ? m.reading.reading.ranges : null).toEqual([
+      Infinity,
+      1,
+    ]);
   });
 
   describe('serial sessions', () => {

@@ -42,7 +42,8 @@
     return core.connectors?.find((c) => c.id === id)?.name ?? id;
   }
 
-  function portLabel(id: string): string | null {
+  function portLabel(id: string | undefined): string | null {
+    if (!id) return null;
     const port = core.ports?.find((p) => p.id === id);
     if (!port) return null;
     return port.kind === 'bluetooth'
@@ -61,13 +62,14 @@
     if (!p) return null;
     const signals = viewable(p);
     const port = core.ports?.find((x) => x.id === p.port);
-    const busy =
-      port?.claimedBy === p.name
+    const busy = p.simulate
+      ? t('parts.menu.simulatedNoPort')
+      : port?.claimedBy === p.name
         ? t('parts.menu.busy.self', { part: p.name })
         : port?.claimedBy
           ? t('parts.menu.busy.other', { owner: port.claimedBy })
           : !port
-            ? t('parts.menu.busy.missing', { port: p.port })
+            ? t('parts.menu.busy.missing', { port: p.port ?? '' })
             : undefined;
     return {
       label: p.name,
@@ -89,7 +91,7 @@
       ],
       onSelect: (id: string) => {
         if (id === 'view' && signals[0]) openViewer(p, signals[0]);
-        else if (id === 'monitor') openInMonitor(p.port);
+        else if (id === 'monitor' && p.port) openInMonitor(p.port);
         else if (id === 'remove') confirming = p.name;
       },
     };
@@ -234,7 +236,11 @@
               <p class="meta">
                 <span>{connectorName(p.connector)}</span>
                 <span class="sep" aria-hidden="true">·</span>
-                <span>{label ?? t('parts.list.port')} <code>{p.port}</code></span>
+                {#if p.simulate}
+                  <span class="sim">{t(`parts.list.simulated.${p.simulate}`)}</span>
+                {:else}
+                  <span>{label ?? t('parts.list.port')} <code>{p.port}</code></span>
+                {/if}
               </p>
               {#if p.state.message}
                 <div

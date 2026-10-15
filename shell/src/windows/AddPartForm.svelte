@@ -158,7 +158,11 @@
                 <span class="choice-meta">
                   <code>{c.id}</code>
                   <span>{t('addPart.connector.version', { version: c.version })}</span>
-                  <span>{t('addPart.connector.serial', { baud: c.port.baud })}</span>
+                  <span
+                    >{c.port.kind === 'serial'
+                      ? t('addPart.connector.serial', { baud: c.port.baud })
+                      : t('addPart.connector.bridge')}</span
+                  >
                 </span>
                 <span class="provides">
                   {t('addPart.connector.provides', {

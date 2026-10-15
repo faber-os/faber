@@ -213,6 +213,9 @@ export const en = {
     '"{part}" is using this port, and a port can only be open once. Remove the part to talk to the port directly.',
   'parts.menu.busy.other': 'The port is in use by {owner}.',
   'parts.menu.busy.missing': "{port} isn't connected right now.",
+  'parts.menu.simulatedNoPort': 'A simulated part has no port.',
+  'parts.list.simulated.manual': 'Simulated, values set by hand',
+  'parts.list.simulated.world': 'Simulated in the world',
 
   // Window titles opened from the Parts window
   'parts.title.viewer': '{name} · scan',
@@ -246,6 +249,7 @@ export const en = {
   'addPart.connector.loading': 'Loading connectors…',
   'addPart.connector.version': 'v{version}',
   'addPart.connector.serial': 'serial, {baud} baud',
+  'addPart.connector.bridge': 'needs a bridge (Phase 4); simulated for now',
   'addPart.connector.provides': 'Provides {capabilities}',
 
   // Add part form: step 3, the name (also the checks in lib/state/partName.ts)
