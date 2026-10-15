@@ -207,8 +207,13 @@ fn check_files(files: BTreeMap<String, Vec<u8>>) -> Result<Opened, PackageError>
 /// [`open`] does, so a package that packs also opens.
 pub fn pack(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>, PackageError> {
     let mut out = zip::ZipWriter::new(io::Cursor::new(Vec::new()));
-    let options =
-        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    // The same files give the same bytes on every OS and every day: a fixed time and fixed
+    // permissions and "made by", since the zip defaults record the clock and the OS.
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .last_modified_time(zip::DateTime::default())
+        .unix_permissions(0o644)
+        .system(zip::System::Unix);
     let fail = |e: zip::result::ZipError| PackageError::io("write the package", &io::Error::other(e));
     for (name, data) in files {
         out.start_file(name.as_str(), options).map_err(fail)?;
@@ -684,5 +689,22 @@ mod tests {
         std::fs::write(dir.path().join("config/packages.toml"), "[packages").unwrap();
         let e = store.list().unwrap_err();
         assert!(e.message.contains("packages.toml can't be read") && e.hint.contains("delete it"), "{e:?}");
+    }
+
+    #[test]
+    fn a_package_is_the_same_bytes_on_every_os_and_every_day() {
+        // CI packs on Linux what was packed and committed on Windows; the zip must not record
+        // the OS or the clock.
+        let files = files(&[]);
+        let bytes = pack(&files).unwrap();
+        let mut zip = zip::ZipArchive::new(io::Cursor::new(&bytes)).unwrap();
+        for i in 0..zip.len() {
+            let f = zip.by_index(i).unwrap();
+            use zip::read::HasZipMetadata;
+            assert_eq!(f.last_modified(), Some(zip::DateTime::default()), "entry {i}");
+            assert_eq!(f.unix_mode(), Some(0o100644), "entry {i}");
+            assert_eq!(f.get_metadata().system, zip::System::Unix, "entry {i}");
+        }
+        assert_eq!(pack(&files).unwrap(), bytes, "packing twice gives the same bytes");
     }
 }
