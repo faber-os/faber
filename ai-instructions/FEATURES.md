@@ -34,7 +34,9 @@ Phase 1 is built (see `docs/roadmap.md`).
 | Packages and faber CLI (Phase 3b) | Implemented | `.faberpkg` checked fully before install, live install/uninstall, Install window, Settings → Connectors, `position@1` viewer, `faber new/check/pack`, templates, first-connector guide and its end-to-end test | 2026-10-15 | 3a, 3c | — |
 | Phase 3 polish | Implemented | backups include installed connectors (re-checked on restore, all or nothing), `packages` WS topic, install errors name the package file, reproducible package bytes | 2026-10-15 | 3b | — |
 | FaberLink protocol (Phase 4a) | Implemented | `sdk/rust/faberlink` (COBS, CRC-16, every message, per-capability layouts, core session); `firmware/faberlink` C++11 Arduino library enforcing the board safety rules; interop tests compile the C++ via `cc` (MSVC/g++); CI compiles the examples for Uno and Mega | 2026-10-15 | — | — |
-| faber-bridge connector (Phase 4b) | In progress | sub-parts, leases to the board, hardware e-stop, detect-then-suggest, shell | — | 4a | — |
+| faber-bridge connector (Phase 4b) | Implemented | sub-parts `mega.left`, leases gate commands, SAFE on lease end, e-stop both ways (board button latches), reconnect, opt-in "Check for a FaberLink board", Parts/Add part; proof in `core/tests/bridge.rs` against the real C++ core | 2026-10-15 | 4a | needs a real Mega |
+| Arduino flasher (Phase 4c) | In progress | STK500v1/v2 in Rust, firmware in packages, Flasher window | — | 4b | — |
+| Apps in the core (Phase 5a) | In progress | `faber:app` WIT, guest SDK, roles, app host, derived signals, wall-follower example | — | Phase 3 | — |
 | Restart / shut down | Planned | Power items exist in the start menu but are disabled until the machine image (Phase 6) | — | Image | Phase 6 |
 | Copy / paste, multi-select in Files | Planned | Also unlocks moving between disks and home | — | Files | — |
 | Real LD19 on the PC | Planned | Mikkel plugs in the LD19 and adds it via its USB port | — | Phase 1 | Mikkel |
