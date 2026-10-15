@@ -27,6 +27,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Includes tools/faberlink-interop, which compiles the Arduino library's C++ core with the
+      # runner's own compiler (g++ on Linux, MSVC on Windows) and tests it against the Rust side.
       - run: cargo test --workspace
         env:
           # The wasm connector tests skip themselves without the target; here they must run.
@@ -86,6 +88,21 @@ jobs:
         with:
           name: playwright-traces
           path: shell/test-results
+
+  arduino:
+    name: Arduino library (examples for Uno and Mega)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - run: arduino-cli core update-index && arduino-cli core install arduino:avr
+      - name: Every example compiles, and fits an Uno
+        run: |
+          for board in arduino:avr:uno arduino:avr:mega; do
+            for example in firmware/faberlink/examples/*/; do
+              arduino-cli compile --fqbn "$board" --library firmware/faberlink --warnings all "$example"
+            done
+          done
 
   wit:
     name: WIT interfaces
