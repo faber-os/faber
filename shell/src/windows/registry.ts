@@ -14,6 +14,7 @@ import NotesWindow from './NotesWindow.svelte';
 import PartsWindow from './PartsWindow.svelte';
 import PlanarBaseWindow from './PlanarBaseWindow.svelte';
 import PositionWindow from './PositionWindow.svelte';
+import BatteryWindow from './BatteryWindow.svelte';
 import PropertiesWindow from './PropertiesWindow.svelte';
 import SerialMonitorWindow from './SerialMonitorWindow.svelte';
 import SettingsWindow from './SettingsWindow.svelte';
@@ -86,6 +87,22 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 460, h: 380 },
     minSize: { w: 300, h: 260 },
     component: PositionWindow,
+  },
+  {
+    kind: 'battery',
+    get title() {
+      return t('programs.battery.title');
+    },
+    get description() {
+      return t('programs.battery.description');
+    },
+    icon: 'battery',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 440, h: 400 },
+    minSize: { w: 300, h: 280 },
+    component: BatteryWindow,
   },
   {
     kind: 'planar-base',

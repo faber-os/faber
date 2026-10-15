@@ -46,7 +46,9 @@ access, in Phase 6).
 `signals` (`address`, `capability`, `info?`) carries the capability's `info` as **this part's own
 settings** give it (a base with `max-vx = 0.6` says 0.6, not the connector's default 0.5). `info` is
 absent when the capability has none or the part's settings can't be read (the part is `invalid`).
-A bridge's `PartInfo` has `board` and is followed by its sub-parts, which have `bridge`; see
+A `battery@1` signal also has `battery` (`empty`, `full`, `low`, `critical`, in V): the pack's
+voltages for its chemistry and cells, so a screen shows the same thresholds the core uses for its
+level (the Battery viewer, a manual battery's slider). A bridge's `PartInfo` has `board` and is followed by its sub-parts, which have `bridge`; see
 [FaberLink boards](#faberlink-boards-bridges).
 
 Adding or removing a part **writes `parts.toml`** (keeping comments and formatting) and then

@@ -79,7 +79,7 @@ export function patternKinds(p: PartInfo): readonly PatternKind[] {
 
 /**
  * The slider's range, from the sensor's own info (its settings): 0 to the furthest it can measure,
- * or a battery from empty to full.
+ * or a battery from empty to full (voltages the core works out from its chemistry and cells).
  */
 export function sensorRange(p: PartInfo): SensorRange {
   for (const s of p.signals) {
@@ -87,30 +87,9 @@ export function sensorRange(p: PartInfo): SensorRange {
     if (i?.capability === 'distance@1') return { min: 0, max: i.info.maxM, quantity: 'length' };
     if (i?.capability === 'laser-scan@1')
       return { min: 0, max: i.info.rangeMaxM, quantity: 'length' };
-    if (i?.capability === 'battery@1') {
-      const { empty, full } = batteryVolts(i.info.chemistry, i.info.cellsInSeries);
-      return { min: empty, max: full, quantity: 'voltage' };
-    }
+    if (s.battery) return { min: s.battery.empty, max: s.battery.full, quantity: 'voltage' };
   }
   return { min: 0, max: 4, quantity: 'length' };
-}
-
-/**
- * One cell's resting voltage when empty and when full: the typical values the core's battery
- * capability uses (sdk/rust/capabilities/src/battery.rs, `Chemistry::cell`).
- */
-const CELL_VOLTS: Record<string, { empty: number; full: number }> = {
-  'li-ion': { empty: 3.0, full: 4.2 },
-  lipo: { empty: 3.0, full: 4.2 },
-  lifepo4: { empty: 2.5, full: 3.4 },
-  nimh: { empty: 1.0, full: 1.4 },
-  'lead-acid': { empty: 1.75, full: 2.122 },
-};
-
-/** A pack's resting voltage when empty and when full. */
-export function batteryVolts(chemistry: string, cells: number): { empty: number; full: number } {
-  const c = CELL_VOLTS[chemistry] ?? { empty: 3.0, full: 4.2 };
-  return { empty: round(c.empty * cells), full: round(c.full * cells) };
 }
 
 function round(v: number): number {

@@ -487,6 +487,26 @@ pub struct SignalInfo {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub info: Option<Info>,
+    /// A `battery@1` signal's voltages for its chemistry and cells, so screens show the same
+    /// thresholds the core uses for its level. Absent for anything else.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub battery: Option<BatteryVolts>,
+}
+
+/// A battery pack's voltages (V), from its chemistry's typical per-cell values (docs/capabilities.md).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BatteryVolts {
+    /// Empty, at rest.
+    pub empty: f32,
+    /// Full, at rest.
+    pub full: f32,
+    /// Below this the level is `low`.
+    pub low: f32,
+    /// Below this the level is `critical`.
+    pub critical: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]

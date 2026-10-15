@@ -61,6 +61,7 @@ pub fn part(p: &PartView) -> dto::PartInfo {
                 address: s.address.to_string(),
                 capability: s.capability,
                 info: s.info.clone(),
+                battery: battery_volts(s.info.as_ref()),
             })
             .collect(),
         mount: p.mount,
@@ -159,6 +160,14 @@ pub fn estop_status(v: &EstopView) -> dto::EstopStatus {
         engaged_by: v.engaged.clone(),
         history: v.history.clone(),
     }
+}
+
+/// The voltages a battery's info implies, for screens to show next to its level.
+pub fn battery_volts(info: Option<&faber_capabilities::Info>) -> Option<dto::BatteryVolts> {
+    let Some(faber_capabilities::Info::Battery(i)) = info else { return None };
+    let (empty, full) = i.range_volts();
+    let (low, critical) = i.thresholds_volts();
+    Some(dto::BatteryVolts { empty, full, low, critical })
 }
 
 pub fn notice(n: &Notice) -> dto::Notice {
@@ -507,6 +516,22 @@ pub fn world_message(id: u32, s: WorldState) -> dto::ServerMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_battery_signal_carries_its_voltages_and_nothing_else_does() {
+        let info = faber_capabilities::Info::Battery(faber_capabilities::battery::Info {
+            chemistry: faber_capabilities::battery::Chemistry::LiIon,
+            cells_in_series: 3,
+            capacity_ah: None,
+        });
+        let v = battery_volts(Some(&info)).unwrap();
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        assert!(
+            close(v.empty, 9.0) && close(v.full, 12.6) && close(v.low, 10.5) && close(v.critical, 9.9),
+            "{v:?}"
+        );
+        assert_eq!(battery_volts(None), None);
+    }
 
     #[test]
     fn problems_become_message_and_hint() {

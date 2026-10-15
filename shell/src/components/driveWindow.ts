@@ -17,6 +17,7 @@ const VIEWERS: Partial<
   'distance@1': { kind: 'distance', title: (name) => t('parts.title.distance', { name }) },
   'planar-base@1': { kind: 'planar-base', title: (name) => t('parts.title.base', { name }) },
   'position@1': { kind: 'position', title: (name) => t('parts.title.position', { name }) },
+  'battery@1': { kind: 'battery', title: (name) => t('parts.title.battery', { name }) },
 };
 
 /** The signals of a part that Faber can draw. */

@@ -7,12 +7,14 @@ import {
   GENERIC_DISTANCE,
   fakeShell,
   simBase,
+  simBattery,
   simDistance,
 } from '../test/fakeShell';
 import type { WindowState } from '../lib/desktop/windows';
 import DistanceWindow from './DistanceWindow.svelte';
 import PlanarBaseWindow from './PlanarBaseWindow.svelte';
 import PositionWindow from './PositionWindow.svelte';
+import BatteryWindow from './BatteryWindow.svelte';
 
 function win(kind: string, address: string, part: string): WindowState {
   return {
@@ -159,5 +161,49 @@ describe('Position viewer', () => {
       delete (navigator as unknown as Record<string, unknown>).onLine;
       if (online) Object.defineProperty(Navigator.prototype, 'onLine', online);
     }
+  });
+});
+
+describe('Battery viewer', () => {
+  const w = win('battery', 'pack/battery', 'pack');
+
+  it('shows the level in words, the voltage, how full it is and what the battery is', async () => {
+    const shell = setup(BatteryWindow, w);
+    shell.pushParts([simBattery('pack')]);
+    const sub = shell.sent().find((m) => m.topic?.kind === 'signal');
+    expect(sub?.topic).toEqual({ kind: 'signal', address: 'pack/battery', maxHz: 5 });
+    shell.pushReading('pack/battery', {
+      capability: 'battery@1',
+      reading: { tUs: 1, volts: 11.84, amps: -1.5, charge: 0.62, level: 'ok' },
+    });
+    expect(await screen.findByTestId('battery-level')).toHaveTextContent('OK');
+    expect(screen.getByTestId('battery-volts')).toHaveTextContent('11.84 V');
+    expect(screen.getByRole('meter', { name: 'How full it is' })).toHaveAttribute(
+      'aria-valuenow',
+      '62',
+    );
+    const facts = screen.getByTestId('battery');
+    expect(facts).toHaveTextContent('62 %');
+    expect(facts).toHaveTextContent('1.5 A out');
+    expect(facts).toHaveTextContent('Li-ion, 3 in series, 2.2 Ah');
+    expect(facts).toHaveTextContent('Low below 10.5 V, critical below 9.9 V');
+  });
+
+  it('says when to charge, and gauges a battery that reports only its voltage', async () => {
+    const shell = setup(BatteryWindow, w);
+    shell.pushParts([simBattery('pack')]);
+    shell.pushReading('pack/battery', {
+      capability: 'battery@1',
+      reading: { tUs: 1, volts: 9.8, level: 'critical', cellVolts: [3.25, 3.3, 3.25] },
+    });
+    expect(await screen.findByTestId('battery-level')).toHaveTextContent(
+      'Critical: stop and charge it now',
+    );
+    expect(screen.getByRole('meter', { name: 'How full it is' })).toHaveAttribute(
+      'aria-valuenow',
+      '22',
+    );
+    expect(screen.getByText('Cell 2')).toBeInTheDocument();
+    expect(screen.getByText('3.3 V')).toBeInTheDocument();
   });
 });

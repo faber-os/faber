@@ -173,6 +173,9 @@ export const en = {
   'programs.install.description': 'Install a connector package (.faberpkg)',
   'programs.position.title': 'Position viewer',
   'programs.position.description': 'Live position of a GPS: coordinates, fix and satellites',
+  'programs.battery.title': 'Battery viewer',
+  'programs.battery.description':
+    'Live voltage of a battery, how full it is, and whether it needs charging',
 
   // Errors the shell makes itself (errors the core sends are shown as sent)
   'errors.coreUnreachable.message': 'The shell could not reach the Faber core.',
@@ -262,6 +265,7 @@ export const en = {
   'parts.title.distance': '{name} · distance',
   'parts.title.base': '{name} · base',
   'parts.title.position': '{name} · position',
+  'parts.title.battery': '{name} · battery',
   'parts.title.recordings': 'Recordings · Files',
 
   // What kind of link a port is
@@ -513,6 +517,30 @@ export const en = {
   'distance.plot.label': 'The last {seconds} seconds',
   'distance.range': 'Range {min} to {max}',
 
+  // Battery viewer (battery@1)
+  'battery.waiting': 'Waiting for the first reading from <code>{address}</code>…',
+  'battery.level.ok': 'OK',
+  'battery.level.low': 'Low: charge it soon',
+  'battery.level.critical': 'Critical: stop and charge it now',
+  'battery.volts': 'Voltage',
+  'battery.charge': 'Charge',
+  'battery.charge.value': '{percent} %',
+  'battery.charge.label': 'How full it is',
+  'battery.current': 'Current',
+  'battery.current.discharging': '{amps} out',
+  'battery.current.charging': '{amps} in',
+  'battery.temperature': 'Temperature',
+  'battery.cells': 'Cells',
+  'battery.cell': 'Cell {index}',
+  'battery.kind': 'Battery',
+  'battery.kind.value': '{chemistry}, {cells} in series',
+  'battery.kind.capacity': '{chemistry}, {cells} in series, {capacity} Ah',
+  'battery.thresholds': 'Low below {low}, critical below {critical}',
+  'battery.chemistry.li-ion': 'Li-ion',
+  'battery.chemistry.lipo': 'LiPo',
+  'battery.chemistry.lifepo4': 'LiFePO4',
+  'battery.chemistry.nimh': 'NiMH',
+  'battery.chemistry.lead-acid': 'Lead-acid',
   // Position viewer (position@1, e.g. a GPS)
   'position.waiting': 'Waiting for the first reading from <code>{address}</code>…',
   'position.noFix': 'No fix yet',

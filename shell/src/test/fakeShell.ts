@@ -243,6 +243,27 @@ export function simDistance(name = 'front', overrides: Partial<PartInfo> = {}): 
   });
 }
 
+/** A manual simulated 3S Li-ion battery, as the core describes `generic-battery`. */
+export function simBattery(name = 'pack', overrides: Partial<PartInfo> = {}): PartInfo {
+  return part(name, {
+    connector: 'generic-battery',
+    port: undefined,
+    simulate: 'manual',
+    signals: [
+      {
+        address: `${name}/battery`,
+        capability: 'battery@1',
+        info: {
+          capability: 'battery@1',
+          info: { chemistry: 'li-ion', cellsInSeries: 3, capacityAh: 2.2 },
+        },
+        battery: { empty: 9, full: 12.6, low: 10.5, critical: 9.9 },
+      },
+    ],
+    ...overrides,
+  });
+}
+
 export const SAMPLE_PORT: PortInfo = {
   id: 'replay:ld19-sample',
   kind: 'replay',

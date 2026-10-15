@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   BATTERY_PATTERN_KINDS,
   PATTERN_KINDS,
-  batteryVolts,
   isManualSensor,
   patternFor,
   patternKinds,
@@ -78,11 +77,11 @@ describe('manual sensors', () => {
             capability: 'battery@1',
             info: { chemistry: 'li-ion', cellsInSeries: 3, capacityAh: 2.2 },
           },
+          battery: { empty: 9, full: 12.6, low: 10.5, critical: 9.9 },
         },
       ],
     } as PartInfo;
     expect(sensorRange(pack)).toEqual(PACK);
-    expect(batteryVolts('lead-acid', 6)).toEqual({ empty: 10.5, full: 12.732 });
   });
 
   it("slide up to the sensor's own range", () => {
