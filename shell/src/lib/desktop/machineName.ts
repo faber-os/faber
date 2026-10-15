@@ -1,13 +1,15 @@
+import { t } from '../i18n';
+
 /**
  * The machine's name (Settings → This machine). Same rule as the core (`valid_machine_name` in
  * core/src/settings.rs): it becomes the network name `<name>.local` on the Pi image, so it must be
  * a valid host name.
  */
 export function machineNameProblem(name: string): string | null {
-  if (name.length === 0) return 'Give the machine a name.';
-  if (name.length > 63) return 'At most 63 characters.';
-  if (!/^[a-z0-9-]+$/.test(name)) return 'Only lowercase letters, digits and dashes.';
-  if (name.startsWith('-') || name.endsWith('-')) return "It can't start or end with a dash.";
+  if (name.length === 0) return t('settings.machine.problem.empty');
+  if (name.length > 63) return t('settings.machine.problem.tooLong');
+  if (!/^[a-z0-9-]+$/.test(name)) return t('settings.machine.problem.characters');
+  if (name.startsWith('-') || name.endsWith('-')) return t('settings.machine.problem.dash');
   return null;
 }
 

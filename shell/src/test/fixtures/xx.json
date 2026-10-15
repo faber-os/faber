@@ -1,0 +1,11 @@
+{
+  "_language": "Testish",
+  "settings.appearance.title": "Lookz",
+  "settings.time.zone.now": "At {time} on {date}",
+  "settings.storage.backup.saved": "Kept {name}",
+  "parts.summary.count": { "one": "one partz", "other": "{count} partz" },
+  "settings.storage.full.message": "Full to {procent}",
+  "settings.loading": "",
+  "settings.units.title": { "one": "Unitz", "other": "Unitz" },
+  "settings.no.such.key": "Gone"
+}

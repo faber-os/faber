@@ -22,6 +22,8 @@ Phase 1 is built (see `docs/roadmap.md`).
 | Uploads without overwrite | Implemented | `PUT files/content?mode=create`; the shell asks Replace / Keep both / Skip | 2026-10-15 | Files | — |
 | Settings batch 1 | Implemented | D40–D43: accessibility (motion, contrast, text size), units (length), date and time in the machine's zone, backups to home:/Backups with restore, storage use, About and diagnostics, reset to defaults | 2026-10-15 | Settings | — |
 | API fingerprint | Implemented | Shell and core detect a mismatched build and ask for a restart | 2026-10-15 | — | — |
+| Translations | Implemented | D44: 621 English texts in one catalogue, translation files built in or in `<data>/config/translations/` (no rebuild), per-key English fallback, `npm run i18n:check`, a test that fails on new raw text; picker only with 2+ languages | 2026-10-15 | Shell | — |
+| Machine name | Implemented | D45: `settings.machine.name`, browser tab, backups, `<name>.local` later | 2026-10-15 | Settings | — |
 | Restart / shut down | Planned | Power items exist in the start menu but are disabled until the machine image (Phase 6) | — | Image | Phase 6 |
 | Copy / paste, multi-select in Files | Planned | Also unlocks moving between disks and home | — | Files | — |
 | Real LD19 on the PC | Planned | Mikkel plugs in the LD19 and adds it via its USB port | — | Phase 1 | Mikkel |

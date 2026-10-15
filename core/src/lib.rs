@@ -18,6 +18,7 @@ pub mod router;
 pub mod runtime;
 pub mod settings;
 pub mod suggest;
+pub mod translations;
 
 // Layer 3: ties everything together.
 pub mod machine;

@@ -11,6 +11,7 @@
     type TabsState,
   } from '../lib/desktop/tabs';
   import { baseName } from '../lib/desktop/filePaths';
+  import { t } from '../lib/i18n';
   import { useDesktop } from '../components/desktopController.svelte';
   import type { WindowProps } from '../components/windowDefs';
   import FilesPane from './FilesPane.svelte';
@@ -25,7 +26,7 @@
   let panes = $state.raw<{ id: string; start: string }[]>([]);
 
   function addPane(start: string) {
-    const r = addTab(tabs, { title: baseName(start) || 'Home', key: start });
+    const r = addTab(tabs, { title: baseName(start) || t('files.home'), key: start });
     tabs = r.state;
     panes = [...panes, { id: r.id, start }];
   }
@@ -45,15 +46,15 @@
       activate: (id) => (tabs = activateTab(tabs, id)),
       close,
       add: () => addPane(HOME_START),
-      addLabel: 'New tab',
+      addLabel: t('files.newTab'),
     });
   });
   $effect(() => () => desktop.setTabs(win.id, null));
 
   // The taskbar tells two Files windows apart by their front tab's folder.
   $effect(() => {
-    const t = activeTab(tabs);
-    if (t) desktop.update(win.id, { title: `${t.title} · Files` });
+    const tab = activeTab(tabs);
+    if (tab) desktop.update(win.id, { title: t('files.windowTitle.folder', { name: tab.title }) });
   });
 
   function keys(e: KeyboardEvent) {

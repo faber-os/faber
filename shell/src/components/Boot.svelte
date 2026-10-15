@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ConnectionStatus } from '../lib/state/types';
+  import { t } from '../lib/i18n';
   import Wordmark from './Wordmark.svelte';
 
   /**
@@ -22,19 +23,20 @@
 <div class="boot" role="status" aria-live="polite">
   <div class="mark"><Wordmark size={56} os /></div>
   {#if mismatch}
-    <h1 class="title">Restart the Faber core</h1>
-    <p class="line">
-      This desktop was built for a different version of the Faber core than the one running. Stop
-      faber-core and start it again (build it first if you changed the code). This page connects by
-      itself once the core is back.
+    <h1 class="title">{t('boot.mismatch.title')}</h1>
+    <p class="line">{t('boot.mismatch.message')}</p>
+    <p class="ids">
+      {t('boot.mismatch.versions', {
+        shell: mismatch.shell,
+        core: mismatch.core ?? t('boot.mismatch.coreTooOld'),
+      })}
     </p>
-    <p class="ids">desktop {mismatch.shell} · core {mismatch.core ?? 'too old to say'}</p>
   {:else}
     <p class="line">
       {#if status === 'reconnecting' || slow}
-        Waiting for the Faber core. Is faber-core running?
+        {t('boot.waiting')}
       {:else}
-        Connecting to the core…
+        {t('boot.connecting')}
       {/if}
     </p>
   {/if}

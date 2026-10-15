@@ -1,22 +1,29 @@
 <script lang="ts" module>
   import type { PartStateKind } from '../lib/state/types';
+  import { t, type MessageKey } from '../lib/i18n';
 
   type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral';
+  type StateKey = Extract<MessageKey, `partState.${string}`>;
 
-  export const STATE_LOOK: Record<PartStateKind, { label: string; tone: Tone }> = {
-    running: { label: 'Running', tone: 'ok' },
-    starting: { label: 'Starting', tone: 'info' },
-    degraded: { label: 'Degraded', tone: 'warn' },
-    failed: { label: 'Failed', tone: 'danger' },
-    conflict: { label: 'Conflict', tone: 'danger' },
-    invalid: { label: 'Invalid', tone: 'danger' },
-    stopped: { label: 'Stopped', tone: 'neutral' },
+  /** The label is a catalogue key, translated where the badge is drawn. */
+  export const STATE_LOOK: Record<PartStateKind, { key: StateKey; tone: Tone }> = {
+    running: { key: 'partState.running', tone: 'ok' },
+    starting: { key: 'partState.starting', tone: 'info' },
+    degraded: { key: 'partState.degraded', tone: 'warn' },
+    failed: { key: 'partState.failed', tone: 'danger' },
+    conflict: { key: 'partState.conflict', tone: 'danger' },
+    invalid: { key: 'partState.invalid', tone: 'danger' },
+    stopped: { key: 'partState.stopped', tone: 'neutral' },
   };
 </script>
 
 <script lang="ts">
   let { kind }: { kind: PartStateKind } = $props();
-  const look = $derived(STATE_LOOK[kind] ?? { label: kind, tone: 'neutral' as Tone });
+  const known = $derived(STATE_LOOK[kind]);
+  // A state this shell doesn't know yet shows as the core sent it.
+  const look = $derived(
+    known ? { label: t(known.key), tone: known.tone } : { label: kind, tone: 'neutral' as Tone },
+  );
 </script>
 
 <span class="badge {look.tone}" data-state={kind}>

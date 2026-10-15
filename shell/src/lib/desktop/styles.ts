@@ -9,6 +9,8 @@
  * tokens.css holds the Aluminium values too, so the page has colours before this runs.
  */
 
+import { t } from '../i18n';
+
 export type ThemeName = 'light' | 'dark';
 
 interface Oklch {
@@ -19,63 +21,67 @@ interface Oklch {
 
 export interface StyleSpec {
   id: string;
-  label: string;
-  description: string;
+  /** In the current language (a getter, so it follows a language change). */
+  readonly label: string;
+  readonly description: string;
   /** Hue of the greys, and how strongly they are tinted (1 = Aluminium's hint of blue). */
   greyHue: number;
   greyTint: number;
   accent: { light: Oklch; dark: Oklch };
 }
 
+type StyleId = 'aluminium' | 'cobalt' | 'workshop' | 'blueprint' | 'graphite' | 'signal';
+
+/** A style with its name and description from the catalogue. */
+function named(spec: Omit<StyleSpec, 'id' | 'label' | 'description'> & { id: StyleId }): StyleSpec {
+  return {
+    ...spec,
+    get label() {
+      return t(`settings.style.${spec.id}.label`);
+    },
+    get description() {
+      return t(`settings.style.${spec.id}.description`);
+    },
+  };
+}
+
 export const STYLES: readonly StyleSpec[] = [
-  {
+  named({
     id: 'aluminium',
-    label: 'Aluminium',
-    description: 'Brushed metal with an anodised teal, the default',
     greyHue: 250,
     greyTint: 1,
     accent: { light: { l: 0.487, c: 0.083, h: 186 }, dark: { l: 0.74, c: 0.095, h: 184 } },
-  },
-  {
+  }),
+  named({
     id: 'cobalt',
-    label: 'Cobalt',
-    description: 'Cool greys and a strong blue',
     greyHue: 262,
     greyTint: 2,
     accent: { light: { l: 0.5, c: 0.19, h: 265 }, dark: { l: 0.72, c: 0.13, h: 267 } },
-  },
-  {
+  }),
+  named({
     id: 'workshop',
-    label: 'Workshop',
-    description: 'Warm greys and a green like a cutting mat',
     greyHue: 85,
     greyTint: 2.5,
     accent: { light: { l: 0.5, c: 0.115, h: 143 }, dark: { l: 0.76, c: 0.112, h: 142 } },
-  },
-  {
+  }),
+  named({
     id: 'blueprint',
-    label: 'Blueprint',
-    description: 'Blue paper and navy ink',
     greyHue: 252,
     greyTint: 5,
     accent: { light: { l: 0.4, c: 0.08, h: 257 }, dark: { l: 0.78, c: 0.06, h: 256 } },
-  },
-  {
+  }),
+  named({
     id: 'graphite',
-    label: 'Graphite',
-    description: 'Pure greys, no colour at all',
     greyHue: 250,
     greyTint: 0,
     accent: { light: { l: 0.37, c: 0.012, h: 248 }, dark: { l: 0.84, c: 0.01, h: 243 } },
-  },
-  {
+  }),
+  named({
     id: 'signal',
-    label: 'Signal',
-    description: 'Neutral greys and a signal red',
     greyHue: 100,
     greyTint: 0.6,
     accent: { light: { l: 0.5, c: 0.18, h: 30 }, dark: { l: 0.78, c: 0.128, h: 22 } },
-  },
+  }),
 ];
 
 export const DEFAULT_STYLE = 'aluminium';

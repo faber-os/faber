@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
+  import { t, type MessageKey } from '../lib/i18n';
   import { item } from '../lib/desktop/contextMenu';
   import {
     powerActions,
@@ -33,11 +34,11 @@
   let search: HTMLInputElement | undefined = $state();
   let query = $state('');
 
-  const GROUP_LABEL: Record<string, string> = {
-    parts: 'Tool',
-    tools: 'Tool',
-    accessories: 'Accessory',
-    faber: 'Faber',
+  const GROUP_LABEL: Record<string, Extract<MessageKey, `startMenu.group.${string}`>> = {
+    parts: 'startMenu.group.tool',
+    tools: 'startMenu.group.tool',
+    accessories: 'startMenu.group.accessory',
+    faber: 'startMenu.group.faber',
   };
 
   const launchable = $derived(defs.filter((d) => d.menu !== null));
@@ -47,7 +48,7 @@
       kind: d.kind,
       title: d.title,
       description: d.description,
-      group: GROUP_LABEL[d.menu ?? ''] ?? '',
+      group: d.menu && GROUP_LABEL[d.menu] ? t(GROUP_LABEL[d.menu]!) : '',
       def: d,
     })),
   );
@@ -111,7 +112,7 @@
     if (p.viewer) {
       desktop.open('laser-scan', {
         key: p.viewer,
-        title: `${p.name} · scan`,
+        title: t('startMenu.scanWindowTitle', { part: p.name }),
         params: { address: p.viewer, part: p.name },
       });
     } else desktop.open('parts');
@@ -130,7 +131,10 @@
     return {
       label: d.title,
       header: { title: d.title, detail: d.description, icon: d.icon },
-      entries: [item('open', 'Open', { icon: 'open' }), !!d.program && pinItem(core, d.program)],
+      entries: [
+        item('open', t('menu.open'), { icon: 'open' }),
+        !!d.program && pinItem(core, d.program),
+      ],
       onSelect: (id) => {
         if (d.program && runPinItem(core, d.program, id)) return;
         if (id === 'open') open(d.kind);
@@ -143,7 +147,7 @@
     const r = button.getBoundingClientRect();
     menu.show(
       {
-        label: 'Power',
+        label: t('startMenu.power.menu'),
         entries: powerActions(false).map((a) =>
           item(a.id, a.label, {
             icon: a.id === 'restart' ? 'restart' : 'power',
@@ -164,7 +168,7 @@
   class="panel"
   id="start-menu"
   role="dialog"
-  aria-label="Start"
+  aria-label={t('startMenu.label')}
   tabindex="-1"
   bind:this={panel}
   {onkeydown}
@@ -175,21 +179,26 @@
       bind:this={search}
       bind:value={query}
       type="search"
-      placeholder="Search programs, parts and files"
-      aria-label="Search Faber"
+      placeholder={t('startMenu.search.placeholder')}
+      aria-label={t('startMenu.search.label')}
       spellcheck="false"
       autocomplete="off"
     />
   </label>
 
-  <div class="body" role="menu" aria-label="Start" use:menuTrigger={{ menu, build: tileMenu }}>
+  <div
+    class="body"
+    role="menu"
+    aria-label={t('startMenu.label')}
+    use:menuTrigger={{ menu, build: tileMenu }}
+  >
     {#if searching}
       {#if results.programs.length + results.parts.length + results.files.length === 0}
-        <p class="nothing">Nothing called “{query.trim()}”.</p>
+        <p class="nothing">{t('startMenu.search.nothing', { query: query.trim() })}</p>
       {/if}
       {#if results.programs.length}
-        <div class="group" role="group" aria-label="Programs">
-          <p class="heading" aria-hidden="true">Programs</p>
+        <div class="group" role="group" aria-label={t('startMenu.programs')}>
+          <p class="heading" aria-hidden="true">{t('startMenu.programs')}</p>
           {#each results.programs as p (p.kind)}
             {@const d = defs.find((x) => x.kind === p.kind)!}
             <button class="row" role="menuitem" data-kind={d.kind} onclick={() => open(d.kind)}>
@@ -203,8 +212,8 @@
         </div>
       {/if}
       {#if results.parts.length}
-        <div class="group" role="group" aria-label="Parts">
-          <p class="heading" aria-hidden="true">Parts</p>
+        <div class="group" role="group" aria-label={t('startMenu.parts')}>
+          <p class="heading" aria-hidden="true">{t('startMenu.parts')}</p>
           {#each results.parts as p (p.name)}
             <button class="row" role="menuitem" onclick={() => openPart(p)}>
               <AppIcon
@@ -214,7 +223,7 @@
               />
               <span class="text"
                 ><span class="name">{p.name}</span><span class="desc mono"
-                  >{p.viewer ?? 'Open in Parts'}</span
+                  >{p.viewer ?? t('startMenu.openInParts')}</span
                 ></span
               >
             </button>
@@ -222,14 +231,14 @@
         </div>
       {/if}
       {#if results.files.length}
-        <div class="group" role="group" aria-label="Recent files">
-          <p class="heading" aria-hidden="true">Recent files</p>
+        <div class="group" role="group" aria-label={t('startMenu.recent')}>
+          <p class="heading" aria-hidden="true">{t('startMenu.recent')}</p>
           {#each results.files as f (f.path)}
             <button class="row" role="menuitem" onclick={() => openRecent(f)}>
               <FileIcon type={fileType({ kind: 'file', name: f.name })} size={30} />
               <span class="text"
                 ><span class="name">{f.name}</span><span class="desc"
-                  >{baseName(parentPath(f.path) ?? '') || 'Home'}</span
+                  >{baseName(parentPath(f.path) ?? '') || t('startMenu.recent.home')}</span
                 ></span
               >
             </button>
@@ -237,8 +246,8 @@
         </div>
       {/if}
     {:else}
-      <div class="group" role="group" aria-label="Programs">
-        <p class="heading" aria-hidden="true">Programs</p>
+      <div class="group" role="group" aria-label={t('startMenu.programs')}>
+        <p class="heading" aria-hidden="true">{t('startMenu.programs')}</p>
         <div class="grid">
           {#each programs as p (p.kind)}
             <button
@@ -255,8 +264,8 @@
         </div>
       </div>
       {#if viewers.length}
-        <div class="group" role="group" aria-label="Viewers">
-          <p class="heading" aria-hidden="true">Viewers</p>
+        <div class="group" role="group" aria-label={t('startMenu.viewers')}>
+          <p class="heading" aria-hidden="true">{t('startMenu.viewers')}</p>
           {#each viewers as v (v.viewer)}
             <button class="row compact" role="menuitem" onclick={() => openPart(v)}>
               <AppIcon icon="scan" colour="viewer" size={28} />
@@ -267,8 +276,8 @@
           {/each}
         </div>
       {/if}
-      <div class="group" role="group" aria-label="Recent files">
-        <p class="heading" aria-hidden="true">Recent files</p>
+      <div class="group" role="group" aria-label={t('startMenu.recent')}>
+        <p class="heading" aria-hidden="true">{t('startMenu.recent')}</p>
         {#each desktop.recent.slice(0, 4) as f (f.path)}
           <button class="row compact" role="menuitem" onclick={() => openRecent(f)}>
             <FileIcon type={fileType({ kind: 'file', name: f.name })} size={26} />
@@ -276,7 +285,7 @@
             <span class="when">{recentWhen(f.at, Date.now(), core.wallClock)}</span>
           </button>
         {:else}
-          <p class="nothing">Files you open show up here.</p>
+          <p class="nothing">{t('startMenu.recent.empty')}</p>
         {/each}
       </div>
     {/if}
@@ -287,7 +296,12 @@
       ><span class="dot" class:off={core.connection !== 'connected'} aria-hidden="true"
       ></span>{host}</span
     >
-    <button class="power" aria-label="Power options" aria-haspopup="menu" onclick={powerMenu}>
+    <button
+      class="power"
+      aria-label={t('startMenu.power.label')}
+      aria-haspopup="menu"
+      onclick={powerMenu}
+    >
       <Icon name="power" size={18} />
     </button>
   </div>

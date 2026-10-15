@@ -1,4 +1,5 @@
 import { item, type MenuItem } from '../lib/desktop/contextMenu';
+import { t } from '../lib/i18n';
 import { isPinned, pin, unpin, type Program } from '../lib/desktop/taskbar';
 import type { CoreState } from '../lib/state/core.svelte';
 import type { Settings, TaskbarSize } from '../lib/state/types';
@@ -16,8 +17,8 @@ export function pinnedKeys(core: CoreState): string[] {
 /** The Pin to taskbar / Unpin from taskbar item for a program's menus. */
 export function pinItem(core: CoreState, key: string): MenuItem {
   return isPinned(pinnedKeys(core), key)
-    ? item('unpin', 'Unpin from taskbar', { icon: 'unpin' })
-    : item('pin', 'Pin to taskbar', { icon: 'pin' });
+    ? item('unpin', t('programs.menu.unpin'), { icon: 'unpin' })
+    : item('pin', t('programs.menu.pin'), { icon: 'pin' });
 }
 
 async function saveTaskbar(

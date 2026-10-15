@@ -21,6 +21,7 @@ use crate::settings::{
     self as settings_file, DeveloperChange, Settings as MachineSettings, SettingsError, SettingsStore,
 };
 use crate::suggest::{Suggestion, suggestions};
+use crate::translations::Translations;
 use faber_capabilities::{Capability, Mount};
 use faber_connector::{Definition, Manifest, Problem, Settings};
 use std::collections::BTreeMap;
@@ -191,6 +192,7 @@ pub struct Machine {
     config_path: PathBuf,
     files: Files,
     settings: SettingsStore,
+    translations: Translations,
     state: Mutex<State>,
     ports_changed: watch::Sender<u64>,
     files_changed: broadcast::Sender<Vec<String>>,
@@ -217,6 +219,7 @@ impl Machine {
         };
         let files = Files::open(opts.data_dir.join("files"), config_path.clone())?;
         let settings = SettingsStore::load(&config_dir);
+        let translations = Translations::open(&config_dir);
         let machine = Arc::new(Machine {
             clock: opts.clock,
             router: Arc::new(Router::new()),
@@ -232,6 +235,7 @@ impl Machine {
             config_path,
             files,
             settings,
+            translations,
             state: Mutex::new(State {
                 text,
                 config,
@@ -641,6 +645,11 @@ impl Machine {
 
     pub fn settings_changed(&self) -> watch::Receiver<u64> {
         self.settings.watch()
+    }
+
+    /// The shell translations installed in `config/translations` (D44).
+    pub fn translations(&self) -> &Translations {
+        &self.translations
     }
 
     pub fn update_settings(&self, new: MachineSettings) -> Result<MachineSettings, MachineError> {

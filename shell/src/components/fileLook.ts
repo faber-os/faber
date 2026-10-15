@@ -2,6 +2,14 @@ import { fileType, type FileType } from '../lib/desktop/fileTypes';
 import type { FileEntry, SpecialFolder } from '../lib/state/types';
 import type { IconName } from './Icon.svelte';
 
+/**
+ * One of the home folder's fixed folders. Its label is its real name on disk (the core's), so it
+ * is data, not catalogue text.
+ */
+function special(id: SpecialFolder, name: string, icon: IconName) {
+  return { id, path: `home:/${name}`, label: name, icon };
+}
+
 /** The home folder's fixed folders, in sidebar order, with what each is for. */
 export const SPECIALS: readonly {
   id: SpecialFolder;
@@ -9,11 +17,11 @@ export const SPECIALS: readonly {
   label: string;
   icon: IconName;
 }[] = [
-  { id: 'desktop', path: 'home:/Desktop', label: 'Desktop', icon: 'desktop' },
-  { id: 'documents', path: 'home:/Documents', label: 'Documents', icon: 'fileText' },
-  { id: 'recordings', path: 'home:/Recordings', label: 'Recordings', icon: 'recording' },
-  { id: 'system', path: 'home:/System', label: 'System', icon: 'nut' },
-  { id: 'trash', path: 'home:/Trash', label: 'Trash', icon: 'trash' },
+  special('desktop', 'Desktop', 'desktop'),
+  special('documents', 'Documents', 'fileText'),
+  special('recordings', 'Recordings', 'recording'),
+  special('system', 'System', 'nut'),
+  special('trash', 'Trash', 'trash'),
 ];
 
 /** How FileIcon draws an entry: its type, and an emblem on Faber's fixed folders. */

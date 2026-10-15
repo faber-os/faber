@@ -1,3 +1,4 @@
+import { t } from '../lib/i18n';
 import { item, separator, type MenuEntry, type MenuHeader } from '../lib/desktop/contextMenu';
 import { isOnDisk } from '../lib/desktop/disks';
 import {
@@ -39,7 +40,11 @@ export function openInNotes(desktop: DesktopController, path: string): void {
   desktop.noteRecent(path);
   const target = tabTarget(desktop.state.windows, 'notes', (id) => desktop.tabs[id]?.state, path);
   if (!target) {
-    desktop.open('notes', { key: path, title: `${baseName(path)} · Notes`, params: { path } });
+    desktop.open('notes', {
+      key: path,
+      title: t('files.windowTitle.notes', { name: baseName(path) }),
+      params: { path },
+    });
     return;
   }
   desktop.focus(target.windowId);
@@ -58,7 +63,11 @@ export function openProperties(desktop: DesktopController, entry: FileEntry): vo
   if (entry.modifiedMs !== undefined) params.modifiedMs = String(entry.modifiedMs);
   if (entry.originalPath) params.originalPath = entry.originalPath;
   if (entry.special) params.special = entry.special;
-  desktop.open('properties', { key: entry.path, title: `${entry.name} · Properties`, params });
+  desktop.open('properties', {
+    key: entry.path,
+    title: t('files.windowTitle.properties', { name: entry.name }),
+    params,
+  });
 }
 
 /** Let the browser save the file, from the core's download address. */
@@ -73,14 +82,18 @@ export function download(core: CoreState, path: string): void {
 }
 
 function titleFor(path: string): string {
-  return baseName(path) ? `${baseName(path)} · Files` : 'Files';
+  return baseName(path)
+    ? t('files.windowTitle.folder', { name: baseName(path) })
+    : t('files.windowTitle.plain');
 }
 
 /** The top of an entry's right-click menu: its picture, name, size and folder. */
 export function entryHeader(entry: FileEntry): MenuHeader {
-  const folder = baseName(parentPath(entry.path) ?? '') || 'Home';
+  const folder = baseName(parentPath(entry.path) ?? '') || t('files.home');
   const detail =
-    entry.kind === 'file' ? `${formatBytes(entry.size)} · ${folder}` : `Folder · ${folder}`;
+    entry.kind === 'file'
+      ? t('files.menu.header.file', { size: formatBytes(entry.size), folder })
+      : t('files.menu.header.folder', { folder });
   return { title: entry.name, detail, icon: fileLook(entry).type, file: true };
 }
 
@@ -91,29 +104,39 @@ export function entryHeader(entry: FileEntry): MenuHeader {
 export function entryMenu(entry: FileEntry): (MenuEntry | false)[] {
   if (isInTrash(entry.path)) {
     return [
-      item('restore', 'Restore', { icon: 'undo' }),
-      item('properties', 'Properties', { icon: 'info', shortcut: 'Alt+Enter' }),
+      item('restore', t('files.menu.restore'), { icon: 'undo' }),
+      item('properties', t('files.menu.properties'), { icon: 'info', shortcut: 'Alt+Enter' }),
       separator(),
-      item('delete', 'Delete for good', { danger: true, shortcut: 'Delete', icon: 'trash' }),
+      item('delete', t('files.menu.deleteForGood'), {
+        danger: true,
+        shortcut: 'Delete',
+        icon: 'trash',
+      }),
     ];
   }
-  const fixed = entry.special
-    ? `${entry.name} is one of Faber's fixed folders, so it can't be renamed or moved.`
-    : undefined;
+  const fixed = entry.special ? t('files.menu.fixedFolder', { name: entry.name }) : undefined;
   const isFile = entry.kind === 'file';
   const replay = replayPortFor(entry.path);
   const disk = isOnDisk(entry.path);
   return [
-    item('open', 'Open', { icon: 'open', shortcut: 'Enter' }),
-    isFile && !replay && item('notes', 'Open with Notes', { icon: 'notes' }),
+    item('open', t('files.menu.open'), { icon: 'open', shortcut: 'Enter' }),
+    isFile && !replay && item('notes', t('files.menu.openWithNotes'), { icon: 'notes' }),
     separator(),
-    item('rename', 'Rename', { shortcut: 'F2', disabledReason: fixed, icon: 'rename' }),
-    isFile && item('download', 'Download', { icon: 'download' }),
-    item('properties', 'Properties', { icon: 'info', shortcut: 'Alt+Enter' }),
+    item('rename', t('files.menu.rename'), {
+      shortcut: 'F2',
+      disabledReason: fixed,
+      icon: 'rename',
+    }),
+    isFile && item('download', t('files.menu.download'), { icon: 'download' }),
+    item('properties', t('files.menu.properties'), { icon: 'info', shortcut: 'Alt+Enter' }),
     separator(),
     disk
-      ? item('delete', 'Delete for good…', { danger: true, shortcut: 'Delete', icon: 'trash' })
-      : item('trash', 'Move to Trash', {
+      ? item('delete', t('files.menu.deleteForGoodAsk'), {
+          danger: true,
+          shortcut: 'Delete',
+          icon: 'trash',
+        })
+      : item('trash', t('files.menu.moveToTrash'), {
           shortcut: 'Delete',
           disabledReason: fixed,
           danger: true,

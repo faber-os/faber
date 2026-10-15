@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 /**
  * How big Files draws a folder: a details list, small icons or large icons. Ctrl and the mouse
  * wheel, Ctrl +/−/0, a trackpad or touch pinch, and the view buttons all move along these steps.
@@ -8,10 +10,17 @@ export type FileView = (typeof ZOOM_STEPS)[number];
 
 export const DEFAULT_VIEW: FileView = 'details';
 
-export const VIEW_LABELS: Record<FileView, string> = {
-  details: 'Details',
-  small: 'Small icons',
-  large: 'Large icons',
+/** The name of each view, in the language in use (getters, so it follows a language change). */
+export const VIEW_LABELS: Readonly<Record<FileView, string>> = {
+  get details() {
+    return t('files.view.details');
+  },
+  get small() {
+    return t('files.view.small');
+  },
+  get large() {
+    return t('files.view.large');
+  },
 };
 
 /** One step bigger (+1) or smaller (−1), stopping at the ends. */

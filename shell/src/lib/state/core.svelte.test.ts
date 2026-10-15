@@ -6,6 +6,7 @@ import { FakeWebSocket } from '../../test/fakeWebSocket';
 import { fakeFetch, type FakeFetch } from '../../test/fakeFetch';
 import { CoreState, LOG_CAPACITY } from './core.svelte';
 import type { PartInfo, Settings } from './types';
+import { locale, t } from '../i18n';
 
 const demo: PartInfo = {
   name: 'demo',
@@ -23,7 +24,7 @@ function bin(msg: unknown): ArrayBuffer {
 
 const SETTINGS: Settings = {
   machine: { name: 'faber' },
-  appearance: { theme: 'system', style: 'aluminium', wallpaper: 'aluminium' },
+  appearance: { theme: 'system', style: 'aluminium', wallpaper: 'aluminium', language: 'en' },
   accessibility: { reduceMotion: 'system', higherContrast: 'system', textSize: '100' },
   units: { length: 'metric' },
   time: { timeZone: '', clock: '24h' },
@@ -196,7 +197,7 @@ describe('CoreState', () => {
     const { core } = setup();
     const answer = {
       ...SETTINGS,
-      appearance: { theme: 'dark', style: 'cobalt', wallpaper: 'graphite' },
+      appearance: { theme: 'dark', style: 'cobalt', wallpaper: 'graphite', language: 'en' },
     };
     f.route({ method: 'PUT', path: '/api/v0/settings', body: answer });
     const r = await core.saveSettings(answer as Settings);
@@ -350,5 +351,61 @@ describe('CoreState', () => {
     const error = { code: 'bad', message: 'Something odd.', hint: 'Reload.' };
     ws.receive(bin({ type: 'error', error }));
     expect(core.lastError).toEqual(error);
+  });
+});
+
+describe('the language (D44)', () => {
+  beforeEach(() => locale.use('en', null));
+
+  const DA = { _language: 'Dansk', 'settings.appearance.title': 'Udseende' };
+
+  it('reads a translation from the machine and shows it, missing texts in English', async () => {
+    const { core } = setup();
+    f.route({ path: '/api/v0/translations', body: [{ code: 'da', name: 'Dansk' }] });
+    f.route({ path: '/api/v0/translations/da', body: DA });
+    await core.useLanguage('da');
+    expect(locale.language).toBe('da');
+    expect(t('settings.appearance.title')).toBe('Udseende');
+    expect(t('settings.units.title')).toBe('Units');
+    expect(core.languages('English').map((c) => [c.code, c.name])).toEqual([
+      ['en', 'English'],
+      ['da', 'Dansk'],
+    ]);
+    await core.useLanguage('en');
+    expect(t('settings.appearance.title')).toBe('Appearance');
+  });
+
+  it('shows English for a language that is not installed, or a core without translations', async () => {
+    const { core } = setup();
+    await core.useLanguage('da');
+    expect(locale.language).toBe('en');
+    f.route({ path: '/api/v0/translations', body: [] });
+    await core.useLanguage('da');
+    expect(t('settings.appearance.title')).toBe('Appearance');
+    expect(core.lastError).toBeNull();
+  });
+
+  it('keeps a broken file out of the choices and says why', async () => {
+    const { core } = setup();
+    f.route({
+      path: '/api/v0/translations',
+      body: [{ code: 'da', name: 'da', problem: 'da.json has a problem on line 3: x' }],
+    });
+    await core.useLanguage('da');
+    expect(locale.language).toBe('en');
+    expect(core.translationProblems.map((p) => p.problem)).toEqual([
+      'da.json has a problem on line 3: x',
+    ]);
+    expect(core.languages('English')).toHaveLength(1);
+  });
+
+  it('uses the language chosen last when files arrive out of order', async () => {
+    const { core } = setup();
+    f.route({ path: '/api/v0/translations', body: [{ code: 'da', name: 'Dansk' }] });
+    f.route({ path: '/api/v0/translations/da', body: DA });
+    const slow = core.useLanguage('da');
+    await core.useLanguage('en');
+    await slow;
+    expect(locale.language).toBe('en');
   });
 });

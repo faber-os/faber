@@ -2,17 +2,27 @@
  * The shell's folder layering (docs/development.md, "In the shell"). Breaking a rule here means
  * changing that document first, as a deliberate decision.
  *
- *   src/lib/api/        talks to the core           may import: nothing from the UI
- *   src/lib/state/      app state (Svelte runes)    may import: api
- *   src/lib/desktop/    window manager logic        may import: nothing (and no Svelte)
- *   src/lib/viewers/    canvas drawing maths        may import: nothing (and no Svelte)
- *   src/components/, src/windows/   Svelte UI       may import: state, desktop, viewers, never api
+ *   src/lib/i18n/       texts and translations      may import: nothing (the bottom layer)
+ *   src/lib/api/        talks to the core           may import: i18n, nothing from the UI
+ *   src/lib/state/      app state (Svelte runes)    may import: api, i18n
+ *   src/lib/desktop/    window manager logic        may import: i18n (and no Svelte)
+ *   src/lib/viewers/    canvas drawing maths        may import: i18n (and no Svelte)
+ *   src/components/, src/windows/   Svelte UI       may import: state, desktop, viewers, i18n,
+ *                                                   never api
  *
  * `src/test/` holds shared test fakes and is only imported by *.test.ts files.
  */
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
+    {
+      name: 'i18n-imports-nothing',
+      comment:
+        'src/lib/i18n is the bottom layer: every other folder may use t(), so it may use none of them.',
+      severity: 'error',
+      from: { path: '^src/lib/i18n/', pathNot: '\.test\.ts$' },
+      to: { path: '^src/', pathNot: '^src/lib/i18n/' },
+    },
     {
       name: 'api-imports-no-ui',
       comment:
@@ -30,17 +40,19 @@ module.exports = {
     },
     {
       name: 'desktop-imports-nothing',
-      comment: 'src/lib/desktop is plain TypeScript: no other shell folder and no Svelte.',
+      comment:
+        'src/lib/desktop is plain TypeScript: no other shell folder (except i18n for its texts) and no Svelte.',
       severity: 'error',
       from: { path: '^src/lib/desktop/', pathNot: '\.test\.ts$' },
-      to: { pathNot: '^src/lib/desktop/' },
+      to: { pathNot: '^src/lib/(desktop|i18n)/' },
     },
     {
       name: 'viewers-import-nothing',
-      comment: 'src/lib/viewers are pure functions: no other shell folder and no Svelte.',
+      comment:
+        'src/lib/viewers are pure functions: no other shell folder (except i18n for its texts) and no Svelte.',
       severity: 'error',
       from: { path: '^src/lib/viewers/', pathNot: '\.test\.ts$' },
-      to: { pathNot: '^src/lib/viewers/' },
+      to: { pathNot: '^src/lib/(viewers|i18n)/' },
     },
     {
       name: 'ui-never-imports-api',

@@ -540,6 +540,7 @@ pub use crate::settings::{
     LengthUnit, MachineIdentity, Preference, Settings, Taskbar, TaskbarSize, TextSize, Theme, TimeSettings,
     Units,
 };
+pub use crate::translations::TranslationInfo;
 
 #[cfg(test)]
 mod tests {

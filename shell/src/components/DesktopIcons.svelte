@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { useCore } from '../lib/state/context';
+  import { t } from '../lib/i18n';
   import type { FileEntry, IconPosition } from '../lib/state/types';
   import { item, separator } from '../lib/desktop/contextMenu';
   import { DESKTOP, childPath, isAffected, stem, uniqueName } from '../lib/desktop/filePaths';
@@ -273,7 +274,7 @@
   async function create(kind: 'folder' | 'text') {
     const name = uniqueName(
       files.map((f) => f.name),
-      kind === 'folder' ? 'New folder' : 'New text file.txt',
+      kind === 'folder' ? t('desktop.newFolder.name') : t('desktop.newTextFile.name'),
     );
     const path = childPath(DESKTOP, name);
     const r =
@@ -298,7 +299,10 @@
       return {
         label: i.label,
         header: { title: d.title, detail: d.description, icon: d.icon },
-        entries: [item('open', 'Open', { icon: 'open', shortcut: 'Enter' }), pinItem(core, i.key)],
+        entries: [
+          item('open', t('menu.open'), { icon: 'open', shortcut: 'Enter' }),
+          pinItem(core, i.key),
+        ],
         onSelect: (id: string) => {
           if (!runPinItem(core, i.key, id)) open(i);
         },
@@ -323,14 +327,14 @@
     }
     selected = null;
     return {
-      label: 'Desktop',
+      label: t('desktop.label'),
       entries: [
-        item('folder', 'New folder', { icon: 'folder' }),
-        item('text', 'New text file', { icon: 'fileText' }),
+        item('folder', t('desktop.menu.newFolder'), { icon: 'folder' }),
+        item('text', t('desktop.menu.newTextFile'), { icon: 'fileText' }),
         separator(),
-        item('line-up', 'Line up icons', { icon: 'grid' }),
-        item('wallpaper', 'Change wallpaper…', { icon: 'desktop' }),
-        item('refresh', 'Refresh', { icon: 'refresh' }),
+        item('line-up', t('desktop.menu.lineUp'), { icon: 'grid' }),
+        item('wallpaper', t('desktop.menu.wallpaper'), { icon: 'desktop' }),
+        item('refresh', t('desktop.menu.refresh'), { icon: 'refresh' }),
       ],
       onSelect: (id: string) => {
         if (id === 'folder' || id === 'text') void create(id);
@@ -355,7 +359,7 @@
   bind:this={root}
   class="icons"
   role="listbox"
-  aria-label="Desktop"
+  aria-label={t('desktop.label')}
   tabindex={selected ? -1 : 0}
   style:height="{desktop.area.height}px"
   use:menuTrigger={{ menu, build }}
@@ -392,7 +396,7 @@
       {#if renaming === i.key}
         <input
           class="input rename"
-          aria-label="New name for {i.label}"
+          aria-label={t('desktop.rename.label', { name: i.label })}
           bind:value={renameValue}
           onclick={(e) => e.stopPropagation()}
           onpointerdown={(e) => e.stopPropagation()}

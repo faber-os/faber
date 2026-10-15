@@ -1,6 +1,8 @@
 <script lang="ts">
   import { machineNameProblem, tidyMachineName } from '../../lib/desktop/machineName';
   import type { SectionProps } from './types';
+  import RichText from '../../components/RichText.svelte';
+  import { t } from '../../lib/i18n';
 
   let { winId, settings, saving, change }: SectionProps = $props();
 
@@ -21,7 +23,7 @@
 </script>
 
 <section id="{winId}-machine" aria-labelledby="{winId}-machine-h">
-  <h3 id="{winId}-machine-h">Name</h3>
+  <h3 id="{winId}-machine-h">{t('settings.machine.title')}</h3>
   <form
     class="row"
     onsubmit={(e) => {
@@ -30,10 +32,13 @@
     }}
   >
     <div class="text">
-      <label class="name" for="{winId}-machine-name">Machine name</label>
+      <label class="name" for="{winId}-machine-name">{t('settings.machine.name.label')}</label>
       <p class="desc">
-        Shown in the browser tab, in About and in backup names. On the Pi it is also the network
-        address: <code>{(problem ? settings.machine.name : draft) || 'faber'}.local</code>.
+        <RichText
+          text={t('settings.machine.name.desc', {
+            address: `${(problem ? settings.machine.name : draft) || 'faber'}.local`,
+          })}
+        />
       </p>
       {#if problem && dirty}<p class="problem" role="alert">{problem}</p>{/if}
     </div>

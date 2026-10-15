@@ -7,6 +7,7 @@ import {
   type Point,
 } from '../lib/desktop/contextMenu';
 import { LongPress } from '../lib/desktop/longPress';
+import { t } from '../lib/i18n';
 
 export interface MenuRequest {
   entries: readonly (MenuEntry | false)[];
@@ -39,7 +40,7 @@ export class MenuController {
     this.current = {
       entries,
       onSelect: req.onSelect,
-      label: req.label ?? 'Menu',
+      label: req.label ?? t('menu.label'),
       header: req.header ?? null,
       at,
       opener,

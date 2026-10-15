@@ -1,15 +1,32 @@
+import { t } from '../i18n';
+
 /** The built-in wallpapers (Settings → Appearance). Each is drawn in CSS, so the kiosk needs no network. */
 export interface Wallpaper {
   id: string;
-  label: string;
-  description: string;
+  /** In the current language (a getter, so it follows a language change). */
+  readonly label: string;
+  readonly description: string;
+}
+
+type WallpaperId = 'aluminium' | 'anodised' | 'cutting-mat' | 'graphite';
+
+function wallpaper(id: WallpaperId): Wallpaper {
+  return {
+    id,
+    get label() {
+      return t(`settings.wallpaper.${id}.label`);
+    },
+    get description() {
+      return t(`settings.wallpaper.${id}.description`);
+    },
+  };
 }
 
 export const WALLPAPERS: readonly Wallpaper[] = [
-  { id: 'aluminium', label: 'Aluminium', description: 'Brushed metal, the default' },
-  { id: 'anodised', label: 'Anodised', description: 'Deep teal, like an anodised part' },
-  { id: 'cutting-mat', label: 'Cutting mat', description: 'A self-healing mat with its grid' },
-  { id: 'graphite', label: 'Graphite', description: 'Plain dark grey, nothing to look at' },
+  wallpaper('aluminium'),
+  wallpaper('anodised'),
+  wallpaper('cutting-mat'),
+  wallpaper('graphite'),
 ];
 
 export const DEFAULT_WALLPAPER = 'aluminium';

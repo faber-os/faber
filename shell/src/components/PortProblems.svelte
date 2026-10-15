@@ -1,6 +1,7 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
   import { groupPortProblems } from '../lib/state/portHints';
+  import { t } from '../lib/i18n';
   import Icon from './Icon.svelte';
 
   /**
@@ -16,10 +17,12 @@
     <span class="ico"><Icon name="warning" size={18} /></span>
     <div class="text">
       <p class="label">
-        {p.label}{#if p.count > 1}{' '}<span class="count num">({p.count} times)</span>{/if}
+        {p.label}{#if p.count > 1}{' '}<span class="count num"
+            >{t('portProblems.count', { count: p.count })}</span
+          >{/if}
       </p>
       <details>
-        <summary>What to try</summary>
+        <summary>{t('portProblems.whatToTry')}</summary>
         <p class="detail">{p.detail}</p>
         <p class="hint">{p.hint}</p>
       </details>

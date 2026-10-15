@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n';
   import Logo from './Logo.svelte';
 
   /**
@@ -13,10 +14,15 @@
   }: { size?: number; mark?: boolean; os?: boolean } = $props();
 </script>
 
-<span class="wordmark" style:font-size="{size}px" role="img" aria-label={os ? 'Faber OS' : 'Faber'}>
+<span
+  class="wordmark"
+  style:font-size="{size}px"
+  role="img"
+  aria-label={os ? t('desktop.wordmark.os.label') : 'Faber'}
+>
   {#if mark}<span class="nut"><Logo size={Math.round(size * 1.15)} /></span>{/if}
   <span class="name" aria-hidden="true">Faber</span>
-  {#if os}<span class="os" aria-hidden="true">OS</span>{/if}
+  {#if os}<span class="os" aria-hidden="true">{t('desktop.wordmark.os')}</span>{/if}
 </span>
 
 <style>

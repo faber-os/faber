@@ -1,4 +1,4 @@
-//! Layer 1: part names and signal addresses (docs/glossary.md).
+//! Layer 1: part names and signal addresses (docs/glossary.md), and language codes.
 
 use std::fmt;
 
@@ -67,6 +67,18 @@ impl fmt::Display for SignalAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.part, self.signal)
     }
+}
+
+/// A language code as Faber uses it in file names: `da`, `fil` or `pt-BR`. Nothing else, so a
+/// code can never reach outside the translations folder.
+pub fn valid_language_code(code: &str) -> bool {
+    let (lang, region) = match code.split_once('-') {
+        Some((l, r)) => (l, Some(r)),
+        None => (code, None),
+    };
+    (2..=3).contains(&lang.len())
+        && lang.bytes().all(|b| b.is_ascii_lowercase())
+        && region.is_none_or(|r| r.len() == 2 && r.bytes().all(|b| b.is_ascii_uppercase()))
 }
 
 #[cfg(test)]

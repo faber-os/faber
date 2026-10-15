@@ -1,4 +1,5 @@
 import type { WindowDef } from '../components/windowDefs';
+import { t } from '../lib/i18n';
 import AboutWindow from './AboutWindow.svelte';
 import FilesWindow from './FilesWindow.svelte';
 import LaserScanWindow from './LaserScanWindow.svelte';
@@ -9,12 +10,16 @@ import PropertiesWindow from './PropertiesWindow.svelte';
 import SerialMonitorWindow from './SerialMonitorWindow.svelte';
 import SettingsWindow from './SettingsWindow.svelte';
 
-/** Every kind of window the shell can open. */
+/** Every kind of window the shell can open. Titles and descriptions are getters, so they follow the language. */
 export const WINDOW_DEFS: WindowDef[] = [
   {
     kind: 'parts',
-    title: 'Parts',
-    description: 'Add, watch and remove the hardware on this machine',
+    get title() {
+      return t('programs.parts.title');
+    },
+    get description() {
+      return t('programs.parts.description');
+    },
     icon: 'parts',
     menu: 'parts',
     program: 'tool:parts',
@@ -27,8 +32,12 @@ export const WINDOW_DEFS: WindowDef[] = [
   },
   {
     kind: 'laser-scan',
-    title: 'Scan viewer',
-    description: 'Live top view of a laser-scan signal',
+    get title() {
+      return t('programs.laserScan.title');
+    },
+    get description() {
+      return t('programs.laserScan.description');
+    },
     icon: 'scan',
     menu: null,
     colour: 'viewer',
@@ -39,8 +48,12 @@ export const WINDOW_DEFS: WindowDef[] = [
   },
   {
     kind: 'serial-monitor',
-    title: 'Serial monitor',
-    description: 'Read, write and record a serial port directly',
+    get title() {
+      return t('programs.serialMonitor.title');
+    },
+    get description() {
+      return t('programs.serialMonitor.description');
+    },
     icon: 'serial',
     menu: 'tools',
     program: 'tool:serial-monitor',
@@ -53,8 +66,12 @@ export const WINDOW_DEFS: WindowDef[] = [
   },
   {
     kind: 'logs',
-    title: 'Logs',
-    description: 'Everything the core reports, live',
+    get title() {
+      return t('programs.logs.title');
+    },
+    get description() {
+      return t('programs.logs.description');
+    },
     icon: 'logs',
     menu: 'tools',
     program: 'tool:logs',
@@ -66,8 +83,12 @@ export const WINDOW_DEFS: WindowDef[] = [
   },
   {
     kind: 'files',
-    title: 'Files',
-    description: 'Your desktop, documents, recordings and machine config',
+    get title() {
+      return t('programs.files.title');
+    },
+    get description() {
+      return t('programs.files.description');
+    },
     icon: 'folder',
     menu: 'accessories',
     program: 'accessory:files',
@@ -80,8 +101,12 @@ export const WINDOW_DEFS: WindowDef[] = [
   },
   {
     kind: 'notes',
-    title: 'Notes',
-    description: 'A plain text editor',
+    get title() {
+      return t('programs.notes.title');
+    },
+    get description() {
+      return t('programs.notes.description');
+    },
     icon: 'notes',
     menu: 'accessories',
     program: 'accessory:notes',
@@ -94,8 +119,12 @@ export const WINDOW_DEFS: WindowDef[] = [
   },
   {
     kind: 'settings',
-    title: 'Settings',
-    description: 'Mode, style, wallpaper, taskbar and developer settings',
+    get title() {
+      return t('programs.settings.title');
+    },
+    get description() {
+      return t('programs.settings.description');
+    },
     icon: 'settings',
     menu: 'accessories',
     program: 'accessory:settings',
@@ -108,8 +137,12 @@ export const WINDOW_DEFS: WindowDef[] = [
   },
   {
     kind: 'properties',
-    title: 'Properties',
-    description: 'Details of one file or folder',
+    get title() {
+      return t('programs.properties.title');
+    },
+    get description() {
+      return t('programs.properties.description');
+    },
     icon: 'info',
     menu: null,
     colour: 'about',
@@ -120,8 +153,12 @@ export const WINDOW_DEFS: WindowDef[] = [
   },
   {
     kind: 'about',
-    title: 'About Faber',
-    description: 'Versions and connection details',
+    get title() {
+      return t('programs.about.title');
+    },
+    get description() {
+      return t('programs.about.description');
+    },
     icon: 'info',
     menu: 'faber',
     colour: 'about',

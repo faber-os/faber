@@ -1,6 +1,13 @@
 import { CoreError, type CoreHttp, type WriteMode } from '../api/http';
 import type { CoreSocket, SerialHandlers, SerialSession } from '../api/socket';
 import { RingBuffer } from './ringBuffer';
+import { locale } from '../i18n';
+import {
+  BUILT_IN,
+  languageChoices,
+  type LanguageChoice,
+  type MachineTranslation,
+} from '../i18n/languages';
 import type {
   ConnectionStatus,
   ConnectorInfo,
@@ -73,6 +80,13 @@ export class CoreState {
     timeZone: this.settings?.time.timeZone || this.system?.timeZone || undefined,
     clock: this.settings?.time.clock ?? '24h',
   });
+  /**
+   * Translations installed on the machine (`config/translations`), with their files once read.
+   * Built-in ones (src/lib/i18n/locales) need no loading.
+   */
+  machineTranslations = $state.raw<MachineTranslation[]>([]);
+  /** Translation files on the machine that can't be used, with why. */
+  translationProblems = $derived(this.machineTranslations.filter((m) => m.problem));
   /** The newest error that belonged to no window. */
   lastError = $state.raw<ErrorBody | null>(null);
 
@@ -86,6 +100,7 @@ export class CoreState {
   private logFlushPending = false;
   private clockOffsetMs: number | null = null;
   private stops: (() => void)[] = [];
+  private wantedLanguage = 'en';
   private readonly fileWatchers = new Set<(folders: string[]) => void>();
 
   constructor(deps: CoreDeps) {
@@ -158,6 +173,42 @@ export class CoreState {
   stop(): void {
     for (const stop of this.stops.splice(0)) stop();
     this.socket.close();
+  }
+
+  /**
+   * Reads the machine's translations: the list, then each usable file. A core that can't list
+   * them leaves the shell in English rather than failing (translations are optional).
+   */
+  async loadTranslations(): Promise<void> {
+    const list = await this.call(() => this.http.getTranslations());
+    if (!list.ok) return;
+    this.machineTranslations = await Promise.all(
+      list.value.map(async (info): Promise<MachineTranslation> => {
+        if (info.problem) return info;
+        const file = await this.call(() => this.http.getTranslation(info.code));
+        return file.ok
+          ? { ...info, translation: file.value }
+          : { ...info, problem: file.error.message };
+      }),
+    );
+  }
+
+  /** English, then every translation the shell can show (D44: a picker only when more than one). */
+  languages(englishName: string): LanguageChoice[] {
+    return languageChoices(BUILT_IN, this.machineTranslations, englishName);
+  }
+
+  /**
+   * Shows the shell in `code` (the `appearance.language` setting). A translation on the machine
+   * is read first if needed; a language with no usable translation shows English.
+   */
+  async useLanguage(code: string): Promise<void> {
+    this.wantedLanguage = code;
+    const find = () => this.languages('English').find((c) => c.code === code);
+    if (code !== 'en' && !find()) await this.loadTranslations();
+    if (this.wantedLanguage !== code) return; // changed again while the file was loading
+    const choice = find();
+    locale.use(choice?.translation ? code : 'en', choice?.translation ?? null);
   }
 
   async loadConnectors(): Promise<void> {

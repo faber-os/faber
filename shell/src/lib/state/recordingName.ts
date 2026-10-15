@@ -1,4 +1,5 @@
-import { validatePartName } from './partName';
+import { t } from '../i18n';
+import { MAX_PART_NAME, validatePartName } from './partName';
 
 /**
  * `recording_2026_10_15_1030`: the date and time on the machine's clock (month 1–12), in the
@@ -15,14 +16,13 @@ export function defaultRecordingName(now: {
   return `recording_${now.year}_${p(now.month)}_${p(now.day)}_${p(now.hour)}${p(now.minute)}`;
 }
 
-/** Recording names follow the part-name rule (docs/api.md, "Recordings"). */
+/** Recording names follow the part-name rule (docs/api.md, "Recordings"), in recording words. */
 export function validateRecordingName(name: string): { message: string; hint: string } | null {
-  const e = validatePartName(name);
-  if (!e) return null;
-  return {
-    message: e.message
-      .replace('The part needs a name.', 'The recording needs a name.')
-      .replace('valid part name', 'valid recording name'),
-    hint: e.hint.replace('front_lidar', 'bench_test'),
-  };
+  if (!validatePartName(name)) return null;
+  const hint = t('serial.recordingName.hint');
+  if (name === '') return { message: t('serial.recordingName.required'), hint };
+  if (name.length > MAX_PART_NAME) {
+    return { message: t('serial.recordingName.tooLong', { name, max: MAX_PART_NAME }), hint };
+  }
+  return { message: t('serial.recordingName.invalid', { name }), hint };
 }

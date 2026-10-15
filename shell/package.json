@@ -15,7 +15,8 @@
     "test:e2e": "playwright test",
     "check:arch": "depcruise src --config .dependency-cruiser.cjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "i18n:check": "node --disable-warning=ExperimentalWarning scripts/i18n-check.ts"
   },
   "dependencies": {
     "@fontsource-variable/atkinson-hyperlegible-mono": "^5.3.0",

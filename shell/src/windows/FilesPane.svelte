@@ -44,6 +44,8 @@
   import { formatDateTime } from '../lib/desktop/wallClock';
   import Icon, { type IconName } from '../components/Icon.svelte';
   import { menuTrigger, useMenu } from '../components/menuController.svelte';
+  import RichText from '../components/RichText.svelte';
+  import { t } from '../lib/i18n';
 
   /**
    * One folder being browsed: a tab of a Files window. Details (a list with a panel about the
@@ -122,7 +124,7 @@
   $effect(() => {
     const e = view.error;
     if (e?.code === 'not-found' && isOnDisk(view.path)) {
-      notice = 'The disk was removed, so Files went back to your home folder.';
+      notice = t('files.notice.diskRemoved');
       view.go('home:/Desktop');
     }
   });
@@ -133,7 +135,7 @@
   const disks = $derived(diskRoots(roots));
   const onDisk = $derived(isOnDisk(view.path));
   const rootLabel = $derived(
-    root === 'home' ? 'Home' : (roots.find((r) => r.id === root)?.label ?? root),
+    root === 'home' ? t('files.home') : (roots.find((r) => r.id === root)?.label ?? root),
   );
   const crumbs = $derived(breadcrumbs(view.path, rootLabel));
   const inTrash = $derived(view.path === TRASH);
@@ -154,7 +156,7 @@
     shownPath = view.path;
     selected = null;
     renaming = null;
-    if (!first && !notice?.startsWith('The disk was removed')) notice = null;
+    if (!first && notice !== t('files.notice.diskRemoved')) notice = null;
   });
 
   async function act(fn: () => Promise<{ ok: true } | { ok: false; error: ErrorBody }>) {
@@ -175,7 +177,7 @@
   async function newFolder() {
     const name = uniqueName(
       entries.map((e) => e.name),
-      'New folder',
+      t('files.newName.folder'),
     );
     const path = childPath(view.path, name);
     if (await act(() => core.createFolder(path))) {
@@ -187,7 +189,7 @@
   async function newTextFile() {
     const name = uniqueName(
       entries.map((e) => e.name),
-      'New text file.txt',
+      t('files.newName.textFile'),
     );
     const path = childPath(view.path, name);
     if (await act(() => core.writeFile(path, new Uint8Array(), 'create'))) {
@@ -345,23 +347,23 @@
   function backgroundMenu() {
     if (inTrash) {
       return [
-        item('refresh', 'Refresh', { icon: 'refresh' }),
+        item('refresh', t('files.menu.refresh'), { icon: 'refresh' }),
         separator(),
-        item('empty', 'Empty Trash', {
+        item('empty', t('files.menu.emptyTrash'), {
           danger: true,
           icon: 'trash',
-          disabledReason: entries.length === 0 ? 'The Trash is already empty.' : undefined,
+          disabledReason: entries.length === 0 ? t('files.menu.trashAlreadyEmpty') : undefined,
         }),
       ];
     }
     return [
-      item('new-folder', 'New folder', { icon: 'folder' }),
-      item('new-text', 'New text file', { icon: 'fileText' }),
-      item('upload', 'Upload files…', { icon: 'upload' }),
+      item('new-folder', t('files.menu.newFolder'), { icon: 'folder' }),
+      item('new-text', t('files.menu.newTextFile'), { icon: 'fileText' }),
+      item('upload', t('files.menu.uploadFiles'), { icon: 'upload' }),
       separator(),
       ...ZOOM_STEPS.map((v) => item(`view:${v}`, VIEW_LABELS[v], { checked: mode === v })),
       separator(),
-      item('refresh', 'Refresh', { icon: 'refresh' }),
+      item('refresh', t('files.menu.refresh'), { icon: 'refresh' }),
     ];
   }
 
@@ -382,7 +384,7 @@
       const list = entryMenu(e);
       // Folders can also open in a new tab of this window.
       if (e.kind === 'folder' && !inTrash) {
-        list.splice(1, 0, item('open-tab', 'Open in new tab', { icon: 'plus' }));
+        list.splice(1, 0, item('open-tab', t('files.menu.openTab'), { icon: 'plus' }));
       }
       return {
         entries: list,
@@ -532,27 +534,27 @@
     <div class="nav">
       <button
         class="btn quiet icon"
-        aria-label="Back"
-        title="Back (Alt+Left)"
+        aria-label={t('files.toolbar.back')}
+        title={t('files.toolbar.backHint')}
         disabled={!view.canBack}
         onclick={() => view.back()}><Icon name="back" /></button
       >
       <button
         class="btn quiet icon"
-        aria-label="Forward"
-        title="Forward (Alt+Right)"
+        aria-label={t('files.toolbar.forward')}
+        title={t('files.toolbar.forwardHint')}
         disabled={!view.canForward}
         onclick={() => view.forward()}><Icon name="forward" /></button
       >
       <button
         class="btn quiet icon"
-        aria-label="Up one folder"
-        title="Up one folder (Alt+Up)"
+        aria-label={t('files.toolbar.up')}
+        title={t('files.toolbar.upHint')}
         disabled={!view.canUp}
         onclick={() => view.up()}><Icon name="up" /></button
       >
     </div>
-    <nav class="crumbs" aria-label="Folder path">
+    <nav class="crumbs" aria-label={t('files.toolbar.path')}>
       <ol>
         {#each crumbs as c, i (c.path)}
           <li>
@@ -567,11 +569,21 @@
       </ol>
     </nav>
     {#if !inTrash}
-      <button class="btn tool" onclick={newFolder} disabled={busy} title="New folder">
-        <Icon name="plus" size={17} /><span class="tool-label">New folder</span>
+      <button
+        class="btn tool"
+        onclick={newFolder}
+        disabled={busy}
+        title={t('files.toolbar.newFolder')}
+      >
+        <Icon name="plus" size={17} /><span class="tool-label">{t('files.toolbar.newFolder')}</span>
       </button>
-      <button class="btn tool" onclick={() => picker?.click()} disabled={busy} title="Upload">
-        <Icon name="upload" size={17} /><span class="tool-label">Upload</span>
+      <button
+        class="btn tool"
+        onclick={() => picker?.click()}
+        disabled={busy}
+        title={t('files.toolbar.upload')}
+      >
+        <Icon name="upload" size={17} /><span class="tool-label">{t('files.toolbar.upload')}</span>
       </button>
     {/if}
     <input
@@ -587,8 +599,8 @@
     <div
       class="segmented"
       role="radiogroup"
-      aria-label="Show as"
-      title="Show as (Ctrl and the wheel, or Ctrl + and Ctrl −)"
+      aria-label={t('files.toolbar.showAs')}
+      title={t('files.toolbar.showAsHint')}
     >
       {#each ZOOM_STEPS as v (v)}
         <label title={VIEW_LABELS[v]}
@@ -602,7 +614,7 @@
   </div>
 
   <div class="main">
-    <nav class="side" aria-label="Places">
+    <nav class="side" aria-label={t('files.side.places')}>
       <ul>
         {#each SPECIALS as s (s.id)}
           <li>
@@ -618,7 +630,7 @@
         {/each}
       </ul>
       {#if disks.length}
-        <p class="side-head" id="{id}-disks">Disks</p>
+        <p class="side-head" id="{id}-disks">{t('files.side.disks')}</p>
         <ul aria-labelledby="{id}-disks">
           {#each disks as d (d.id)}
             <li>
@@ -652,7 +664,7 @@
     <section
       class="pane"
       class:dropping
-      aria-label="Contents of {crumbs.at(-1)?.label}"
+      aria-label={t('files.pane.contentsOf', { folder: crumbs.at(-1)?.label ?? '' })}
       ondragover={dragOver}
       ondragleave={(e) => {
         if (!(e.currentTarget as Element).contains(e.relatedTarget as Node)) dropping = false;
@@ -668,27 +680,20 @@
 
       {#if inTrash}
         <div class="actions">
-          <p class="explain">
-            Files here can be restored. Emptying the Trash deletes them for good.
-          </p>
+          <p class="explain">{t('files.explain.trash')}</p>
           <button
             class="btn danger"
             disabled={entries.length === 0 || busy}
-            onclick={() => (confirm = { kind: 'empty' })}>Empty Trash</button
+            onclick={() => (confirm = { kind: 'empty' })}>{t('files.menu.emptyTrash')}</button
           >
         </div>
       {:else if inSystem}
         <div class="actions">
-          <p class="explain">
-            <code>parts.toml</code> here is your machine config. Saving it applies it at once; a broken
-            file is refused with the line that is wrong.
-          </p>
+          <p class="explain"><RichText text={t('files.explain.system')} /></p>
         </div>
       {:else if onDisk}
         <div class="actions">
-          <p class="explain">
-            A removable disk. It has no Trash: deleting a file here deletes it for good.
-          </p>
+          <p class="explain">{t('files.explain.disk')}</p>
         </div>
       {/if}
 
@@ -696,7 +701,9 @@
         <div class="pad">
           <ErrorNotice error={view.error}>
             {#snippet actions()}
-              <button class="btn" onclick={() => view.refresh()}>Try again</button>
+              <button class="btn" onclick={() => view.refresh()}
+                >{t('files.action.tryAgain')}</button
+              >
             {/snippet}
           </ErrorNotice>
         </div>
@@ -705,7 +712,9 @@
         <div class="pad">
           <ErrorNotice error={actionError}>
             {#snippet actions()}
-              <button class="btn quiet" onclick={() => (actionError = null)}>Dismiss</button>
+              <button class="btn quiet" onclick={() => (actionError = null)}
+                >{t('files.action.dismiss')}</button
+              >
             {/snippet}
           </ErrorNotice>
         </div>
@@ -729,30 +738,22 @@
           onwheel={onWheel}
         >
           {#if view.listing === null && view.loading}
-            <p class="empty muted">Loading…</p>
+            <p class="empty muted">{t('files.pane.loading')}</p>
           {:else if view.listing && entries.length === 0}
             {#if inRecordings}
               <div class="empty">
-                <h3>No recordings yet</h3>
-                <p>
-                  Record a port with the serial monitor's Record button and it appears here. Every
-                  recording is also a replay port, so you can add a part on it as if the hardware
-                  were plugged in.
-                </p>
-                <p>
-                  No hardware yet? Faber comes with one sample: a short recording of an LD19 LiDAR
-                  in a room. Adding it copies it here as <code>ld19-sample.fbcap</code>.
-                </p>
+                <h3>{t('files.empty.recordings.title')}</h3>
+                <p>{t('files.empty.recordings.body')}</p>
+                <p><RichText text={t('files.empty.recordings.sample')} /></p>
                 <button class="btn primary" onclick={addSamples} disabled={busy}>
-                  Add sample recordings
+                  {t('files.empty.recordings.addSamples')}
                 </button>
               </div>
             {:else if inTrash}
-              <p class="empty muted">The Trash is empty.</p>
+              <p class="empty muted">{t('files.empty.trash')}</p>
             {:else}
               <p class="empty muted">
-                This folder is empty.{#if !inSystem}{' '}Drop files here from your computer to
-                  upload them.{/if}
+                {inSystem ? t('files.empty.folder') : t('files.empty.folderDrop')}
               </p>
             {/if}
           {:else if view.listing}
@@ -761,13 +762,15 @@
               bind:this={listEl}
               class="view-{mode}"
               role="listbox"
-              aria-label="Files and folders"
+              aria-label={t('files.pane.list')}
               tabindex={selected ? -1 : 0}
               onkeydown={listKey}
             >
               {#if mode === 'details'}
                 <li class="head" role="presentation" aria-hidden="true">
-                  <span>Name</span><span>{inTrash ? 'From' : 'Size'}</span><span>Modified</span>
+                  <span>{t('files.column.name')}</span><span
+                    >{inTrash ? t('files.column.from') : t('files.column.size')}</span
+                  ><span>{t('files.column.modified')}</span>
                 </li>
               {/if}
               {#each entries as e (e.path)}
@@ -788,7 +791,7 @@
                     {#if renaming === e.path}
                       <input
                         class="input rename"
-                        aria-label="New name for {e.name}"
+                        aria-label={t('files.pane.renameInput', { name: e.name })}
                         bind:value={renameValue}
                         onclick={(ev) => ev.stopPropagation()}
                         onkeydown={(ev) => {
@@ -819,13 +822,13 @@
           {#if dropping}
             <div class="drop" aria-hidden="true">
               <Icon name="upload" size={28} />
-              <p>Drop to upload to {crumbs.at(-1)?.label}</p>
+              <p>{t('files.pane.dropHere', { folder: crumbs.at(-1)?.label ?? '' })}</p>
             </div>
           {/if}
         </div>
 
         {#if mode === 'details' && view.listing}
-          <aside class="details" aria-label="Details">
+          <aside class="details" aria-label={t('files.details.label')}>
             {#if current}
               {@const look = fileLook(current)}
               {@const replay = replayPortFor(current.path)}
@@ -834,31 +837,35 @@
               </div>
               <p class="d-name selectable">{current.name}</p>
               <dl class="facts">
-                <dt>Kind</dt>
+                <dt>{t('files.details.kind')}</dt>
                 <dd>{fileTypeLabel(current)}</dd>
                 {#if current.kind === 'file'}
-                  <dt>Size</dt>
+                  <dt>{t('files.details.size')}</dt>
                   <dd class="num">{formatBytes(current.size)}</dd>
                 {/if}
                 {#if current.modifiedMs !== undefined}
-                  <dt>Modified</dt>
+                  <dt>{t('files.details.modified')}</dt>
                   <dd class="num">{formatDateTime(current.modifiedMs, core.wallClock)}</dd>
                 {/if}
                 {#if replay}
-                  <dt>Port</dt>
+                  <dt>{t('files.details.port')}</dt>
                   <dd><code class="selectable">{replay}</code></dd>
                 {/if}
               </dl>
               <div class="d-actions">
                 {#if replay}
                   <button class="btn primary" onclick={() => addPartOn(replay)}
-                    >Add a part on it</button
+                    >{t('files.details.addPart')}</button
                   >
                 {:else if !inTrash}
-                  <button class="btn" onclick={() => open(current)}>Open</button>
+                  <button class="btn" onclick={() => open(current)}
+                    >{t('files.details.open')}</button
+                  >
                 {/if}
                 {#if current.kind === 'file'}
-                  <button class="btn" onclick={() => download(core, current.path)}>Download</button>
+                  <button class="btn" onclick={() => download(core, current.path)}
+                    >{t('files.details.download')}</button
+                  >
                 {/if}
               </div>
             {:else}
@@ -867,8 +874,7 @@
               </div>
               <p class="d-name">{crumbs.at(-1)?.label}</p>
               <p class="muted small">
-                <span class="num">{entries.length}</span>
-                {entries.length === 1 ? 'item' : 'items'}. Select a file to see its details.
+                {t('files.details.folderSummary', { count: entries.length })}
               </p>
             {/if}
           </aside>
@@ -878,7 +884,9 @@
       <p class="status" aria-live="polite">
         {#if view.listing}
           <span class="num"
-            >{`${entries.length} ${entries.length === 1 ? 'item' : 'items'}${current ? ' · 1 selected' : ''}`}</span
+            >{current
+              ? t('files.status.itemsSelected', { count: entries.length })
+              : t('files.status.items', { count: entries.length })}</span
           >
         {/if}
         <span class="where">{VIEW_LABELS[mode]}</span>
@@ -889,64 +897,73 @@
   {#if conflict}
     {@const c = conflict}
     <Dialog
-      title="“{c.name}” is already in {c.folder}"
+      title={t('files.dialog.conflict.title', { name: c.name, folder: c.folder })}
       oncancel={() => c.answer({ choice: 'skip', forAll: false })}
     >
-      <p>Replace the file that is there, keep both (the upload gets a new name), or skip it?</p>
+      <p>{t('files.dialog.conflict.body')}</p>
       {#if c.remaining > 0}
         <label class="ack">
           <input type="checkbox" class="check" bind:checked={conflictForAll} />
-          Do the same for the other files that are already there
+          {t('files.dialog.conflict.forAll')}
         </label>
       {/if}
       {#snippet actions()}
         <button class="btn" onclick={() => c.answer({ choice: 'skip', forAll: conflictForAll })}
-          >Skip</button
+          >{t('files.dialog.conflict.skip')}</button
         >
         <button
           class="btn danger"
-          onclick={() => c.answer({ choice: 'replace', forAll: conflictForAll })}>Replace</button
+          onclick={() => c.answer({ choice: 'replace', forAll: conflictForAll })}
+          >{t('files.dialog.conflict.replace')}</button
         >
         <button
           class="btn primary"
           onclick={() => c.answer({ choice: 'keep-both', forAll: conflictForAll })}
-          >Keep both</button
+          >{t('files.dialog.conflict.keepBoth')}</button
         >
       {/snippet}
     </Dialog>
   {:else if confirm?.kind === 'delete'}
     {@const e = confirm.entry}
-    <Dialog title="Delete “{e.name}” for good?" tone="danger" oncancel={() => (confirm = null)}>
+    <Dialog
+      title={t('files.dialog.deleteForGood.title', { name: e.name })}
+      tone="danger"
+      oncancel={() => (confirm = null)}
+    >
       <p>
-        {#if isOnDisk(e.path)}Disks have no Trash, so it{:else}It{/if} can't be restored afterwards.
+        {isOnDisk(e.path)
+          ? t('files.dialog.deleteForGood.bodyDisk')
+          : t('files.dialog.deleteForGood.body')}
       </p>
       {#snippet actions()}
-        <button class="btn" onclick={() => (confirm = null)}>Cancel</button>
+        <button class="btn" onclick={() => (confirm = null)}>{t('files.action.cancel')}</button>
         <button
           class="btn danger solid"
           onclick={() => {
             const path = e.path;
             confirm = null;
             void act(() => core.deleteForGood([path]));
-          }}>Delete for good</button
+          }}>{t('files.dialog.deleteForGood.confirm')}</button
         >
       {/snippet}
     </Dialog>
   {:else if confirm?.kind === 'empty'}
-    <Dialog title="Empty the Trash?" tone="danger" oncancel={() => (confirm = null)}>
+    <Dialog
+      title={t('files.dialog.emptyTrash.title')}
+      tone="danger"
+      oncancel={() => (confirm = null)}
+    >
       <p>
-        All <span class="num">{entries.length}</span>
-        {entries.length === 1 ? 'item' : 'items'} in the Trash will be deleted for good. They can't be
-        restored afterwards.
+        {t('files.dialog.emptyTrash.body', { count: entries.length })}
       </p>
       {#snippet actions()}
-        <button class="btn" onclick={() => (confirm = null)}>Cancel</button>
+        <button class="btn" onclick={() => (confirm = null)}>{t('files.action.cancel')}</button>
         <button
           class="btn danger solid"
           onclick={() => {
             confirm = null;
             void act(() => core.emptyTrash());
-          }}>Empty Trash</button
+          }}>{t('files.dialog.emptyTrash.confirm')}</button
         >
       {/snippet}
     </Dialog>

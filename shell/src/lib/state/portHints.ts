@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { ConnectorInfo, PortInfo, PortProblem } from './types';
 
 export interface PortHint {
@@ -11,17 +12,24 @@ export interface PortHint {
 export function portHints(port: PortInfo, connectors: ConnectorInfo[]): PortHint[] {
   return port.suggestions.map((s) => {
     const name = connectors.find((c) => c.id === s.connector)?.name ?? s.connector;
-    return { connector: s.connector, text: `Often used for: ${name}`, reason: s.reason };
+    return {
+      connector: s.connector,
+      text: t('addPart.port.oftenUsedFor', { name }),
+      reason: s.reason,
+    };
   });
 }
 
 export function portAvailability(port: PortInfo): { free: boolean; text: string } {
   const by = port.claimedBy;
   // `== null`: a missing field may arrive as nil from MessagePack, which decodes to null.
-  if (by == null) return { free: true, text: 'Free' };
+  if (by == null) return { free: true, text: t('addPart.port.free') };
   if (by.startsWith('tool:'))
-    return { free: false, text: `Used by the ${by.slice(5).replace(/-/g, ' ')}` };
-  return { free: false, text: `Used by the part "${by}"` };
+    return {
+      free: false,
+      text: t('addPart.port.usedByTool', { tool: by.slice(5).replace(/-/g, ' ') }),
+    };
+  return { free: false, text: t('addPart.port.usedByPart', { part: by }) };
 }
 
 /**
@@ -31,13 +39,13 @@ export function portAvailability(port: PortInfo): { free: boolean; text: string 
 export function portKindLabel(port: Pick<PortInfo, 'kind'>): string {
   switch (port.kind) {
     case 'usb-serial':
-      return 'USB serial';
+      return t('parts.portKind.usbSerial');
     case 'serial':
-      return 'Serial';
+      return t('parts.portKind.serial');
     case 'bluetooth':
-      return 'Bluetooth';
+      return t('parts.portKind.bluetooth');
     case 'replay':
-      return 'Recording';
+      return t('parts.portKind.replay');
     default:
       return port.kind;
   }

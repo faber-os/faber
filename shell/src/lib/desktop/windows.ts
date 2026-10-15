@@ -44,7 +44,11 @@ export interface WindowState {
   kind: string;
   /** Identifies the instance: the kind itself for single windows, e.g. a signal address for viewers. */
   key: string;
-  title: string;
+  /**
+   * A title the window chose for itself (a document's or folder's name). Absent: the kind's
+   * title, read when shown, so it follows a language change (`DesktopController.titleOf`).
+   */
+  title?: string;
   rect: Rect;
   chosen: Rect;
   maximised: boolean;
@@ -142,7 +146,7 @@ export function openWindow(
     id,
     kind: req.kind.kind,
     key,
-    title: req.title ?? req.kind.title,
+    title: req.title,
     rect,
     chosen,
     maximised: opts.compact === true,

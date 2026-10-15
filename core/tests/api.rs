@@ -542,7 +542,7 @@ async fn settings_and_the_developer_guard() {
     let (_, mut settings) = call(&c.app, "GET", "/api/v0/settings", None).await;
     assert_eq!(
         settings["appearance"],
-        json!({"theme": "light", "style": "aluminium", "wallpaper": "aluminium"})
+        json!({"theme": "light", "style": "aluminium", "wallpaper": "aluminium", "language": "en"})
     );
     assert_eq!(settings["taskbar"]["size"], "small");
     settings["appearance"]["theme"] = json!("dark");
@@ -758,4 +758,55 @@ async fn big_files_can_be_downloaded_but_not_opened_inline() {
     assert_eq!(s, StatusCode::OK);
     assert_eq!(body.len(), size);
     assert!(body.iter().all(|&b| b == 7));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn translations_on_the_machine_are_listed_and_served() {
+    let c = core();
+    let (s, none) = call(&c.app, "GET", "/api/v0/translations", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(none, json!([]), "English is built into the shell, so nothing is listed");
+
+    // Dropping a file in is enough: no restart.
+    let folder = c._dir.path().join("config").join("translations");
+    std::fs::write(folder.join("da.json"), r#"{ "_language": "Dansk", "parts.title": "Dele" }"#).unwrap();
+    std::fs::write(folder.join("xx.json"), "{\n  \"a\": \"b\"\n  \"c\": 1\n}").unwrap();
+    let (_, list) = call(&c.app, "GET", "/api/v0/translations", None).await;
+    assert_eq!(list[0], json!({"code": "da", "name": "Dansk"}));
+    assert_eq!(list[1]["code"], "xx");
+    assert!(list[1]["problem"].as_str().unwrap().contains("line 3"), "{list}");
+
+    let (s, da) = call(&c.app, "GET", "/api/v0/translations/da", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(da["parts.title"], "Dele");
+
+    let (s, err) = call(&c.app, "GET", "/api/v0/translations/xx", None).await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(err["error"]["code"], "translation-invalid");
+    assert!(err["error"]["message"].as_str().unwrap().contains("line 3"), "{err}");
+
+    let (s, err) = call(&c.app, "GET", "/api/v0/translations/de", None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    assert_eq!(err["error"]["code"], "unknown-language");
+
+    for sneaky in ["..%2Fsettings", "%2E%2E", "DA", "settings.toml"] {
+        let (s, err) = call(&c.app, "GET", &format!("/api/v0/translations/{sneaky}"), None).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{sneaky}");
+        assert_eq!(err["error"]["code"], "invalid-language", "{sneaky}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_language_is_a_setting() {
+    let c = core();
+    let (_, mut settings) = call(&c.app, "GET", "/api/v0/settings", None).await;
+    assert_eq!(settings["appearance"]["language"], "en");
+    settings["appearance"]["language"] = json!("da/..");
+    let (s, err) = call(&c.app, "PUT", "/api/v0/settings", Some(settings.clone())).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(err["error"]["code"], "invalid-language");
+    settings["appearance"]["language"] = json!("da");
+    let (s, saved) = call(&c.app, "PUT", "/api/v0/settings", Some(settings)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(saved["appearance"]["language"], "da");
 }

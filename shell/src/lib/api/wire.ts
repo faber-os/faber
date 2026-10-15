@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { decode, encode } from '@msgpack/msgpack';
 import type { ErrorBody } from './generated/ErrorBody';
 import type { Reading } from './generated/Reading';
@@ -16,7 +17,7 @@ export class WireError extends Error {
     this.body = {
       code: 'bad-message',
       message,
-      hint: 'The shell and the core may be different versions. Reload the page; if it keeps happening, update Faber.',
+      hint: t('errors.wire.hint'),
     };
   }
 }
@@ -60,7 +61,7 @@ export function decodeServerMessage(
       raw = decode(toBytes(data));
     }
   } catch (e) {
-    throw new WireError(`A message from the core could not be read (${(e as Error).message}).`);
+    throw new WireError(t('errors.wire.unreadable', { reason: (e as Error).message }));
   }
   return normaliseServerMessage(raw);
 }
@@ -78,7 +79,7 @@ function toBytes(data: ArrayBuffer | ArrayBufferView): Uint8Array {
  */
 function normaliseServerMessage(raw: unknown): ServerMessage {
   if (!isRecord(raw) || typeof raw.type !== 'string' || !SERVER_TYPES.has(raw.type)) {
-    throw new WireError('The core sent a message of an unknown type.');
+    throw new WireError(t('errors.wire.unknownType'));
   }
   dropNullFields(raw);
   const msg = raw as ServerMessage;

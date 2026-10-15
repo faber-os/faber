@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n';
   import { useCore } from '../lib/state/context';
   import type { ErrorBody } from '../lib/state/types';
   import { INTENSITY_BUCKETS, intensityRamp } from '../lib/viewers/colour';
@@ -14,6 +15,7 @@
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import { formatRate } from '../components/format';
   import Icon from '../components/Icon.svelte';
+  import RichText from '../components/RichText.svelte';
   import StateBadge from '../components/StateBadge.svelte';
   import { useTheme } from '../components/theme.svelte';
   import type { WindowProps } from '../components/windowDefs';
@@ -86,8 +88,8 @@
     if (!ctx) {
       error = {
         code: 'no-canvas',
-        message: 'This browser could not start drawing the scan.',
-        hint: 'Try another browser, or turn on hardware acceleration in the browser settings.',
+        message: t('scan.canvas.error.message'),
+        hint: t('scan.canvas.error.hint'),
       };
       return;
     }
@@ -139,7 +141,7 @@
     return () => c.removeEventListener('wheel', onWheel);
   });
 
-  function readPalette(el: HTMLElement, t: string): ScanPalette {
+  function readPalette(el: HTMLElement, mode: string): ScanPalette {
     const css = getComputedStyle(el);
     const v = (name: string) => css.getPropertyValue(name).trim();
     return {
@@ -148,7 +150,7 @@
       axis: v('--scan-axis'),
       label: v('--scan-label'),
       origin: v('--scan-origin'),
-      points: intensityRamp(INTENSITY_BUCKETS, t === 'dark' ? 'dark' : 'light'),
+      points: intensityRamp(INTENSITY_BUCKETS, mode === 'dark' ? 'dark' : 'light'),
     };
   }
 
@@ -234,7 +236,7 @@
       bind:this={canvas}
       class="canvas"
       tabindex="0"
-      aria-label="Top view of {address}, forward is up. Plus and minus zoom, arrow keys pan, 0 resets the view."
+      aria-label={t('scan.canvas.label', { address })}
       onpointerdown={onPointerDown}
       onpointermove={onPointerMove}
       onpointerup={onPointerUp}
@@ -249,56 +251,61 @@
       </div>
     {:else if waiting}
       <div class="overlay quiet" role="status">
-        <p>Waiting for the first scan from <code>{address}</code>…</p>
+        <p><RichText text={t('scan.waiting', { address })} /></p>
         {#if part && part.state.kind !== 'running'}
           <p class="sub">
-            The part is {part.state.kind}{part.state.message ? `: ${part.state.message}` : '.'}
+            {part.state.message
+              ? t('scan.partStateWithMessage', {
+                  state: part.state.kind,
+                  message: part.state.message,
+                })
+              : t('scan.partState', { state: part.state.kind })}
           </p>
         {/if}
       </div>
     {/if}
 
-    <div class="zoom" role="group" aria-label="View">
+    <div class="zoom" role="group" aria-label={t('scan.zoom.label')}>
       <button
         class="zbtn"
-        aria-label="Zoom in"
+        aria-label={t('scan.zoom.in')}
         onclick={() => setView(zoomCentre(currentView(), ZOOM_STEP, size))}
       >
         <Icon name="zoomIn" />
       </button>
       <button
         class="zbtn"
-        aria-label="Zoom out"
+        aria-label={t('scan.zoom.out')}
         onclick={() => setView(zoomCentre(currentView(), 1 / ZOOM_STEP, size))}
       >
         <Icon name="zoomOut" />
       </button>
-      <button class="zbtn" aria-label="Fit the scan" onclick={resetView}>
+      <button class="zbtn" aria-label={t('scan.zoom.fit')} onclick={resetView}>
         <Icon name="fit" />
       </button>
     </div>
   </div>
 
-  <dl class="stats" aria-label="Scan statistics">
+  <dl class="stats" aria-label={t('scan.stats.label')}>
     <div>
-      <dt>Points</dt>
+      <dt>{t('scan.stats.points')}</dt>
       <dd class="num" data-testid="scan-points">{stats ? stats.points : '–'}</dd>
     </div>
     <div>
-      <dt>No return</dt>
+      <dt>{t('scan.stats.noReturn')}</dt>
       <dd class="num" data-testid="scan-no-return">{stats ? stats.noReturn : '–'}</dd>
     </div>
     <div>
-      <dt>Rate</dt>
+      <dt>{t('scan.stats.rate')}</dt>
       <dd class="num" data-testid="scan-rate">{formatRate(stats?.rateHz ?? null)}</dd>
     </div>
     <div class="grow">
-      <dt class="visually-hidden">Signal</dt>
+      <dt class="visually-hidden">{t('scan.stats.signal')}</dt>
       <dd class="addr"><code>{address}</code></dd>
     </div>
     {#if part}
       <div>
-        <dt class="visually-hidden">Part state</dt>
+        <dt class="visually-hidden">{t('scan.stats.partState')}</dt>
         <dd><StateBadge kind={part.state.kind} /></dd>
       </div>
     {/if}

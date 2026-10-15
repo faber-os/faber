@@ -1,24 +1,29 @@
 <script lang="ts">
   import type { ConnectionStatus } from '../lib/state/types';
+  import { t, type MessageKey } from '../lib/i18n';
 
   let { status }: { status: ConnectionStatus } = $props();
 
-  const LOOK: Record<ConnectionStatus, { text: string; detail: string; tone: string }> = {
-    connected: { text: 'Connected', detail: 'Live connection to the Faber core.', tone: 'ok' },
+  type Key = Extract<MessageKey, `connection.${string}`>;
+  const LOOK: Record<ConnectionStatus, { textKey: Key; detailKey: Key; tone: string }> = {
+    connected: {
+      textKey: 'connection.connected',
+      detailKey: 'connection.connected.detail',
+      tone: 'ok',
+    },
     connecting: {
-      text: 'Connecting…',
-      detail: 'Opening the connection to the Faber core.',
+      textKey: 'connection.connecting',
+      detailKey: 'connection.connecting.detail',
       tone: 'wait',
     },
     reconnecting: {
-      text: 'Reconnecting…',
-      detail:
-        'Lost the connection to the Faber core. Trying again on its own; check that faber-core is running.',
+      textKey: 'connection.reconnecting',
+      detailKey: 'connection.reconnecting.detail',
       tone: 'warn',
     },
     closed: {
-      text: 'Not connected',
-      detail: 'The shell is not connected to the Faber core.',
+      textKey: 'connection.closed',
+      detailKey: 'connection.closed.detail',
       tone: 'off',
     },
   };
@@ -29,11 +34,11 @@
   class="conn {look.tone}"
   role="status"
   aria-live="polite"
-  title={look.detail}
+  title={t(look.detailKey)}
   data-status={status}
 >
   <span class="dot" aria-hidden="true"></span>
-  <span class="text">{look.text}</span>
+  <span class="text">{t(look.textKey)}</span>
 </div>
 
 <style>

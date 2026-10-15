@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { moveRect, resizeRect, type Edge, type WindowState } from '../lib/desktop/windows';
+  import { t } from '../lib/i18n';
   import { useDesktop } from './desktopController.svelte';
   import Icon, { type IconName } from './Icon.svelte';
   import { item, separator } from '../lib/desktop/contextMenu';
@@ -9,6 +10,7 @@
   let { win, icon, children }: { win: WindowState; icon: IconName; children: Snippet } = $props();
 
   const desktop = useDesktop();
+  const title = $derived(desktop.titleOf(win));
   const menu = useMenu();
   const KEY_STEP = 16;
   const EDGES: Edge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
@@ -68,30 +70,32 @@
 
   function titleMenu(target: HTMLElement): MenuRequest {
     const tabId = target.closest<HTMLElement>('[data-tab]')?.dataset.tab;
-    const t = tabId ? tabs?.state.tabs.find((x) => x.id === tabId) : undefined;
-    if (t && tabs) {
+    const tab = tabId ? tabs?.state.tabs.find((x) => x.id === tabId) : undefined;
+    if (tab && tabs) {
       return {
-        label: t.title,
-        header: { title: t.title, icon },
+        label: tab.title,
+        header: { title: tab.title, icon },
         entries: [
-          tabs.add ? item('new-tab', tabs.addLabel ?? 'New tab', { icon: 'plus' }) : false,
-          item('close-tab', 'Close tab', { icon: 'close', shortcut: 'Ctrl+W' }),
+          tabs.add
+            ? item('new-tab', tabs.addLabel ?? t('window.tab.new'), { icon: 'plus' })
+            : false,
+          item('close-tab', t('window.tab.close'), { icon: 'close', shortcut: 'Ctrl+W' }),
         ],
         onSelect: (id: string) => {
           if (id === 'new-tab') tabs.add?.();
-          else if (id === 'close-tab') tabs.close(t.id);
+          else if (id === 'close-tab') tabs.close(tab.id);
         },
       };
     }
     return {
-      label: win.title,
+      label: title,
       entries: [
-        item('minimise', 'Minimise', { icon: 'minimise' }),
-        item('maximise', win.maximised ? 'Restore size' : 'Maximise', {
+        item('minimise', t('window.menu.minimise'), { icon: 'minimise' }),
+        item('maximise', win.maximised ? t('window.menu.restore') : t('window.menu.maximise'), {
           icon: win.maximised ? 'restore' : 'maximise',
         }),
         separator(),
-        item('close', 'Close', { icon: 'close' }),
+        item('close', t('window.menu.close'), { icon: 'close' }),
       ],
       onSelect: (id: string) => {
         if (id === 'minimise') desktop.minimise(win.id);
@@ -169,7 +173,7 @@
     class="titlebar"
     role="toolbar"
     tabindex="0"
-    aria-label="{win.title} window. Arrow keys move it, Shift and arrow keys resize it, Enter maximises it."
+    aria-label={t('window.titlebar.label', { title: title })}
     onpointerdown={startMove}
     ondblclick={(e) => {
       if (!(e.target as Element).closest('button')) desktop.toggleMaximise(win.id);
@@ -178,39 +182,39 @@
     use:menuTrigger={{ menu, build: titleMenu }}
   >
     {#if tabs}
-      <h2 id={titleId} class="visually-hidden">{win.title}</h2>
-      <div class="tabs" role="tablist" aria-label="{win.title} tabs">
-        {#each tabs.state.tabs as t, i (t.id)}
-          {@const on = t.id === tabs.state.activeId}
-          <div class="tab" class:on data-tab={t.id}>
+      <h2 id={titleId} class="visually-hidden">{title}</h2>
+      <div class="tabs" role="tablist" aria-label={t('window.tabs.label', { title: title })}>
+        {#each tabs.state.tabs as tab, i (tab.id)}
+          {@const on = tab.id === tabs.state.activeId}
+          <div class="tab" class:on data-tab={tab.id}>
             <button
               class="tab-pick"
               role="tab"
               aria-selected={on}
               tabindex={on ? 0 : -1}
-              title={t.title}
-              onclick={() => tabs.activate(t.id)}
+              title={tab.title}
+              onclick={() => tabs.activate(tab.id)}
               onauxclick={(e) => {
-                if (e.button === 1) tabs.close(t.id);
+                if (e.button === 1) tabs.close(tab.id);
               }}
               onkeydown={(e) => tabKey(e, i)}
             >
-              {#if t.dirty}<span class="dirty" title="Unsaved changes"></span>{/if}
-              <span class="tab-title">{t.title}</span>
+              {#if tab.dirty}<span class="dirty" title={t('window.tab.unsaved')}></span>{/if}
+              <span class="tab-title">{tab.title}</span>
             </button>
             <button
               class="tab-close"
-              aria-label="Close tab {t.title}"
+              aria-label={t('window.tab.closeNamed', { title: tab.title })}
               tabindex="-1"
-              onclick={() => tabs.close(t.id)}><Icon name="close" size={14} /></button
+              onclick={() => tabs.close(tab.id)}><Icon name="close" size={14} /></button
             >
           </div>
         {/each}
         {#if tabs.add}
           <button
             class="tab-add"
-            aria-label={tabs.addLabel ?? 'New tab'}
-            title={tabs.addLabel ?? 'New tab'}
+            aria-label={tabs.addLabel ?? t('window.tab.new')}
+            title={tabs.addLabel ?? t('window.tab.new')}
             onclick={() => tabs.add?.()}><Icon name="plus" size={16} /></button
           >
         {/if}
@@ -219,28 +223,30 @@
       <div class="tabs">
         <div class="tab on solo">
           <span class="title-icon"><Icon name={icon} size={15} /></span>
-          <h2 id={titleId} class="title">{win.title}</h2>
+          <h2 id={titleId} class="title">{title}</h2>
         </div>
       </div>
     {/if}
     <div class="controls">
       <button
         class="ctl"
-        aria-label="Minimise {win.title}"
+        aria-label={t('window.control.minimise', { title: title })}
         onclick={() => desktop.minimise(win.id)}
       >
         <Icon name="minimise" size={16} />
       </button>
       <button
         class="ctl"
-        aria-label="{win.maximised ? 'Restore' : 'Maximise'} {win.title}"
+        aria-label={win.maximised
+          ? t('window.control.restore', { title: title })
+          : t('window.control.maximise', { title: title })}
         onclick={() => desktop.toggleMaximise(win.id)}
       >
         <Icon name={win.maximised ? 'restore' : 'maximise'} size={16} />
       </button>
       <button
         class="ctl close"
-        aria-label="Close {win.title}"
+        aria-label={t('window.control.close', { title: title })}
         onclick={() => desktop.requestClose(win.id)}
       >
         <Icon name="close" size={16} />

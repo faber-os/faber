@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
+  import { t } from '../lib/i18n';
   import { portKindLabel } from '../lib/state/portHints';
   import type { ErrorBody, PartInfo, SignalInfo } from '../lib/state/types';
   import { item, separator } from '../lib/desktop/contextMenu';
@@ -8,6 +9,7 @@
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
   import PortProblems from '../components/PortProblems.svelte';
+  import RichText from '../components/RichText.svelte';
   import StateBadge from '../components/StateBadge.svelte';
   import type { WindowProps } from '../components/windowDefs';
   import AddPartForm from './AddPartForm.svelte';
@@ -43,7 +45,9 @@
   function portLabel(id: string): string | null {
     const port = core.ports?.find((p) => p.id === id);
     if (!port) return null;
-    return port.kind === 'bluetooth' ? `Bluetooth: ${port.label}` : port.label;
+    return port.kind === 'bluetooth'
+      ? t('parts.list.bluetoothPort', { label: port.label })
+      : port.label;
   }
 
   function openInMonitor(port: string) {
@@ -59,29 +63,29 @@
     const port = core.ports?.find((x) => x.id === p.port);
     const busy =
       port?.claimedBy === p.name
-        ? `"${p.name}" is using this port, and a port can only be open once. Remove the part to talk to the port directly.`
+        ? t('parts.menu.busy.self', { part: p.name })
         : port?.claimedBy
-          ? `The port is in use by ${port.claimedBy}.`
+          ? t('parts.menu.busy.other', { owner: port.claimedBy })
           : !port
-            ? `${p.port} isn't connected right now.`
+            ? t('parts.menu.busy.missing', { port: p.port })
             : undefined;
     return {
       label: p.name,
       entries: [
-        item('view', 'Open viewer', {
-          disabledReason: signals.length
-            ? undefined
-            : 'This part has no signal Faber can draw yet.',
+        item('view', t('parts.menu.view'), {
+          disabledReason: signals.length ? undefined : t('parts.menu.noSignal'),
         }),
         item(
           'monitor',
-          `Open ${port ? portKindLabel(port).toLowerCase() + ' port' : 'port'} in serial monitor`,
+          port
+            ? t('parts.menu.monitorKind', { kind: portKindLabel(port).toLowerCase() })
+            : t('parts.menu.monitor'),
           {
             disabledReason: busy,
           },
         ),
         separator(),
-        item('remove', 'Remove', { danger: true }),
+        item('remove', t('parts.menu.remove'), { danger: true }),
       ],
       onSelect: (id: string) => {
         if (id === 'view' && signals[0]) openViewer(p, signals[0]);
@@ -98,7 +102,7 @@
   function openViewer(p: PartInfo, s: SignalInfo) {
     desktop.open('laser-scan', {
       key: s.address,
-      title: `${p.name} · scan`,
+      title: t('parts.title.viewer', { name: p.name }),
       params: { address: s.address, part: p.name },
     });
   }
@@ -115,10 +119,20 @@
   function openRecordings() {
     desktop.open('files', {
       key: 'files:home:/Recordings',
-      title: 'Recordings · Files',
+      title: t('parts.title.recordings'),
       params: { path: 'home:/Recordings' },
     });
   }
+
+  /** `text` split around the first `mark`, so a styled piece can sit inside a sentence. */
+  function around(text: string, mark: string): [string, string] {
+    const i = text.indexOf(mark);
+    return i < 0 ? [text, ''] : [text.slice(0, i), text.slice(i + mark.length)];
+  }
+
+  // Stands in for the button while the sentence is split around it.
+  const LINK = '\u0000';
+  const noHardware = $derived(around(t('parts.empty.noHardware', { link: LINK }), LINK));
 
   function added(name: string) {
     adding = false;
@@ -141,11 +155,14 @@
     <div class="toolbar">
       <p class="summary">
         {#if parts === null}
-          Loading parts…
+          {t('parts.loading')}
         {:else}
-          <span class="num">{parts.length}</span>
-          {parts.length === 1 ? 'part' : 'parts'}
-          <span class="file">from <code>parts.toml</code></span>
+          {@const [before, after] = around(
+            t('parts.summary.count', { count: parts.length }),
+            String(parts.length),
+          )}
+          {before}<span class="num">{parts.length}</span>{after}
+          <span class="file"><RichText text={t('parts.summary.file')} /></span>
         {/if}
       </p>
       <button
@@ -153,7 +170,8 @@
         onclick={() => (adding = true)}
         disabled={core.connection !== 'connected'}
       >
-        <Icon name="plus" size={17} /> Add part
+        <Icon name="plus" size={17} />
+        {t('parts.toolbar.add')}
       </button>
     </div>
 
@@ -162,8 +180,8 @@
         <ErrorNotice
           tone="warn"
           error={{
-            message: 'Not connected to the core, so the states below may be out of date.',
-            hint: 'Faber reconnects on its own. If this stays, check that faber-core is running.',
+            message: t('parts.offline.message'),
+            hint: t('parts.offline.hint'),
           }}
         />
       </div>
@@ -171,24 +189,29 @@
 
     {#if parts !== null && parts.length === 0}
       <div class="empty">
-        <h3>No parts yet</h3>
+        <h3>{t('parts.empty.title')}</h3>
         <PortProblems />
-        <p>Plug in your hardware. Faber finds it and suggests what it is.</p>
+        <p>{t('parts.empty.body')}</p>
         <p>
-          No hardware yet? <button class="inline-link" onclick={() => openRecordings()}
-            >Try a sample recording</button
-          >.
+          {noHardware[0]}<button class="inline-link" onclick={() => openRecordings()}
+            >{t('parts.empty.sample')}</button
+          >{noHardware[1]}
         </p>
         <button
           class="btn primary"
           onclick={() => (adding = true)}
           disabled={core.connection !== 'connected'}
         >
-          <Icon name="plus" size={17} /> Add the first part
+          <Icon name="plus" size={17} />
+          {t('parts.empty.addFirst')}
         </button>
       </div>
     {:else if parts !== null}
-      <ul class="list" aria-label="Parts" use:menuTrigger={{ menu, build: partMenu }}>
+      <ul
+        class="list"
+        aria-label={t('parts.list.label')}
+        use:menuTrigger={{ menu, build: partMenu }}
+      >
         {#each parts as p (p.name)}
           {@const signals = viewable(p)}
           {@const label = portLabel(p.port)}
@@ -199,7 +222,7 @@
                   <button
                     class="name link"
                     onclick={() => openViewer(p, signals[0]!)}
-                    title="Open the viewer"
+                    title={t('parts.list.openViewer')}
                   >
                     {p.name}
                   </button>
@@ -211,7 +234,7 @@
               <p class="meta">
                 <span>{connectorName(p.connector)}</span>
                 <span class="sep" aria-hidden="true">·</span>
-                <span>{label ?? 'Port'} <code>{p.port}</code></span>
+                <span>{label ?? t('parts.list.port')} <code>{p.port}</code></span>
               </p>
               {#if p.state.message}
                 <div
@@ -229,29 +252,32 @@
 
             <div class="actions">
               {#if confirming === p.name}
-                <span class="confirm-text">Remove from parts.toml?</span>
+                <span class="confirm-text">{t('parts.list.confirmRemove')}</span>
                 <button
                   class="btn danger solid"
                   disabled={removing === p.name}
                   onclick={() => remove(p.name)}
                 >
-                  {removing === p.name ? 'Removing…' : 'Remove'}
+                  {removing === p.name ? t('parts.list.removing') : t('parts.list.remove')}
                 </button>
-                <button class="btn quiet" onclick={() => (confirming = null)}>Keep</button>
+                <button class="btn quiet" onclick={() => (confirming = null)}
+                  >{t('parts.list.keep')}</button
+                >
               {:else}
                 {#each signals as s (s.address)}
                   <button
                     class="btn"
                     onclick={() => openViewer(p, s)}
-                    aria-label="Open the viewer for {s.address}"
+                    aria-label={t('parts.list.viewFor', { address: s.address })}
                   >
-                    <Icon name="scan" size={17} /> View
+                    <Icon name="scan" size={17} />
+                    {t('parts.list.view')}
                   </button>
                 {/each}
                 <button
                   class="btn quiet icon"
-                  aria-label="Remove {p.name}"
-                  title="Remove {p.name}"
+                  aria-label={t('parts.list.removeNamed', { name: p.name })}
+                  title={t('parts.list.removeNamed', { name: p.name })}
                   onclick={() => (confirming = p.name)}
                 >
                   <Icon name="trash" size={18} />

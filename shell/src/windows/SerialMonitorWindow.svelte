@@ -11,12 +11,14 @@
     type LineEnding,
   } from '../lib/state/serialFormat';
   import type { ErrorBody, SerialSession } from '../lib/state/types';
+  import { t } from '../lib/i18n';
   import { useDesktop } from '../components/desktopController.svelte';
   import { openFolder } from '../components/fileOps';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import { formatBytes } from '../components/format';
   import Icon from '../components/Icon.svelte';
   import PortProblems from '../components/PortProblems.svelte';
+  import RichText from '../components/RichText.svelte';
   import type { WindowProps } from '../components/windowDefs';
 
   let { win, visible }: WindowProps = $props();
@@ -187,30 +189,35 @@
 <div class="serial">
   <div class="controls">
     <label class="field">
-      <span class="label">Port</span>
+      <span class="label">{t('serial.port.label')}</span>
       <select class="select" bind:value={port} disabled={status !== 'closed'}>
-        {#if ports.length === 0}<option value="">No ports found</option>{/if}
+        {#if ports.length === 0}<option value="">{t('serial.port.none')}</option>{/if}
         {#each ports as p (p.id)}
           {@const a = portAvailability(p)}
+          {@const name = t(
+            p.kind === 'bluetooth' ? 'serial.port.optionBluetooth' : 'serial.port.option',
+            {
+              label: p.label,
+              id: p.id,
+            },
+          )}
           <option value={p.id}
-            >{p.kind === 'bluetooth' ? 'Bluetooth: ' : ''}{p.label} ({p.id}){a.free
-              ? ''
-              : ` · ${a.text}`}</option
+            >{a.free ? name : t('serial.port.optionBusy', { option: name, reason: a.text })}</option
           >
         {/each}
       </select>
     </label>
     <label class="field baud">
-      <span class="label">Baud</span>
+      <span class="label">{t('serial.baud.label')}</span>
       <select class="select num" bind:value={baud} disabled={status !== 'closed'}>
         {#each BAUDS as b (b)}<option value={b}>{b}</option>{/each}
       </select>
     </label>
     {#if status !== 'closed'}
-      <button class="btn" onclick={close}>Close port</button>
+      <button class="btn" onclick={close}>{t('serial.close')}</button>
     {:else}
       <button class="btn primary" onclick={open} disabled={!port || core.connection !== 'connected'}
-        >Open port</button
+        >{t('serial.open')}</button
       >
     {/if}
   </div>
@@ -224,9 +231,9 @@
   {/if}
 
   {#if status === 'open' && rec === 'naming'}
-    <form class="record" onsubmit={startRecording} aria-label="Record">
+    <form class="record" onsubmit={startRecording} aria-label={t('serial.record.label')}>
       <label class="field grow">
-        <span class="label">Recording name</span>
+        <span class="label">{t('serial.record.name')}</span>
         <input
           class="input mono"
           bind:value={recName}
@@ -236,42 +243,57 @@
           spellcheck="false"
         />
       </label>
-      <button class="btn primary" type="submit"><Icon name="record" size={16} /> Start</button>
-      <button class="btn quiet" type="button" onclick={() => (rec = 'idle')}>Cancel</button>
+      <button class="btn primary" type="submit"
+        ><Icon name="record" size={16} /> {t('serial.record.start')}</button
+      >
+      <button class="btn quiet" type="button" onclick={() => (rec = 'idle')}
+        >{t('serial.record.cancel')}</button
+      >
       <p id="{win.id}-rec-help" class="help" class:bad={recTouched && !!recProblem}>
-        {#if recTouched && recProblem}{recProblem.message} {recProblem.hint}{:else}Saved in
-          Recordings as <code>{recName || '…'}.fbcap</code>, and usable as a replay port at once.{/if}
+        {#if recTouched && recProblem}{recProblem.message} {recProblem.hint}{:else}<RichText
+            text={t('serial.record.help', { name: recName || '…' })}
+          />{/if}
       </p>
     </form>
   {:else if rec === 'starting' || rec === 'recording'}
     <div class="record live-rec" role="status">
       <span class="rec-dot" aria-hidden="true"></span>
       {#if rec === 'starting'}
-        <span>Starting the recording…</span>
+        <span>{t('serial.record.starting')}</span>
       {:else}
-        <span
-          >Recording to <code>{recPath}</code> (<span class="num">{formatBytes(recBytes)}</span
-          >)</span
+        <span class="num"
+          ><RichText
+            text={t('serial.record.recordingTo', {
+              path: recPath ?? '',
+              size: formatBytes(recBytes),
+            })}
+          /></span
         >
       {/if}
       <span class="grow"></span>
       <button class="btn" onclick={stopRecording} disabled={rec !== 'recording'}>
-        <Icon name="stop" size={15} /> Stop
+        <Icon name="stop" size={15} />
+        {t('serial.record.stop')}
       </button>
     </div>
   {:else if lastRecording}
     <div class="record done" role="status">
-      <span
-        >Saved <code>{lastRecording.path}</code> (<span class="num"
-          >{formatBytes(lastRecording.bytes)}</span
-        >).</span
+      <span class="num"
+        ><RichText
+          text={t('serial.record.saved', {
+            path: lastRecording.path,
+            size: formatBytes(lastRecording.bytes),
+          })}
+        /></span
       >
       <span class="grow"></span>
       <button class="btn quiet" onclick={() => openFolder(desktop, 'home:/Recordings')}
-        >Show in Files</button
+        >{t('serial.record.showInFiles')}</button
       >
-      <button class="btn quiet icon" aria-label="Dismiss" onclick={() => (lastRecording = null)}
-        ><Icon name="close" /></button
+      <button
+        class="btn quiet icon"
+        aria-label={t('serial.record.dismiss')}
+        onclick={() => (lastRecording = null)}><Icon name="close" /></button
       >
     </div>
   {/if}
@@ -279,28 +301,38 @@
   <div class="bar">
     <p class="state" role="status">
       {#if status === 'open' && openedOn}
-        <span class="live" aria-hidden="true"></span> <code>{openedOn.port}</code> at
-        <span class="num">{openedOn.baud}</span> baud
+        <span class="live" aria-hidden="true"></span>
+        <RichText text={t('serial.state.open', { port: openedOn.port, baud: openedOn.baud })} />
       {:else if status === 'opening' && openedOn}
-        Opening <code>{openedOn.port}</code>…
+        <RichText text={t('serial.state.opening', { port: openedOn.port })} />
       {:else if closedReason}
-        Closed: {closedReason}
+        {t('serial.state.closedWithReason', { reason: closedReason })}
       {:else}
-        Closed
+        {t('serial.state.closed')}
       {/if}
-      <span class="count num">{formatBytes(received)} received</span>
+      <span class="count num">{t('serial.received', { size: formatBytes(received) })}</span>
     </p>
     {#if status === 'open' && rec === 'idle'}
-      <button class="btn" onclick={startNaming}><Icon name="record" size={16} /> Record</button>
+      <button class="btn" onclick={startNaming}
+        ><Icon name="record" size={16} /> {t('serial.record.button')}</button
+      >
     {/if}
-    <div class="segmented" role="radiogroup" aria-label="Show as">
-      <label><input type="radio" name="serial-mode" value="text" bind:group={mode} />Text</label>
-      <label><input type="radio" name="serial-mode" value="hex" bind:group={mode} />Hex</label>
+    <div class="segmented" role="radiogroup" aria-label={t('serial.mode.label')}>
+      <label
+        ><input type="radio" name="serial-mode" value="text" bind:group={mode} />{t(
+          'serial.mode.text',
+        )}</label
+      >
+      <label
+        ><input type="radio" name="serial-mode" value="hex" bind:group={mode} />{t(
+          'serial.mode.hex',
+        )}</label
+      >
     </div>
     <button
       class="btn quiet icon"
-      aria-label="Clear the output"
-      title="Clear the output"
+      aria-label={t('serial.clear')}
+      title={t('serial.clear')}
       onclick={() => {
         log.clear();
         render();
@@ -315,30 +347,32 @@
     class="out selectable"
     bind:this={pre}
     onscroll={onScroll}
-    aria-label="Received data"
+    aria-label={t('serial.output.label')}
     tabindex="0">{output ||
-      (status === 'open' ? 'Waiting for data…' : 'Open a port to see what it sends.')}</pre>
+      (status === 'open' ? t('serial.output.waiting') : t('serial.output.closed'))}</pre>
 
   <form class="send" onsubmit={send}>
-    <label class="visually-hidden" for="serial-line">Line to send</label>
+    <label class="visually-hidden" for="serial-line">{t('serial.send.label')}</label>
     <input
       id="serial-line"
       class="input mono"
       bind:value={line}
-      placeholder={status === 'open' ? 'Type a line and press Enter' : 'Open a port to send'}
+      placeholder={status === 'open'
+        ? t('serial.send.placeholder')
+        : t('serial.send.placeholderClosed')}
       disabled={status !== 'open'}
       autocomplete="off"
       spellcheck="false"
     />
-    <label class="visually-hidden" for="serial-ending">Line ending</label>
+    <label class="visually-hidden" for="serial-ending">{t('serial.send.ending')}</label>
     <select id="serial-ending" class="select" bind:value={ending} disabled={status !== 'open'}>
-      <option value="lf">LF</option>
-      <option value="crlf">CR LF</option>
-      <option value="cr">CR</option>
-      <option value="none">No ending</option>
+      <option value="lf">{t('serial.send.ending.lf')}</option>
+      <option value="crlf">{t('serial.send.ending.crlf')}</option>
+      <option value="cr">{t('serial.send.ending.cr')}</option>
+      <option value="none">{t('serial.send.ending.none')}</option>
     </select>
     <button class="btn" type="submit" disabled={status !== 'open'}
-      ><Icon name="send" size={17} /> Send</button
+      ><Icon name="send" size={17} /> {t('serial.send.button')}</button
     >
   </form>
 </div>

@@ -5,16 +5,24 @@
   import { formatCoreTime } from '../components/format';
   import { formatLogTime } from '../lib/desktop/wallClock';
   import type { WindowProps } from '../components/windowDefs';
+  import { t, type MessageKey } from '../lib/i18n';
 
   let { visible }: WindowProps = $props();
 
   const core = useCore();
-  const LABEL: Record<LogLevel, string> = {
-    error: 'Errors',
-    warn: 'Warnings',
-    info: 'Info',
-    debug: 'Debug',
-  };
+  const LABEL = {
+    error: 'logs.levels.error',
+    warn: 'logs.levels.warn',
+    info: 'logs.levels.info',
+    debug: 'logs.levels.debug',
+  } as const satisfies Record<LogLevel, MessageKey>;
+  /** The level word on each row. */
+  const LEVEL = {
+    error: 'logs.level.error',
+    warn: 'logs.level.warn',
+    info: 'logs.level.info',
+    debug: 'logs.level.debug',
+  } as const satisfies Record<LogLevel, MessageKey>;
 
   let level = $state<LogLevel>('info');
   let text = $state('');
@@ -46,21 +54,24 @@
 
 <div class="logs">
   <div class="toolbar">
-    <div class="segmented" role="radiogroup" aria-label="Show at least">
+    <div class="segmented" role="radiogroup" aria-label={t('logs.levels.label')}>
       {#each LOG_LEVELS as l (l)}
-        <label><input type="radio" name="log-level" value={l} bind:group={level} />{LABEL[l]}</label
+        <label
+          ><input type="radio" name="log-level" value={l} bind:group={level} />{t(LABEL[l])}</label
         >
       {/each}
     </div>
-    <label class="visually-hidden" for="log-search">Filter by text</label>
+    <label class="visually-hidden" for="log-search">{t('logs.filter.label')}</label>
     <input
       id="log-search"
       class="input"
       type="search"
-      placeholder="Filter by source or text"
+      placeholder={t('logs.filter.placeholder')}
       bind:value={text}
     />
-    <p class="count num">{shown.length} of {core.logs.length}</p>
+    <p class="count num">
+      {t('logs.count', { shown: shown.length, total: core.logs.length })}
+    </p>
   </div>
 
   <!-- svelte-ignore a11y_no_noninteractive_tabindex (a scrollable region must be reachable by keyboard) -->
@@ -69,22 +80,20 @@
     bind:this={list}
     onscroll={onScroll}
     role="log"
-    aria-label="Log"
+    aria-label={t('logs.list.label')}
     tabindex="0"
   >
     {#if core.logs.length === 0}
       <p class="empty">
-        {core.connection === 'connected'
-          ? 'Nothing logged yet.'
-          : 'The log appears once the shell is connected to the core.'}
+        {core.connection === 'connected' ? t('logs.empty.connected') : t('logs.empty.disconnected')}
       </p>
     {:else if shown.length === 0}
-      <p class="empty">No entries match. Show more levels or clear the filter.</p>
+      <p class="empty">{t('logs.empty.noMatch')}</p>
     {:else}
       {#each shown as e, i (i)}
         <div class="row {e.level}">
           <span class="t num">{time(e)}</span>
-          <span class="lvl">{e.level}</span>
+          <span class="lvl">{t(LEVEL[e.level])}</span>
           <span class="src">{e.source}</span>
           <span class="msg">{e.message}</span>
         </div>
@@ -93,7 +102,7 @@
   </div>
 
   {#if !follow}
-    <button class="btn jump" onclick={jump}>Jump to newest</button>
+    <button class="btn jump" onclick={jump}>{t('logs.jump')}</button>
   {/if}
 </div>
 

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { ApiError } from './generated/ApiError';
 import type { ConnectorInfo } from './generated/ConnectorInfo';
 import type { ErrorBody } from './generated/ErrorBody';
@@ -12,6 +13,7 @@ import type { Settings } from './generated/Settings';
 import type { AboutInfo } from './generated/AboutInfo';
 import type { BackupInfo } from './generated/BackupInfo';
 import type { StorageInfo } from './generated/StorageInfo';
+import type { TranslationInfo } from './generated/TranslationInfo';
 import { dropNullFields } from './wire';
 
 /** Something the core (or the way to it) said no to, with what to try next. */
@@ -67,6 +69,11 @@ export interface CoreHttp {
   createBackup(includeRecordings: boolean): Promise<BackupInfo>;
   /** Restores a backup from the home folder; checked first (`422 config-invalid` …). */
   restoreBackup(path: string): Promise<void>;
+
+  /** The translations installed in the machine's `config/translations` (docs/translations.md). */
+  getTranslations(): Promise<TranslationInfo[]>;
+  /** One translation file. `422 translation-invalid` (with the line) if it is broken. */
+  getTranslation(code: string): Promise<Record<string, unknown>>;
 }
 
 export type WriteMode = 'replace' | 'create';
@@ -96,8 +103,8 @@ export function createHttp(
     } catch {
       throw new CoreError(0, {
         code: 'core-unreachable',
-        message: 'The shell could not reach the Faber core.',
-        hint: 'Check that faber-core is running and that this computer can reach the machine, then try again.',
+        message: t('errors.coreUnreachable.message'),
+        hint: t('errors.coreUnreachable.hint'),
       });
     }
   }
@@ -113,8 +120,8 @@ export function createHttp(
     if (json === undefined) {
       throw new CoreError(res.status, {
         code: 'bad-response',
-        message: `The core's answer to ${method} ${path} was not valid JSON.`,
-        hint: 'The shell and the core may be different versions. Reload the page.',
+        message: t('errors.badJson.message', { method, path }),
+        hint: t('errors.badJson.hint'),
       });
     }
     // Same rule as the WebSocket: an optional field is absent, never null.
@@ -139,9 +146,12 @@ export function createHttp(
     }
     return new CoreError(res.status, {
       code: 'bad-response',
-      message:
-        `The core answered ${method} ${path} with ${res.status} ${res.statusText}`.trim() + '.',
-      hint: 'Try again. If it keeps happening, look in the Logs tool for what the core reported.',
+      message: t('errors.badStatus.message', {
+        method,
+        path,
+        status: `${res.status} ${res.statusText}`.trim(),
+      }),
+      hint: t('errors.badStatus.hint'),
     });
   }
 
@@ -180,6 +190,9 @@ export function createHttp(
     getStorage: () => request('GET', '/storage'),
     createBackup: (includeRecordings) => request('POST', '/backups', { includeRecordings }),
     restoreBackup: (path) => request('POST', '/backups/restore', { path }),
+
+    getTranslations: () => request('GET', '/translations'),
+    getTranslation: (code) => request('GET', `/translations/${encodeURIComponent(code)}`),
   };
 }
 

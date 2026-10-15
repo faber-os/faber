@@ -3,12 +3,13 @@
   import { formatClockTime, formatLongDate, timeZones } from '../../lib/desktop/wallClock';
   import ChoiceRow from './ChoiceRow.svelte';
   import type { SectionProps } from './types';
+  import { t } from '../../lib/i18n';
 
   let { winId, settings, saving, change }: SectionProps = $props();
 
   const core = useCore();
   const zones = timeZones();
-  const machineZone = $derived(core.system?.timeZone ?? 'not known yet');
+  const machineZone = $derived(core.system?.timeZone ?? t('settings.time.zone.unknown'));
   const chosen = $derived(settings.time.timeZone);
   // A zone from the settings that this browser can't list still shows, so the picker never lies.
   const listed = $derived(chosen && !zones.includes(chosen) ? [chosen, ...zones] : zones);
@@ -24,16 +25,16 @@
 </script>
 
 <section id="{winId}-time" aria-labelledby="{winId}-time-h">
-  <h3 id="{winId}-time-h">Date and time</h3>
-  <p class="intro">
-    Clocks, file dates and log times show this machine's time in every browser, so a machine in
-    another room or country shows its own time.
-  </p>
+  <h3 id="{winId}-time-h">{t('settings.time.title')}</h3>
+  <p class="intro">{t('settings.time.intro')}</p>
   <div class="row">
     <div class="text">
-      <label class="name" for="{winId}-zone">Time zone</label>
+      <label class="name" for="{winId}-zone">{t('settings.time.zone.name')}</label>
       <p class="desc">
-        Now {formatClockTime(now, core.wallClock)}, {formatLongDate(now, core.wallClock)}.
+        {t('settings.time.zone.now', {
+          time: formatClockTime(now, core.wallClock),
+          date: formatLongDate(now, core.wallClock),
+        })}
       </p>
     </div>
     <select
@@ -43,7 +44,7 @@
       disabled={saving}
       onchange={(e) => setZone(e.currentTarget.value)}
     >
-      <option value="">Machine's own ({machineZone})</option>
+      <option value="">{t('settings.time.zone.machine', { zone: machineZone })}</option>
       {#each listed as z (z)}
         <option value={z}>{z.replaceAll('_', ' ')}</option>
       {/each}
@@ -51,11 +52,11 @@
   </div>
   <ChoiceRow
     id="{winId}-clock"
-    label="Clock"
-    description="For the taskbar clock, file dates and log times."
+    label={t('settings.time.clock.name')}
+    description={t('settings.time.clock.desc')}
     options={[
-      ['24h', '24-hour (14:30)'],
-      ['12h', '12-hour (2:30 pm)'],
+      ['24h', t('settings.time.clock.24h')],
+      ['12h', t('settings.time.clock.12h')],
     ]}
     value={settings.time.clock}
     disabled={saving}
