@@ -1,0 +1,38 @@
+faber-manifest = 1
+
+# A declarative connector: no code, only this file. Faber's engine reads the lines an Arduino
+# with an HC-SR04 ultrasonic sensor prints, like "D:123" for 123 cm (the sketch is in README.md).
+
+[package]
+id = "line-distance"
+type = "connector"
+kind = "declarative"
+version = "0.1.0"
+name = "Arduino distance printer (HC-SR04)"
+
+[ports]
+# Serial.begin(9600) in the sketch.
+serial = { baud = 9600 }
+
+[lines]
+# Serial.println ends every line with "\r\n".
+ending = "\r\n"
+# "D:400" is 5 characters; anything much longer is noise.
+max-length = 32
+
+[[settings]]
+key = "max-m"
+label = "Farthest it can measure"
+description = "Anything farther reads as too far. The HC-SR04 datasheet says 4 m."
+kind = "number"
+unit = "m"
+default = 4.0
+min = 0.0
+min-exclusive = true
+
+[[provides]]
+capability = "distance@1"
+# From the HC-SR04 datasheet: 2 cm to 4 m, a 15° cone (0.26 rad).
+info = { min-m = 0.02, max-m = { setting = "max-m" }, field-of-view-rad = 0.26, kind = "ultrasonic" }
+# "D:123" is 123 cm: × 0.01 makes metres. Faber works out ok / too-close / too-far from the info.
+line = { pattern = "D:{meters:u32}", scale = 0.01 }

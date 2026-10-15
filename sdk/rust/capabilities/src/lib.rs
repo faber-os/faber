@@ -15,6 +15,7 @@ mod mount;
 mod non_finite;
 pub mod planar_base;
 pub mod pose;
+pub mod position;
 
 pub use geometry::{Quaternion, Twist2d, Vec3};
 pub use mount::Mount;
@@ -58,6 +59,8 @@ pub enum Capability {
     Estop,
     #[serde(rename = "pose@1")]
     Pose,
+    #[serde(rename = "position@1")]
+    Position,
 }
 
 impl Capability {
@@ -68,6 +71,7 @@ impl Capability {
         Capability::PlanarBase,
         Capability::Estop,
         Capability::Pose,
+        Capability::Position,
     ];
 
     /// The versioned id used in manifests, addresses and on the wire.
@@ -79,6 +83,7 @@ impl Capability {
             Capability::PlanarBase => "planar-base@1",
             Capability::Estop => "estop@1",
             Capability::Pose => "pose@1",
+            Capability::Position => "position@1",
         }
     }
 
@@ -95,7 +100,8 @@ impl Capability {
             | Capability::Distance
             | Capability::Motor
             | Capability::PlanarBase
-            | Capability::Pose => Delivery::LatestValue,
+            | Capability::Pose
+            | Capability::Position => Delivery::LatestValue,
         }
     }
 
@@ -109,7 +115,11 @@ impl Capability {
                 duration_us: 250_000,
                 safe_state: Command::PlanarBase(planar_base::Command::STOP),
             }),
-            Capability::LaserScan | Capability::Distance | Capability::Estop | Capability::Pose => None,
+            Capability::LaserScan
+            | Capability::Distance
+            | Capability::Estop
+            | Capability::Pose
+            | Capability::Position => None,
         }
     }
 
@@ -135,6 +145,8 @@ pub enum Reading {
     Estop(estop::Reading),
     #[serde(rename = "pose@1")]
     Pose(pose::Reading),
+    #[serde(rename = "position@1")]
+    Position(position::Reading),
 }
 
 impl Reading {
@@ -146,6 +158,7 @@ impl Reading {
             Reading::PlanarBase(_) => Capability::PlanarBase,
             Reading::Estop(_) => Capability::Estop,
             Reading::Pose(_) => Capability::Pose,
+            Reading::Position(_) => Capability::Position,
         }
     }
 
@@ -157,6 +170,7 @@ impl Reading {
             Reading::PlanarBase(r) => r.t_us,
             Reading::Estop(r) => r.t_us,
             Reading::Pose(r) => r.t_us,
+            Reading::Position(r) => r.t_us,
         }
     }
 }
@@ -302,7 +316,13 @@ mod tests {
         assert_eq!(base.safe_state, Command::PlanarBase(planar_base::Command::SetVelocity(Twist2d::ZERO)));
         let motor = Capability::Motor.lease().unwrap();
         assert_eq!(motor.safe_state, Command::Motor(motor::Command::SetVelocity { velocity_rad_s: 0.0 }));
-        for c in [Capability::LaserScan, Capability::Distance, Capability::Estop, Capability::Pose] {
+        for c in [
+            Capability::LaserScan,
+            Capability::Distance,
+            Capability::Estop,
+            Capability::Pose,
+            Capability::Position,
+        ] {
             assert!(c.lease().is_none(), "{c:?} is not leased");
         }
         for &c in Capability::ALL {
@@ -344,6 +364,7 @@ mod tests {
                 reason: "x".into(),
             }),
             Reading::Pose(pose::Reading::planar(5, "world", 1.0, 1.0, 0.0)),
+            Reading::Position(position::Reading::no_fix(6, 3)),
         ]
     }
 

@@ -14,6 +14,7 @@ pub mod testing;
 pub use settings::{Choice, Number, SettingKind, SettingSpec};
 
 use faber_capabilities::{Capability, Command, Info, Reading, Timestamp};
+use std::sync::Arc;
 
 /// Settings for one part, straight from its `[parts.<name>.settings]` table.
 pub type Settings = toml::Table;
@@ -152,22 +153,82 @@ pub struct SettingsError {
     pub hint: String,
 }
 
+/// Makes a running connector for one part's settings.
+pub type CreateFn = Arc<dyn Fn(&Settings) -> Result<Box<dyn Connector>, SettingsError> + Send + Sync>;
+
+/// What one part provides with its settings.
+pub type ProvidesFn = Arc<dyn Fn(&Manifest, &Settings) -> Result<Vec<Provide>, SettingsError> + Send + Sync>;
+
+/// How a connector runs (docs/packages.md §2). Every kind behaves the same to the core; the kind
+/// is shown so people know what they trust.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectorKind {
+    /// Rust compiled into the core.
+    BuiltIn,
+    /// Only a `faber.toml`; the core's engine runs it.
+    Declarative,
+    /// A WebAssembly component, sandboxed inside the core.
+    Wasm,
+}
+
+impl ConnectorKind {
+    /// The kind as manifests and the API write it.
+    pub fn id(self) -> &'static str {
+        match self {
+            ConnectorKind::BuiltIn => "built-in",
+            ConnectorKind::Declarative => "declarative",
+            ConnectorKind::Wasm => "wasm",
+        }
+    }
+}
+
 /// Everything the core needs to offer and start a connector.
+///
+/// `create` and `provides` are shared closures, so a connector that is data (a declarative
+/// manifest, a wasm module) can carry it into them.
+#[derive(Clone)]
 pub struct Definition {
     pub manifest: Manifest,
-    pub create: fn(&Settings) -> Result<Box<dyn Connector>, SettingsError>,
+    pub kind: ConnectorKind,
+    pub create: CreateFn,
     /// What one part provides with these settings. Most connectors provide what their manifest
     /// says ([`manifest_provides`]); generic ones take their limits from the settings.
-    pub provides: fn(&Manifest, &Settings) -> Result<Vec<Provide>, SettingsError>,
+    pub provides: ProvidesFn,
 }
 
 impl Definition {
-    /// A connector that always provides what its manifest says.
+    /// A built-in connector that always provides what its manifest says.
     pub fn new(
         manifest: Manifest,
-        create: fn(&Settings) -> Result<Box<dyn Connector>, SettingsError>,
+        create: impl Fn(&Settings) -> Result<Box<dyn Connector>, SettingsError> + Send + Sync + 'static,
     ) -> Self {
-        Definition { manifest, create, provides: manifest_provides }
+        Definition {
+            manifest,
+            kind: ConnectorKind::BuiltIn,
+            create: Arc::new(create),
+            provides: Arc::new(manifest_provides),
+        }
+    }
+
+    /// The same connector, providing what `provides` says for each part's settings.
+    pub fn with_provides(
+        self,
+        provides: impl Fn(&Manifest, &Settings) -> Result<Vec<Provide>, SettingsError> + Send + Sync + 'static,
+    ) -> Self {
+        Definition { provides: Arc::new(provides), ..self }
+    }
+
+    pub fn with_kind(self, kind: ConnectorKind) -> Self {
+        Definition { kind, ..self }
+    }
+}
+
+impl std::fmt::Debug for Definition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Definition")
+            .field("manifest", &self.manifest)
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
     }
 }
 
@@ -332,5 +393,25 @@ mod tests {
     fn a_definition_provides_what_its_manifest_says_by_default() {
         let d = Definition::new(manifest(), create_sensor);
         assert_eq!((d.provides)(&d.manifest, &Settings::new()).unwrap(), d.manifest.provides);
+        assert_eq!(d.kind, ConnectorKind::BuiltIn);
+    }
+
+    #[test]
+    fn a_definition_can_carry_its_data_into_create_and_provides() {
+        let name = String::from("from-data");
+        let d = Definition::new(manifest(), create_sensor)
+            .with_provides(move |m, _| {
+                let mut p = m.provides.clone();
+                p[0].name = name.clone();
+                Ok(p)
+            })
+            .with_kind(ConnectorKind::Declarative);
+        assert_eq!((d.provides)(&d.manifest, &Settings::new()).unwrap()[0].name, "from-data");
+        assert!((d.create)(&Settings::new()).is_ok());
+        let copy = d.clone();
+        assert_eq!(
+            (copy.kind.id(), ConnectorKind::BuiltIn.id(), ConnectorKind::Wasm.id()),
+            ("declarative", "built-in", "wasm")
+        );
     }
 }

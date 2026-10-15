@@ -5,7 +5,7 @@ import type { SettingInfo } from "./SettingInfo";
 
 export type ConnectorInfo = { id: string, name: string, version: string, 
 /**
- * `built-in` in Phase 1; `declarative`, `wasm`, `native` later.
+ * How it runs: `built-in`, `declarative` (only a faber.toml) or `wasm`; `native` later.
  */
 kind: string, port: PortRequirementInfo, provides: Array<ProvideInfo>, 
 /**

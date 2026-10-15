@@ -47,7 +47,7 @@ fn definition(
         MOTOR => create_motor,
         _ => create_distance,
     };
-    Definition { manifest, create, provides }
+    Definition::new(manifest, create).with_provides(provides)
 }
 
 /// A drive base's `length` × `width` (m) when its settings don't say.

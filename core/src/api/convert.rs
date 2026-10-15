@@ -12,7 +12,7 @@ use crate::ports::{PortKind, PortProblem};
 use crate::runtime::PartStatus;
 use crate::simparts::WorldState;
 use crate::simulation::Pattern;
-use faber_connector::{Manifest, PortRequirement, Problem, SettingKind, SettingSpec};
+use faber_connector::{ConnectorKind, Manifest, PortRequirement, Problem, SettingKind, SettingSpec};
 
 pub fn error_body(e: &MachineError) -> dto::ErrorBody {
     dto::ErrorBody {
@@ -174,12 +174,12 @@ pub fn port_problem(p: &PortProblem) -> dto::PortProblem {
     }
 }
 
-pub fn connector(m: &Manifest) -> dto::ConnectorInfo {
+pub fn connector(m: &Manifest, kind: ConnectorKind) -> dto::ConnectorInfo {
     dto::ConnectorInfo {
         id: m.id.clone(),
         name: m.name.clone(),
         version: m.version.clone(),
-        kind: "built-in".into(),
+        kind: kind.id().into(),
         port: match m.port {
             PortRequirement::Serial { baud } => dto::PortRequirementInfo::Serial { baud },
             PortRequirement::Bridge => dto::PortRequirementInfo::Bridge,
@@ -323,7 +323,8 @@ mod tests {
 
     #[test]
     fn connectors_are_described_from_their_manifest() {
-        let c = connector(&ldrobot_ld19::manifest());
+        let c = connector(&ldrobot_ld19::manifest(), ConnectorKind::BuiltIn);
+        assert_eq!(c.kind, "built-in");
         assert_eq!(c.id, "ldrobot-ld19");
         assert_eq!(c.port, dto::PortRequirementInfo::Serial { baud: 230_400 });
         assert_eq!(c.provides[0].name, "laser-scan");
@@ -337,7 +338,7 @@ mod tests {
     #[test]
     fn connectors_describe_their_settings_on_the_wire() {
         let base = crate::connectors::generic::definitions().remove(0).manifest;
-        let json = serde_json::to_value(connector(&base)).unwrap();
+        let json = serde_json::to_value(connector(&base, ConnectorKind::BuiltIn)).unwrap();
         let vx = json["settings"].as_array().unwrap().iter().find(|s| s["key"] == "max-vx").unwrap();
         assert_eq!(
             *vx,
@@ -351,6 +352,6 @@ mod tests {
         let kinds: Vec<_> = json["settings"].as_array().unwrap().iter().map(|s| s["kind"].clone()).collect();
         assert!(kinds.contains(&"bool".into()) && kinds.contains(&"part-list".into()), "{kinds:?}");
         let back: dto::ConnectorInfo = serde_json::from_value(json).unwrap();
-        assert_eq!(back, connector(&base), "it reads back the same");
+        assert_eq!(back, connector(&base, ConnectorKind::BuiltIn), "it reads back the same");
     }
 }

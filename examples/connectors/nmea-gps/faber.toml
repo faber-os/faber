@@ -1,0 +1,27 @@
+faber-manifest = 1
+
+# A GPS module that sends NMEA 0183 sentences ($GPGGA, $GPRMC, …), such as a u-blox NEO-6M.
+# Faber has a built-in NMEA reader, so the connector is only this file.
+
+[package]
+id = "nmea-gps"
+type = "connector"
+kind = "declarative"
+version = "0.1.0"
+name = "NMEA GPS module"
+
+[ports]
+# NEO-6M modules start at 9600 baud; set yours here if it was changed.
+serial = { baud = 9600 }
+
+[lines]
+# NMEA allows 82 characters per sentence. Longer lines are noise.
+max-length = 100
+# A GPS sends once a second, so allow a few seconds of silence.
+timeout-s = 5
+
+[[provides]]
+capability = "position@1"
+# GGA gives the position and fix, RMC the speed and course, GSA whether the fix is 2D or 3D.
+# Each sentence's checksum is checked.
+line = { format = "nmea" }
