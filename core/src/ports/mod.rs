@@ -59,7 +59,7 @@ impl SerialDiscovery for SystemDiscovery {
 
 /// Which of `(device, port)` pairs from the OS serial map are Bluetooth links. Windows maps
 /// `\Device\BthModem<n>` to the COM port of every Bluetooth serial link.
-fn bluetooth_from_device_map(map: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
+pub fn bluetooth_from_device_map(map: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
     map.into_iter().filter(|(device, _)| device.contains("BthModem")).map(|(_, port)| port).collect()
 }
 
