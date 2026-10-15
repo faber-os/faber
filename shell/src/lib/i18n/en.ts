@@ -252,6 +252,48 @@ export const en = {
   'addPart.connector.bridge': 'needs a bridge (Phase 4); simulated for now',
   'addPart.connector.provides': 'Provides {capabilities}',
 
+  // Add part form: simulated parts (D36). `{connector}` is the connector's name.
+  'addPart.source.simulated': 'Simulated',
+  'addPart.source.simulated.help':
+    'No hardware needed. The part gets the same name and capability as the real one, so switching to the real part later is one line in parts.toml.',
+  'addPart.source.locked':
+    '{connector} needs a FaberLink bridge to be real, which comes in Phase 4. Until then it can only be simulated.',
+  'addPart.source.mode': 'Where its values come from',
+  'addPart.source.manual': 'Manual',
+  'addPart.source.manual.help': 'You set its value in Parts, by hand or as a pattern.',
+  'addPart.source.world': 'In the world',
+  'addPart.source.world.help':
+    'The simulated world gives its values. A drive base becomes the machine in the world.',
+
+  // Add part form: the settings of a generic part (lib/state/connectorSettings.ts)
+  'addPart.settings.legend': 'Set its limits',
+  'addPart.settings.help':
+    'Faber keeps every command within these. They are saved in parts.toml, where you can change them later.',
+  'addPart.settings.base.length': 'Length',
+  'addPart.settings.base.width': 'Width',
+  'addPart.settings.base.holonomic': 'Can drive sideways (mecanum or omni wheels)',
+  'addPart.settings.base.maxVx': 'Top speed forward',
+  'addPart.settings.base.maxVy': 'Top speed sideways',
+  'addPart.settings.base.maxOmega': 'Top turning speed',
+  'addPart.settings.base.maxAccel': 'Acceleration',
+  'addPart.settings.motor.maxVelocity': 'Top speed',
+  'addPart.settings.motor.kind': 'Kind of motor',
+  'addPart.settings.distance.minM': 'Closest it can measure',
+  'addPart.settings.distance.maxM': 'Farthest it can measure',
+  'addPart.settings.distance.fov': 'Field of view',
+  'addPart.settings.distance.kind': 'Kind of sensor',
+  'addPart.settings.choice.dc': 'DC motor',
+  'addPart.settings.choice.stepper': 'Stepper',
+  'addPart.settings.choice.bldc': 'Brushless (BLDC)',
+  'addPart.settings.choice.continuousServo': 'Continuous servo',
+  'addPart.settings.choice.ultrasonic': 'Ultrasonic',
+  'addPart.settings.choice.laserTof': 'Laser time-of-flight',
+  'addPart.settings.choice.infrared': 'Infrared',
+  'addPart.settings.choice.radar': 'Radar',
+  'addPart.settings.notANumber': '{label} must be a number.',
+  'addPart.settings.mustBePositive': '{label} must be more than 0.',
+  'addPart.settings.mustNotBeNegative': "{label} can't be below 0.",
+
   // Add part form: step 3, the name (also the checks in lib/state/partName.ts)
   'addPart.name.legend': 'Give it a name',
   'addPart.name.label': 'Name',
