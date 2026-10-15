@@ -5,6 +5,7 @@
   import { taskClick, taskbarItems, type TaskItem } from '../lib/desktop/taskbar';
   import AppIcon from './AppIcon.svelte';
   import Clock from './Clock.svelte';
+  import EstopButton from './EstopButton.svelte';
   import ConnectionIndicator from './ConnectionIndicator.svelte';
   import { useDesktop } from './desktopController.svelte';
   import Logo from './Logo.svelte';
@@ -214,6 +215,7 @@
     </ul>
 
     <div class="side right">
+      <EstopButton {large} />
       <ConnectionIndicator status={core.connection} />
       <Clock withDate={large} />
     </div>
