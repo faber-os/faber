@@ -6,9 +6,11 @@ use crate::files::{Entry, Kind, Special, VPath};
 use crate::leases::{EndReason, Lease};
 use crate::logs;
 use crate::machine::EstopView;
+use crate::machine::WorldView;
 use crate::machine::{MachineError, PartView, PortView};
 use crate::ports::{PortKind, PortProblem};
 use crate::runtime::PartStatus;
+use crate::simparts::WorldState;
 use crate::simulation::Pattern;
 use faber_connector::{Manifest, PortRequirement, Problem};
 
@@ -237,6 +239,32 @@ pub fn log_entry(e: &logs::Entry) -> dto::LogEntry {
         },
         source: e.source.clone(),
         message: e.message.clone(),
+    }
+}
+
+pub fn world_view(v: WorldView) -> dto::WorldView {
+    dto::WorldView {
+        name: v.world.name,
+        title: v.world.title,
+        description: v.world.description,
+        start: v.start,
+        geometry: v.world.geometry,
+        footprint: v.footprint,
+    }
+}
+
+pub fn world_message(id: u32, s: WorldState) -> dto::ServerMessage {
+    dto::ServerMessage::World {
+        id,
+        pose: s.pose,
+        velocity: s.velocity,
+        bumped: s.bumped,
+        movers: s
+            .movers
+            .iter()
+            .map(|m| dto::WorldMover { x: m.position.x, y: m.position.y, radius: m.radius })
+            .collect(),
+        t_us: s.t_us,
     }
 }
 

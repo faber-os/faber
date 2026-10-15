@@ -74,8 +74,8 @@ impl Simulate {
 #[serde(deny_unknown_fields)]
 pub struct WorldConfig {
     pub name: String,
-    #[serde(default)]
-    pub start: Start,
+    /// Where the machine starts; the world's own start when left out.
+    pub start: Option<Start>,
 }
 
 /// A pose on the world's floor: `x`, `y` (m) and `yaw` (rad).
@@ -206,6 +206,84 @@ fn source(
     }
 }
 
+/// Checks that `[world] name` is one of the `known` worlds, pointing at the line if it isn't.
+/// The worlds live in another module, so the caller says which exist.
+pub fn check_world(text: &str, config: &PartsConfig, known: &[&str]) -> Result<(), ConfigError> {
+    let Some(world) = &config.world else { return Ok(()) };
+    if known.contains(&world.name.as_str()) {
+        return Ok(());
+    }
+    Err(ConfigError::at(
+        text,
+        world_name_span(text),
+        format!("There is no world called \"{}\".", world.name),
+        &format!("Use one of the prebuilt worlds: {}.", known.join(", ")),
+    ))
+}
+
+/// Where the value of `[world] name` sits in the file.
+fn world_name_span(text: &str) -> Option<Range<usize>> {
+    let doc = toml_edit::Document::parse(text).ok()?;
+    doc.get("world")?.as_table_like()?.get("name")?.span()
+}
+
+/// Writes `[world]` (its `name`, and `start` if given), keeping everything else in the file,
+/// comments included. Without a `start` the world's own start is used, so any old one goes.
+pub fn set_world(text: &str, world: &WorldConfig) -> Result<String, ConfigError> {
+    let mut doc = edit_doc(text)?;
+    let start = world.start.map(|s| {
+        let mut t = toml_edit::InlineTable::new();
+        for (k, v) in [("x", s.x), ("y", s.y), ("yaw", s.yaw)] {
+            t.insert(k, v.into());
+        }
+        toml_edit::Value::InlineTable(t)
+    });
+    if let Some(table) = doc.get_mut("world").and_then(|w| w.as_table_like_mut()) {
+        set_value(table, "name", world.name.as_str().into());
+        match start {
+            Some(s) => set_value(table, "start", s),
+            None => {
+                table.remove("start");
+            }
+        }
+        return Ok(doc.to_string());
+    }
+    let mut t = toml_edit::Table::new();
+    t.insert("name", toml_edit::value(world.name.as_str()));
+    if let Some(s) = start {
+        t.insert("start", toml_edit::value(s));
+    }
+    move_trailing_comments_above(&mut doc, &mut t);
+    doc.insert("world", toml_edit::Item::Table(t));
+    Ok(doc.to_string())
+}
+
+/// Replaces the value of `key`, keeping the comments around the old one.
+fn set_value(table: &mut dyn toml_edit::TableLike, key: &str, value: toml_edit::Value) {
+    match table.get_mut(key).and_then(|i| i.as_value_mut()) {
+        Some(old) => {
+            let decor = old.decor().clone();
+            *old = value;
+            *old.decor_mut() = decor;
+        }
+        None => {
+            table.insert(key, toml_edit::Item::Value(value));
+        }
+    }
+}
+
+/// Comments after the last table (or a comment-only file) are the document's "trailing" text,
+/// which is printed after every table. Like a person appending a table, put the new one after
+/// those comments, not before them.
+fn move_trailing_comments_above(doc: &mut toml_edit::DocumentMut, t: &mut toml_edit::Table) {
+    let trailing = doc.trailing().as_str().unwrap_or("").to_string();
+    if !trailing.trim().is_empty() {
+        let gap = if trailing.ends_with("\n\n") { "" } else { "\n" };
+        t.decor_mut().set_prefix(format!("{trailing}{gap}"));
+        doc.set_trailing("");
+    }
+}
+
 fn edit_doc(text: &str) -> Result<toml_edit::DocumentMut, ConfigError> {
     text.parse::<toml_edit::DocumentMut>()
         .map_err(|e| ConfigError::at(text, e.span(), e.message().trim().to_string(), FIX_HINT))
@@ -253,15 +331,7 @@ pub fn add_part(text: &str, name: &PartName, cfg: &PartConfig) -> Result<String,
             toml::to_string(&cfg.settings).expect("a toml table serialises").parse().expect("valid toml");
         t.insert("settings", toml_edit::Item::Table(settings.as_table().clone()));
     }
-    // Comments after the last table (or a comment-only file) are the document's "trailing"
-    // text, which is printed after every table. Like a person appending a part, put the new part
-    // after those comments, not before them.
-    let trailing = doc.trailing().as_str().unwrap_or("").to_string();
-    if !trailing.trim().is_empty() {
-        let gap = if trailing.ends_with("\n\n") { "" } else { "\n" };
-        t.decor_mut().set_prefix(format!("{trailing}{gap}"));
-        doc.set_trailing("");
-    }
+    move_trailing_comments_above(&mut doc, &mut t);
     let parts = doc.get_mut("parts").and_then(|p| p.as_table_mut()).expect("checked above");
     parts.insert(name.as_str(), toml_edit::Item::Table(t));
     Ok(doc.to_string())
@@ -486,7 +556,7 @@ simulate = "manual"
         assert_eq!(c.parts[&name("base")].settings["max-omega"].as_float(), Some(1.5));
         assert_eq!(
             c.world,
-            Some(WorldConfig { name: "apartment".into(), start: Start { x: 1.0, y: 1.0, yaw: 0.0 } })
+            Some(WorldConfig { name: "apartment".into(), start: Some(Start { x: 1.0, y: 1.0, yaw: 0.0 }) })
         );
     }
 
@@ -498,7 +568,7 @@ name = \"empty\"
 ",
         )
         .unwrap();
-        assert_eq!(c.world.unwrap().start, Start::default());
+        assert_eq!(c.world.unwrap().start, None, "the world's own start");
         assert_eq!(
             parse(
                 "[parts.a]
@@ -570,6 +640,44 @@ port = \"usb:10c4:ea60\"
         assert!(out.contains("simulate = \"manual\""), "{out}");
         assert!(!out[out.find("[parts.base]").unwrap()..].contains("port"), "{out}");
         assert_eq!(parse(&out).unwrap().parts[&name("base")], cfg);
+    }
+
+    const WORLDS: &[&str] = &["empty", "apartment"];
+
+    #[test]
+    fn an_unknown_world_points_at_its_name_and_lists_the_worlds() {
+        let text = "# robot\n\n[world]\nname = \"apartmnet\"\n";
+        let e = check_world(text, &parse(text).unwrap(), WORLDS).unwrap_err();
+        assert_eq!((e.line, e.column), (Some(4), Some(8)), "{e:?}");
+        assert!(e.message.contains("\"apartmnet\""), "{e:?}");
+        assert!(e.hint.contains("empty, apartment"), "{e:?}");
+        let ok = "[world]\nname = \"apartment\"\n";
+        assert_eq!(check_world(ok, &parse(ok).unwrap(), WORLDS), Ok(()));
+        assert_eq!(check_world("", &parse("").unwrap(), WORLDS), Ok(()), "no [world] is fine");
+    }
+
+    #[test]
+    fn setting_the_world_adds_it_after_the_comments() {
+        let text = "# My robot\n\n[parts.a] # first\nconnector = \"x\"\nsimulate = \"world\"\n\n# spare\n";
+        let w = WorldConfig { name: "apartment".into(), start: Some(Start { x: 1.0, y: 2.0, yaw: 0.5 }) };
+        let out = set_world(text, &w).unwrap();
+        assert!(out.starts_with("# My robot\n") && out.contains("# first"), "{out}");
+        assert!(out.find("# spare").unwrap() < out.find("[world]").unwrap(), "{out}");
+        assert_eq!(parse(&out).unwrap().world, Some(w));
+        assert_eq!(parse(&out).unwrap().parts.len(), 1);
+    }
+
+    #[test]
+    fn setting_the_world_again_keeps_its_comments_and_drops_an_old_start() {
+        let text = "# My robot\n\n# where it drives\n[world]\nname = \"empty\" # for now\nstart = { x = 1.0, y = 1.0, yaw = 0.0 }\n\n[parts.a]\nconnector = \"x\"\nsimulate = \"world\"\n";
+        let w = WorldConfig { name: "apartment".into(), start: None };
+        let out = set_world(text, &w).unwrap();
+        assert!(out.contains("# where it drives") && out.contains("# for now"), "{out}");
+        assert!(!out.contains("start"), "{out}");
+        assert_eq!(parse(&out).unwrap().world, Some(w));
+        let inline = "world = { name = \"empty\" }\n";
+        let out = set_world(inline, &WorldConfig { name: "maze".into(), start: None }).unwrap();
+        assert_eq!(parse(&out).unwrap().world.unwrap().name, "maze");
     }
 
     #[test]

@@ -3,10 +3,11 @@
 
 use super::geometry::{Footprint, Pose, Vec2, wrap_angle};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// A velocity in the machine frame: `vx` forward and `vy` left (m/s), `omega` counter-clockwise
 /// (rad/s). The same shape as `planar-base@1`'s twist2d.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct Twist {
     pub vx: f64,

@@ -4,6 +4,7 @@
 //! `shell/src/lib/api/generated/` by `cargo test` (ts-rs), and CI fails if they are out of date.
 //! Field names are camelCase on the wire.
 
+use crate::sim::world::{Footprint, Geometry, Pose, Twist};
 use faber_capabilities::{Capability, Command, Info, Mount, Reading};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -301,6 +302,9 @@ pub enum Topic {
     Leases,
     /// The e-stop: an `estop` message now and on every change (none is lost).
     Estop,
+    /// The machine in the simulated world: a `world` message 20 times a second, and
+    /// `world-changed` when the world is switched.
+    World,
 }
 
 /// Messages from the shell to the core.
@@ -426,6 +430,28 @@ pub enum ServerMessage {
         id: u32,
         status: EstopStatus,
     },
+    /// The machine in the simulated world now (the `world` topic, 20 times a second).
+    #[serde(rename_all = "camelCase")]
+    World {
+        id: u32,
+        /// The ground truth, in the world frame (m, rad).
+        pose: Pose,
+        /// Machine frame: `vx` forward, `vy` left (m/s), `omega` counter-clockwise (rad/s).
+        velocity: Twist,
+        /// Something stopped the machine during its last step.
+        bumped: bool,
+        /// Where the moving obstacles are now.
+        movers: Vec<WorldMover>,
+        /// When the world last moved on (µs, core clock).
+        #[ts(type = "number")]
+        t_us: u64,
+    },
+    /// The world was switched (the machine is at rest at its start). `GET /api/v0/world` has
+    /// its geometry.
+    WorldChanged {
+        id: u32,
+        name: String,
+    },
     /// Something the client asked for failed. `id` is absent when it isn't tied to one request.
     Error {
         #[ts(optional)]
@@ -433,6 +459,47 @@ pub enum ServerMessage {
         id: Option<u32>,
         error: ErrorBody,
     },
+}
+
+// ---------------------------------------------------------------------------------------------
+// The simulated world (docs/api.md, "The simulated world").
+
+/// The world simulated parts are in (`GET /api/v0/world`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct WorldView {
+    pub name: String,
+    pub title: String,
+    pub description: String,
+    /// Where the machine starts: `[world] start` in parts.toml, or the world's own start.
+    pub start: Pose,
+    pub geometry: Geometry,
+    /// The world base's footprint (m). Absent while no part is the world's base.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footprint: Option<Footprint>,
+}
+
+/// `PUT /api/v0/world`: which world, and where the machine starts in it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct WorldRequest {
+    pub name: String,
+    /// Left out: the world's own start.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Pose>,
+}
+
+/// A moving obstacle on the `world` topic: a circle (m).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorldMover {
+    pub x: f64,
+    pub y: f64,
+    pub radius: f64,
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive a 1 m square with a Faber drive base, over plain HTTP.
+"""Drive a 0.8 m square with a Faber drive base, over plain HTTP.
 
 What you need
     A Faber core running on this computer, with a drive base part. No hardware: add a
@@ -9,6 +9,18 @@ What you need
         [parts.base]
         connector = "generic-planar-base"
         simulate = "manual"
+
+    Or let it really move, in a simulated world (the World window shows it):
+
+        [world]
+        name = "apartment"
+
+        [parts.base]
+        connector = "generic-planar-base"
+        simulate = "world"
+        settings = { length = 0.8, width = 0.65 }
+
+    From the apartment's start, the square (turning right) fits in the living room.
 
     Python 3.8 or newer. Nothing to install: only the standard library is used.
 
@@ -24,6 +36,9 @@ If it doesn't work
     "Is the Faber core running?"  Start it, or check the address.
     "… is driving base."          Someone else holds the lease (the Drive window?). Let go there.
     "The e-stop is engaged …"     Release it in the shell when it is safe.
+    In a world, it stops short     It bumped into something: the square doesn't fit where it
+                                   stands. Put it back (Reset position in the World window, or
+                                   POST /api/v0/world/reset) and run it again.
 
 How it works
     Anything that moves needs a *lease*: the right to drive it, for 250 ms at a time. Every
@@ -42,8 +57,9 @@ import urllib.request
 PART = sys.argv[1] if len(sys.argv) > 1 else "base"
 CORE = (sys.argv[2] if len(sys.argv) > 2 else "http://127.0.0.1:7878").rstrip("/")
 
+SIDE = 0.8  # m
 SPEED = 0.25  # m/s along each side
-TURN = 0.8  # rad/s when turning on the spot
+TURN = -0.8  # rad/s when turning on the spot: negative is clockwise, to the right
 EVERY = 0.1  # s between commands: well inside the 250 ms lease
 CLAMPED = []  # non-empty once a clamp has been reported
 
@@ -98,10 +114,10 @@ def main():
     print(f"Driving {PART}.")
     try:
         for side in range(1, 5):
-            print(f"Side {side}: 1 m forward")
-            drive_for(lease, 1.0 / SPEED, vx=SPEED)
-            print(f"Turn {side}: a quarter turn left")
-            drive_for(lease, (math.pi / 2) / TURN, omega=TURN)
+            print(f"Side {side}: {SIDE} m forward")
+            drive_for(lease, SIDE / SPEED, vx=SPEED)
+            print(f"Turn {side}: a quarter turn right")
+            drive_for(lease, (math.pi / 2) / abs(TURN), omega=TURN)
     except FaberError as e:
         # 423: the e-stop was pressed. 403: the lease ended (someone took over, or it expired).
         # Either way the base is already stopped; tell the user why and stop driving.

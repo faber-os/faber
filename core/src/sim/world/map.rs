@@ -4,10 +4,11 @@
 use super::geometry::{Bounds, Footprint, Pose, Segment, Vec2, ray_circle};
 use super::grid::{DEFAULT_CELL, SegmentGrid};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// A world's geometry in the world frame (metres, x east, y north). This is what
 /// `GET /api/v0/world` sends the shell.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Geometry {
     /// The area worth showing; everything solid lies inside it.
@@ -32,9 +33,10 @@ pub struct Geometry {
 }
 
 /// A closed polygon; the last point connects back to the first.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 pub struct Shape {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub label: Option<String>,
     pub points: Vec<Vec2>,
 }
@@ -62,9 +64,10 @@ impl Shape {
 
 /// A circle (a person, a pet) going round a closed path at a steady speed. Its position depends
 /// only on the time, so the simulation stays repeatable.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 pub struct Mover {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub label: Option<String>,
     /// Radius (m).
     pub radius: f64,

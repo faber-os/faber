@@ -7,8 +7,11 @@ import type { LogEntry } from "./LogEntry";
 import type { PartInfo } from "./PartInfo";
 import type { PortInfo } from "./PortInfo";
 import type { PortProblem } from "./PortProblem";
+import type { Pose } from "./Pose";
 import type { Reading } from "./Reading";
 import type { Settings } from "./Settings";
+import type { Twist } from "./Twist";
+import type { WorldMover } from "./WorldMover";
 
 /**
  * Messages from the core to the shell. `id` is the subscription or serial session it belongs to.
@@ -17,4 +20,24 @@ export type ServerMessage = { "type": "signal", id: number, address: string, rea
 /**
  * Left out when there are none.
  */
-problems?: Array<PortProblem>, } | { "type": "log", id: number, entry: LogEntry, } | { "type": "serial-data", id: number, tUs: number, data: Uint8Array, } | { "type": "serial-opened", id: number, port: string, } | { "type": "serial-closed", id: number, reason?: string, } | { "type": "settings", id: number, settings: Settings, } | { "type": "files-changed", id: number, folders: Array<string>, } | { "type": "serial-recording", id: number, path: string, } | { "type": "serial-recording-stopped", id: number, path: string, bytes: number, } | { "type": "leases", id: number, leases: Array<LeaseInfo>, } | { "type": "lease-granted", id: number, lease: LeaseInfo, } | { "type": "lease-ended", id: number, lease: LeaseInfo, reason: LeaseEndReason, } | { "type": "estop", id: number, status: EstopStatus, } | { "type": "error", id?: number, error: ErrorBody, };
+problems?: Array<PortProblem>, } | { "type": "log", id: number, entry: LogEntry, } | { "type": "serial-data", id: number, tUs: number, data: Uint8Array, } | { "type": "serial-opened", id: number, port: string, } | { "type": "serial-closed", id: number, reason?: string, } | { "type": "settings", id: number, settings: Settings, } | { "type": "files-changed", id: number, folders: Array<string>, } | { "type": "serial-recording", id: number, path: string, } | { "type": "serial-recording-stopped", id: number, path: string, bytes: number, } | { "type": "leases", id: number, leases: Array<LeaseInfo>, } | { "type": "lease-granted", id: number, lease: LeaseInfo, } | { "type": "lease-ended", id: number, lease: LeaseInfo, reason: LeaseEndReason, } | { "type": "estop", id: number, status: EstopStatus, } | { "type": "world", id: number, 
+/**
+ * The ground truth, in the world frame (m, rad).
+ */
+pose: Pose, 
+/**
+ * Machine frame: `vx` forward, `vy` left (m/s), `omega` counter-clockwise (rad/s).
+ */
+velocity: Twist, 
+/**
+ * Something stopped the machine during its last step.
+ */
+bumped: boolean, 
+/**
+ * Where the moving obstacles are now.
+ */
+movers: Array<WorldMover>, 
+/**
+ * When the world last moved on (µs, core clock).
+ */
+tUs: number, } | { "type": "world-changed", id: number, name: string, } | { "type": "error", id?: number, error: ErrorBody, };

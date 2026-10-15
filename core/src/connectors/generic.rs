@@ -76,6 +76,22 @@ fn distance_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, Setting
     Ok(vec![Provide::with_info(Info::Distance(distance_info(s)?))])
 }
 
+/// A drive base's `length` × `width` (m) when its settings don't say.
+pub const DEFAULT_FOOTPRINT: (f64, f64) = (0.5, 0.4);
+
+/// A drive base's footprint, `length` × `width` (m), from its settings. The world shows and
+/// collides it (docs/simulation.md, section 7). Settings were checked when the part was added;
+/// anything unreadable falls back to [`DEFAULT_FOOTPRINT`].
+pub fn footprint(s: &Settings) -> (f64, f64) {
+    let read = |key: &str, default: f64| {
+        s.get(key)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .filter(|n| n.is_finite() && *n > 0.0)
+            .unwrap_or(default)
+    };
+    (read("length", DEFAULT_FOOTPRINT.0), read("width", DEFAULT_FOOTPRINT.1))
+}
+
 /// Settings every simulated part may have: how often it publishes.
 const COMMON: &[&str] = &["rate-hz"];
 
@@ -88,8 +104,8 @@ fn base_info(s: &Settings) -> Result<planar_base::Info, SettingsError> {
     let max =
         Twist2d::new(r.positive("max-vx", 0.5)?, r.positive("max-vy", 0.5)?, r.positive("max-omega", 1.5)?);
     let accel = r.positive("max-accel", 1.0)?;
-    r.positive("length", 0.5)?;
-    r.positive("width", 0.4)?;
+    r.positive("length", DEFAULT_FOOTPRINT.0 as f32)?;
+    r.positive("width", DEFAULT_FOOTPRINT.1 as f32)?;
     r.positive("rate-hz", 20.0)?;
     // One acceleration setting: turning takes as long to reach full speed as driving does.
     let omega_accel = accel * max.omega / max.vx.max(max.vy);
@@ -296,6 +312,13 @@ mod tests {
         }
         let e = info_of(PLANAR_BASE, &settings("max-speed = 1")).unwrap_err();
         assert!(e.hint.contains("max-vx"), "the hint lists the real settings: {e:?}");
+    }
+
+    #[test]
+    fn a_base_footprint_comes_from_its_settings() {
+        assert_eq!(footprint(&settings("length = 0.8\nwidth = 0.65\n")), (0.8, 0.65));
+        assert_eq!(footprint(&settings("length = 1\n")), (1.0, DEFAULT_FOOTPRINT.1));
+        assert_eq!(footprint(&Settings::new()), DEFAULT_FOOTPRINT);
     }
 
     #[test]

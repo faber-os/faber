@@ -190,8 +190,8 @@ model what a sensor at about 0.3 m would hit (table legs, not table tops).
 | `estop` | 2 | e-stop state and its history |
 | `sim::world` | 2 | geometry, raycasting, collision (pure, no threads) |
 | `sim::worlds` | 2 | the prebuilt worlds (data) |
-| `sim::parts` | 3 | simulated parts as runtime sources: tick, publish, accept commands |
-| `machine` | 4 | wires it all: config, leases, commands, e-stop, world |
+| `simparts` | 3 | the world engine: world parts as runtime sources: tick, publish, accept commands |
+| `machine` | 4 | wires it all: config, leases, commands, e-stop, world (`[world]` in parts.toml) |
 | `api` | 5 | the endpoints and topics above |
 
 ## 9. Shell

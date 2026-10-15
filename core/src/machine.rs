@@ -4,8 +4,10 @@
 //! running parts match it.
 
 mod safety;
+mod world;
 
 pub use safety::{CommandReply, EstopView, LeaseEvent};
+pub use world::{DEFAULT_WORLD, WorldChanged, WorldView};
 
 use crate::backup::{self, Archive, BackupError, Item};
 use crate::clock::SharedClock;
@@ -26,7 +28,8 @@ use crate::runtime::{self, PartStatus, RunDeps, RunSpec, StatusBoard, Timing};
 use crate::settings::{
     self as settings_file, DeveloperChange, Settings as MachineSettings, SettingsError, SettingsStore,
 };
-use crate::simulation::{self, Outlet, PartSpec, WorldEngine};
+use crate::simparts::{self, WorldEngine};
+use crate::simulation::{self, Outlet, PartSpec};
 use crate::suggest::{Suggestion, suggestions};
 use crate::translations::Translations;
 use faber_capabilities::{Capability, Mount, Reading, estop};
@@ -58,7 +61,7 @@ pub struct MachineOptions {
     pub timing: Timing,
     /// How often to look for new or removed ports. `None` = only when asked (tests).
     pub port_scan: Option<Duration>,
-    /// Runs `simulate = "world"` parts. [`simulation::NoWorld`] until the world engine exists.
+    /// Runs `simulate = "world"` parts: the world engine ([`simparts::SimWorld`]).
     pub world: Arc<dyn WorldEngine>,
 }
 
@@ -194,6 +197,8 @@ struct State {
     running: BTreeMap<PartName, Running>,
     leases: Leases,
     estop: Estop,
+    /// The `[world]` loaded into the world engine.
+    world: world::Loaded,
 }
 
 pub struct Machine {
@@ -220,6 +225,7 @@ pub struct Machine {
     world: Arc<dyn WorldEngine>,
     lease_events: broadcast::Sender<LeaseEvent>,
     estop_events: broadcast::Sender<estop::Reading>,
+    world_events: broadcast::Sender<WorldChanged>,
     stop_sweeping: Arc<AtomicBool>,
     sweeper: Mutex<Option<JoinHandle<()>>>,
 }
@@ -234,7 +240,7 @@ impl Machine {
             write_atomically(&config_path, NEW_FILE_HEADER)?;
         }
         let text = std::fs::read_to_string(&config_path)?;
-        let (config, config_problem) = match config::parse(&text) {
+        let (config, config_problem) = match world::read_config(&text) {
             Ok(c) => (c, None),
             Err(e) => {
                 tracing::error!(target: "core::machine", "parts.toml can't be read: {} {}", e.message, e.hint);
@@ -244,9 +250,11 @@ impl Machine {
         let files = Files::open(opts.data_dir.join("files"), config_path.clone())?;
         let settings = SettingsStore::load(&config_dir);
         let translations = Translations::open(&config_dir);
+        let router = Arc::new(Router::new());
+        opts.world.attach(Arc::clone(&router));
         let machine = Arc::new(Machine {
             clock: opts.clock,
-            router: Arc::new(Router::new()),
+            router,
             status: Arc::new(StatusBoard::default()),
             discovery: opts.discovery,
             usb_problems: opts.usb_problems,
@@ -271,6 +279,7 @@ impl Machine {
                 running: BTreeMap::new(),
                 leases: Leases::new(lease_seed()),
                 estop: Estop::default(),
+                world: world::Loaded::default(),
             }),
             ports_changed: watch::channel(0).0,
             files_changed: broadcast::channel(64).0,
@@ -279,6 +288,7 @@ impl Machine {
             world: opts.world,
             lease_events: broadcast::channel(256).0,
             estop_events: broadcast::channel(64).0,
+            world_events: broadcast::channel(16).0,
             stop_sweeping: Arc::new(AtomicBool::new(false)),
             sweeper: Mutex::new(None),
         });
@@ -447,6 +457,14 @@ impl Machine {
     pub fn add_part(&self, new: NewPart) -> Result<PartView, MachineError> {
         let name = PartName::parse(&new.name)
             .map_err(|b| MachineError::new(ErrorKind::BadRequest, "invalid-name", b.message, b.hint))?;
+        if name.as_str() == simparts::WORLD_PART {
+            return Err(MachineError::new(
+                ErrorKind::BadRequest,
+                "invalid-name",
+                "\"world\" is the simulated world's own name (its signal is world/pose).",
+                "Pick another name, e.g. world_lidar.",
+            ));
+        }
         let mut st = self.state.lock().expect("machine lock");
         refuse_if_config_broken(&st)?;
         if st.config.parts.contains_key(&name) {
@@ -554,7 +572,7 @@ impl Machine {
     /// Writes the new config text, then adopts it. The file is written first, so the running
     /// machine never disagrees with what is on disk.
     fn save(&self, st: &mut State, text: String) -> Result<(), MachineError> {
-        let parsed = config::parse(&text).map_err(config_write_error)?;
+        let parsed = world::read_config(&text).map_err(config_write_error)?;
         write_atomically(&self.config_path, &text).map_err(|e| {
             MachineError::new(
                 ErrorKind::Internal,
@@ -572,6 +590,7 @@ impl Machine {
     /// Makes the running parts match the config: stops removed or changed parts, starts new
     /// ones, and retries parts whose port was missing or busy.
     fn reconcile(&self, st: &mut State) {
+        self.sync_world(st);
         let gone: Vec<PartName> = st
             .running
             .iter()
@@ -598,6 +617,7 @@ impl Machine {
             let (runner, provides) = self.try_start(st, &name, &cfg);
             st.running.insert(name, Running { config: cfg, runner, provides });
         }
+        self.tell_default_world(st);
     }
 
     /// The part simulated as the base in the world (the machine), other than `except`.
@@ -960,7 +980,7 @@ impl Machine {
         let mut archive = Archive::open(&real)?;
 
         // 1. Check everything first.
-        config::parse(archive.parts_toml()).map_err(|e| config_invalid(&e))?;
+        world::read_config(archive.parts_toml()).map_err(|e| config_invalid(&e))?;
         let restored_settings = match archive.settings_toml() {
             None => None,
             Some(text) => Some(settings_file::parse(text).map_err(|e| {
@@ -1130,7 +1150,7 @@ impl Machine {
                 "Save it as plain text.",
             )
         })?;
-        config::parse(&text).map_err(|e| config_invalid(&e))?;
+        world::read_config(&text).map_err(|e| config_invalid(&e))?;
         let mut st = self.state.lock().expect("machine lock");
         self.save(&mut st, text)?;
         st.config_problem = None;
@@ -1588,7 +1608,7 @@ mod tests {
                 ..Timing::default()
             },
             port_scan: None,
-            world: Arc::new(simulation::NoWorld),
+            world: Arc::new(simparts::SimWorld::new()),
         })
         .unwrap()
     }
@@ -1613,7 +1633,7 @@ mod tests {
             connectors: vec![ldrobot_ld19::definition()],
             timing: Timing::default(),
             port_scan: Some(Duration::from_millis(50)),
-            world: Arc::new(simulation::NoWorld),
+            world: Arc::new(simparts::SimWorld::new()),
         })
         .unwrap();
         let mut changes = m.ports_changed();
@@ -2204,7 +2224,7 @@ connector =
             connectors: vec![ldrobot_ld19::definition()],
             timing: Timing::default(),
             port_scan: None,
-            world: Arc::new(simulation::NoWorld),
+            world: Arc::new(simparts::SimWorld::new()),
         })
         .unwrap();
         let mut changes = m.files_changed();
@@ -2231,6 +2251,7 @@ connector =
     // ---- leases, commands and the e-stop -------------------------------------------------
 
     use crate::router::Subscription;
+    use crate::sim::world::Pose;
     use crate::simulation::Pattern;
     use faber_capabilities::{Command, Twist2d, planar_base};
 
@@ -2452,18 +2473,21 @@ connector =
     }
 
     #[test]
-    fn world_parts_wait_for_the_world_and_only_one_base_is_the_machine() {
+    fn world_parts_run_in_the_world_and_only_one_base_is_the_machine() {
         let dir = tempfile::tempdir().unwrap();
         let m = machine(dir.path(), no_ports());
-        sim(&m, "base", "generic-planar-base", Simulate::World, "");
-        let PartStatus::Degraded(p) = wait_for_status(&m, "base", |s| matches!(s, PartStatus::Degraded(_)))
-        else {
-            unreachable!()
-        };
-        assert!(p.message.contains("Waiting for the world"), "{p:?}");
+        sim(&m, "base", "generic-planar-base", Simulate::World, "length = 0.8\nwidth = 0.65\n");
+        wait_for_status(&m, "base", |s| *s == PartStatus::Running);
         let lease = m.request_lease("base", "test", false).unwrap();
-        let e = m.command("base", &lease.id, drive(0.1, 0.0)).unwrap_err();
-        assert_eq!((e.kind, e.code), (ErrorKind::Conflict, "part-not-ready"));
+        m.command("base", &lease.id, drive(0.3, 0.0)).unwrap();
+        assert_eq!(commanded(&m), Twist2d::new(0.3, 0.0, 0.0));
+        let start = Instant::now();
+        while m.world_state().velocity.vx <= 0.0 {
+            assert!(start.elapsed() < Duration::from_secs(2), "the world base never moved");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(latest(&m, "world/pose").is_some(), "the ground truth is published");
+        assert_eq!(m.world().footprint.map(|f| (f.length, f.width)), Some((0.8, 0.65)));
         let e = m
             .add_part(NewPart {
                 connector: "generic-planar-base".into(),
@@ -2474,6 +2498,130 @@ connector =
             .unwrap_err();
         assert_eq!(e.code, "world-has-a-base");
         sim(&m, "lidar", "ldrobot-ld19", Simulate::World, "");
+        wait_for_status(&m, "lidar", |s| *s == PartStatus::Running);
         m.shutdown();
+    }
+
+    #[test]
+    fn without_a_world_table_world_parts_are_in_the_empty_world() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        sim(&m, "front", "generic-distance", Simulate::World, "");
+        assert_eq!(m.world().world.name, DEFAULT_WORLD);
+        assert_eq!(m.world_state().pose, m.world().start, "a sensor alone stands at the start");
+        assert!(!read_text(&m, "home:/System/parts.toml").contains("[world]"), "nothing is written");
+        let e = m
+            .add_part(NewPart { simulate: Some(Simulate::Manual), port: None, ..demo("world") })
+            .unwrap_err();
+        assert_eq!(e.code, "invalid-name", "world/pose belongs to the world");
+        m.shutdown();
+    }
+
+    #[test]
+    fn an_unknown_world_is_a_config_error_with_its_line_and_the_worlds() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(config.join("parts.toml"), "# mine\n[world]\nname = \"moon\"\n").unwrap();
+        let m = machine(dir.path(), no_ports());
+        let p = m.config_problem().expect("a config problem");
+        assert_eq!(p.line, Some(3), "{p:?}");
+        assert!(p.message.contains("\"moon\"") && p.hint.contains("apartment"), "{p:?}");
+        m.shutdown();
+
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let e = m.write_file("home:/System/parts.toml", b"[world]\nname = \"moon\"\n", WriteMode::Replace);
+        let e = e.unwrap_err();
+        assert_eq!(e.code, "config-invalid", "{e:?}");
+        assert!(e.message.contains("line 2"), "{e:?}");
+        let e = m.set_world("moon", None).unwrap_err();
+        assert_eq!((e.kind, e.code), (ErrorKind::BadRequest, "unknown-world"));
+        assert!(e.hint.contains("obstacle-course"), "{e:?}");
+        let e = m.set_world("apartment", Some(Pose::new(50.0, 1.0, 0.0))).unwrap_err();
+        assert_eq!(e.code, "start-outside-world");
+        m.shutdown();
+    }
+
+    #[test]
+    fn changing_the_world_rebuilds_it_resets_the_pose_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let mut changes = m.world_events();
+        sim(&m, "base", "generic-planar-base", Simulate::World, "");
+        let view = m.set_world("apartment", None).unwrap();
+        assert_eq!((view.world.name.as_str(), view.start), ("apartment", view.world.start));
+        assert_eq!(changes.try_recv().unwrap().name, "apartment");
+        assert_eq!(m.world_state().pose, view.world.start);
+        let text = read_text(&m, "home:/System/parts.toml");
+        assert!(text.starts_with("# The parts on this Faber machine."), "the header stays:\n{text}");
+        assert!(text.contains("[world]\nname = \"apartment\""), "{text}");
+
+        // Drive a little, then put it back.
+        let lease = m.request_lease("base", "test", false).unwrap();
+        m.command("base", &lease.id, drive(0.3, 0.0)).unwrap();
+        let start = Instant::now();
+        while m.world_state().pose == view.start {
+            assert!(start.elapsed() < Duration::from_secs(2), "it never moved");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        m.release_lease("base", &lease.id).unwrap();
+        m.reset_world();
+        assert_eq!(m.world_state().pose, view.start);
+
+        // A hand edit of [world] switches it too.
+        let edited =
+            text.replace("name = \"apartment\"", "name = \"maze\"\nstart = { x = 1.0, y = 1.0, yaw = 0.0 }");
+        m.write_file("home:/System/parts.toml", edited.as_bytes(), WriteMode::Replace).unwrap();
+        assert_eq!(changes.try_recv().unwrap().name, "maze");
+        assert_eq!((m.world().world.name.as_str(), m.world().start), ("maze", Pose::new(1.0, 1.0, 0.0)));
+        assert_eq!(m.world_state().pose, Pose::new(1.0, 1.0, 0.0));
+        // Anything else in parts.toml changing leaves the world alone.
+        sim(&m, "front", "generic-distance", Simulate::Manual, "");
+        assert!(changes.try_recv().is_err());
+        m.shutdown();
+    }
+
+    #[test]
+    fn removing_or_restarting_world_parts_leaves_no_thread_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let world = Arc::new(simparts::SimWorld::new());
+        let replays = ReplayLibrary::with_demo();
+        let m = Machine::start(MachineOptions {
+            data_dir: dir.path().to_path_buf(),
+            clock: Arc::new(MonotonicClock::new()),
+            discovery: no_ports(),
+            usb_problems: Arc::new(FakeUsbProblems::default()),
+            disks: Arc::new(FakeDisks::default()),
+            opener: Arc::new(SystemOpener::new(replays.clone())),
+            replays,
+            connectors: crate::connectors::built_in(),
+            timing: Timing::default(),
+            port_scan: None,
+            world: Arc::clone(&world) as Arc<dyn WorldEngine>,
+        })
+        .unwrap();
+        sim(&m, "base", "generic-planar-base", Simulate::World, "");
+        sim(&m, "lidar", "ldrobot-ld19", Simulate::World, "");
+        assert_eq!(world.live_threads(), 1);
+        // Restart the base by changing its settings by hand.
+        let text = read_text(&m, "home:/System/parts.toml").replacen(
+            "simulate = \"world\"\n",
+            "simulate = \"world\"\nsettings = { max-vx = 0.4 }\n",
+            1,
+        );
+        m.write_file("home:/System/parts.toml", text.as_bytes(), WriteMode::Replace).unwrap();
+        wait_for_status(&m, "base", |s| *s == PartStatus::Running);
+        assert_eq!(world.live_threads(), 1, "restarting keeps one thread");
+        m.remove_part("base").unwrap();
+        m.remove_part("lidar").unwrap();
+        assert_eq!(world.live_threads(), 0, "removing the last world part stops it");
+        assert!(
+            latest(&m, "world/pose").is_none() && m.router().subscribe(&simparts::pose_address()).is_none()
+        );
+        sim(&m, "lidar", "ldrobot-ld19", Simulate::World, "");
+        assert_eq!(world.live_threads(), 1);
+        m.shutdown();
+        assert_eq!(world.live_threads(), 0, "and so does shutting down");
     }
 }
