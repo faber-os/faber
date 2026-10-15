@@ -1,0 +1,9 @@
+# A bare room: the place to try driving and sensors without anything in the way.
+name = "empty"
+title = "Empty room"
+description = "A bare 10 × 10 m room: four walls and nothing else."
+start = { x = 5.0, y = 5.0, yaw = 0.0 }
+bounds = { min = [0.0, 0.0], max = [10.0, 10.0] }
+
+[[outline]]
+points = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]

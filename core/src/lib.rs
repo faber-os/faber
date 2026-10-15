@@ -17,6 +17,7 @@ pub mod ports;
 pub mod router;
 pub mod runtime;
 pub mod settings;
+pub mod sim;
 pub mod suggest;
 pub mod translations;
 

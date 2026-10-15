@@ -14,6 +14,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("files", 2),
     ("host", 2),
     ("settings", 2),
+    ("sim", 2),
     ("logs", 2),
     ("ports", 2),
     ("router", 2),

@@ -1,0 +1,91 @@
+# A maze of 7 × 7 cells, 1.1 m each: corridors 1.1 m wide, so SENNEP (0.8 × 0.65 m, 1.03 m
+# across its diagonal) can just turn on the spot. A perfect maze (one way between any two cells),
+# generated once with a seeded recursive backtracker; edit freely.
+name = "maze"
+title = "Maze"
+description = "A 7 × 7 cell maze with 1.1 m corridors: tight enough that turning on the spot only just fits."
+start = { x = 0.55, y = 0.55, yaw = 0.0 }
+bounds = { min = [0.0, 0.0], max = [7.7, 7.7] }
+
+[[outline]]
+points = [[0.0, 0.0], [7.7, 0.0], [7.7, 7.7], [0.0, 7.7]]
+
+[[wall]]
+from = [0.0, 1.1]
+to = [1.1, 1.1]
+
+[[wall]]
+from = [3.3, 1.1]
+to = [6.6, 1.1]
+
+[[wall]]
+from = [5.5, 2.2]
+to = [6.6, 2.2]
+
+[[wall]]
+from = [6.6, 3.3]
+to = [7.7, 3.3]
+
+[[wall]]
+from = [2.2, 4.4]
+to = [3.3, 4.4]
+
+[[wall]]
+from = [5.5, 4.4]
+to = [6.6, 4.4]
+
+[[wall]]
+from = [1.1, 5.5]
+to = [4.4, 5.5]
+
+[[wall]]
+from = [5.5, 5.5]
+to = [6.6, 5.5]
+
+[[wall]]
+from = [6.6, 6.6]
+to = [7.7, 6.6]
+
+[[wall]]
+from = [1.1, 1.1]
+to = [1.1, 6.6]
+
+[[wall]]
+from = [2.2, 0.0]
+to = [2.2, 4.4]
+
+[[wall]]
+from = [2.2, 6.6]
+to = [2.2, 7.7]
+
+[[wall]]
+from = [3.3, 2.2]
+to = [3.3, 4.4]
+
+[[wall]]
+from = [3.3, 5.5]
+to = [3.3, 6.6]
+
+[[wall]]
+from = [4.4, 1.1]
+to = [4.4, 5.5]
+
+[[wall]]
+from = [4.4, 6.6]
+to = [4.4, 7.7]
+
+[[wall]]
+from = [5.5, 2.2]
+to = [5.5, 4.4]
+
+[[wall]]
+from = [5.5, 5.5]
+to = [5.5, 6.6]
+
+[[wall]]
+from = [6.6, 1.1]
+to = [6.6, 2.2]
+
+[[wall]]
+from = [6.6, 4.4]
+to = [6.6, 5.5]

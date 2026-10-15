@@ -133,6 +133,55 @@ The core module `leases` owns them (see capabilities.md, "The lease"):
 - The pose is also published as a signal: `world/pose` (`pose@1`), the ground truth, so a
   program can compare its own estimate with it.
 
+### Adding a world
+
+A world is a TOML file in `core/src/sim/worlds/`, listed in `FILES` in that folder's `mod.rs`
+(the binary includes it). Metres and radians, world frame (x east, y north):
+
+```toml
+name = "garage"                       # must match its FILES entry
+title = "Garage"
+description = "A 6 × 3 m garage: a workshop behind a doorway, a workbench and a stool."
+start = { x = 1.0, y = 1.5, yaw = 0.0 }
+bounds = { min = [0.0, 0.0], max = [6.0, 3.0] }
+# open = true                         # only if rays may escape (an open floor)
+
+[[outline]]                           # walls through these points, closed by default
+points = [[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [0.0, 3.0]]
+
+[[wall]]                              # a straight wall; doors = [[offset from `from`, width]]
+from = [3.0, 0.0]
+to = [3.0, 3.0]
+doors = [[1.0, 0.9]]
+
+[[box]]                               # a solid rectangle: centre, [length, width], yaw
+label = "workbench"
+at = [5.6, 1.5]
+size = [0.6, 2.0]
+
+[[legs]]                              # a table or chair: only its four legs are solid
+label = "stool"
+at = [4.8, 1.5]
+size = [0.35, 0.35]
+leg = 0.03
+
+[[post]]                              # round: a bin, a pillar
+at = [0.5, 2.5]
+radius = 0.2
+
+[[mover]]                             # walks its loop forever, positioned by time
+label = "person"
+radius = 0.25
+speed = 1.0
+path = [[3.6, 0.5], [4.8, 0.5]]
+```
+
+`[[polygon]]` (`points`) takes any other solid shape. The tests in `worlds/tests.rs` check a new
+world like every other: it parses, rays from the start never escape (unless `open`), SENNEP's
+0.8 × 0.65 m footprint is free at the start and can drive more than 3 m, and no mover walks
+through anything. The world is 2D, so every sensor sees everything solid whatever its height:
+model what a sensor at about 0.3 m would hit (table legs, not table tops).
+
 ## 8. Where it lives in the core
 
 | Module | Layer | What |
