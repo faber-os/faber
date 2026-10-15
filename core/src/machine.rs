@@ -547,6 +547,10 @@ impl Machine {
             return None;
         };
         let port_name = match &cfg.source {
+            Source::Port(_) if definition.manifest.port == PortRequirement::Bridge => {
+                self.status.set(name, PartStatus::Invalid(runtime::needs_bridge(&definition.manifest)));
+                return None;
+            }
             Source::Port(p) => p.as_str(),
             Source::Simulated(_) => {
                 self.status.set(
@@ -1378,7 +1382,7 @@ mod tests {
             disks: Arc::new(FakeDisks::default()),
             opener: Arc::new(SystemOpener::new(replays.clone())),
             replays,
-            connectors: vec![ldrobot_ld19::definition()],
+            connectors: crate::connectors::built_in(),
             timing: Timing {
                 backoff_start: Duration::from_millis(10),
                 port_retry_max: Duration::from_millis(50),
@@ -1604,6 +1608,54 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join("config/parts.toml")).unwrap();
         assert!(text.contains("simulate = \"manual\"") && !text.contains("replay:demo-ld19"), "{text}");
         assert!(m.ports().iter().all(|p| p.claimed_by.is_none()), "a simulated part claims no port");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_generic_part_without_simulate_is_refused_with_a_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let e = m.add_part(NewPart { connector: "generic-planar-base".into(), ..demo("base") }).unwrap_err();
+        assert_eq!((e.kind, e.code), (ErrorKind::BadRequest, "needs-bridge"));
+        assert!(e.message.contains("Phase 4") && e.hint.contains("Simulated"), "{e:?}");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_generic_part_on_a_port_in_parts_toml_is_invalid_and_claims_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("config")).unwrap();
+        std::fs::write(
+            dir.path().join("config/parts.toml"),
+            "[parts.base]\nconnector = \"generic-planar-base\"\nport = \"replay:demo-ld19\"\n",
+        )
+        .unwrap();
+        let m = machine(dir.path(), no_ports());
+        let PartStatus::Invalid(p) = wait_for_status(&m, "base", |s| matches!(s, PartStatus::Invalid(_)))
+        else {
+            unreachable!()
+        };
+        assert!(p.message.contains("needs a bridge"), "{p:?}");
+        assert!(m.ports().iter().all(|p| p.claimed_by.is_none()));
+        m.shutdown();
+    }
+
+    #[test]
+    fn generic_settings_are_checked_when_the_part_is_added() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let mut settings = Settings::new();
+        settings.insert("max-vx".into(), (-1.0).into());
+        let req = NewPart {
+            connector: "generic-planar-base".into(),
+            port: None,
+            simulate: Some(Simulate::Manual),
+            settings,
+            ..demo("base")
+        };
+        let e = m.add_part(req).unwrap_err();
+        assert_eq!(e.code, "invalid-settings");
+        assert!(e.message.contains("max-vx"), "{e:?}");
         m.shutdown();
     }
 
