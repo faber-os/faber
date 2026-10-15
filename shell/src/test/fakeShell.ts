@@ -256,6 +256,8 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
       body: { name: 'Faber', version: '0.1.0', timeUs: 1_000_000, timeZone: 'Europe/Copenhagen' },
     },
     { path: '/api/v0/connectors', body: [LD19] },
+    { path: '/api/v0/connectors/problems', body: [] },
+    { path: '/api/v0/packages', body: [] },
     {
       path: '/api/v0/about',
       body: {

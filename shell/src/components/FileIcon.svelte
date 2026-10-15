@@ -112,6 +112,13 @@
         stroke="var(--file-code)"
         stroke-width="2.2"
       />
+    {:else if type === 'package'}
+      <path
+        d="M24 19l7.5 4v8.5L24 35.5l-7.5-4V23zM16.5 23l7.5 4 7.5-4M24 27v8.5"
+        fill="none"
+        stroke="var(--file-config)"
+        stroke-width="2.2"
+      />
     {:else if type === 'recording'}
       <path
         d="M15.5 28h3l2.2-6 3 12 3-15 3 11.5 2-2.5h3"

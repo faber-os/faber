@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { useCore } from '../lib/state/context';
   import { t } from '../lib/i18n';
   import { validatePartName } from '../lib/state/partName';
@@ -10,6 +11,7 @@
     type SettingValues,
   } from '../lib/state/connectorSettings';
   import type { ErrorBody, NewPart, SettingInfo, Simulate } from '../lib/state/types';
+  import { useDesktop } from '../components/desktopController.svelte';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
   import PortProblems from '../components/PortProblems.svelte';
@@ -49,7 +51,16 @@
   let values = $state<SettingValues>({});
   let settingsProblem = $state<{ key: string; message: string } | null>(null);
 
+  const desktop = useDesktop();
   const ports = $derived(core.ports);
+
+  // A fresh look each time the form opens: another browser may have installed a package.
+  $effect(() => untrack(() => void core.loadConnectors()));
+
+  function openConnectorSettings() {
+    const id = desktop.open('settings', { params: { section: 'connectors' } });
+    desktop.update(id, { params: { section: 'connectors' } });
+  }
   const connectors = $derived(core.connectors);
   const nameProblem = $derived(validatePartName(name));
   const showNameProblem = $derived(nameTouched && nameProblem !== null);
@@ -262,7 +273,23 @@
         </ErrorNotice>
       {:else if connectors === null}
         <p class="muted">{t('addPart.connector.loading')}</p>
-      {:else}
+      {/if}
+      {#if core.connectorProblems.length > 0}
+        <ErrorNotice
+          tone="warn"
+          error={{
+            message: t('addPart.connector.problems', { count: core.connectorProblems.length }),
+            hint: t('addPart.connector.problems.hint'),
+          }}
+        >
+          {#snippet actions()}
+            <button type="button" class="btn" onclick={openConnectorSettings}
+              >{t('addPart.connector.problems.open')}</button
+            >
+          {/snippet}
+        </ErrorNotice>
+      {/if}
+      {#if connectors && !core.connectorsError}
         <div class="choices">
           {#each connectors as c (c.id)}
             <label class="choice">

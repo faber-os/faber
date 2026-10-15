@@ -156,6 +156,10 @@ export const en = {
   'programs.properties.description': 'Details of one file or folder',
   'programs.about.title': 'About Faber',
   'programs.about.description': 'Versions and connection details',
+  'programs.install.title': 'Install connector',
+  'programs.install.description': 'Install a connector package (.faberpkg)',
+  'programs.position.title': 'Position viewer',
+  'programs.position.description': 'Live position of a GPS: coordinates, fix and satellites',
 
   // Errors the shell makes itself (errors the core sends are shown as sent)
   'errors.coreUnreachable.message': 'The shell could not reach the Faber core.',
@@ -243,6 +247,7 @@ export const en = {
   'parts.title.viewer': '{name} · scan',
   'parts.title.distance': '{name} · distance',
   'parts.title.base': '{name} · base',
+  'parts.title.position': '{name} · position',
   'parts.title.recordings': 'Recordings · Files',
 
   // What kind of link a port is
@@ -275,6 +280,13 @@ export const en = {
   'addPart.connector.serial': 'serial, {baud} baud',
   'addPart.connector.bridge': 'needs a bridge (Phase 4); simulated for now',
   'addPart.connector.provides': 'Provides {capabilities}',
+  // Installed connectors that couldn't be loaded (GET /api/v0/connectors/problems)
+  'addPart.connector.problems': {
+    one: 'One installed connector could not be loaded, so it is not in this list.',
+    other: '{count} installed connectors could not be loaded, so they are not in this list.',
+  },
+  'addPart.connector.problems.hint': 'Settings → Connectors says why, and what to do.',
+  'addPart.connector.problems.open': 'Open Settings',
 
   // Add part form: simulated parts (D36). `{connector}` is the connector's name.
   'addPart.source.simulated': 'Simulated',
@@ -460,6 +472,62 @@ export const en = {
   'distance.plot.label': 'The last {seconds} seconds',
   'distance.range': 'Range {min} to {max}',
 
+  // Position viewer (position@1, e.g. a GPS)
+  'position.waiting': 'Waiting for the first reading from <code>{address}</code>…',
+  'position.noFix': 'No fix yet',
+  'position.noFix.hint':
+    'A GPS needs a clear view of the sky. The first fix can take a minute or more after it is switched on.',
+  'position.latitude': 'Latitude',
+  'position.longitude': 'Longitude',
+  'position.altitude': 'Altitude',
+  'position.accuracy': 'Accuracy',
+  'position.fix': 'Fix',
+  'position.satellites': 'Satellites',
+  'position.fix.none': 'None',
+  'position.fix.fix2d': '2D (no altitude)',
+  'position.fix.fix3d': '3D',
+  'position.fix.dgps': '3D, corrected (DGPS)',
+  'position.fix.rtkFloat': 'RTK float',
+  'position.fix.rtkFixed': 'RTK fixed',
+  'position.north': '{deg}° N',
+  'position.south': '{deg}° S',
+  'position.east': '{deg}° E',
+  'position.west': '{deg}° W',
+  'position.accuracyValue': '± {value}',
+  'position.openMap': 'Open in OpenStreetMap',
+  'position.offline': 'Connect this computer to the internet to see it on a map.',
+
+  // Install dialog: a connector package (.faberpkg, docs/packages.md)
+  'install.windowTitle': 'Install {name}',
+  'install.loading': 'Reading the package…',
+  'install.noFile': 'There is no package to install here. Double-click a .faberpkg file in Files.',
+  'install.retry': 'Try again',
+  'install.kind.wasm': 'Code, run sandboxed (WebAssembly)',
+  'install.kind.declarative': 'Settings only (declarative)',
+  'install.facts.kind': 'Kind',
+  'install.facts.version': 'Version',
+  'install.facts.publisher': 'Publisher',
+  'install.facts.publisherUnknown': 'Not given',
+  'install.facts.provides': 'Provides',
+  'install.replaces': 'Replaces version {version}. Parts that use it restart with the new version.',
+  'install.touch.title': 'What it can touch',
+  'install.touch.serial': 'A serial port you pick, at {baud} baud',
+  'install.touch.bridge': 'A FaberLink bridge you pick',
+  'install.touch.nothingElse': 'Nothing else: no files, no network, no other hardware.',
+  'install.notChecked.title': 'Not checked by the Faber registry',
+  'install.notChecked.body':
+    'Install packages only from people you trust. Faber runs the connector in its sandbox, but nobody has reviewed this package.',
+  'install.readme': 'About this connector',
+  'install.readme.empty': 'The package has no description.',
+  'install.install': 'Install',
+  'install.update': 'Update',
+  'install.installing': 'Installing…',
+  'install.cancel': 'Cancel',
+  'install.done.title': '{name} is installed',
+  'install.done.body': 'Add it as a part: it is in the list of connectors in Add part now.',
+  'install.done.addPart': 'Add part',
+  'install.done.close': 'Close',
+
   // E-stop (taskbar)
   'estop.stop': 'Stop',
   'estop.stop.title': 'Stop everything that moves (Pause/Break)',
@@ -564,6 +632,7 @@ export const en = {
   'files.type.image': '{ext} image',
   'files.type.other': '{ext} file',
   'files.type.file': 'File',
+  'files.type.package': 'Connector package',
 
   // Names of new files and folders
   'files.newName.folder': 'New folder',
@@ -812,6 +881,31 @@ export const en = {
   'settings.nav.storage': 'Storage and backups',
   'settings.nav.about': 'About and diagnostics',
   'settings.nav.developer': 'Developer',
+  'settings.nav.connectors': 'Connectors',
+
+  // Settings → Connectors (Advanced): installed packages and connectors that couldn't be loaded
+  'settings.connectors.title': 'Connectors',
+  'settings.connectors.intro':
+    'Connector packages installed on this machine. Install one by double-clicking a .faberpkg file in Files. The built-in connectors are always there.',
+  'settings.connectors.empty': 'No packages installed.',
+  'settings.connectors.loading': 'Loading packages…',
+  'settings.connectors.meta': '{kind} · version {version} · installed from <code>{source}</code>',
+  'settings.connectors.publisher': 'by {publisher}',
+  'settings.connectors.notChecked': 'Not checked by the Faber registry',
+  'settings.connectors.usedBy': {
+    one: 'Used by {count} part, {parts}. Remove it in Parts to uninstall.',
+    other: 'Used by {count} parts, {parts}. Remove them in Parts to uninstall.',
+  },
+  'settings.connectors.uninstall': 'Uninstall',
+  'settings.connectors.uninstall.named': 'Uninstall {name}',
+  'settings.connectors.uninstall.title': 'Uninstall {name}?',
+  'settings.connectors.uninstall.body':
+    'Its connector disappears from Add part. You can install the package again later.',
+  'settings.connectors.uninstall.confirm': 'Uninstall',
+  'settings.connectors.uninstall.cancel': 'Cancel',
+  'settings.connectors.problems.title': 'Connectors that could not be loaded',
+  'settings.connectors.problems.intro':
+    'Faber runs without these. Each says what is wrong in <code>connectors/</code> in the data folder.',
   'settings.loading': 'Loading settings…',
 
   // Appearance

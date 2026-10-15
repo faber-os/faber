@@ -60,6 +60,46 @@ describe('createHttp', () => {
     });
   });
 
+  it('previews, installs and uninstalls packages, sending the file as raw bytes', async () => {
+    const preview = { connector: { id: 'acme' }, readme: '# Acme', captures: [], checked: false };
+    const info = { id: 'acme', version: '0.1.0', usedBy: [] };
+    const f = fakeFetch([
+      {
+        method: 'POST',
+        path: '/api/v0/packages?mode=preview&name=acme-0.1.0.faberpkg',
+        body: preview,
+      },
+      {
+        method: 'POST',
+        path: '/api/v0/packages?name=acme-0.1.0.faberpkg',
+        status: 201,
+        body: info,
+      },
+      { path: '/api/v0/packages', body: [info] },
+      { method: 'DELETE', path: '/api/v0/packages/acme', status: 204 },
+      { path: '/api/v0/connectors/problems', body: [{ folder: 'x', message: 'm', hint: 'h' }] },
+    ]);
+    const http = createHttp(f.fetch);
+    const file = new Uint8Array([0x50, 0x4b]);
+    expect(await http.previewPackage(file, 'acme-0.1.0.faberpkg')).toEqual(preview);
+    expect(f.calls[0]?.raw).toBe(file);
+    expect(await http.installPackage(file, 'acme-0.1.0.faberpkg')).toEqual(info);
+    expect(await http.getPackages()).toEqual([info]);
+    await expect(http.uninstallPackage('acme')).resolves.toBeUndefined();
+    expect(await http.getConnectorProblems()).toHaveLength(1);
+  });
+
+  it('downloads a whole file, of any size, as a blob', async () => {
+    const f = fakeFetch([
+      {
+        path: '/api/v0/files/content?path=home%3A%2Fa.faberpkg&download=1',
+        bytes: new Uint8Array([1, 2, 3]),
+      },
+    ]);
+    const blob = await createHttp(f.fetch).downloadFile('home:/a.faberpkg');
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
   it('throws the core ErrorBody as a CoreError', async () => {
     const error = {
       code: 'port-claimed',

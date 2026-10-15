@@ -292,6 +292,47 @@ describe('CoreState', () => {
     await vi.waitFor(() => expect(core.connectors).toEqual([]));
   });
 
+  it('loads the connectors that could not be loaded with the connectors', async () => {
+    const { core } = setup();
+    const problem = { folder: 'broken', message: 'It broke.', hint: 'Fix it.' };
+    f.route({ path: '/api/v0/connectors/problems', body: [problem] });
+    await core.loadConnectors();
+    expect(core.connectorProblems).toEqual([problem]);
+  });
+
+  it('installs a package, then offers its connector and lists it', async () => {
+    const { core } = setup();
+    const info = { id: 'acme', version: '0.1.0', usedBy: [] };
+    const acme = { id: 'acme' };
+    f.route({ method: 'POST', path: '/api/v0/packages?name=a.faberpkg', status: 201, body: info });
+    f.route({ path: '/api/v0/connectors', body: [acme] });
+    f.route({ path: '/api/v0/connectors/problems', body: [] });
+    f.route({ path: '/api/v0/packages', body: [info] });
+    const r = await core.installPackage(new Uint8Array([1]), 'a.faberpkg');
+    expect(r.ok).toBe(true);
+    expect(core.connectors).toEqual([acme]);
+    expect(core.packages).toEqual([info]);
+
+    const refused = {
+      code: 'package-in-use',
+      message: 'The connector "acme" is used by the part "front".',
+      hint: 'Remove those parts in the Parts window first, then uninstall it.',
+    };
+    f.route({
+      method: 'DELETE',
+      path: '/api/v0/packages/acme',
+      status: 409,
+      body: { error: refused },
+    });
+    expect(await core.uninstallPackage('acme')).toEqual({ ok: false, error: refused });
+    f.route({ method: 'DELETE', path: '/api/v0/packages/acme', status: 204 });
+    f.route({ path: '/api/v0/packages', body: [] });
+    f.route({ path: '/api/v0/connectors', body: [] });
+    expect((await core.uninstallPackage('acme')).ok).toBe(true);
+    expect(core.packages).toEqual([]);
+    expect(core.connectors).toEqual([]);
+  });
+
   it('maps core time to wall-clock time using the system info', async () => {
     const { core } = setup();
     await vi.waitFor(() => expect(core.system).not.toBeNull());

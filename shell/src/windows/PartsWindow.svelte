@@ -33,11 +33,11 @@
   let formKey = $state(0);
 
   // Opened to add something particular: from a recording's Properties ("Add a part on this
-  // recording": `addPort`), or from the World window ("Add a simulated base": `addSimulate`
-  // and `addConnector`). Start the form there.
+  // recording": `addPort`), from the World window ("Add a simulated base": `addSimulate`
+  // and `addConnector`), or after installing a package (`addConnector`). Start the form there.
   $effect(() => {
     const { addPort: port, addSimulate: simulate, addConnector: connector } = win.params;
-    if (!port && !simulate) return;
+    if (!port && !simulate && !connector) return;
     addPort = port ?? null;
     addSimulate = simulate === 'world' || simulate === 'manual' ? simulate : null;
     addConnector = connector ?? null;

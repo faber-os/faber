@@ -25,6 +25,8 @@
     openProperties,
   } from './fileOps';
   import FileIcon from './FileIcon.svelte';
+  import { isPackageFile } from '../lib/desktop/packages';
+  import { openDroppedPackage } from './installWindow';
   import { fileLook } from './fileLook';
   import { menuTrigger, useMenu } from './menuController.svelte';
   import { pinItem, runPinItem } from './programs';
@@ -352,9 +354,24 @@
       },
     };
   }
+
+  /** Files dragged in from this computer: connector packages dropped here open Install. */
+  function dragOver(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function drop(e: DragEvent) {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    for (const f of Array.from(e.dataTransfer.files)) {
+      if (isPackageFile(f.name)) openDroppedPackage(desktop, f);
+    }
+  }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions (keys act on the selected icon) -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions (keys act on the selected icon; drops install packages) -->
 <ul
   bind:this={root}
   class="icons"
@@ -367,6 +384,8 @@
     if (e.target === e.currentTarget) selected = null;
   }}
   onkeydown={keydown}
+  ondragover={dragOver}
+  ondrop={drop}
 >
   {#each icons as i (i.key)}
     {@const cell = placement.get(i.key)!}

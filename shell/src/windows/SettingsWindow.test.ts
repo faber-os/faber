@@ -141,6 +141,7 @@ describe('Settings', () => {
       'Name',
       'Date and time',
       'Storage and backups',
+      'Connectors',
       'About and diagnostics',
       'Developer',
     ]);
@@ -343,6 +344,43 @@ describe('Settings: about and diagnostics', () => {
     os: 'windows (x86_64)',
     timeZone: 'Europe/Copenhagen',
   };
+
+  it('lists installed packages, uninstalls one after asking, and explains connectors that could not load', async () => {
+    const acme = {
+      id: 'acme',
+      name: 'Acme ranger',
+      version: '0.1.0',
+      kind: 'wasm',
+      publisher: 'Ada',
+      installedAt: '2026-10-15T10:00:00Z',
+      source: 'acme-0.1.0.faberpkg',
+      checked: false,
+      usedBy: [],
+    };
+    const lines = { ...acme, id: 'lines', name: 'Lines', kind: 'declarative', usedBy: ['front'] };
+    const shell = setup([
+      { path: '/api/v0/packages', body: [acme, lines] },
+      {
+        path: '/api/v0/connectors/problems',
+        body: [{ folder: 'broken', message: 'faber.toml line 3: no.', hint: 'Fix line 3.' }],
+      },
+      { method: 'DELETE', path: '/api/v0/packages/acme', status: 204 },
+    ]);
+    const section = await screen.findByRole('region', { name: 'Connectors' });
+    await waitFor(() => expect(section).toHaveTextContent('Acme ranger'));
+    expect(section).toHaveTextContent('by Ada');
+    expect(section).toHaveTextContent('Not checked by the Faber registry');
+    expect(section).toHaveTextContent('Used by 1 part, "front".');
+    await waitFor(() => expect(section).toHaveTextContent('faber.toml line 3: no.'));
+    expect(section).toHaveTextContent('Fix line 3.');
+    expect(within(section).getByRole('button', { name: 'Uninstall Lines' })).toBeDisabled();
+
+    shell.fetch.route({ path: '/api/v0/packages', body: [lines] });
+    await userEvent.click(within(section).getByRole('button', { name: 'Uninstall Acme ranger' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Uninstall' }));
+    await waitFor(() => expect(section).not.toHaveTextContent('Acme ranger'));
+    expect(shell.fetch.calls.some((c) => c.method === 'DELETE')).toBe(true);
+  });
 
   it('says which Faber this is and where its data is', async () => {
     setup([{ path: '/api/v0/about', body: ABOUT }]);

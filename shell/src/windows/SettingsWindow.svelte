@@ -12,6 +12,7 @@
   import type { WindowDef, WindowProps } from '../components/windowDefs';
   import AboutSection from './settings/AboutSection.svelte';
   import AccessibilitySection from './settings/AccessibilitySection.svelte';
+  import ConnectorsSection from './settings/ConnectorsSection.svelte';
   import StorageSection from './settings/StorageSection.svelte';
   import TimeSection from './settings/TimeSection.svelte';
   import MachineSection from './settings/MachineSection.svelte';
@@ -51,6 +52,7 @@
     {
       group: 'settings.nav.group.advanced',
       items: [
+        { id: 'connectors', label: 'settings.nav.connectors', icon: 'package' },
         { id: 'about', label: 'settings.nav.about', icon: 'info' },
         { id: 'developer', label: 'settings.nav.developer', icon: 'warning' },
       ],
@@ -325,6 +327,7 @@
       <MachineSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
       <TimeSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
       <StorageSection winId={win.id} />
+      <ConnectorsSection winId={win.id} />
       <AboutSection winId={win.id} />
 
       <section id="{win.id}-developer" aria-labelledby="{win.id}-developer-h">
