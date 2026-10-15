@@ -469,7 +469,8 @@ screen. Every field has a default, so a settings.toml from an older Faber still 
 | `units.length` | `metric`, `imperial` | display only (D43) |
 | `time.timeZone` | `""`, or an IANA zone | `""` = the machine's own (`SystemInfo.timeZone`) |
 | `time.clock` | `24h`, `12h` | |
-| `taskbar.size`, `taskbar.pinned`, `desktop.icons` | | |
+| `taskbar.size`, `desktop.icons` | | |
+| `taskbar.pinned` | program keys, in order: `tool:<id>`, `accessory:<id>`, `app:<id>` | an app whose `[window] pinned = true` is added at the end when it is first installed (not on an update, so unpinning it sticks); uninstalling an app takes it out |
 | `developer.fullMachineFiles` | `false`, `true` | only through `/settings/developer` |
 
 Reset is its own endpoint rather than a `PUT` of the defaults because the defaults live in one

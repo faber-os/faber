@@ -3,20 +3,27 @@
  * were pinned, marked when they have windows open. Windows of programs that are not pinned get a
  * button each after them, in the order they were opened.
  *
- * Programs are named by their key (`tool:<id>` or `accessory:<id>`, docs/api.md), the same keys
- * Settings.taskbar.pinned stores.
+ * Programs are named by their key (`tool:<id>`, `accessory:<id>`, or `app:<id>` for an installed
+ * app's window; docs/api.md), the same keys Settings.taskbar.pinned stores.
  */
 
 export interface Program {
-  /** `tool:parts`, `accessory:files` … */
+  /** `tool:parts`, `accessory:files`, `app:wall-follower` … */
   key: string;
   /** The window kind it opens. */
   kind: string;
+  /**
+   * Only the windows of its kind with this key are its own: every app's window is of kind `app`,
+   * keyed by the app's id.
+   */
+  windowKey?: string;
 }
 
 export interface TaskWindow {
   id: string;
   kind: string;
+  /** What the window shows (an app's id for an app window). */
+  key?: string;
   minimised: boolean;
 }
 
@@ -41,12 +48,14 @@ export function taskbarItems(
   const byKey = new Map(programs.map((p) => [p.key, p]));
   const isActive = (w: TaskWindow) => w.id === focusedId && !w.minimised;
   const items: TaskItem[] = [];
-  const pinnedKinds = new Set<string>();
+  const claimed = new Set<string>();
   for (const key of new Set(pinned)) {
     const p = byKey.get(key);
-    if (!p) continue; // A program this shell doesn't have (an older or newer Faber).
-    pinnedKinds.add(p.kind);
-    const own = windows.filter((w) => w.kind === p.kind);
+    if (!p) continue; // A program this shell doesn't have (an older or newer Faber, or an app gone).
+    const own = windows.filter(
+      (w) => w.kind === p.kind && (p.windowKey === undefined || w.key === p.windowKey),
+    );
+    for (const w of own) claimed.add(w.id);
     items.push({
       type: 'program',
       key,
@@ -56,13 +65,14 @@ export function taskbarItems(
     });
   }
   for (const w of windows) {
-    if (pinnedKinds.has(w.kind)) continue;
+    if (claimed.has(w.id)) continue;
     items.push({ type: 'window', id: w.id, kind: w.kind, active: isActive(w) });
   }
   return items;
 }
 
-export type TaskClick = { do: 'open'; kind: string } | { do: 'activate'; id: string };
+/** `open` names the program (its key) as well as its window kind: an app opens its own window. */
+export type TaskClick = { do: 'open'; kind: string; key: string } | { do: 'activate'; id: string };
 
 /**
  * A click on a taskbar button: a pinned program with nothing open starts it; one with a window
@@ -72,7 +82,7 @@ export type TaskClick = { do: 'open'; kind: string } | { do: 'activate'; id: str
 export function taskClick(item: TaskItem, focusedId: string | null): TaskClick {
   if (item.type === 'window') return { do: 'activate', id: item.id };
   const ws = item.windows;
-  if (ws.length === 0) return { do: 'open', kind: item.kind };
+  if (ws.length === 0) return { do: 'open', kind: item.kind, key: item.key };
   if (ws.length === 1) return { do: 'activate', id: ws[0]! };
   const at = focusedId === null ? -1 : ws.indexOf(focusedId);
   if (at === -1 || !item.active) return { do: 'activate', id: ws.at(-1)! };

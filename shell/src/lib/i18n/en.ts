@@ -47,12 +47,15 @@ export const en = {
 
   // Start menu
   'startMenu.label': 'Start',
-  'startMenu.search.placeholder': 'Search programs, parts and files',
+  'startMenu.search.placeholder': 'Search programs, apps, parts and files',
   'startMenu.search.label': 'Search Faber',
   'startMenu.search.nothing': 'Nothing called “{query}”.',
   'startMenu.programs': 'Programs',
   'startMenu.parts': 'Parts',
   'startMenu.viewers': 'Viewers',
+  'startMenu.apps': 'Apps',
+  'startMenu.app.desc': 'App, version {version}',
+  'startMenu.group.app': 'App',
   'startMenu.recent': 'Recent files',
   'startMenu.recent.empty': 'Files you open show up here.',
   'startMenu.recent.home': 'Home',

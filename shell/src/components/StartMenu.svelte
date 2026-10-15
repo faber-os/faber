@@ -18,12 +18,15 @@
   import { openEntry } from './fileOps';
   import Icon from './Icon.svelte';
   import { menuTrigger, useMenu, type MenuRequest } from './menuController.svelte';
-  import { pinItem, runPinItem } from './programs';
+  import { appProgram, pinItem, runPinItem } from './programs';
+  import { openAppWindow } from './appWindow';
+  import type { AppInfo } from '../lib/state/types';
   import type { WindowDef } from './windowDefs';
 
   /**
-   * The start menu: a search field, every program as a grid of icons, part viewers, and the files
-   * opened lately; the power button at the bottom. Typing searches programs, parts and recent files.
+   * The start menu: a search field, every program as a grid of icons, the installed apps that have
+   * a window, part viewers, and the files opened lately; the power button at the bottom. Typing
+   * searches programs, apps, parts and recent files.
    */
   let { defs, onclose }: { defs: WindowDef[]; onclose: (returnFocus: boolean) => void } = $props();
 
@@ -59,6 +62,13 @@
     }),
   );
   const viewers = $derived(parts.filter((p) => p.viewer));
+  /** Installed apps with a window, by their window's title (or name). */
+  const apps = $derived((core.apps ?? []).filter((a) => a.ui));
+  const appTitle = (a: AppInfo) => a.window?.title ?? a.name;
+  const foundApps = $derived.by(() => {
+    const q = query.trim().toLowerCase();
+    return q ? apps.filter((a) => appTitle(a).toLowerCase().includes(q)) : [];
+  });
   const results = $derived(searchLauncher(query, { programs, parts, files: desktop.recent }));
   const searching = $derived(query.trim() !== '');
   const host = typeof location === 'undefined' ? '' : location.host;
@@ -108,6 +118,11 @@
     onclose(false);
   }
 
+  function openApp(a: AppInfo) {
+    openAppWindow(desktop, a);
+    onclose(false);
+  }
+
   function openPart(p: LaunchPart) {
     if (p.viewer) {
       desktop.open('laser-scan', {
@@ -125,6 +140,20 @@
   }
 
   function tileMenu(target: HTMLElement): MenuRequest | null {
+    const appId = target.closest<HTMLElement>('[data-app]')?.dataset.app;
+    const a = apps.find((x) => x.id === appId);
+    if (a) {
+      const key = appProgram(a.id);
+      return {
+        label: appTitle(a),
+        header: { title: appTitle(a), icon: 'grid' },
+        entries: [item('open', t('menu.open'), { icon: 'open' }), pinItem(core, key)],
+        onSelect: (id) => {
+          if (runPinItem(core, key, id)) return;
+          if (id === 'open') openApp(a);
+        },
+      };
+    }
     const kind = target.closest<HTMLElement>('[data-kind]')?.dataset.kind;
     const d = defs.find((x) => x.kind === kind);
     if (!d) return null;
@@ -193,7 +222,7 @@
     use:menuTrigger={{ menu, build: tileMenu }}
   >
     {#if searching}
-      {#if results.programs.length + results.parts.length + results.files.length === 0}
+      {#if results.programs.length + foundApps.length + results.parts.length + results.files.length === 0}
         <p class="nothing">{t('startMenu.search.nothing', { query: query.trim() })}</p>
       {/if}
       {#if results.programs.length}
@@ -207,6 +236,22 @@
                 ><span class="name">{d.title}</span><span class="desc">{d.description}</span></span
               >
               <span class="tag">{p.group}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+      {#if foundApps.length}
+        <div class="group" role="group" aria-label={t('startMenu.apps')}>
+          <p class="heading" aria-hidden="true">{t('startMenu.apps')}</p>
+          {#each foundApps as a (a.id)}
+            <button class="row" role="menuitem" data-app={a.id} onclick={() => openApp(a)}>
+              <AppIcon icon="grid" colour="parts" size={32} src={a.icon ?? null} />
+              <span class="text"
+                ><span class="name">{appTitle(a)}</span><span class="desc"
+                  >{t('startMenu.app.desc', { version: a.version })}</span
+                ></span
+              >
+              <span class="tag">{t('startMenu.group.app')}</span>
             </button>
           {/each}
         </div>
@@ -263,6 +308,25 @@
           {/each}
         </div>
       </div>
+      {#if apps.length}
+        <div class="group" role="group" aria-label={t('startMenu.apps')}>
+          <p class="heading" aria-hidden="true">{t('startMenu.apps')}</p>
+          <div class="grid">
+            {#each apps as a (a.id)}
+              <button
+                class="tile"
+                role="menuitem"
+                data-app={a.id}
+                title={appTitle(a)}
+                onclick={() => openApp(a)}
+              >
+                <AppIcon icon="grid" colour="parts" size={44} src={a.icon ?? null} />
+                <span class="tile-name">{appTitle(a)}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
       {#if viewers.length}
         <div class="group" role="group" aria-label={t('startMenu.viewers')}>
           <p class="heading" aria-hidden="true">{t('startMenu.viewers')}</p>

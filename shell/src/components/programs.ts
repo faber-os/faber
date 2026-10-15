@@ -2,12 +2,30 @@ import { item, type MenuItem } from '../lib/desktop/contextMenu';
 import { t } from '../lib/i18n';
 import { isPinned, pin, unpin, type Program } from '../lib/desktop/taskbar';
 import type { CoreState } from '../lib/state/core.svelte';
-import type { Settings, TaskbarSize } from '../lib/state/types';
+import type { AppInfo, Settings, TaskbarSize } from '../lib/state/types';
 import type { WindowDef } from './windowDefs';
 
 /** The programs (tools and accessories that have a program key), as the taskbar knows them. */
 export function programsOf(defs: readonly WindowDef[]): Program[] {
   return defs.flatMap((d) => (d.program ? [{ key: d.program, kind: d.kind }] : []));
+}
+
+/** An app's program key: `app:<id>`, as Settings.taskbar.pinned stores it. */
+export function appProgram(id: string): string {
+  return `app:${id}`;
+}
+
+/** The installed apps with a window, as programs: each its own `app` window, keyed by its id. */
+export function appPrograms(apps: readonly AppInfo[] | null): Program[] {
+  return (apps ?? []).flatMap((a) =>
+    a.ui ? [{ key: appProgram(a.id), kind: 'app', windowKey: a.id }] : [],
+  );
+}
+
+/** The app a program key names, if it is an installed app's. */
+export function appOf(core: CoreState, key: string): AppInfo | null {
+  if (!key.startsWith('app:')) return null;
+  return core.apps?.find((a) => appProgram(a.id) === key) ?? null;
 }
 
 export function pinnedKeys(core: CoreState): string[] {

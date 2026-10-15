@@ -69,6 +69,33 @@ describe('taskbarItems', () => {
     expect(items[0]).toMatchObject({ active: false });
   });
 
+  it('gives each pinned app its own windows only, though every app window is of one kind', () => {
+    const programs: Program[] = [
+      ...PROGRAMS,
+      { key: 'app:wall-follower', kind: 'app', windowKey: 'wall-follower' },
+      { key: 'app:gauges', kind: 'app', windowKey: 'gauges' },
+    ];
+    const windows: TaskWindow[] = [
+      { id: 'w1', kind: 'app', key: 'gauges', minimised: false },
+      { id: 'w2', kind: 'app', key: 'wall-follower', minimised: false },
+    ];
+    const items = taskbarItems(['app:wall-follower'], programs, windows, 'w1');
+    expect(items).toEqual([
+      { type: 'program', key: 'app:wall-follower', kind: 'app', windows: ['w2'], active: false },
+      { type: 'window', id: 'w1', kind: 'app', active: true },
+    ]);
+    expect(
+      taskClick(
+        { ...(items[0] as Extract<(typeof items)[0], { type: 'program' }>), windows: [] },
+        null,
+      ),
+    ).toEqual({
+      do: 'open',
+      kind: 'app',
+      key: 'app:wall-follower',
+    });
+  });
+
   it('skips pinned keys this shell does not know, and duplicates', () => {
     const items = taskbarItems(['app:weather', 'tool:parts', 'tool:parts'], PROGRAMS, [], null);
     expect(items.map((i) => (i.type === 'program' ? i.key : ''))).toEqual(['tool:parts']);
@@ -80,7 +107,11 @@ describe('taskClick', () => {
     ({ type: 'program', key: 'accessory:notes', kind: 'notes', windows, active }) as const;
 
   it('starts a pinned program that is not open', () => {
-    expect(taskClick(program([]), null)).toEqual({ do: 'open', kind: 'notes' });
+    expect(taskClick(program([]), null)).toEqual({
+      do: 'open',
+      kind: 'notes',
+      key: 'accessory:notes',
+    });
   });
 
   it('activates its one window', () => {

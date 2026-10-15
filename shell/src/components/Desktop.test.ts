@@ -127,4 +127,24 @@ describe('Desktop', () => {
     await userEvent.click(within(region).getByRole('button', { name: 'Dismiss' }));
     expect(screen.queryByRole('region', { name: 'Notices' })).not.toBeInTheDocument();
   });
+
+  it("marks a viewer of an app's derived signal with the app badge in its title bar", async () => {
+    const shell = setup();
+    shell.desktop.open('distance', {
+      key: 'app:wall-follower/wall-distance',
+      title: 'Wall follower · wall-distance',
+      params: { address: 'app:wall-follower/wall-distance', part: 'app:wall-follower' },
+    });
+    shell.desktop.open('distance', {
+      key: 'front/distance',
+      title: 'front · distance',
+      params: { address: 'front/distance', part: 'front' },
+    });
+    const derived = await screen.findByRole('dialog', { name: 'Wall follower · wall-distance' });
+    expect(
+      within(derived).getByTitle('Computed and published by the app wall-follower, not a part'),
+    ).toHaveTextContent('app');
+    const own = screen.getByRole('dialog', { name: 'front · distance' });
+    expect(within(own).queryByText('app')).toBeNull();
+  });
 });

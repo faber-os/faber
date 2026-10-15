@@ -581,6 +581,34 @@ mod backups {
         assert!(!c.dir.path().join("packages/staging/gauges").exists(), "staging cleaned");
     }
 
+    async fn pinned(c: &TestCore) -> Vec<String> {
+        let (_, s) = call(&c.app, "GET", "/api/v0/settings", None).await;
+        serde_json::from_value(s["taskbar"]["pinned"].clone()).unwrap()
+    }
+
+    /// `[window] pinned = true` pins an app's window to the taskbar when it is first installed;
+    /// an update leaves the taskbar as the user has it, and uninstalling unpins it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_app_that_asks_is_pinned_on_its_first_install_and_unpinning_sticks() {
+        let c = core();
+        let pinned_app = GAUGES.replace("[[requires]]", "[window]\npinned = true\n[[requires]]");
+        install(&c, &pinned_app).await;
+        assert_eq!(pinned(&c).await.last().map(String::as_str), Some("app:gauges"));
+        let (_, mut settings) = call(&c.app, "GET", "/api/v0/settings", None).await;
+        let without: Vec<String> = pinned(&c).await.into_iter().filter(|k| k != "app:gauges").collect();
+        settings["taskbar"]["pinned"] = json!(without);
+        assert_eq!(json_call(&c.app, "PUT", "/api/v0/settings", settings).await.0, StatusCode::OK);
+        install(&c, &pinned_app.replace("0.1.0", "0.2.0")).await;
+        assert!(!pinned(&c).await.contains(&"app:gauges".to_string()), "unpinned stays unpinned");
+        call(&c.app, "DELETE", "/api/v0/packages/gauges", None).await;
+        install(&c, &pinned_app).await;
+        assert!(pinned(&c).await.contains(&"app:gauges".to_string()), "a fresh install pins again");
+        call(&c.app, "DELETE", "/api/v0/packages/gauges", None).await;
+        assert!(!pinned(&c).await.contains(&"app:gauges".to_string()), "uninstalling unpins");
+        install(&c, GAUGES).await;
+        assert!(!pinned(&c).await.contains(&"app:gauges".to_string()), "only an app that asks");
+    }
+
     /// An app's state lives in the core and is written at most once a second; a backup made right
     /// after a window changed it still holds the change.
     #[tokio::test(flavor = "multi_thread")]

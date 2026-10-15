@@ -65,7 +65,8 @@ pub enum TaskbarSize {
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct Taskbar {
-    /// Programs pinned to the taskbar, in order: `tool:<id>` or `accessory:<id>`.
+    /// Programs pinned to the taskbar, in order: `tool:<id>`, `accessory:<id>` or `app:<id>`
+    /// (an installed app's window).
     pub pinned: Vec<String>,
     pub size: TaskbarSize,
 }
@@ -304,6 +305,23 @@ impl SettingsStore {
         self.save(&mut cur, new)
     }
 
+    /// Pins `program` to the end of the taskbar, or unpins it. Nothing changes (and nothing is
+    /// written) when it already is as asked.
+    pub fn set_pinned(&self, program: &str, on: bool) -> Result<Settings, SettingsError> {
+        let mut cur = self.current.lock().expect("settings lock");
+        let pinned = cur.taskbar.pinned.iter().any(|k| k == program);
+        if pinned == on {
+            return Ok(cur.clone());
+        }
+        let mut new = cur.clone();
+        if on {
+            new.taskbar.pinned.push(program.to_string());
+        } else {
+            new.taskbar.pinned.retain(|k| k != program);
+        }
+        self.save(&mut cur, new)
+    }
+
     /// Back to the defaults: every setting, including the developer settings (so whole-machine
     /// files are off again). Parts and files are not settings and stay as they are.
     /// Everything back to its default, except the machine's name: resetting the desktop must
@@ -434,6 +452,21 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join(FILE_NAME)).unwrap();
         assert!(text.starts_with("# Faber settings"));
         assert_eq!(SettingsStore::load(dir.path()).get(), new);
+    }
+
+    #[test]
+    fn a_program_is_pinned_once_at_the_end_and_unpinned() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = SettingsStore::load(dir.path());
+        let rx = s.watch();
+        s.set_pinned("app:wall-follower", true).unwrap();
+        s.set_pinned("app:wall-follower", true).unwrap();
+        assert_eq!(s.get().taskbar.pinned.last().map(String::as_str), Some("app:wall-follower"));
+        assert_eq!(s.get().taskbar.pinned.iter().filter(|k| *k == "app:wall-follower").count(), 1);
+        assert_eq!(*rx.borrow(), 1, "pinning twice is one change");
+        s.set_pinned("app:wall-follower", false).unwrap();
+        assert!(!s.get().taskbar.pinned.iter().any(|k| k == "app:wall-follower"));
+        assert_eq!(SettingsStore::load(dir.path()).get(), s.get(), "saved");
     }
 
     #[test]

@@ -4,7 +4,7 @@
   import { item, separator, type MenuEntry } from '../lib/desktop/contextMenu';
   import { taskClick, taskbarItems, type TaskItem } from '../lib/desktop/taskbar';
   import AppIcon from './AppIcon.svelte';
-  import { windowIcon } from './appWindow';
+  import { openAppWindow, windowIcon } from './appWindow';
   import Clock from './Clock.svelte';
   import EstopButton from './EstopButton.svelte';
   import EstopRelease from './EstopRelease.svelte';
@@ -12,7 +12,16 @@
   import { useDesktop } from './desktopController.svelte';
   import Logo from './Logo.svelte';
   import { menuTrigger, useMenu, type MenuRequest } from './menuController.svelte';
-  import { pinItem, pinnedKeys, programsOf, runPinItem, setTaskbarSize } from './programs';
+  import {
+    appOf,
+    appProgram,
+    appPrograms,
+    pinItem,
+    pinnedKeys,
+    programsOf,
+    runPinItem,
+    setTaskbarSize,
+  } from './programs';
   import StartMenu from './StartMenu.svelte';
   import type { WindowDef } from './windowDefs';
 
@@ -33,7 +42,7 @@
   let root: HTMLDivElement | undefined = $state();
 
   const large = $derived(core.settings?.taskbar.size === 'large');
-  const programs = $derived(programsOf(defs));
+  const programs = $derived([...programsOf(defs), ...appPrograms(core.apps)]);
   const items = $derived(
     taskbarItems(pinnedKeys(core), programs, desktop.state.windows, desktop.state.focusedId),
   );
@@ -47,9 +56,9 @@
     return defs.find((d) => d.kind === kind);
   }
 
-  /** An app window's own icon (an image), for a window's button. */
+  /** An app's own icon (an image), for its pinned button or its window's button. */
   function imageIcon(i: TaskItem): string | null {
-    if (i.type !== 'window') return null;
+    if (i.type === 'program') return appOf(core, i.key)?.icon ?? null;
     const w = desktop.state.windows.find((x) => x.id === i.id);
     return w ? windowIcon(core, w) : null;
   }
@@ -58,8 +67,14 @@
     return i.type === 'program' ? i.key : i.id;
   }
 
+  /** A pinned app's name, as its window is titled. */
+  function appTitle(key: string): string | null {
+    const app = appOf(core, key);
+    return app ? (app.window?.title ?? app.name) : null;
+  }
+
   function label(i: TaskItem): string {
-    if (i.type === 'program') return def(i.kind)?.title ?? i.key;
+    if (i.type === 'program') return appTitle(i.key) ?? def(i.kind)?.title ?? i.key;
     return (() => {
       const w = desktop.state.windows.find((x) => x.id === i.id);
       return w ? desktop.titleOf(w) : '';
@@ -72,14 +87,21 @@
 
   function click(i: TaskItem) {
     const c = taskClick(i, desktop.state.focusedId);
-    if (c.do === 'open') desktop.open(c.kind);
-    else desktop.activate(c.id);
+    if (c.do === 'activate') desktop.activate(c.id);
+    else openProgram(c.key, c.kind);
+  }
+
+  /** Opens a program's window: an app's own, or a tool's or accessory's. */
+  function openProgram(key: string, kind: string) {
+    const app = appOf(core, key);
+    if (app) openAppWindow(desktop, app);
+    else desktop.open(kind);
   }
 
   function windowMenu(id: string): MenuRequest | null {
     const w = desktop.state.windows.find((x) => x.id === id);
     if (!w) return null;
-    const program = def(w.kind)?.program;
+    const program = w.kind === 'app' ? appProgram(w.key) : def(w.kind)?.program;
     return {
       label: desktop.titleOf(w),
       header: { title: desktop.titleOf(w), icon: def(w.kind)?.icon ?? 'info' },
@@ -106,6 +128,8 @@
 
   function programMenu(i: Extract<TaskItem, { type: 'program' }>): MenuRequest {
     const d = def(i.kind);
+    const app = appOf(core, i.key);
+    const title = appTitle(i.key) ?? d?.title ?? i.key;
     const wins = i.windows.flatMap((id) => {
       const w = desktop.state.windows.find((x) => x.id === id);
       return w ? [w] : [];
@@ -115,19 +139,20 @@
       wins.length > 0 && separator(),
       wins.length === 0
         ? item('new', t('menu.open'), { icon: 'open' })
-        : !!d?.multiple && item('new', t('taskbar.menu.newWindow'), { icon: 'newWindow' }),
+        : !app && !!d?.multiple && item('new', t('taskbar.menu.newWindow'), { icon: 'newWindow' }),
       pinItem(core, i.key),
       wins.length > 0 && separator(),
       wins.length === 1 && item('close', t('taskbar.menu.closeWindow'), { icon: 'close' }),
       wins.length > 1 && item('close', t('taskbar.menu.closeAllWindows'), { icon: 'close' }),
     ];
     return {
-      label: d?.title ?? i.key,
-      header: { title: d?.title ?? i.key, detail: d?.description, icon: d?.icon ?? 'info' },
+      label: title,
+      header: { title, detail: app ? undefined : d?.description, icon: d?.icon ?? 'info' },
       entries,
       onSelect: (choice: string) => {
         if (runPinItem(core, i.key, choice)) return;
         if (choice.startsWith('win:')) desktop.focus(choice.slice(4));
+        else if (choice === 'new' && app) openAppWindow(desktop, app);
         else if (choice === 'new')
           desktop.open(i.kind, d?.multiple ? { key: `${i.kind}:${Date.now()}` } : {});
         else if (choice === 'close') for (const w of wins) desktop.requestClose(w.id);

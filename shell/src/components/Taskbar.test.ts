@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { DEFAULT_SETTINGS, fakeShell } from '../test/fakeShell';
+import { DEFAULT_SETTINGS, WALL_FOLLOWER, fakeShell } from '../test/fakeShell';
 import type { Settings } from '../lib/state/types';
 import { WINDOW_DEFS } from '../windows/registry';
 import Desktop from './Desktop.svelte';
@@ -148,5 +148,37 @@ describe('Opening files in Notes', () => {
     ]);
     // Both files are now the newest recent files.
     expect(shell.desktop.recent.map((f) => f.name)).toEqual(['a.txt', 'b.txt']);
+  });
+
+  it("shows a pinned app by its name and icon, and opens the app's own window", async () => {
+    const pinned = {
+      ...DEFAULT_SETTINGS,
+      taskbar: { ...DEFAULT_SETTINGS.taskbar, pinned: ['tool:parts', 'app:wall-follower'] },
+    };
+    const shell = setup(pinned);
+    shell.pushApps([WALL_FOLLOWER]);
+    const button = await within(bar()).findByRole('button', { name: 'Wall follower' });
+    expect(button.querySelector('img')).toHaveAttribute('src', '/apps/wall-follower/icon.svg');
+    await userEvent.click(button);
+    const w = shell.desktop.state.windows.at(-1)!;
+    expect([w.kind, w.key]).toEqual(['app', 'wall-follower']);
+    expect(names()).toEqual(['Parts', 'Wall follower']);
+    expect(within(bar()).getByRole('button', { name: 'Wall follower' })).toHaveClass('open');
+  });
+
+  it('pins an open app window from its taskbar button', async () => {
+    const shell = setup();
+    shell.pushApps([WALL_FOLLOWER]);
+    shell.desktop.open('app', {
+      key: 'wall-follower',
+      title: 'Wall follower',
+      params: { app: 'wall-follower' },
+    });
+    const button = await within(bar()).findByRole('button', { name: 'Wall follower' });
+    await fireEvent.contextMenu(button, { clientX: 300, clientY: 580 });
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Pin to taskbar' }));
+    await waitFor(() =>
+      expect(savedSettings(shell)?.taskbar.pinned).toContain('app:wall-follower'),
+    );
   });
 });
