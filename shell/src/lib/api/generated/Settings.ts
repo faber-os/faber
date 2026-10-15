@@ -3,8 +3,9 @@ import type { Accessibility } from "./Accessibility";
 import type { Appearance } from "./Appearance";
 import type { DesktopLayout } from "./DesktopLayout";
 import type { DeveloperSettings } from "./DeveloperSettings";
+import type { MachineIdentity } from "./MachineIdentity";
 import type { Taskbar } from "./Taskbar";
 import type { TimeSettings } from "./TimeSettings";
 import type { Units } from "./Units";
 
-export type Settings = { appearance: Appearance, accessibility: Accessibility, units: Units, time: TimeSettings, desktop: DesktopLayout, taskbar: Taskbar, developer: DeveloperSettings, };
+export type Settings = { machine: MachineIdentity, appearance: Appearance, accessibility: Accessibility, units: Units, time: TimeSettings, desktop: DesktopLayout, taskbar: Taskbar, developer: DeveloperSettings, };

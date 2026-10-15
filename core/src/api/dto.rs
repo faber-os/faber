@@ -537,7 +537,8 @@ pub struct BackupInfo {
 // Settings types live in `crate::settings` (layer 2 owns its data); re-exported for the wire.
 pub use crate::settings::{
     Accessibility, Appearance, ClockFormat, DesktopLayout, DeveloperChange, DeveloperSettings, IconPosition,
-    LengthUnit, Preference, Settings, Taskbar, TaskbarSize, TextSize, Theme, TimeSettings, Units,
+    LengthUnit, MachineIdentity, Preference, Settings, Taskbar, TaskbarSize, TextSize, Theme, TimeSettings,
+    Units,
 };
 
 #[cfg(test)]

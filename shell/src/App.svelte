@@ -13,6 +13,7 @@
   import { DisplayPrefs } from './components/display.svelte';
   import { WINDOW_DEFS, WINDOW_KINDS } from './windows/registry';
   import { taskbarHeight } from './lib/desktop/taskbar';
+  import { pageTitle } from './lib/desktop/machineName';
 
   const core = createCore();
   const storage = browserStorage();
@@ -47,6 +48,10 @@
 
   $effect(() => {
     document.documentElement.dataset.theme = theme.resolved;
+  });
+
+  $effect(() => {
+    document.title = pageTitle(core.settings?.machine.name);
   });
 
   // Accessibility (D40): base.css turns animations off under data-motion="reduce", and every

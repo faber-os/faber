@@ -39,7 +39,7 @@ impl BackupError {
         BackupError {
             code: "backup-invalid",
             message: message.into(),
-            hint: "Pick a backup Faber made (home:/Backups/faber-backup-….zip).".into(),
+            hint: "Pick a backup Faber made (in home:/Backups, named …-backup-….zip).".into(),
         }
     }
 
@@ -150,10 +150,11 @@ fn write_zip(src: &Sources, out: &Path) -> Result<(), BackupError> {
     file.sync_all().map_err(io_err)
 }
 
-/// `faber-backup-2026-10-15-1430.zip`: the minute it was made, in `zone` (UTC if unknown).
-pub fn file_name(now: jiff::Timestamp, zone: &str) -> String {
+/// `sennep-backup-2026-10-15-1430.zip`: the machine's name and the minute it was made, in `zone`
+/// (UTC if unknown).
+pub fn file_name(now: jiff::Timestamp, zone: &str, machine: &str) -> String {
     let tz = jiff::tz::TimeZone::get(zone).unwrap_or(jiff::tz::TimeZone::UTC);
-    format!("faber-backup-{}.zip", now.to_zoned(tz).strftime("%Y-%m-%d-%H%M"))
+    format!("{machine}-backup-{}.zip", now.to_zoned(tz).strftime("%Y-%m-%d-%H%M"))
 }
 
 /// One file or folder from the home folder, inside a backup.
@@ -403,8 +404,8 @@ mod tests {
     #[test]
     fn backups_are_named_after_the_minute_in_the_machines_time_zone() {
         let t: jiff::Timestamp = "2026-10-15T12:30:59Z".parse().unwrap();
-        assert_eq!(file_name(t, "Europe/Copenhagen"), "faber-backup-2026-10-15-1430.zip");
-        assert_eq!(file_name(t, "UTC"), "faber-backup-2026-10-15-1230.zip");
-        assert_eq!(file_name(t, "Not/AZone"), "faber-backup-2026-10-15-1230.zip", "unknown: UTC");
+        assert_eq!(file_name(t, "Europe/Copenhagen", "faber"), "faber-backup-2026-10-15-1430.zip");
+        assert_eq!(file_name(t, "UTC", "sennep"), "sennep-backup-2026-10-15-1230.zip");
+        assert_eq!(file_name(t, "Not/AZone", "faber"), "faber-backup-2026-10-15-1230.zip", "unknown: UTC");
     }
 }

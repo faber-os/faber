@@ -14,6 +14,7 @@
   import AccessibilitySection from './settings/AccessibilitySection.svelte';
   import StorageSection from './settings/StorageSection.svelte';
   import TimeSection from './settings/TimeSection.svelte';
+  import MachineSection from './settings/MachineSection.svelte';
   import UnitsSection from './settings/UnitsSection.svelte';
 
   let { win }: WindowProps = $props();
@@ -39,6 +40,7 @@
     {
       group: 'This machine',
       items: [
+        { id: 'machine', label: 'Name', icon: 'nut' },
         { id: 'time', label: 'Date and time', icon: 'clock' },
         { id: 'storage', label: 'Storage and backups', icon: 'archive' },
       ],
@@ -319,6 +321,7 @@
         </fieldset>
       </section>
 
+      <MachineSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
       <TimeSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
       <StorageSection winId={win.id} />
       <AboutSection winId={win.id} />

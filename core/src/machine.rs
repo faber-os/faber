@@ -743,8 +743,10 @@ impl Machine {
             "Delete old backups or recordings and empty the Trash, or leave the recordings out.",
         )?;
         let folder = home.join(Special::Backups.name());
-        let name =
-            files::unique_name(&folder, &backup::file_name(jiff::Timestamp::now(), &self.display_zone()));
+        let name = files::unique_name(
+            &folder,
+            &backup::file_name(jiff::Timestamp::now(), &self.display_zone(), &self.settings().machine.name),
+        );
         let bytes = backup::create(&src, &folder.join(&name))?;
         let p = VPath::home(&["Backups", &name]);
         tracing::info!(target: "core::backup", "saved the backup {p} ({bytes} bytes)");
@@ -785,7 +787,7 @@ impl Machine {
                         ErrorKind::Unprocessable,
                         "backup-invalid",
                         format!("The backup holds \"{}\", which isn't a name Faber can use.", i.path),
-                        "Pick a backup Faber made (home:/Backups/faber-backup-….zip).",
+                        "Pick a backup Faber made (in home:/Backups, named …-backup-….zip).",
                     )
                 })
             })

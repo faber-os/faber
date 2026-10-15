@@ -180,10 +180,38 @@ pub struct TimeSettings {
     pub clock: ClockFormat,
 }
 
+/// Which machine this is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct MachineIdentity {
+    /// The machine's name, e.g. `sennep`: shown in the browser tab, About and backup names, and
+    /// its network name (`sennep.local`) once Faber runs on the Pi image. Lowercase letters,
+    /// digits and single dashes, so it is a valid host name.
+    pub name: String,
+}
+
+impl Default for MachineIdentity {
+    fn default() -> Self {
+        MachineIdentity { name: DEFAULT_MACHINE_NAME.into() }
+    }
+}
+
+pub const DEFAULT_MACHINE_NAME: &str = "faber";
+
+/// A host name label: 1–63 of `a-z`, `0-9` and `-`, not starting or ending with `-`.
+pub fn valid_machine_name(name: &str) -> bool {
+    (1..=63).contains(&name.len())
+        && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct Settings {
+    pub machine: MachineIdentity,
     pub appearance: Appearance,
     pub accessibility: Accessibility,
     pub units: Units,
@@ -267,9 +295,12 @@ impl SettingsStore {
 
     /// Back to the defaults: every setting, including the developer settings (so whole-machine
     /// files are off again). Parts and files are not settings and stay as they are.
+    /// Everything back to its default, except the machine's name: resetting the desktop must
+    /// not rename the machine (and, on the Pi, its network address).
     pub fn reset(&self) -> Result<Settings, SettingsError> {
         let mut cur = self.current.lock().expect("settings lock");
-        self.save(&mut cur, Settings::default())
+        let fresh = Settings { machine: cur.machine.clone(), ..Settings::default() };
+        self.save(&mut cur, fresh)
     }
 
     /// Takes settings from a backup. This machine's developer settings stay as they are: a
@@ -280,6 +311,9 @@ impl SettingsStore {
         if check(&restored).is_err() {
             // A zone this machine doesn't know (an older time-zone database): use its own.
             restored.time.time_zone.clear();
+            if !valid_machine_name(&restored.machine.name) {
+                restored.machine = cur.machine.clone();
+            }
         }
         self.save(&mut cur, restored)
     }
@@ -328,6 +362,13 @@ pub fn parse(text: &str) -> Result<Settings, SettingsError> {
 
 /// What `update` refuses: values the shell could never show.
 fn check(s: &Settings) -> Result<(), SettingsError> {
+    if !valid_machine_name(&s.machine.name) {
+        return Err(SettingsError::new(
+            "invalid-machine-name",
+            format!("\"{}\" can't be a machine name.", s.machine.name),
+            "Use lowercase letters, digits and dashes, like \"sennep\" or \"rover-2\" (at most 63).",
+        ));
+    }
     let zone = &s.time.time_zone;
     if !zone.is_empty() && jiff::tz::TimeZone::get(zone).is_err() {
         return Err(SettingsError::new(
@@ -541,5 +582,24 @@ fullMachineFiles = true
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(FILE_NAME), "appearance = 5").unwrap();
         assert_eq!(SettingsStore::load(dir.path()).get(), Settings::default());
+    }
+
+    #[test]
+    fn the_machine_has_a_name_that_is_a_valid_host_name() {
+        assert_eq!(Settings::default().machine.name, "faber");
+        for good in ["sennep", "rover-2", "a", &"x".repeat(63)] {
+            assert!(valid_machine_name(good), "{good}");
+        }
+        for bad in ["", "Sennep", "-a", "a-", "my robot", "æble", &"x".repeat(64)] {
+            assert!(!valid_machine_name(bad), "{bad}");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path());
+        let mut s = store.get();
+        s.machine.name = "My Robot".into();
+        assert_eq!(store.update(s.clone()).unwrap_err().code, "invalid-machine-name");
+        s.machine.name = "sennep".into();
+        store.update(s).unwrap();
+        assert_eq!(store.reset().unwrap().machine.name, "sennep", "reset keeps the name");
     }
 }

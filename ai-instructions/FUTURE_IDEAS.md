@@ -15,8 +15,7 @@ See also the "Later" section of `docs/roadmap.md`.
 
 ## Settings
 - (medium) Translation files (D44): extract shell strings, one file per language, Danish as the test language; community translations as store packages.
-- (medium) Machine name: waiting for Mikkel's answer (it becomes `<name>.local` in Phase 6).
-- (Phase 2) Safety settings ("confirm before driving"), waiting for Mikkel's answer.
+- (later) A switch in Settings to turn off "confirm before driving" (D46); on by default.
 - See `private/settings-proposal.md` for the full list and what not to build.
 
 ## Branding

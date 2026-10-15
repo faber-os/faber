@@ -194,6 +194,7 @@ screen. Every field has a default, so a settings.toml from an older Faber still 
 
 | Field | Values (default first) | Notes |
 |---|---|---|
+| `machine.name` | `faber`, or any host name (`a-z`, `0-9`, `-`, 1–63, no dash at the ends) | browser tab, About, backup names (`<name>-backup-….zip`), and `<name>.local` on the Pi image. `400 invalid-machine-name` otherwise. Reset keeps it. |
 | `appearance.theme` | `light`, `dark`, `system` | |
 | `appearance.style`, `appearance.wallpaper` | `aluminium`, … | |
 | `accessibility.reduceMotion` | `system`, `on`, `off` | `system` follows `prefers-reduced-motion` |

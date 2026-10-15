@@ -22,6 +22,7 @@ function bin(msg: unknown): ArrayBuffer {
 }
 
 const SETTINGS: Settings = {
+  machine: { name: 'faber' },
   appearance: { theme: 'system', style: 'aluminium', wallpaper: 'aluminium' },
   accessibility: { reduceMotion: 'system', higherContrast: 'system', textSize: '100' },
   units: { length: 'metric' },

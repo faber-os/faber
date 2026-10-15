@@ -135,6 +135,7 @@ describe('Settings', () => {
       'Accessibility',
       'Units',
       'Desktop and taskbar',
+      'Name',
       'Date and time',
       'Storage and backups',
       'About and diagnostics',
@@ -162,6 +163,24 @@ const ok = (shell: ReturnType<typeof fakeShell>) =>
 const putBody = (shell: ReturnType<typeof fakeShell>) =>
   shell.fetch.calls.filter((c) => c.method === 'PUT').at(-1)?.body as
     typeof DEFAULT_SETTINGS | undefined;
+
+describe('Settings: machine name', () => {
+  it('saves a tidied name, and explains a name it cannot use without saving it', async () => {
+    const shell = setup();
+    ok(shell);
+    const input = await screen.findByLabelText('Machine name');
+    await userEvent.clear(input);
+    await userEvent.type(input, 'My Robot{Enter}');
+    await waitFor(() => expect(putBody(shell)?.machine.name).toBe('my-robot'));
+
+    const puts = shell.fetch.calls.filter((c) => c.method === 'PUT').length;
+    await userEvent.clear(input);
+    await userEvent.type(input, 'æble');
+    expect(screen.getByRole('alert')).toHaveTextContent(/lowercase/);
+    await userEvent.tab();
+    expect(shell.fetch.calls.filter((c) => c.method === 'PUT')).toHaveLength(puts);
+  });
+});
 
 describe('Settings: accessibility, units and time', () => {
   it('sets reduce motion, higher contrast and larger text for every screen', async () => {
