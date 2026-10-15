@@ -3,6 +3,7 @@
 //!
 //! - [`crc`], [`cobs`] and [`frame`] need neither `std` nor an allocator.
 //! - [`message`] holds every message, [`layout`] the fixed binary layout of each capability.
+//! - [`session`] is the core side of a connection: a pure state machine with the clock passed in.
 
 mod bytes;
 pub mod cobs;
@@ -10,8 +11,10 @@ pub mod crc;
 pub mod frame;
 pub mod layout;
 pub mod message;
+pub mod session;
 
 pub use message::{MAX_VERSION, MIN_VERSION, Message};
+pub use session::{Event, Session, SessionConfig, State};
 
 use std::fmt;
 
