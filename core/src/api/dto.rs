@@ -1174,6 +1174,13 @@ pub enum Pattern {
         high: f32,
         period_s: f32,
     },
+    /// From `from` to `to` in a straight line over `periodS`, then `to`: a battery running down.
+    #[serde(rename_all = "camelCase")]
+    Drain {
+        from: f32,
+        to: f32,
+        period_s: f32,
+    },
 }
 
 /// Body and answer of `PUT /api/v0/parts/{name}/simulation`, answer of `GET`.

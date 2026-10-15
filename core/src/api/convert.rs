@@ -166,6 +166,7 @@ pub fn pattern(p: Pattern) -> dto::Pattern {
         Pattern::Sine { center, amplitude, period_s } => dto::Pattern::Sine { center, amplitude, period_s },
         Pattern::Noise { center, amplitude } => dto::Pattern::Noise { center, amplitude },
         Pattern::Step { low, high, period_s } => dto::Pattern::Step { low, high, period_s },
+        Pattern::Drain { from, to, period_s } => dto::Pattern::Drain { from, to, period_s },
     }
 }
 
@@ -175,6 +176,7 @@ pub fn pattern_from(p: dto::Pattern) -> Pattern {
         dto::Pattern::Sine { center, amplitude, period_s } => Pattern::Sine { center, amplitude, period_s },
         dto::Pattern::Noise { center, amplitude } => Pattern::Noise { center, amplitude },
         dto::Pattern::Step { low, high, period_s } => Pattern::Step { low, high, period_s },
+        dto::Pattern::Drain { from, to, period_s } => Pattern::Drain { from, to, period_s },
     }
 }
 

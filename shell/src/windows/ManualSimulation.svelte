@@ -3,14 +3,14 @@
   import { t } from '../lib/i18n';
   import { useCore } from '../lib/state/context';
   import {
-    PATTERN_KINDS,
     patternFor,
+    patternKinds,
     patternValue,
-    sensorMax,
+    sensorRange,
     type PatternKind,
   } from '../lib/state/simulation';
   import type { ErrorBody, PartInfo, Pattern } from '../lib/state/types';
-  import { formatLength } from '../lib/viewers/units';
+  import { formatLength, formatVolts } from '../lib/viewers/units';
   import ErrorNotice from '../components/ErrorNotice.svelte';
 
   /** A manual simulated sensor's value: a slider and a pattern menu (docs/simulation.md, 9). */
@@ -18,8 +18,11 @@
 
   const core = useCore();
   const name = $derived(part.name);
-  const max = $derived(sensorMax(part));
+  const range = $derived(sensorRange(part));
+  const kinds = $derived(patternKinds(part));
   const unit = $derived(core.settings?.units.length ?? 'metric');
+  const show = (v: number) =>
+    range.quantity === 'voltage' ? formatVolts(v) : formatLength(v, unit);
 
   let value = $state<number | null>(null);
   let kind = $state<PatternKind>('steady');
@@ -30,6 +33,7 @@
     sine: () => t('parts.manual.pattern.sine'),
     noise: () => t('parts.manual.pattern.noise'),
     step: () => t('parts.manual.pattern.step'),
+    drain: () => t('parts.manual.pattern.drain'),
   };
 
   // What the part does now: the core keeps it, and another screen may have changed it.
@@ -66,31 +70,31 @@
   function change(v: number, k: PatternKind) {
     value = v;
     kind = k;
-    void send(patternFor(k, v, max));
+    void send(patternFor(k, v, range));
   }
 </script>
 
 <div class="manual">
   <input
     type="range"
-    min="0"
-    {max}
-    step={max / 200}
-    value={value ?? 0}
+    min={range.min}
+    max={range.max}
+    step={(range.max - range.min) / 200}
+    value={value ?? range.min}
     disabled={value === null}
     aria-label={t('parts.manual.value', { name })}
-    aria-valuetext={value === null ? undefined : formatLength(value, unit)}
+    aria-valuetext={value === null ? undefined : show(value)}
     oninput={(e) => change(Number(e.currentTarget.value), kind)}
   />
-  <output class="num">{value === null ? '–' : formatLength(value, unit)}</output>
+  <output class="num">{value === null ? '–' : show(value)}</output>
   <select
     class="input"
     value={kind}
     disabled={value === null}
     aria-label={t('parts.manual.pattern', { name })}
-    onchange={(e) => change(value ?? 0, e.currentTarget.value as PatternKind)}
+    onchange={(e) => change(value ?? range.min, e.currentTarget.value as PatternKind)}
   >
-    {#each PATTERN_KINDS as k (k)}
+    {#each kinds as k (k)}
       <option value={k}>{LABELS[k]()}</option>
     {/each}
   </select>

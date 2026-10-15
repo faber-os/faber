@@ -67,3 +67,18 @@ export function formatSpeed(mps: number, unit: LengthUnit): string {
 export function formatTurnRate(radS: number): string {
   return `${trim(radS, 2)} rad/s`;
 }
+
+/** "11.84 V". Electrical units have no setting: they are the same everywhere. */
+export function formatVolts(v: number): string {
+  return `${trim(v, 2)} V`;
+}
+
+/** "1.5 A". */
+export function formatAmps(a: number): string {
+  return `${trim(a, 2)} A`;
+}
+
+/** "31.5 °C". Temperatures stay Celsius, as the capabilities give them. */
+export function formatCelsius(c: number): string {
+  return `${trim(c, 1)} °C`;
+}

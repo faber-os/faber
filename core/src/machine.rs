@@ -2915,6 +2915,28 @@ connector =
     }
 
     #[test]
+    fn a_manual_battery_is_a_voltage_that_can_drain() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        sim(&m, "battery", "generic-battery", Simulate::Manual, "rate-hz = 100\n");
+        let level = |m: &Machine| match latest(m, "battery/battery") {
+            Some(Reading::Battery(b)) => Some((b.volts, b.level)),
+            _ => None,
+        };
+        let start = Instant::now();
+        while level(&m) != Some((12.3, faber_capabilities::battery::Level::Ok)) {
+            assert!(start.elapsed() < Duration::from_secs(2), "{:?}", level(&m));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        m.set_pattern("battery", Pattern::Drain { from: 10.0, to: 9.0, period_s: 0.2 }).unwrap();
+        while level(&m) != Some((9.0, faber_capabilities::battery::Level::Critical)) {
+            assert!(start.elapsed() < Duration::from_secs(3), "{:?}", level(&m));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        m.shutdown();
+    }
+
+    #[test]
     fn world_parts_run_in_the_world_and_only_one_base_is_the_machine() {
         let dir = tempfile::tempdir().unwrap();
         let m = machine(dir.path(), no_ports());

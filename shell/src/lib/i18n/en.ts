@@ -248,6 +248,7 @@ export const en = {
   'parts.manual.pattern.sine': 'Wave',
   'parts.manual.pattern.noise': 'Noise',
   'parts.manual.pattern.step': 'Steps',
+  'parts.manual.pattern.drain': 'Drain',
 
   // Window titles opened from the Parts window
   'parts.title.viewer': '{name} · scan',

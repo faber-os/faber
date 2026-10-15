@@ -7,6 +7,8 @@
 //!   `bumped`. The safe state is a zero command, so the machine ramps to a stop within its
 //!   acceleration limit;
 //! - world `laser-scan` and `distance` parts raycast from their mount at their rate;
+//! - a world `battery` drains with the base's commanded speed: its idle current, plus its moving
+//!   current in proportion to how close to top speed the base is asked to go;
 //! - the machine's ground-truth pose is published as `world/pose` (`pose@1`).
 //!
 //! Without a world base the machine stands at the world's start pose, so sensors alone still see
@@ -22,7 +24,9 @@ use crate::sim::world::{
 };
 use crate::sim::worlds;
 use crate::simulation::{Outlet, PartSpec, SimulatedPart};
-use faber_capabilities::{Capability, Command, Info, Mount, Reading, Twist2d, distance, planar_base, pose};
+use faber_capabilities::{
+    Capability, Command, Info, Mount, Reading, Twist2d, battery, distance, planar_base, pose,
+};
 use faber_connector::{Applied, CommandError, Health, Problem, Settings};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -187,6 +191,16 @@ impl WorldEngine for SimWorld {
                         let every = every_us(&part.settings, 10.0);
                         let id = e.next_id();
                         let kind = SensorKind::Distance(i.clone(), cone);
+                        e.sensors.push(Sensor::new(id, &part, p.name.clone(), kind, every));
+                        ids.push(id);
+                    }
+                    (Capability::Battery, Some(Info::Battery(i))) => {
+                        let every = every_us(&part.settings, 2.0);
+                        let id = e.next_id();
+                        let kind = SensorKind::Battery(WorldBattery::new(
+                            i.clone(),
+                            generic::battery_drain(&part.settings),
+                        ));
                         e.sensors.push(Sensor::new(id, &part, p.name.clone(), kind, every));
                         ids.push(id);
                     }
@@ -374,6 +388,55 @@ struct Base {
 enum SensorKind {
     Scan(ScanSpec),
     Distance(distance::Info, DistanceCone),
+    Battery(WorldBattery),
+}
+
+/// A battery in the world: it drains as the machine drives.
+struct WorldBattery {
+    info: battery::Info,
+    drain: generic::Drain,
+    /// 0-1.
+    charge: f32,
+    /// What it draws now (A).
+    amps: f32,
+    /// The level reported last, for its hysteresis.
+    level: Option<battery::Level>,
+}
+
+impl WorldBattery {
+    fn new(info: battery::Info, drain: generic::Drain) -> WorldBattery {
+        WorldBattery { info, charge: drain.start_charge, drain, amps: drain.idle_a, level: None }
+    }
+
+    /// Draws for `dt_s` seconds with the base asked to go at `load` (0-1) of its top speed.
+    fn run(&mut self, load: f32, dt_s: f64) {
+        self.amps = self.drain.idle_a + self.drain.moving_a * load.clamp(0.0, 1.0);
+        let capacity_as = f64::from(self.info.capacity_ah.unwrap_or(f32::INFINITY)) * 3600.0;
+        let used = f64::from(self.amps) * dt_s / capacity_as;
+        self.charge = (self.charge - used as f32).max(0.0);
+    }
+
+    /// Its resting voltage at its charge (no sag under load), the current as discharge, and the
+    /// level with the capability's hysteresis.
+    fn reading(&mut self, t_us: u64) -> battery::Reading {
+        let volts = self.info.volts_at(self.charge);
+        let level = self.info.level(volts, self.level);
+        self.level = Some(level);
+        battery::Reading {
+            amps: Some(-self.amps),
+            charge: Some(self.charge),
+            ..battery::Reading::volts(t_us, volts, level)
+        }
+    }
+}
+
+/// How close to its top speed a base is asked to go, 0-1: the largest share on any axis.
+fn speed_share(commanded: Twist2d, max: Twist2d) -> f32 {
+    let share = |v: f32, m: f32| if m > 0.0 { (v / m).abs() } else { 0.0 };
+    share(commanded.vx, max.vx)
+        .max(share(commanded.vy, max.vy))
+        .max(share(commanded.omega, max.omega))
+        .min(1.0)
 }
 
 struct Sensor {
@@ -485,6 +548,12 @@ impl Engine {
             self.bumped = motion.bumped;
         }
         let mut readings = Vec::new();
+        let load = self.base.as_ref().map_or(0.0, |b| speed_share(b.commanded, b.info.max_velocity));
+        for s in &mut self.sensors {
+            if let SensorKind::Battery(b) = &mut s.kind {
+                b.run(load, dt);
+            }
+        }
         let base_due = self.base.as_mut().is_some_and(|b| due(&mut b.due_us, b.every_us, now));
         if base_due && let (Some(b), Some(r)) = (self.base.as_ref(), self.base_reading(now)) {
             readings.push((Arc::clone(&b.outlet), b.name.clone(), r));
@@ -494,11 +563,12 @@ impl Engine {
             if !due(&mut s.due_us, s.every_us, now) {
                 continue;
             }
-            let reading = match &s.kind {
+            let reading = match &mut s.kind {
                 SensorKind::Scan(spec) => Reading::LaserScan(sim.scan(&s.mount, spec, now)),
                 SensorKind::Distance(info, cone) => {
                     Reading::Distance(distance_reading(now, info, sim.distance(&s.mount, cone)))
                 }
+                SensorKind::Battery(b) => Reading::Battery(b.reading(now)),
             };
             readings.push((Arc::clone(&s.outlet), s.name.clone(), reading));
         }
@@ -681,6 +751,70 @@ mod tests {
 
     fn set_velocity(vx: f32, vy: f32, omega: f32) -> Command {
         Command::PlanarBase(planar_base::Command::SetVelocity(Twist2d::new(vx, vy, omega)))
+    }
+
+    fn battery_info() -> Info {
+        Info::Battery(battery::Info {
+            chemistry: battery::Chemistry::LiIon,
+            cells_in_series: 3,
+            capacity_ah: Some(1.0),
+        })
+    }
+
+    fn batteries(out: &Recorder) -> Vec<battery::Reading> {
+        out.readings()
+            .into_iter()
+            .filter_map(|r| match r {
+                Reading::Battery(b) => Some(b),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_world_battery_drains_faster_the_faster_the_base_is_asked_to_go() {
+        let (w, _, clock) = paused(Pose::new(3.0, 2.0, 0.0));
+        let out = Arc::new(Recorder::default());
+        let settings = "idle-current-a = 0.36\nmoving-current-a = 3.6\nrate-hz = 1";
+        let _battery = w.start(spec(battery_info(), Mount::default(), settings, &out, clock.clone()));
+        assert_eq!(out.last_health(), Some(Health::Running));
+        let base_out = Arc::new(Recorder::default());
+        let mut base = w.start(spec(base_info(), Mount::default(), "", &base_out, clock.clone()));
+        w.shared.tick(0);
+        run(&w, &clock, 10.0, |_| {});
+        let idle = batteries(&out);
+        let first = idle.first().unwrap();
+        assert_eq!(first.level, battery::Level::Ok);
+        assert_eq!((first.charge, first.amps), (Some(1.0), Some(-0.36)), "full, drawing its idle current");
+        assert!((first.volts - 12.6).abs() < 1e-4);
+        // 0.36 A for 10 s from 1 Ah (3600 As) is 0.1 %.
+        let after_idle = idle.last().unwrap().charge.unwrap();
+        assert!((after_idle - 0.999).abs() < 1e-4, "{after_idle}");
+        // Half speed sideways: 0.36 + 3.6 × 0.5 = 2.16 A, six times the idle drain.
+        base.command(set_velocity(0.0, 0.5, 0.0)).unwrap();
+        run(&w, &clock, 10.0, |_| {});
+        let last = batteries(&out).pop().unwrap();
+        assert!((last.amps.unwrap() + 2.16).abs() < 1e-5, "{last:?}");
+        assert!((after_idle - last.charge.unwrap() - 0.006).abs() < 2e-4, "{last:?}");
+        assert!(last.volts < 12.6);
+    }
+
+    #[test]
+    fn a_world_battery_runs_down_to_low_and_critical_and_stops_at_empty() {
+        let (w, _, clock) = paused(Pose::new(3.0, 2.0, 0.0));
+        let out = Arc::new(Recorder::default());
+        let settings = "idle-current-a = 36\nmoving-current-a = 0\nstart-charge = 0.2\nrate-hz = 10";
+        let _battery = w.start(spec(battery_info(), Mount::default(), settings, &out, clock.clone()));
+        w.shared.tick(0);
+        // 36 A from 1 Ah is 1 % a second: 20 % lasts 20 s.
+        run(&w, &clock, 30.0, |_| {});
+        let levels: Vec<battery::Level> = batteries(&out).iter().map(|b| b.level).collect();
+        let mut changes = levels.clone();
+        changes.dedup();
+        assert_eq!(changes, [battery::Level::Ok, battery::Level::Low, battery::Level::Critical]);
+        let last = batteries(&out).pop().unwrap();
+        assert_eq!(last.charge, Some(0.0), "an empty battery stays empty");
+        assert!((last.volts - 9.0).abs() < 1e-4);
     }
 
     #[test]

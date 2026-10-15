@@ -3,4 +3,4 @@
 /**
  * How a manual simulated sensor's value changes (in the capability's unit, e.g. m).
  */
-export type Pattern = { "kind": "steady", value: number, } | { "kind": "sine", center: number, amplitude: number, periodS: number, } | { "kind": "noise", center: number, amplitude: number, } | { "kind": "step", low: number, high: number, periodS: number, };
+export type Pattern = { "kind": "steady", value: number, } | { "kind": "sine", center: number, amplitude: number, periodS: number, } | { "kind": "noise", center: number, amplitude: number, } | { "kind": "step", low: number, high: number, periodS: number, } | { "kind": "drain", from: number, to: number, periodS: number, };

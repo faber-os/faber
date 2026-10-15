@@ -14,7 +14,7 @@
 use crate::clock::SharedClock;
 use crate::names::PartName;
 use faber_capabilities::{
-    Capability, Command, Info, Mount, Reading, Twist2d, distance, laser_scan, motor, planar_base,
+    Capability, Command, Info, Mount, Reading, Twist2d, battery, distance, laser_scan, motor, planar_base,
 };
 use faber_connector::{Applied, CommandError, Health, Problem, Provide, Settings};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -64,7 +64,7 @@ pub trait SimulatedPart: Send {
 // ---- patterns ---------------------------------------------------------------------------------
 
 /// How a manual sensor's value changes over time, in the capability's own unit (m for
-/// `distance` and `laser-scan`).
+/// `distance` and `laser-scan`, V for `battery`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Pattern {
     Steady {
@@ -85,6 +85,13 @@ pub enum Pattern {
     Step {
         low: f32,
         high: f32,
+        period_s: f32,
+    },
+    /// From `from` to `to` in a straight line over `period_s`, then `to` from then on: a battery
+    /// running down.
+    Drain {
+        from: f32,
+        to: f32,
         period_s: f32,
     },
 }
@@ -131,6 +138,11 @@ impl Pattern {
                 finite("high", high)?;
                 period(period_s)
             }
+            Pattern::Drain { from, to, period_s } => {
+                finite("from", from)?;
+                finite("to", to)?;
+                period(period_s)
+            }
         }
     }
 
@@ -148,6 +160,10 @@ impl Pattern {
                 } else {
                     high
                 }
+            }
+            Pattern::Drain { from, to, period_s } => {
+                let f = (t_s / f64::from(period_s)).clamp(0.0, 1.0) as f32;
+                from + (to - from) * f
             }
         }
     }
@@ -178,6 +194,8 @@ enum Channel {
         info: Option<Info>,
         pattern: Pattern,
         since_us: u64,
+        /// A battery's level reported last, for its hysteresis.
+        level: Option<battery::Level>,
     },
     Motor {
         name: String,
@@ -282,12 +300,13 @@ fn channel(p: &Provide, now_us: u64) -> Channel {
         (Capability::PlanarBase, Some(Info::PlanarBase(info))) => {
             Channel::Base { name, info: info.clone(), commanded: Twist2d::ZERO, measured: Twist2d::ZERO }
         }
-        (Capability::Distance | Capability::LaserScan, info) => Channel::Sensor {
+        (Capability::Distance | Capability::LaserScan | Capability::Battery, info) => Channel::Sensor {
             name,
             capability: p.capability,
             info: info.clone(),
             pattern: Pattern::Steady { value: default_value(info.as_ref()) },
             since_us: now_us,
+            level: None,
         },
         _ => Channel::Silent,
     }
@@ -298,6 +317,8 @@ fn default_value(info: Option<&Info>) -> f32 {
     match info {
         Some(Info::Distance(i)) => (i.min_m + i.max_m) / 2.0,
         Some(Info::LaserScan(i)) => 2.0f32.clamp(i.range_min_m, i.range_max_m),
+        // Nearly full, rounded to a tenth of a volt so the slider starts on a plain number.
+        Some(Info::Battery(i)) => (i.volts_at(0.9) * 10.0).round() / 10.0,
         _ => 1.0,
     }
 }
@@ -310,10 +331,10 @@ impl Manual {
         let mut out = Vec::new();
         for c in &mut self.channels {
             match c {
-                Channel::Sensor { name, capability, info, pattern, since_us } => {
+                Channel::Sensor { name, capability, info, pattern, since_us, level } => {
                     let t = now_us.saturating_sub(*since_us) as f64 / 1e6;
                     let v = pattern.value_at(t, self.noise.next());
-                    out.push((name.clone(), sensor_reading(*capability, info.as_ref(), now_us, v)));
+                    out.push((name.clone(), sensor_reading(*capability, info.as_ref(), level, now_us, v)));
                 }
                 Channel::Motor { name, velocity, position, .. } => {
                     *position += *velocity * dt;
@@ -384,8 +405,23 @@ fn base_reading(t_us: u64, commanded: Twist2d, measured: Twist2d) -> Reading {
     Reading::PlanarBase(planar_base::Reading { t_us, commanded, measured: Some(measured), bumped: false })
 }
 
-fn sensor_reading(capability: Capability, info: Option<&Info>, t_us: u64, value: f32) -> Reading {
+fn sensor_reading(
+    capability: Capability,
+    info: Option<&Info>,
+    level: &mut Option<battery::Level>,
+    t_us: u64,
+    value: f32,
+) -> Reading {
     match (capability, info) {
+        (Capability::Battery, info) => {
+            let volts = value.max(0.0);
+            let reading = match info {
+                Some(Info::Battery(i)) => i.reading(t_us, volts, *level),
+                _ => battery::Reading::volts(t_us, volts, battery::Level::Ok),
+            };
+            *level = Some(reading.level);
+            Reading::Battery(reading)
+        }
         (Capability::Distance, Some(Info::Distance(i))) => Reading::Distance(i.reading(t_us, value)),
         (Capability::Distance, _) => Reading::Distance(distance::Reading {
             t_us,
@@ -516,6 +552,41 @@ mod tests {
         );
         let noise = Pattern::Noise { center: 1.0, amplitude: 0.1 };
         assert!((noise.value_at(0.0, -1.0) - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_drain_runs_down_in_a_straight_line_and_stays_there() {
+        let drain = Pattern::Drain { from: 12.0, to: 9.0, period_s: 60.0 };
+        assert_eq!(drain.value_at(0.0, 0.5), 12.0);
+        assert!((drain.value_at(20.0, 0.0) - 11.0).abs() < 1e-5);
+        assert_eq!(drain.value_at(600.0, 0.0), 9.0);
+        assert!(drain.validate().is_ok());
+        assert!(Pattern::Drain { from: 12.0, to: 9.0, period_s: 0.0 }.validate().is_err());
+        assert!(Pattern::Drain { from: f32::NAN, to: 9.0, period_s: 1.0 }.validate().is_err());
+    }
+
+    #[test]
+    fn a_manual_battery_reports_its_voltage_with_level_and_charge() {
+        let info = battery::Info {
+            chemistry: battery::Chemistry::LiIon,
+            cells_in_series: 3,
+            capacity_ah: Some(2.2),
+        };
+        let mut m = manual(Info::Battery(info.clone()));
+        let Reading::Battery(r) = &m.tick(1).remove(0).1 else { panic!() };
+        assert_eq!((r.volts, r.level), (12.3, battery::Level::Ok), "starts nearly full");
+        assert!((r.charge.unwrap() - info.charge_at(12.3)).abs() < 1e-6);
+        let at = |m: &mut Manual, volts: f32, t: u64| {
+            if let Channel::Sensor { pattern, .. } = &mut m.channels[0] {
+                *pattern = Pattern::Steady { value: volts };
+            }
+            let Reading::Battery(r) = m.tick(t).remove(0).1 else { panic!() };
+            r.level
+        };
+        assert_eq!(at(&mut m, 10.4, 2), battery::Level::Low);
+        assert_eq!(at(&mut m, 10.55, 3), battery::Level::Low, "the level keeps its hysteresis");
+        assert_eq!(at(&mut m, 9.5, 4), battery::Level::Critical);
+        assert_eq!(at(&mut m, 12.0, 5), battery::Level::Ok);
     }
 
     #[test]
