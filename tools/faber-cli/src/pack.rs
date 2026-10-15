@@ -101,6 +101,24 @@ mod tests {
         assert!(!project.join("acme-ranger-0.1.0.faberpkg").exists());
     }
 
+    /// The package the shell's end-to-end test installs through the Install window
+    /// (shell/e2e/packages.spec.ts): the declarative template, packed. Written here and
+    /// committed, like the generated TypeScript types: commit what the tests write.
+    #[test]
+    fn the_e2e_package_is_the_packed_template() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = template::new_connector("e2e-line-sensor", Kind::Declarative, dir.path()).unwrap();
+        let file = pack(&project, None, &Options::default(), &mut Vec::new()).unwrap();
+        let fresh = std::fs::read(file).unwrap();
+        let committed = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../shell/e2e/fixtures/e2e-line-sensor-0.1.0.faberpkg");
+        if std::fs::read(&committed).ok() != Some(fresh.clone()) {
+            std::fs::create_dir_all(committed.parent().unwrap()).unwrap();
+            std::fs::write(&committed, fresh).unwrap();
+            panic!("{} was out of date and has been rewritten; commit it", committed.display());
+        }
+    }
+
     #[test]
     fn manifest_mistakes_name_their_line() {
         let dir = tempfile::tempdir().unwrap();

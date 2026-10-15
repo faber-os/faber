@@ -29,6 +29,12 @@
     }),
   );
 
+  // Which parts use a package changes with the parts: ask again when they change.
+  $effect(() => {
+    if (core.parts === null) return;
+    untrack(() => void core.loadPackages());
+  });
+
   async function uninstall() {
     if (!confirming) return;
     removing = true;
