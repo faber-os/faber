@@ -1,7 +1,8 @@
 //! Layer 2: connector packages on disk (docs/packages.md §5).
 //!
 //! A `.faberpkg` is a zip holding `faber.toml` at its root, the connector's component (wasm),
-//! `README.md`, `LICENSE`, and optionally `icon.svg` and recordings in `captures/`. This module:
+//! `README.md`, `LICENSE`, and optionally `icon.svg`, recordings in `captures/` and bridge
+//! firmware in `firmware/<board>.hex` (declared in `[[firmware]]`). This module:
 //! - **reads and checks a package file** ([`open`]): sizes, paths, which files it holds, and its
 //!   `[package]` header, all before anything is written;
 //! - **installs it** ([`Store::prepare`], then [`Prepared::swap_in`]): unpacked into a staging
@@ -32,6 +33,7 @@ const README: &str = "README.md";
 const LICENSE: &str = "LICENSE";
 const ICON: &str = "icon.svg";
 const CAPTURES: &str = "captures/";
+const FIRMWARE: &str = "firmware/";
 
 /// Why a package can't be read, installed or removed, in words the user can act on.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,6 +82,8 @@ pub struct Opened {
     pub readme: String,
     /// The recordings in `captures/`, by file name.
     pub captures: Vec<String>,
+    /// The boards it carries firmware for (`firmware/<board>.hex`), e.g. `uno`, `mega2560`.
+    pub firmware: Vec<String>,
     /// Every file, by its path inside the package (`faber.toml`, `captures/x.fbcap`, …).
     files: BTreeMap<String, Vec<u8>>,
 }
@@ -185,6 +189,7 @@ fn check_files(files: BTreeMap<String, Vec<u8>>) -> Result<Opened, PackageError>
     }
     let mut modules = 0;
     let mut captures = Vec::new();
+    let mut hex_files = Vec::new();
     let mut unknown = Vec::new();
     for name in files.keys() {
         match name.as_str() {
@@ -193,15 +198,19 @@ fn check_files(files: BTreeMap<String, Vec<u8>>) -> Result<Opened, PackageError>
             n if n.starts_with(CAPTURES) && n.ends_with(".fbcap") && !n[CAPTURES.len()..].contains('/') => {
                 captures.push(n[CAPTURES.len()..].to_string());
             }
+            n if n.starts_with(FIRMWARE) && n.ends_with(".hex") && !n[FIRMWARE.len()..].contains('/') => {
+                hex_files.push(n[FIRMWARE.len()..n.len() - ".hex".len()].to_string());
+            }
             n => unknown.push(n.to_string()),
         }
     }
     if !unknown.is_empty() {
         return Err(PackageError::invalid(
             format!("The package holds files Faber doesn't expect: {}.", unknown.join(", ")),
-            "A package holds faber.toml, README.md, LICENSE, the connector's .wasm, and optionally icon.svg and captures/*.fbcap.",
+            "A package holds faber.toml, README.md, LICENSE, the connector's .wasm, and optionally icon.svg, captures/*.fbcap and firmware/<board>.hex.",
         ));
     }
+    let firmware = check_firmware(manifest, &hex_files, &files)?;
     match (wasm, modules) {
         (true, 0) => return Err(missing("connector.wasm", "A wasm connector is its component.")),
         (true, 1) | (false, 0) => {}
@@ -215,7 +224,89 @@ fn check_files(files: BTreeMap<String, Vec<u8>>) -> Result<Opened, PackageError>
             ));
         }
     }
-    Ok(Opened { header, readme, captures, files })
+    Ok(Opened { header, readme, captures, firmware, files })
+}
+
+/// The firmware a package declares (`[[firmware]] board = "uno"`) against the files it holds
+/// (`firmware/uno.hex`): every declared board known to the flasher, every file declared, each
+/// one valid Intel HEX that fits its board's flash next to the bootloader. Returns the boards.
+fn check_firmware(
+    manifest: &str,
+    hex_files: &[String],
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Result<Vec<String>, PackageError> {
+    #[derive(Deserialize)]
+    struct Entry {
+        board: String,
+    }
+    #[derive(Deserialize)]
+    struct Declared {
+        #[serde(default)]
+        firmware: Vec<Entry>,
+    }
+    let known = || faber_flash::BOARDS.iter().map(|b| format!("\"{}\"", b.id)).collect::<Vec<_>>().join(", ");
+    let declared: Declared = toml::from_str(manifest).map_err(|e| {
+        PackageError::invalid(
+            format!("faber.toml: [[firmware]] can't be read: {}", e.message().trim()),
+            format!("Write one [[firmware]] table per board, like board = \"uno\". Boards: {}.", known()),
+        )
+    })?;
+    let mut boards: Vec<String> = Vec::new();
+    for entry in declared.firmware {
+        let Some(board) = faber_flash::Board::by_id(&entry.board) else {
+            return Err(PackageError::invalid(
+                format!(
+                    "faber.toml declares firmware for \"{}\", a board the flasher doesn't know.",
+                    entry.board
+                ),
+                format!("Use one of {}.", known()),
+            ));
+        };
+        if boards.contains(&entry.board) {
+            return Err(PackageError::invalid(
+                format!("faber.toml declares firmware for \"{}\" twice.", entry.board),
+                "Keep one [[firmware]] table per board.",
+            ));
+        }
+        let path = format!("{FIRMWARE}{}.hex", board.id);
+        let bytes = files.get(&path).ok_or_else(|| {
+            PackageError::invalid(
+                format!(
+                    "faber.toml declares firmware for the {}, but the package has no {path}.",
+                    board.name
+                ),
+                "Export the sketch for that board (Sketch → Export Compiled Binary) and put the .hex there.",
+            )
+        })?;
+        let image = std::str::from_utf8(bytes)
+            .map_err(|_| faber_flash::HexError::NotHex { line: 1 })
+            .and_then(faber_flash::Image::parse)
+            .map_err(|e| {
+                PackageError::invalid(
+                    format!("{path} in the package can't be flashed: {e}."),
+                    "Export it again from the Arduino IDE, then make the package again.",
+                )
+            })?;
+        if image.end() > board.room {
+            return Err(PackageError::invalid(
+                format!(
+                    "{path} is {} bytes, but the {} has room for {}.",
+                    image.end(),
+                    board.name,
+                    board.room
+                ),
+                "Make the sketch smaller, or check that it was exported for this board.",
+            ));
+        }
+        boards.push(entry.board);
+    }
+    if let Some(stray) = hex_files.iter().find(|f| !boards.contains(f)) {
+        return Err(PackageError::invalid(
+            format!("The package holds {FIRMWARE}{stray}.hex, but faber.toml doesn't declare it."),
+            format!("Add [[firmware]] with board = \"{stray}\" to faber.toml, or leave the file out."),
+        ));
+    }
+    Ok(boards)
 }
 
 /// Writes a package file from its files (path inside the package → contents). Checks it the way
@@ -301,6 +392,41 @@ impl Store {
     /// Where installed connectors live; the engines load every folder in it.
     pub fn connectors_dir(&self) -> &Path {
         &self.connectors
+    }
+
+    /// The boards an installed package carries firmware for: its `firmware/*.hex`, which were
+    /// checked when it was installed.
+    pub fn firmware_boards(&self, id: &str) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(self.connectors.join(id).join("firmware")) else {
+            return Vec::new();
+        };
+        let mut boards: Vec<String> = entries
+            .flatten()
+            .filter_map(|e| e.file_name().to_str()?.strip_suffix(".hex").map(str::to_string))
+            .filter(|b| faber_flash::Board::by_id(b).is_some())
+            .collect();
+        boards.sort();
+        boards
+    }
+
+    /// An installed package's firmware for `board`, as text.
+    pub fn firmware(&self, id: &str, board: &str) -> Result<String, PackageError> {
+        let missing = || {
+            PackageError::new(
+                "not-installed",
+                format!("The package \"{id}\" has no firmware for \"{board}\"."),
+                "Pick a board the package has firmware for, or a .hex file from Files.",
+            )
+        };
+        if !is_kebab_name(id) || faber_flash::Board::by_id(board).is_none() {
+            return Err(missing());
+        }
+        let path = self.connectors.join(id).join("firmware").join(format!("{board}.hex"));
+        match std::fs::read_to_string(&path) {
+            Ok(text) => Ok(text),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Err(missing()),
+            Err(e) => Err(PackageError::io(&format!("read connectors/{id}/firmware/{board}.hex"), &e)),
+        }
     }
 
     /// Every installed package, by id.
@@ -573,6 +699,76 @@ mod tests {
         assert_eq!(p.header.publisher.as_deref(), Some("Ada"));
         assert_eq!(p.readme, "# My sensor\nReads lines.");
         assert_eq!(p.captures, ["walk.fbcap"]);
+    }
+
+    /// A small valid program as Intel HEX.
+    fn hex(len: usize) -> Vec<u8> {
+        faber_flash::Image::from_bytes(&vec![0x0C; len]).to_hex().into_bytes()
+    }
+
+    fn with_firmware(declared: &str, extra: &[(&str, &[u8])]) -> Result<Opened, PackageError> {
+        let mut f = files(extra);
+        f.insert(MANIFEST.into(), format!("{TOML}{declared}").into_bytes());
+        from_files(f)
+    }
+
+    #[test]
+    fn firmware_for_declared_boards_is_checked_and_listed() {
+        let uno = hex(1000);
+        let mega = hex(40_000);
+        let p = with_firmware(
+            "[[firmware]]\nboard = \"uno\"\n[[firmware]]\nboard = \"mega2560\"\n",
+            &[("firmware/uno.hex", &uno), ("firmware/mega2560.hex", &mega)],
+        )
+        .unwrap();
+        assert_eq!(p.firmware, ["uno", "mega2560"]);
+        assert!(with_firmware("", &[]).unwrap().firmware.is_empty());
+    }
+
+    #[test]
+    fn firmware_problems_are_refused_with_what_to_fix() {
+        let ok = hex(100);
+        let uno = "[[firmware]]\nboard = \"uno\"\n";
+        type Case<'a> = (&'a str, Vec<(&'a str, Vec<u8>)>, &'a str);
+        let cases: Vec<Case> = vec![
+            (uno, vec![], "has no firmware/uno.hex"),
+            ("", vec![("firmware/uno.hex", ok.clone())], "doesn't declare it"),
+            ("[[firmware]]\nboard = \"due\"\n", vec![], "a board the flasher doesn't know"),
+            (
+                "[[firmware]]\nboard = \"uno\"\n[[firmware]]\nboard = \"uno\"\n",
+                vec![("firmware/uno.hex", ok.clone())],
+                "twice",
+            ),
+            (uno, vec![("firmware/uno.hex", b":10000000DEAD\n".to_vec())], "can't be flashed"),
+            (
+                uno,
+                vec![("firmware/uno.hex", ok.iter().map(|b| if *b == b'C' { b'D' } else { *b }).collect())],
+                "checksum",
+            ),
+            (uno, vec![("firmware/uno.hex", hex(32_257))], "has room for 32256"),
+            ("[[firmware]]\nchip = 1\n", vec![], "[[firmware]] can't be read"),
+        ];
+        for (declared, extra, want) in cases {
+            let extra: Vec<(&str, &[u8])> = extra.iter().map(|(n, d)| (*n, d.as_slice())).collect();
+            let e = with_firmware(declared, &extra).unwrap_err();
+            assert_eq!(e.code, "package-invalid");
+            assert!(e.message.contains(want), "{want}: {e:?}");
+        }
+    }
+
+    #[test]
+    fn installed_firmware_is_found_by_package_and_board() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let fw = store.connectors_dir().join("my-bridge").join("firmware");
+        std::fs::create_dir_all(&fw).unwrap();
+        std::fs::write(fw.join("uno.hex"), hex(10)).unwrap();
+        std::fs::write(fw.join("notes.txt"), "x").unwrap();
+        assert_eq!(store.firmware_boards("my-bridge"), ["uno"]);
+        assert!(store.firmware("my-bridge", "uno").unwrap().starts_with(':'));
+        assert_eq!(store.firmware("my-bridge", "mega2560").unwrap_err().code, "not-installed");
+        assert_eq!(store.firmware("../x", "uno").unwrap_err().code, "not-installed");
+        assert!(store.firmware_boards("nothing").is_empty());
     }
 
     #[test]

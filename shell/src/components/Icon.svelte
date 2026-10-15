@@ -45,6 +45,8 @@
     grid: 'M5 5h5.5v5.5H5zM13.5 5H19v5.5h-5.5zM5 13.5h5.5V19H5zM13.5 13.5H19V19h-5.5z',
     list: 'M8.5 7h11M8.5 12h11M8.5 17h11M4.5 7h1M4.5 12h1M4.5 17h1',
     upload: 'M12 15.5V4.5M7.5 9L12 4.5 16.5 9M5 15.5v4h14v-4',
+    // A microcontroller: the Arduino flasher.
+    chip: 'M7 7h10v10H7zM10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3',
     download: 'M12 4.5v11M7.5 11l4.5 4.5 4.5-4.5M5 15.5v4h14v-4',
     record: 'M12 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0',
     stop: 'M7 7h10v10H7z',

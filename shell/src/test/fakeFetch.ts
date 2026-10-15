@@ -9,6 +9,8 @@ export interface FakeRoute {
   bytes?: Uint8Array;
   /** Make fetch itself reject, as it does when the core cannot be reached. */
   networkError?: boolean;
+  /** Answer only once this settles, e.g. to look at a window while a long request runs. */
+  until?: Promise<unknown>;
 }
 
 export interface FakeFetch {
@@ -32,6 +34,7 @@ export function fakeFetch(routes: FakeRoute[] = []): FakeFetch {
       .reverse()
       .find((r) => r.path === path && (r.method ?? 'GET') === method);
     if (!match) return new Response('not found', { status: 404 });
+    if (match.until) await match.until;
     if (match.networkError) throw new TypeError('Failed to fetch');
     const status = match.status ?? 200;
     if (status === 204) return new Response(null, { status });

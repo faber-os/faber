@@ -104,7 +104,15 @@ README.md           shown in the install dialog and the store
 LICENSE
 icon.svg            optional
 captures/*.fbcap    optional: recordings, used by `faber check` and offered as samples
+firmware/<board>.hex  optional: bridge firmware for the Arduino flasher (uno, nano, nano-old, mega2560)
 ```
+
+**Firmware** (built in Phase 4c): each `firmware/<board>.hex` is declared in `faber.toml` as
+`[[firmware]]` with `board = "uno"`. The package checks refuse a board the flasher doesn't know, a
+declared file that is missing, a file that isn't declared, one that isn't valid Intel HEX (every
+record's checksum is checked) and one too big for the board's flash next to its bootloader.
+`faber pack` takes `firmware/*.hex` along. The flasher offers it for that board
+([api.md](api.md#the-arduino-flasher)).
 
 - Installed into `<data>/connectors/<id>/`; `<data>/config/packages.toml` lists what is
   installed and which version is active (TOML, D13). Uninstall refuses while a part uses it.

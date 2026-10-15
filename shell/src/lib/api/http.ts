@@ -21,6 +21,9 @@ import type { TranslationInfo } from './generated/TranslationInfo';
 import type { Command } from './generated/Command';
 import type { CommandResult } from './generated/CommandResult';
 import type { EstopStatus } from './generated/EstopStatus';
+import type { FlashBoard } from './generated/FlashBoard';
+import type { FlashRequest } from './generated/FlashRequest';
+import type { FlashResult } from './generated/FlashResult';
 import type { LeaseGrant } from './generated/LeaseGrant';
 import type { LeaseInfo } from './generated/LeaseInfo';
 import type { Pattern } from './generated/Pattern';
@@ -62,6 +65,13 @@ export interface CoreHttp {
    * opening a port restarts most Arduino boards. `409 port-claimed` for a port in use.
    */
   checkBoard(port: string): Promise<BoardCheck>;
+  /** The boards the Arduino flasher can program (docs/api.md, "The Arduino flasher"). */
+  getFlasherBoards(): Promise<FlashBoard[]>;
+  /**
+   * Puts a program on the board on a port. Answers once it is done (seconds, up to a minute);
+   * the `flash` topic follows it. Replaces the program on the board: only on a user's confirm.
+   */
+  flash(port: string, req: FlashRequest): Promise<FlashResult>;
   getParts(): Promise<PartInfo[]>;
   addPart(part: NewPart): Promise<PartInfo>;
   removePart(name: string): Promise<void>;
@@ -232,6 +242,8 @@ export function createHttp(
     uninstallPackage: (id) => request('DELETE', `/packages/${encodeURIComponent(id)}`),
     getPorts: () => request('GET', '/ports'),
     checkBoard: (port) => request('POST', '/ports/check-board', { port }),
+    getFlasherBoards: () => request('GET', '/flasher/boards'),
+    flash: (port, req) => request('POST', `/ports/${encodeURIComponent(port)}/flash`, req),
     getParts: () => request('GET', '/parts'),
     addPart: (part) => request('POST', '/parts', part),
     removePart: (name) => request('DELETE', `/parts/${encodeURIComponent(name)}`),

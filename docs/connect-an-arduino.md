@@ -11,7 +11,8 @@ sensor.
 **Tested or not.** Every step marked *(tested)* is checked on every CI run against the library's
 real C++ code behind a fake serial port (`core/tests/bridge.rs`, `tools/faberlink-interop`) or by
 compiling the example for an Uno and a Mega. Steps marked *(needs hardware)* have not yet been
-checked with a real board on a real USB port.
+checked with a real board on a real USB port. Faber's own [Arduino flasher](#flash-from-faber) is
+tested against simulated bootloaders only: it still needs a run on a real Uno and a real Mega.
 
 ## What you need
 
@@ -19,7 +20,8 @@ checked with a real board on a real USB port.
 - A DC motor on an H-bridge (motor driver) with a PWM input for speed and an input for direction,
   e.g. an L298N or a TB6612, with its own motor power supply.
 - An analog distance sensor, here a Sharp GP2Y0A21 infrared sensor (10–80 cm).
-- The Arduino IDE (only once, to upload the sketch).
+- The Arduino IDE, once, to compile the sketch and upload it. Or compile it there and put it on
+  the board with Faber's own [Arduino flasher](#flash-from-faber).
 - A computer running Faber.
 
 ## Wiring
@@ -44,7 +46,9 @@ The motor's own power goes to the H-bridge, never through the Arduino.
    is known, put it in rad/s in `FaberMotor left("left", 9, 8, 15.0)`; then Faber can drive it by
    speed as well as by duty (the Drive window drives by speed, so it needs this number). *(tested: compiles for an Uno and a Mega)*
 3. **Upload it** to the board (Sketch → Upload). Then **close the Arduino IDE's Serial Monitor**:
-   only one program can use the port at a time. *(needs hardware)*
+   only one program can use the port at a time. *(needs hardware)* Or **flash it from Faber**
+   instead, see [Flash from Faber](#flash-from-faber). *(tested on simulated bootloaders only;
+   needs hardware)*
 4. **Find the board in Faber.** Open Parts → Add part. Under the board's port, press **Check for
    a FaberLink board**. Faber opens the port, says hello and listens for a few seconds; it only
    does this when you ask, because opening a port restarts most Arduinos. It answers "FaberLink
@@ -85,6 +89,51 @@ The motor's own power goes to the H-bridge, never through the Arduino.
 
 Don't print to `Serial` in the sketch: the port belongs to FaberLink. The library's `link.log()`
 sends a line to Faber's log instead.
+
+## Flash from Faber
+
+Faber can put the compiled sketch on the board itself, over the board's USB cable, so the board can
+be plugged into the robot's computer and never into the PC with the Arduino IDE. It talks to the
+bootloader every Arduino comes with: Optiboot on the Uno and Nano, and the Mega 2560's own. It works
+for any sketch, not only FaberLink ones.
+
+**Tested or not.** The flasher is tested on every CI run against simulated bootloaders, written
+from Atmel's protocol descriptions (AVR061 for the Uno and Nano, AVR068 for the Mega), through the
+API with a fake serial port: write, read back and compare, a board that doesn't answer, a wrong
+chip, a board that stops in the middle, a bad flash cell and damaged answers. **It has not yet been
+tried on a real board** (*needs hardware*): until it has, the Arduino IDE's Upload is the safe way.
+
+1. **Compile the sketch to a file.** In the Arduino IDE: Sketch → Export Compiled Binary. The IDE
+   writes two `.hex` files next to the sketch; take the one **without** `with_bootloader` in its
+   name, e.g. `MotorAndDistance.ino.hex`. Copy it into Faber's Files (drag it onto Files in the
+   browser), e.g. into Documents. A connector package may also bring its own firmware; then there
+   is nothing to compile.
+2. **Open the flasher**: Start → Arduino flasher.
+3. **Pick the port.** An official Uno or Mega is recognised by its USB ids, and the board is
+   picked for you. A clone with a CH340 or FT232 USB chip can't be told apart from other boards:
+   pick the board yourself (an old Nano clone is often "Arduino Nano (old bootloader)").
+4. **Pick the program**: "A .hex file from Files" and Choose…, or "Firmware from a package".
+5. **Flash.** Faber warns that this replaces the program on the board and asks once more. Then it
+   resets the board, waits for the bootloader, checks that the chip is the board you picked,
+   writes the program and reads it back to compare. The bar shows writing, then checking. Keep the
+   board plugged in until it says done.
+6. **Find the board.** If the board was already added as a FaberLink board, it starts again by
+   itself on the new firmware. If not, press **Check for a FaberLink board** (after a package's
+   firmware), or go on with step 4 above in Parts → Add part.
+
+Faber never flashes on its own, and it never flashes a port a part is using. A port that a
+FaberLink board in Parts is using is refused first; **Stop the board and flash** stops it (its
+motors stop), flashes, and lets it start again on the new firmware.
+
+| What you see | What to try |
+|---|---|
+| "The board didn't answer the bootloader." | Press the reset button on the board just as you press Flash (some clones don't reset by themselves). Check that you picked the right board: an Uno and a Mega speak different bootloader languages. Nothing was written. |
+| "This board has an ATmega168 …, but an Arduino Uno has an ATmega328P" | The board isn't the one you picked (here an old Nano). Pick the right board, with a sketch compiled for it. Nothing was written. |
+| "The program is … bytes, but the Arduino Uno has room for 32256." | The sketch was compiled for a bigger board, or is too big. Compile it for this board. |
+| "The firmware file can't be used: line 12 is damaged …" | The `.hex` file is broken or cut off. Export it again. |
+| "The board stopped answering while writing the program." | A loose cable. Flash again: the bootloader is still there, so a half-written program is fixed by flashing again. |
+| "Reading the program back found a difference at address …" | Flash again. If it keeps failing at the same address, the chip's flash may be worn out. |
+| "… is open in the serial monitor" or "… is used by the part …" | Close the serial monitor, or remove the part (or change its port), then flash. |
 
 ## The code, explained
 

@@ -17,6 +17,13 @@ pub trait PortReader: Send {
 
 pub trait PortWriter: Send {
     fn write(&mut self, data: &[u8]) -> io::Result<()>;
+
+    /// Sets the DTR and RTS lines (`true`: asserted). Only the Arduino flasher uses them: an
+    /// Arduino resets when DTR is asserted, which starts its bootloader. A port without such
+    /// lines says `Unsupported`.
+    fn set_dtr_rts(&mut self, _asserted: bool) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "this port has no DTR or RTS line"))
+    }
 }
 
 /// What a port's reader thread reports.
@@ -66,6 +73,12 @@ impl PortReader for SerialReader {
 impl PortWriter for SerialWriter {
     fn write(&mut self, data: &[u8]) -> io::Result<()> {
         io::Write::write_all(&mut self.0, data)
+    }
+
+    fn set_dtr_rts(&mut self, asserted: bool) -> io::Result<()> {
+        self.0.write_data_terminal_ready(asserted)?;
+        self.0.write_request_to_send(asserted)?;
+        Ok(())
     }
 }
 

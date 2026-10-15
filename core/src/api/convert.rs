@@ -197,6 +197,24 @@ pub fn port(p: &PortView) -> dto::PortInfo {
             .iter()
             .map(|s| dto::Suggestion { connector: s.connector.clone(), reason: s.reason.clone() })
             .collect(),
+        board: match p.board {
+            faber_flash::Detected::Board(b) => {
+                Some(dto::BoardGuess { board: Some(b.id.into()), usb_chip: None })
+            }
+            faber_flash::Detected::UsbSerial { chip } => {
+                Some(dto::BoardGuess { board: None, usb_chip: Some(chip.into()) })
+            }
+            faber_flash::Detected::Unknown => None,
+        },
+    }
+}
+
+pub fn flash_stage(s: faber_flash::Stage) -> dto::FlashStage {
+    match s {
+        faber_flash::Stage::Connecting => dto::FlashStage::Connecting,
+        faber_flash::Stage::Writing => dto::FlashStage::Writing,
+        faber_flash::Stage::Verifying => dto::FlashStage::Verifying,
+        faber_flash::Stage::Done => dto::FlashStage::Done,
     }
 }
 
@@ -237,6 +255,7 @@ pub fn package(p: &crate::machine::PackageView) -> dto::PackageInfo {
             message: pr.message.clone(),
             hint: pr.hint.clone(),
         }),
+        firmware: p.firmware.clone(),
     }
 }
 

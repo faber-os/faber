@@ -50,6 +50,16 @@ fn package_from(dir: &Path, report: &Report, out_dir: &Path) -> Result<PathBuf, 
         let rel = format!("captures/{}", c.name);
         files.insert(rel.clone(), read(&rel)?);
     }
+    // Bridge firmware (`[[firmware]]` in faber.toml); the package writer checks each file.
+    if let Ok(entries) = std::fs::read_dir(dir.join("firmware")) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.ends_with(".hex") {
+                let rel = format!("firmware/{name}");
+                files.insert(rel.clone(), read(&rel)?);
+            }
+        }
+    }
     if let Some(component) = &report.component {
         let module = report.module.clone().unwrap_or_else(|| "connector.wasm".into());
         files.insert(module, component.clone());
@@ -85,6 +95,20 @@ mod tests {
         assert_eq!(opened.captures, ["sample.fbcap"]);
         let text = String::from_utf8(log).unwrap();
         assert!(text.starts_with("Checking acme-ranger 0.1.0 (declarative connector)"), "{text}");
+    }
+
+    #[test]
+    fn firmware_goes_into_the_package() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = template::new_connector("acme-ranger", Kind::Declarative, dir.path()).unwrap();
+        let toml = std::fs::read_to_string(project.join("faber.toml")).unwrap();
+        std::fs::write(project.join("faber.toml"), format!("{toml}\n[[firmware]]\nboard = \"uno\"\n"))
+            .unwrap();
+        std::fs::create_dir(project.join("firmware")).unwrap();
+        std::fs::write(project.join("firmware/uno.hex"), ":0100000011EE\n:00000001FF\n").unwrap();
+        let file = pack(&project, None, &Options::default(), &mut Vec::new()).unwrap();
+        let opened = packages::open(&std::fs::read(file).unwrap()).unwrap();
+        assert_eq!(opened.firmware, ["uno"]);
     }
 
     #[test]

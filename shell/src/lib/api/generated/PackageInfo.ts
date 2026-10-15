@@ -32,4 +32,8 @@ usedBy: Array<string>,
 /**
  * Why its connector isn't loaded, when it isn't.
  */
-problem?: ConnectorProblem, };
+problem?: ConnectorProblem, 
+/**
+ * The boards it carries firmware for (`firmware/<board>.hex`), for the Arduino flasher.
+ */
+firmware: Array<string>, };

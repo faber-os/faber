@@ -93,6 +93,8 @@ pub struct PackageView {
     pub used_by: Vec<PartName>,
     /// Why its connector isn't loaded, when it isn't.
     pub problem: Option<Problem>,
+    /// The boards it carries firmware for, for the Arduino flasher.
+    pub firmware: Vec<String>,
 }
 
 impl From<PackageError> for MachineError {
@@ -163,7 +165,8 @@ impl Machine {
                     )
                 })
             });
-        PackageView { installed, used_by, problem }
+        let firmware = self.package_store().firmware_boards(&installed.id);
+        PackageView { installed, used_by, problem, firmware }
     }
 
     /// Checks a package file in full and, unless `preview`, installs it: `source` is the file's

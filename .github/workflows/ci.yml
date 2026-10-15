@@ -103,6 +103,23 @@ jobs:
               arduino-cli compile --fqbn "$board" --library firmware/faberlink --warnings all "$example"
             done
           done
+      # The example as ready firmware for Faber's Arduino flasher (docs/connect-an-arduino.md),
+      # named as a package carries it: firmware/<board>.hex. Built here, never on a PC, so the
+      # binary always matches the library in this commit.
+      - name: The example as flasher firmware
+        run: |
+          mkdir -p faberlink-firmware/firmware
+          for pair in uno:uno mega2560:mega; do
+            id="${pair%%:*}"; fqbn="arduino:avr:${pair##*:}"
+            arduino-cli compile --fqbn "$fqbn" --library firmware/faberlink \
+              --output-dir "build/$id" firmware/faberlink/examples/MotorAndDistance
+            cp "build/$id/MotorAndDistance.ino.hex" "faberlink-firmware/firmware/$id.hex"
+          done
+          ls -l faberlink-firmware/firmware
+      - uses: actions/upload-artifact@v4
+        with:
+          name: faberlink-example-firmware
+          path: faberlink-firmware/
 
   wit:
     name: WIT interfaces

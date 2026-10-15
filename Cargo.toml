@@ -6,6 +6,7 @@ members = [
     "sdk/rust/connector",
     "sdk/rust/connector-wasm",
     "sdk/rust/faberlink",
+    "sdk/rust/flash",
     "connectors/ldrobot-ld19",
     "core/tests/wasm-guests/misbehaving",
     "tools/arch-check",

@@ -378,9 +378,19 @@ second to start after the reset, then closes the port.
   own lease; the e-stop stops everything; the stop button latches until reset on the board;
   unplugging fails the bridge, stops its parts and ends every lease.
 
+### The Arduino flasher
+
+Built in Phase 4c: Start → Arduino flasher puts a compiled sketch (Intel HEX) on an Uno, Nano or
+Mega over its USB port, from Files or from a package's `firmware/<board>.hex`, so a bridge's
+firmware can be installed without the Arduino IDE ([connect-an-arduino.md](connect-an-arduino.md#flash-from-faber),
+[api.md](api.md#the-arduino-flasher)). It is written in Rust (`sdk/rust/flash`, crate
+`faber-flash`) instead of bundling avrdude: one binary for every OS the core runs on, no external
+program to ship, and the protocol code testable against simulated bootloaders. A FaberLink board
+on the port is stopped only when the user says so, and starts again on the new firmware. Tested on
+simulated bootloaders only so far; it needs a run on a real board.
+
 ### Not built yet
 
-- The Arduino flasher tool (avrdude, bundled), so most people never open the Arduino IDE.
 - A bridge as a wasm connector.
 - Other speeds than 115 200 baud.
 - Using the board's `t_ms` to map its clock (readings are stamped on arrival, §10 decision 5).

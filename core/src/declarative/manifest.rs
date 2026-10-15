@@ -233,6 +233,10 @@ struct RawFile {
     provides: Vec<Spanned<RawProvide>>,
     #[serde(default)]
     settings: Vec<Spanned<RawSetting>>,
+    /// Bridge firmware the package carries; the package checks read it (core/src/packages.rs).
+    #[allow(dead_code)]
+    #[serde(default)]
+    firmware: Vec<toml::Value>,
 }
 
 #[derive(Deserialize)]
