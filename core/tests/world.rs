@@ -443,10 +443,13 @@ async fn driving_into_a_wall_stops_with_bumped_and_never_passes_through() {
     }
     let r = base(&c);
     assert_eq!((r.commanded.vx, r.measured.unwrap().vx), (0.6, 0.0), "pushing, but stopped");
-    assert!(front < 6.0 + 0.02, "it got right up to the wall: {front}");
+    // Where it stopped, read now: the last step to the wall can fall between two samples above.
+    let stopped = pose(&c).0 - 0.4;
+    assert!(stopped >= 6.0 - 1e-6, "the front edge passed the wall: x = {stopped}");
+    assert!(stopped < 6.0 + 0.02, "it got right up to the wall: {stopped}");
     hold(&c, &lease, 0.6, 0.3).await;
     assert!(base(&c).bumped, "still bumped while it pushes");
-    assert!((pose(&c).0 - 0.4 - front).abs() < 1e-3, "and it doesn't move");
+    assert!((pose(&c).0 - 0.4 - stopped).abs() < 1e-3, "and it doesn't move");
     let ahead = range_towards(&scan_after(&c, now_us(&c)).await, 0.0);
     assert!((ahead - 0.2).abs() < 0.05, "the LiDAR, 0.2 m behind the front edge, agrees: {ahead}");
 }
