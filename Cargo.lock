@@ -815,6 +815,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "faberlink-interop"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "faber-capabilities",
+ "faberlink",
+ "proptest",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -30,6 +30,8 @@ connectors/ldrobot-ld19/  first connector: built in, and the same code as a WebA
 shell/                    the web desktop (Svelte 5 + Vite + TypeScript)
 tools/arch-check/         enforces the crate dependency rules below
 tools/faber-cli/          the `faber` command: new connector from a template, check, pack
+tools/faberlink-interop/  tests the Rust FaberLink session against the C++ library, compiled for the PC
+firmware/faberlink/       the FaberLink Arduino library (C++): the board side of a bridge
 templates/                the connector templates `faber new connector` copies (Rust/wasm, declarative)
 wit/                      capability interfaces, and the connector world (wit/connector)
 fixtures/                 test data, e.g. a real LD19 capture
@@ -52,6 +54,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | `faber-connector-wasm` | `faber-connector`, `faber-capabilities`, `toml`, `wit-bindgen` (the component glue; its generated code is the only `unsafe` allowed outside the core's dependencies) | I/O, `faber-core` |
 | connectors (`connectors/*`, and the core's test guests in `core/tests/wasm-guests/*`) | `faber-connector`, `faber-capabilities`, `toml`, and `faber-connector-wasm` for their wasm build | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
 | `faberlink` (the bridge protocol, [faberlink.md](faberlink.md)) | `faber-capabilities` | any I/O crate. It turns bytes into messages and back; the clock is passed in. |
+| `faberlink-interop` (tests only) | `cc` (a build dependency: it compiles the Arduino library's C++ core and a fake-board harness). Its FFI module is the only other `unsafe` code in the workspace. | anything else |
 | `faber-core` | everything above, plus I/O crates | — |
 | `faber-cli` (the `faber` command) | `faber-core` (its package checks and its sandbox, so `faber check` accepts exactly what a machine runs), `faber-connector`, `faber-capabilities`, `clap`, `toml`, `wit-component` | anything else |
 
@@ -94,6 +97,7 @@ that isn't. How translations work, and `npm run i18n:check`: [translations.md](t
 | End-to-end | Playwright | `shell/e2e/`. Builds the shell, starts the real core with it compiled in (`embed-shell`), adds a part on the demo recording and checks that a scan is drawn, at desktop and 7" sizes |
 | Wasm connectors | `cargo test` | `core/tests/wasm.rs` builds the LD19 and a misbehaving test guest for `wasm32-unknown-unknown` and runs them in the sandbox. Without that target the tests are skipped with a message (`rustup target add wasm32-unknown-unknown`); CI sets `FABER_REQUIRE_WASM=1` so they always run there |
 | The `faber` CLI and its templates | `cargo test` | `tools/faber-cli`: `tests/first_connector.rs` is the Phase 3 proof (a new connector from the template, tested, checked, packed, installed through the API on a test core, run on a recording and uninstalled), skipped like the wasm tests without the target; the unit tests check and pack the declarative template and write the fixtures the templates and the e2e test use |
+| FaberLink | `cargo test` | `sdk/rust/faberlink`: property tests for the framing, every message and capability layout, and the session state machine. `tools/faberlink-interop`: the Rust session against the Arduino library's C++ core, compiled on the PC with the `cc` crate (MSVC on Windows, g++/clang elsewhere) and driven over an in-memory pipe with a fake clock: handshake, readings, commands, the board's safety rules, corruption and version mismatch |
 | Packages | `cargo test` | `core/tests/packages.rs`: preview, install while the core runs, parts restarting on an update, uninstall refused while used, and every refusal with its hint |
 | Interfaces | `wasm-tools component wit wit/capabilities`, and the connector world (see [wit/connector](../wit/connector/README.md)) | CI |
 

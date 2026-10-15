@@ -28,6 +28,8 @@ fn rule_for(name: &str, manifest_path: &str) -> Option<Rule> {
         }
         // FaberLink, the bridge protocol: pure encode/decode and a clock-passed-in session.
         "faberlink" => Some(Rule::Only(&["faber-capabilities"])),
+        // Compiles the Arduino library's C++ core for the interop tests; its tests use faberlink.
+        "faberlink-interop" => Some(Rule::Only(&["cc"])),
         "faber-core" => Some(Rule::Anything),
         // The `faber` command: the core's own checks and sandbox, plus the component wrapper.
         "faber-cli" => Some(Rule::Only(&[
@@ -181,6 +183,18 @@ mod tests {
         assert!(violations(&m).is_empty(), "{:?}", violations(&m));
         let m = json!({"packages": [
             pkg("faberlink", "/r/sdk/rust/faberlink/Cargo.toml", &[("serialport", None)]),
+        ]});
+        assert_eq!(violations(&m).len(), 1);
+    }
+
+    #[test]
+    fn the_interop_tests_only_build_c_plus_plus() {
+        let m = json!({"packages": [
+            pkg("faberlink-interop", "/r/tools/faberlink-interop/Cargo.toml", &[("cc", Some("build")), ("faberlink", Some("dev"))]),
+        ]});
+        assert!(violations(&m).is_empty(), "{:?}", violations(&m));
+        let m = json!({"packages": [
+            pkg("faberlink-interop", "/r/tools/faberlink-interop/Cargo.toml", &[("tokio", None)]),
         ]});
         assert_eq!(violations(&m).len(), 1);
     }

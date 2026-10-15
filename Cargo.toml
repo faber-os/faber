@@ -9,6 +9,7 @@ members = [
     "connectors/ldrobot-ld19",
     "core/tests/wasm-guests/misbehaving",
     "tools/arch-check",
+    "tools/faberlink-interop",
     "tools/faber-cli",
 ]
 
