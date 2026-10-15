@@ -677,3 +677,78 @@ mod backups {
         assert_eq!(gauges(&c).await["enabled"], true);
     }
 }
+
+/// What an app's package may show in the shell: its UI pages (sandboxed with an opaque origin
+/// even when opened on their own) and its own icon (an image only).
+mod app_files {
+    use super::*;
+
+    const UI_ONLY: &str = "faber-manifest = 1\n[package]\nid = \"gauges\"\ntype = \"app\"\n\
+        version = \"0.1.0\"\nname = \"Gauges\"\nui = \"ui/\"\n";
+
+    const ICON: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>";
+
+    fn app_package(toml: &str, extra: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut files: BTreeMap<String, Vec<u8>> = [
+            ("faber.toml", toml.as_bytes()),
+            ("README.md", b"# Gauges".as_slice()),
+            ("LICENSE", b"MIT".as_slice()),
+            ("ui/index.html", b"<p>gauges</p>".as_slice()),
+        ]
+        .into_iter()
+        .map(|(n, d)| (n.to_string(), d.to_vec()))
+        .collect();
+        files.extend(extra.iter().map(|(n, d)| (n.to_string(), d.to_vec())));
+        packages::pack(&files).unwrap()
+    }
+
+    async fn get(c: &TestCore, path: &str) -> axum::response::Response {
+        c.app.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ui_pages_are_sandboxed_and_the_icon_is_an_image_only() {
+        let c = core();
+        let body = Body::from(app_package(UI_ONLY, &[("icon.svg", ICON)]));
+        assert_eq!(call(&c.app, "POST", "/api/v0/packages", Some(body)).await.0, StatusCode::CREATED);
+
+        let res = get(&c, "/apps/gauges/ui/index.html").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let h = res.headers();
+        let csp = h["content-security-policy"].to_str().unwrap();
+        for rule in ["connect-src 'none'", "frame-src 'none'", "sandbox allow-scripts", "form-action 'none'"]
+        {
+            assert!(csp.contains(rule), "{rule}: {csp}");
+        }
+        assert!(!csp.contains("allow-same-origin"), "{csp}");
+        assert_eq!(h["access-control-allow-origin"], "null", "its own scripts load from its opaque origin");
+
+        let (_, app) = call(&c.app, "GET", "/api/v0/apps/gauges", None).await;
+        assert_eq!(app["icon"], "/apps/gauges/icon.svg", "{app}");
+        let res = get(&c, "/apps/gauges/icon.svg").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let h = res.headers();
+        assert_eq!(h["content-type"], "image/svg+xml");
+        assert_eq!(h["x-content-type-options"], "nosniff");
+        let csp = h["content-security-policy"].to_str().unwrap();
+        assert!(csp.starts_with("default-src 'none'") && csp.ends_with("sandbox"), "{csp}");
+        assert!(h.get("access-control-allow-origin").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_window_icon_wins_and_an_app_without_one_has_none() {
+        let c = core();
+        let body = Body::from(app_package(UI_ONLY, &[]));
+        assert_eq!(call(&c.app, "POST", "/api/v0/packages", Some(body)).await.0, StatusCode::CREATED);
+        let (_, app) = call(&c.app, "GET", "/api/v0/apps/gauges", None).await;
+        assert!(app.get("icon").is_none(), "{app}");
+        assert_eq!(get(&c, "/apps/gauges/icon.svg").await.status(), StatusCode::NOT_FOUND);
+        assert_eq!(get(&c, "/apps/nope/icon.svg").await.status(), StatusCode::NOT_FOUND);
+
+        let toml = format!("{UI_ONLY}[window]\nicon = \"ui/dial.svg\"\n");
+        let body = Body::from(app_package(&toml, &[("icon.svg", ICON), ("ui/dial.svg", ICON)]));
+        assert_eq!(call(&c.app, "POST", "/api/v0/packages", Some(body)).await.0, StatusCode::CREATED);
+        let (_, app) = call(&c.app, "GET", "/api/v0/apps/gauges", None).await;
+        assert_eq!(app["icon"], "/apps/gauges/ui/dial.svg", "{app}");
+    }
+}

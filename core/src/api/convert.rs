@@ -250,6 +250,7 @@ pub fn package_preview(p: &PackagePreview) -> Result<dto::PackagePreview, Box<dt
                 status: AppStatus::Stopped(Problem::new("The app is turned off.", "Turn it on to start it.")),
                 enabled: false,
                 bindings: Default::default(),
+                has_icon: false,
             }),
             readme: p.readme.clone(),
             replaces: p.replaces.clone(),
@@ -307,6 +308,13 @@ pub fn app_info(a: &AppView) -> dto::AppInfo {
             })
             .collect(),
         ui: m.ui.then(|| ui_url("ui/index.html")),
+        icon: m
+            .window
+            .as_ref()
+            .and_then(|w| w.icon.as_deref())
+            .filter(|i| i.starts_with("ui/"))
+            .map(ui_url)
+            .or_else(|| a.has_icon.then(|| ui_url(crate::packages::ICON))),
         window: m.window.as_ref().map(|w| dto::AppWindow {
             title: w.title.clone(),
             icon: w.icon.as_deref().filter(|i| i.starts_with("ui/")).map(ui_url),

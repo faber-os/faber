@@ -63,6 +63,8 @@ pub struct AppView {
     pub enabled: bool,
     /// Role → the parts picked for it.
     pub bindings: BTreeMap<String, Vec<PartName>>,
+    /// Its package has its own icon (`icon.svg` at its root).
+    pub has_icon: bool,
 }
 
 /// What the machine wants for one app now.
@@ -197,6 +199,7 @@ impl Machine {
             status: self.app_status.get(&d.manifest.id).unwrap_or(AppStatus::Starting),
             enabled: entry.enabled,
             bindings: entry.roles,
+            has_icon: d.folder.join(packages::ICON).is_file(),
         }
     }
 
@@ -443,6 +446,19 @@ impl Machine {
         for r in running.into_values() {
             r.stop();
         }
+    }
+
+    /// The icon at the root of an app's package (`icon.svg`), served as an image only.
+    pub fn app_icon(&self, id: &str) -> Result<Vec<u8>, MachineError> {
+        let def = self.known_app(id)?;
+        std::fs::read(def.folder.join(packages::ICON)).map_err(|_| {
+            MachineError::new(
+                ErrorKind::NotFound,
+                "not-found",
+                format!("{} has no icon.svg.", def.manifest.name),
+                "An app's own icon is icon.svg at the root of its package.",
+            )
+        })
     }
 
     /// A file of an app's UI, with the type it is served as. Only paths the installer accepts.
