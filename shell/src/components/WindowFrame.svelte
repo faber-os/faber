@@ -4,7 +4,7 @@
   import { useDesktop } from './desktopController.svelte';
   import Icon, { type IconName } from './Icon.svelte';
   import { item, separator } from '../lib/desktop/contextMenu';
-  import { menuTrigger, useMenu } from './menuController.svelte';
+  import { menuTrigger, useMenu, type MenuRequest } from './menuController.svelte';
 
   let { win, icon, children }: { win: WindowState; icon: IconName; children: Snippet } = $props();
 
@@ -17,6 +17,7 @@
   let interacting = $state(false);
 
   const focused = $derived(desktop.state.focusedId === win.id);
+  const tabs = $derived(desktop.tabs[win.id]);
   const box = $derived(
     win.maximised ? { x: 0, y: 0, w: desktop.area.width, h: desktop.area.height } : win.rect,
   );
@@ -65,14 +66,32 @@
     );
   }
 
-  function titleMenu() {
+  function titleMenu(target: HTMLElement): MenuRequest {
+    const tabId = target.closest<HTMLElement>('[data-tab]')?.dataset.tab;
+    const t = tabId ? tabs?.state.tabs.find((x) => x.id === tabId) : undefined;
+    if (t && tabs) {
+      return {
+        label: t.title,
+        header: { title: t.title, icon },
+        entries: [
+          tabs.add ? item('new-tab', tabs.addLabel ?? 'New tab', { icon: 'plus' }) : false,
+          item('close-tab', 'Close tab', { icon: 'close', shortcut: 'Ctrl+W' }),
+        ],
+        onSelect: (id: string) => {
+          if (id === 'new-tab') tabs.add?.();
+          else if (id === 'close-tab') tabs.close(t.id);
+        },
+      };
+    }
     return {
       label: win.title,
       entries: [
-        item('minimise', 'Minimise'),
-        item('maximise', win.maximised ? 'Restore size' : 'Maximise'),
+        item('minimise', 'Minimise', { icon: 'minimise' }),
+        item('maximise', win.maximised ? 'Restore size' : 'Maximise', {
+          icon: win.maximised ? 'restore' : 'maximise',
+        }),
         separator(),
-        item('close', 'Close'),
+        item('close', 'Close', { icon: 'close' }),
       ],
       onSelect: (id: string) => {
         if (id === 'minimise') desktop.minimise(win.id);
@@ -80,6 +99,28 @@
         else if (id === 'close') desktop.requestClose(win.id);
       },
     };
+  }
+
+  function tabKey(e: KeyboardEvent, index: number) {
+    if (!tabs) return;
+    const list = tabs.state.tabs;
+    let next = -1;
+    if (e.key === 'ArrowRight') next = (index + 1) % list.length;
+    else if (e.key === 'ArrowLeft') next = (index - 1 + list.length) % list.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = list.length - 1;
+    else if (e.key === 'Delete') {
+      e.preventDefault();
+      e.stopPropagation();
+      tabs.close(list[index]!.id);
+      return;
+    }
+    if (next === -1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    tabs.activate(list[next]!.id);
+    const strip = (e.currentTarget as HTMLElement).closest('[role="tablist"]');
+    strip?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
   }
 
   function titleKey(e: KeyboardEvent) {
@@ -136,8 +177,52 @@
     onkeydown={titleKey}
     use:menuTrigger={{ menu, build: titleMenu }}
   >
-    <span class="title-icon"><Icon name={icon} size={16} /></span>
-    <h2 id={titleId} class="title">{win.title}</h2>
+    {#if tabs}
+      <h2 id={titleId} class="visually-hidden">{win.title}</h2>
+      <div class="tabs" role="tablist" aria-label="{win.title} tabs">
+        {#each tabs.state.tabs as t, i (t.id)}
+          {@const on = t.id === tabs.state.activeId}
+          <div class="tab" class:on data-tab={t.id}>
+            <button
+              class="tab-pick"
+              role="tab"
+              aria-selected={on}
+              tabindex={on ? 0 : -1}
+              title={t.title}
+              onclick={() => tabs.activate(t.id)}
+              onauxclick={(e) => {
+                if (e.button === 1) tabs.close(t.id);
+              }}
+              onkeydown={(e) => tabKey(e, i)}
+            >
+              {#if t.dirty}<span class="dirty" title="Unsaved changes"></span>{/if}
+              <span class="tab-title">{t.title}</span>
+            </button>
+            <button
+              class="tab-close"
+              aria-label="Close tab {t.title}"
+              tabindex="-1"
+              onclick={() => tabs.close(t.id)}><Icon name="close" size={14} /></button
+            >
+          </div>
+        {/each}
+        {#if tabs.add}
+          <button
+            class="tab-add"
+            aria-label={tabs.addLabel ?? 'New tab'}
+            title={tabs.addLabel ?? 'New tab'}
+            onclick={() => tabs.add?.()}><Icon name="plus" size={16} /></button
+          >
+        {/if}
+      </div>
+    {:else}
+      <div class="tabs">
+        <div class="tab on solo">
+          <span class="title-icon"><Icon name={icon} size={15} /></span>
+          <h2 id={titleId} class="title">{win.title}</h2>
+        </div>
+      </div>
+    {/if}
     <div class="controls">
       <button
         class="ctl"
@@ -209,14 +294,13 @@
 
   .titlebar {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     gap: var(--space-2);
     flex: none;
     height: var(--titlebar-h);
-    padding-left: var(--space-4);
+    padding-left: var(--space-2);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    background: var(--chrome);
-    border-bottom: 1px solid var(--line);
+    background: var(--chrome-tabs);
     cursor: default;
     touch-action: none;
   }
@@ -226,6 +310,92 @@
   .titlebar:focus-visible {
     outline-offset: -2px;
   }
+  .tabs {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tab {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 220px;
+    height: calc(var(--titlebar-h) - 6px);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    color: var(--text-muted);
+  }
+  .tab:not(.on):hover {
+    background: var(--hover);
+  }
+  .tab.on {
+    background: var(--surface);
+    color: var(--text);
+  }
+  .tab.solo {
+    gap: var(--space-2);
+    padding: 0 var(--space-4) 0 var(--space-3);
+    max-width: 100%;
+  }
+  .tab-pick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    height: 100%;
+    padding: 0 4px 0 var(--space-3);
+    border: 0;
+    background: none;
+    color: inherit;
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  .tab.on .tab-pick {
+    font-weight: 680;
+  }
+  .tab-pick:focus-visible {
+    outline-offset: -3px;
+  }
+  .tab-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dirty {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .tab-close,
+  .tab-add {
+    display: grid;
+    place-items: center;
+    flex: none;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-muted);
+  }
+  .tab-close {
+    width: 26px;
+    height: 26px;
+    margin-right: 4px;
+  }
+  .tab-add {
+    align-self: center;
+    width: 30px;
+    height: 30px;
+  }
+  .tab-close:hover,
+  .tab-add:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
   .title-icon {
     display: inline-flex;
     color: var(--text-faint);
@@ -234,13 +404,12 @@
     color: var(--accent-ink);
   }
   .title {
-    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: var(--text-sm);
-    font-weight: 620;
+    font-weight: 650;
     letter-spacing: -0.005em;
     color: var(--text-muted);
   }
@@ -255,7 +424,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 46px;
+    width: 44px;
     border: 0;
     background: transparent;
     color: var(--text-muted);

@@ -6,6 +6,7 @@ use axum::http::{Request, StatusCode};
 use faber_capabilities::Reading;
 use faber_core::api::{self, dto};
 use faber_core::clock::MonotonicClock;
+use faber_core::disks::{Disk, DiskDiscovery};
 use faber_core::logs::LogBook;
 use faber_core::machine::{Machine, MachineOptions};
 use faber_core::ports::{
@@ -37,6 +38,15 @@ impl UsbProblemDiscovery for FakeUsbProblems {
     }
 }
 
+/// Removable disks the test can plug in and out.
+#[derive(Default)]
+struct FakeDisks(std::sync::Mutex<Vec<Disk>>);
+impl DiskDiscovery for FakeDisks {
+    fn list(&self) -> Vec<Disk> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 /// What Windows 11 reports for a cable it can't talk to (seen on a long passive extension).
 fn port_reset_failed() -> FailedUsb {
     FailedUsb {
@@ -51,6 +61,7 @@ struct TestCore {
     machine: Arc<Machine>,
     serial: Arc<FakeSerialPorts>,
     usb_problems: Arc<FakeUsbProblems>,
+    disks: Arc<FakeDisks>,
     _dir: tempfile::TempDir,
 }
 
@@ -60,11 +71,13 @@ fn core() -> TestCore {
     let replays = ReplayLibrary::with_demo();
     let serial = Arc::new(FakeSerialPorts::default());
     let usb_problems = Arc::new(FakeUsbProblems::default());
+    let disks = Arc::new(FakeDisks::default());
     let machine = Machine::start(MachineOptions {
         data_dir: dir.path().to_path_buf(),
         clock: clock.clone(),
         discovery: Arc::clone(&serial) as Arc<dyn SerialDiscovery>,
         usb_problems: Arc::clone(&usb_problems) as Arc<dyn UsbProblemDiscovery>,
+        disks: Arc::clone(&disks) as Arc<dyn DiskDiscovery>,
         opener: Arc::new(SystemOpener::new(replays.clone())),
         replays,
         connectors: faber_core::connectors::built_in(),
@@ -73,7 +86,7 @@ fn core() -> TestCore {
     })
     .unwrap();
     let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
-    TestCore { app, machine, serial, usb_problems, _dir: dir }
+    TestCore { app, machine, serial, usb_problems, disks, _dir: dir }
 }
 
 impl Drop for TestCore {
@@ -527,7 +540,11 @@ async fn parts_toml_is_validated_when_saved_from_files() {
 async fn settings_and_the_developer_guard() {
     let c = core();
     let (_, mut settings) = call(&c.app, "GET", "/api/v0/settings", None).await;
-    assert_eq!(settings["appearance"], json!({"theme": "system", "wallpaper": "aluminium"}));
+    assert_eq!(
+        settings["appearance"],
+        json!({"theme": "system", "style": "aluminium", "wallpaper": "aluminium"})
+    );
+    assert_eq!(settings["taskbar"]["size"], "small");
     settings["appearance"]["theme"] = json!("dark");
     settings["desktop"]["icons"] = json!([{"key": "accessory:files", "x": 16.0, "y": 16.0}]);
     let (s, saved) = call(&c.app, "PUT", "/api/v0/settings", Some(settings.clone())).await;
@@ -598,4 +615,46 @@ async fn recording_from_the_serial_monitor_makes_a_replay_port() {
     assert!(bytes > 0);
     let (_, ports) = call(&c.app, "GET", "/api/v0/ports", None).await;
     assert!(ports.as_array().unwrap().iter().any(|p| p["id"] == "replay:bench"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uploads_can_refuse_to_overwrite() {
+    let c = core();
+    let (s, _) = put_bytes(&c.app, "home:/Documents/a.txt&mode=create", b"one").await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, err) = put_bytes(&c.app, "home:/Documents/a.txt&mode=create", b"two").await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(err["error"]["code"], "already-exists");
+    assert_eq!(get_bytes(&c.app, "home:/Documents/a.txt").await.1, b"one");
+    let (s, _) = put_bytes(&c.app, "home:/Documents/a.txt", b"two").await;
+    assert_eq!(s, StatusCode::NO_CONTENT, "without a mode, saving replaces");
+    let (s, err) = put_bytes(&c.app, "home:/Documents/a.txt&mode=sideways", b"x").await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(err["error"]["code"], "bad-request");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_usb_stick_shows_up_as_its_own_place() {
+    let c = core();
+    let stick = tempfile::tempdir().unwrap();
+    std::fs::write(stick.path().join("notes.txt"), "on the stick").unwrap();
+    c.disks.0.lock().unwrap().push(Disk {
+        id: "disk-e".into(),
+        label: "STICK (E:)".into(),
+        mount: stick.path().to_path_buf(),
+    });
+    c.machine.refresh_ports();
+    let (_, roots) = call(&c.app, "GET", "/api/v0/files/roots", None).await;
+    assert_eq!(roots[1], json!({"id": "disk-e", "label": "STICK (E:)", "path": "disk-e:/"}));
+    let (s, list) = call(&c.app, "GET", "/api/v0/files/list?path=disk-e:/", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(list["entries"][0]["name"], "notes.txt");
+    let (s, body) =
+        call(&c.app, "POST", "/api/v0/files/trash", Some(json!({"paths": ["disk-e:/notes.txt"]}))).await;
+    assert_eq!((s, body["error"]["code"].as_str()), (StatusCode::CONFLICT, Some("no-trash")));
+
+    c.disks.0.lock().unwrap().clear();
+    c.machine.refresh_ports();
+    let (s, body) = call(&c.app, "GET", "/api/v0/files/list?path=disk-e:/", None).await;
+    assert_eq!((s, body["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("not-found")));
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { fakeShell } from '../test/fakeShell';
+import { DEFAULT_SETTINGS, fakeShell } from '../test/fakeShell';
 import { WINDOW_DEFS } from '../windows/registry';
 import Desktop from './Desktop.svelte';
 
@@ -41,9 +41,12 @@ describe('Desktop', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Minimise About Faber' }));
     expect(dialog).not.toBeVisible();
 
-    const task = within(screen.getByRole('list', { name: 'Open windows' })).getByRole('button', {
-      name: /About Faber/,
-    });
+    const task = within(screen.getByRole('list', { name: 'Programs and windows' })).getByRole(
+      'button',
+      {
+        name: /About Faber/,
+      },
+    );
     await userEvent.click(task);
     expect(dialog).toBeVisible();
     expect(task).toHaveAttribute('aria-pressed', 'true');
@@ -96,9 +99,8 @@ describe('Desktop', () => {
     const wall = document.querySelector('.wall')!;
     expect(wall.getAttribute('data-wallpaper')).toBe('aluminium');
     shell.pushSettings({
-      appearance: { theme: 'dark', wallpaper: 'cutting-mat' },
-      desktop: { icons: [] },
-      developer: { fullMachineFiles: false },
+      ...DEFAULT_SETTINGS,
+      appearance: { theme: 'dark', style: 'aluminium', wallpaper: 'cutting-mat' },
     });
     await expect.poll(() => wall.getAttribute('data-wallpaper')).toBe('cutting-mat');
   });

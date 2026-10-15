@@ -21,12 +21,6 @@ pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const TRASH_INDEX: &str = ".faber-trash.toml";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Root {
-    Home,
-    Machine,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Special {
     Desktop,
     Documents,
@@ -61,11 +55,15 @@ pub struct VPath {
     pub parts: Vec<String>,
 }
 
-/// `Root` with ordering, so paths can be sorted and used as keys.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Where a path lives.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RootKey {
+    /// Faber's home folder.
     Home,
+    /// The whole machine (developer setting).
     Machine,
+    /// A removable disk, by id without the `disk-` prefix (`disk-e:/` → `e`).
+    Disk(String),
 }
 
 impl VPath {
@@ -73,22 +71,39 @@ impl VPath {
         VPath { root: RootKey::Home, parts: parts.iter().map(|s| s.to_string()).collect() }
     }
 
-    pub fn root(&self) -> Root {
-        match self.root {
-            RootKey::Home => Root::Home,
-            RootKey::Machine => Root::Machine,
+    /// The root's id as written before `:/`: `home`, `machine` or `disk-<name>`.
+    pub fn root_id(&self) -> String {
+        match &self.root {
+            RootKey::Home => "home".into(),
+            RootKey::Machine => "machine".into(),
+            RootKey::Disk(name) => format!("disk-{name}"),
         }
+    }
+
+    pub fn disk(name: &str) -> VPath {
+        VPath { root: RootKey::Disk(name.to_string()), parts: vec![] }
     }
 
     /// Parses `home:/Desktop/notes.txt`. Refuses anything that could point outside its root.
     pub fn parse(s: &str) -> Result<VPath, FileError> {
         let bad = || FileError::bad_path(s);
-        let (root, rest) = if let Some(r) = s.strip_prefix("home:") {
-            (RootKey::Home, r)
-        } else if let Some(r) = s.strip_prefix("machine:") {
-            (RootKey::Machine, r)
-        } else {
-            return Err(bad());
+        let (root_token, rest) = s.split_once(':').ok_or_else(bad)?;
+        let root = match root_token {
+            "home" => RootKey::Home,
+            "machine" => RootKey::Machine,
+            t => match t.strip_prefix("disk-") {
+                // Same shape as disks::disk_id makes: lowercase letters, digits, single dashes.
+                Some(name)
+                    if !name.is_empty()
+                        && name.len() <= 32
+                        && name.split('-').all(|w| {
+                            !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                        }) =>
+                {
+                    RootKey::Disk(name.to_string())
+                }
+                _ => return Err(bad()),
+            },
         };
         let rest = rest.strip_prefix('/').ok_or_else(bad)?;
         let mut parts = Vec::new();
@@ -115,17 +130,17 @@ impl VPath {
 
     pub fn parent(&self) -> Option<VPath> {
         (!self.parts.is_empty())
-            .then(|| VPath { root: self.root, parts: self.parts[..self.parts.len() - 1].to_vec() })
+            .then(|| VPath { root: self.root.clone(), parts: self.parts[..self.parts.len() - 1].to_vec() })
     }
 
     pub fn join(&self, name: &str) -> VPath {
         let mut parts = self.parts.clone();
         parts.push(name.to_string());
-        VPath { root: self.root, parts }
+        VPath { root: self.root.clone(), parts }
     }
 
     fn special(&self) -> Option<Special> {
-        match (self.root, self.parts.as_slice()) {
+        match (&self.root, self.parts.as_slice()) {
             (RootKey::Home, [one]) => Special::from_name(one),
             _ => None,
         }
@@ -143,10 +158,7 @@ impl VPath {
 
 impl fmt::Display for VPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let root = match self.root {
-            RootKey::Home => "home",
-            RootKey::Machine => "machine",
-        };
+        let root = self.root_id();
         write!(f, "{root}:/{}", self.parts.join("/"))
     }
 }
@@ -164,6 +176,15 @@ fn is_plain_name(s: &str) -> bool {
 fn is_drive(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
+
+/// What writing to an existing file does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WriteMode {
+    /// Overwrite it (saving in Notes).
+    Replace,
+    /// Refuse with `already-exists` (uploads, so nothing is overwritten by surprise).
+    CreateOnly,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,6 +214,11 @@ pub struct FileError {
 impl FileError {
     fn new(code: &'static str, message: impl Into<String>, hint: impl Into<String>) -> FileError {
         FileError { code, message: message.into(), hint: hint.into() }
+    }
+
+    /// For callers outside this module that need a file error of their own.
+    pub fn new_public(code: &'static str, message: impl Into<String>, hint: impl Into<String>) -> FileError {
+        FileError::new(code, message, hint)
     }
 
     fn bad_path(s: &str) -> FileError {
@@ -232,6 +258,8 @@ impl FileError {
 pub struct Files {
     home: PathBuf,
     config_file: PathBuf,
+    /// Connected removable disks: name (without `disk-`) → where they are mounted.
+    disks: std::sync::RwLock<BTreeMap<String, PathBuf>>,
 }
 
 const CONFIG_NAME: &str = "parts.toml";
@@ -242,11 +270,23 @@ impl Files {
         for s in Special::ALL.into_iter().filter(|s| *s != Special::System) {
             fs::create_dir_all(home.join(s.name()))?;
         }
-        Ok(Files { home, config_file })
+        Ok(Files { home, config_file, disks: Default::default() })
     }
 
     pub fn home_dir(&self) -> &Path {
         &self.home
+    }
+
+    /// Replaces the set of connected disks (`disk-<name>` id → mount). Returns true if it changed.
+    pub fn set_disks(&self, disks: impl IntoIterator<Item = (String, PathBuf)>) -> bool {
+        let new: BTreeMap<String, PathBuf> = disks
+            .into_iter()
+            .filter_map(|(id, mount)| id.strip_prefix("disk-").map(|n| (n.to_string(), mount)))
+            .collect();
+        let mut cur = self.disks.write().expect("disks lock");
+        let changed = *cur != new;
+        *cur = new;
+        changed
     }
 
     /// True if `p` is the machine config shown in the System folder.
@@ -257,7 +297,19 @@ impl Files {
     /// The real location of `p`. Checks the root is allowed, and that symbolic links don't lead
     /// out of the home folder.
     fn resolve(&self, p: &VPath, machine_allowed: bool) -> Result<PathBuf, FileError> {
-        match p.root {
+        match &p.root {
+            RootKey::Disk(name) => {
+                let mount = self.disks.read().expect("disks lock").get(name).cloned().ok_or_else(|| {
+                    FileError::new(
+                        "not-found",
+                        format!("The disk {} isn't connected.", p.root_id()),
+                        "Plug it in again; it shows up under Disks by itself.",
+                    )
+                })?;
+                let real = p.parts.iter().fold(mount.clone(), |acc, s| acc.join(s));
+                self.check_inside(p, &real, &mount, "the disk")?;
+                Ok(real)
+            }
             RootKey::Machine if !machine_allowed => Err(FileError::new(
                 "machine-files-off",
                 "Files can only see Faber's home folder.",
@@ -277,16 +329,16 @@ impl Files {
                     };
                 }
                 let real = p.parts.iter().fold(self.home.clone(), |acc, s| acc.join(s));
-                self.check_inside_home(p, &real)?;
+                self.check_inside(p, &real, &self.home, "Faber's home folder")?;
                 Ok(real)
             }
         }
     }
 
     /// Follows symbolic links on the longest existing part of `real` and refuses if that leads
-    /// outside the home folder.
-    fn check_inside_home(&self, p: &VPath, real: &Path) -> Result<(), FileError> {
-        let home = fs::canonicalize(&self.home).map_err(|e| FileError::io(p, &e))?;
+    /// outside `base` (the home folder or a disk).
+    fn check_inside(&self, p: &VPath, real: &Path, base: &Path, what: &str) -> Result<(), FileError> {
+        let home = fs::canonicalize(base).map_err(|e| FileError::io(p, &e))?;
         let mut probe = real.to_path_buf();
         while !probe.exists() {
             if !probe.pop() {
@@ -299,8 +351,8 @@ impl Files {
         } else {
             Err(FileError::new(
                 "bad-path",
-                format!("{p} leads outside Faber's home folder."),
-                "Links that point outside the home folder can't be followed.",
+                format!("{p} leads outside {what}."),
+                "Links that point outside it can't be followed.",
             ))
         }
     }
@@ -391,7 +443,13 @@ impl Files {
     }
 
     /// Creates or overwrites a file. Refuses the System folder: the machine handles the config.
-    pub fn write(&self, p: &VPath, bytes: &[u8], machine_allowed: bool) -> Result<(), FileError> {
+    pub fn write(
+        &self,
+        p: &VPath,
+        bytes: &[u8],
+        mode: WriteMode,
+        machine_allowed: bool,
+    ) -> Result<(), FileError> {
         if p.within(Special::System) {
             return Err(FileError::new(
                 "protected",
@@ -420,8 +478,30 @@ impl Files {
         if !parent.is_dir() {
             return Err(FileError::not_found(&p.parent().unwrap_or_else(|| p.clone())));
         }
-        let tmp = parent.join(format!(".{}.faber-tmp", p.name().unwrap_or("file")));
-        fs::write(&tmp, bytes).and_then(|()| fs::rename(&tmp, &real)).map_err(|e| FileError::io(p, &e))
+        match mode {
+            // Written beside the target and renamed over it, so a reader never sees half a file.
+            WriteMode::Replace => {
+                let tmp = parent.join(format!(".{}.faber-tmp", p.name().unwrap_or("file")));
+                fs::write(&tmp, bytes)
+                    .and_then(|()| fs::rename(&tmp, &real))
+                    .map_err(|e| FileError::io(p, &e))
+            }
+            // `create_new` fails if the file exists, even if it appeared a moment ago.
+            WriteMode::CreateOnly => {
+                use std::io::Write;
+                let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&real).map_err(|e| {
+                    if e.kind() == io::ErrorKind::AlreadyExists {
+                        already_exists(p)
+                    } else {
+                        FileError::io(p, &e)
+                    }
+                })?;
+                f.write_all(bytes).map_err(|e| {
+                    let _ = fs::remove_file(&real);
+                    FileError::io(p, &e)
+                })
+            }
+        }
     }
 
     pub fn create_folder(&self, p: &VPath, machine_allowed: bool) -> Result<(), FileError> {
@@ -476,7 +556,7 @@ impl Files {
         for p in paths {
             if p.root != RootKey::Home {
                 return Err(FileError::new(
-                    "bad-path",
+                    "no-trash",
                     format!("{p} is outside the home folder, which has no Trash."),
                     "Delete it for good instead, if you're sure.",
                 ));
@@ -551,6 +631,13 @@ impl Files {
                     "protected",
                     format!("{p} isn't in the Trash."),
                     "Move it to the Trash first; delete it from there if you're sure.",
+                ));
+            }
+            if matches!(p.root, RootKey::Disk(_)) && p.parts.is_empty() {
+                return Err(FileError::new(
+                    "protected",
+                    format!("{p} is a whole disk."),
+                    "Delete what is on it instead.",
                 ));
             }
             if p.root == RootKey::Machine && p.parts.len() < 2 {
@@ -723,14 +810,20 @@ mod tests {
         assert_eq!(entries[0].path.to_string(), "home:/System/parts.toml");
         assert_eq!(f.read(&p("home:/System/parts.toml"), false).unwrap(), b"# parts\n");
         assert!(Files::is_config(&p("home:/System/parts.toml")));
-        assert_eq!(f.write(&p("home:/System/parts.toml"), b"x", false).unwrap_err().code, "protected");
-        assert_eq!(f.write(&p("home:/System/other.txt"), b"x", false).unwrap_err().code, "protected");
+        assert_eq!(
+            f.write(&p("home:/System/parts.toml"), b"x", WriteMode::Replace, false).unwrap_err().code,
+            "protected"
+        );
+        assert_eq!(
+            f.write(&p("home:/System/other.txt"), b"x", WriteMode::Replace, false).unwrap_err().code,
+            "protected"
+        );
     }
 
     #[test]
     fn write_read_rename_and_folders() {
         let (_d, f) = setup();
-        f.write(&p("home:/Documents/a.txt"), b"hello", false).unwrap();
+        f.write(&p("home:/Documents/a.txt"), b"hello", WriteMode::Replace, false).unwrap();
         assert_eq!(f.read(&p("home:/Documents/a.txt"), false).unwrap(), b"hello");
         f.create_folder(&p("home:/Documents/notes"), false).unwrap();
         assert_eq!(f.create_folder(&p("home:/Documents/notes"), false).unwrap_err().code, "already-exists");
@@ -739,14 +832,31 @@ mod tests {
         assert_eq!(listed[0].name, "b.txt");
         assert_eq!(listed[0].size, 5);
         assert!(listed[0].modified_ms.is_some());
-        assert_eq!(f.write(&p("home:/Nowhere/x.txt"), b"x", false).unwrap_err().code, "not-found");
-        assert_eq!(f.write(&p("home:/loose.txt"), b"x", false).unwrap_err().code, "protected");
+        assert_eq!(
+            f.write(&p("home:/Nowhere/x.txt"), b"x", WriteMode::Replace, false).unwrap_err().code,
+            "not-found"
+        );
+        assert_eq!(
+            f.write(&p("home:/loose.txt"), b"x", WriteMode::Replace, false).unwrap_err().code,
+            "protected"
+        );
+    }
+
+    #[test]
+    fn create_only_never_overwrites() {
+        let (_d, f) = setup();
+        f.write(&p("home:/Documents/a.txt"), b"first", WriteMode::CreateOnly, false).unwrap();
+        let e = f.write(&p("home:/Documents/a.txt"), b"second", WriteMode::CreateOnly, false).unwrap_err();
+        assert_eq!(e.code, "already-exists");
+        assert_eq!(f.read(&p("home:/Documents/a.txt"), false).unwrap(), b"first");
+        f.write(&p("home:/Documents/a.txt"), b"second", WriteMode::Replace, false).unwrap();
+        assert_eq!(f.read(&p("home:/Documents/a.txt"), false).unwrap(), b"second");
     }
 
     #[test]
     fn folders_come_first() {
         let (_d, f) = setup();
-        f.write(&p("home:/Desktop/a.txt"), b"", false).unwrap();
+        f.write(&p("home:/Desktop/a.txt"), b"", WriteMode::Replace, false).unwrap();
         f.create_folder(&p("home:/Desktop/z"), false).unwrap();
         let names: Vec<_> = f.list(&p("home:/Desktop"), false).unwrap().into_iter().map(|e| e.name).collect();
         assert_eq!(names, ["z", "a.txt"]);
@@ -770,14 +880,14 @@ mod tests {
     #[test]
     fn trash_restore_and_delete() {
         let (_d, f) = setup();
-        f.write(&p("home:/Desktop/a.txt"), b"1", false).unwrap();
+        f.write(&p("home:/Desktop/a.txt"), b"1", WriteMode::Replace, false).unwrap();
         f.trash(&[p("home:/Desktop/a.txt")]).unwrap();
         let trash = f.list(&p("home:/Trash"), false).unwrap();
         assert_eq!(trash.len(), 1, "the index file is hidden");
         assert_eq!(trash[0].original_path.as_deref(), Some("home:/Desktop/a.txt"));
 
         // A second a.txt in the Trash gets a new name.
-        f.write(&p("home:/Desktop/a.txt"), b"2", false).unwrap();
+        f.write(&p("home:/Desktop/a.txt"), b"2", WriteMode::Replace, false).unwrap();
         f.trash(&[p("home:/Desktop/a.txt")]).unwrap();
         let names: Vec<_> = f.list(&p("home:/Trash"), false).unwrap().into_iter().map(|e| e.name).collect();
         assert_eq!(names, ["a (2).txt", "a.txt"]);
@@ -809,7 +919,10 @@ mod tests {
     fn size_limit() {
         let (_d, f) = setup();
         let big = vec![0u8; (MAX_FILE_BYTES + 1) as usize];
-        assert_eq!(f.write(&p("home:/Documents/big.bin"), &big, false).unwrap_err().code, "too-large");
+        assert_eq!(
+            f.write(&p("home:/Documents/big.bin"), &big, WriteMode::Replace, false).unwrap_err().code,
+            "too-large"
+        );
     }
 
     #[cfg(unix)]
@@ -829,5 +942,45 @@ mod tests {
         assert_eq!(unique_name(d.path(), "a.txt"), "a (3).txt");
         std::fs::create_dir(d.path().join("box")).unwrap();
         assert_eq!(unique_name(d.path(), "box"), "box (2)");
+    }
+}
+
+#[cfg(test)]
+mod disk_tests {
+    use super::*;
+
+    fn p(s: &str) -> VPath {
+        VPath::parse(s).unwrap()
+    }
+
+    #[test]
+    fn disk_paths_parse_and_print() {
+        assert_eq!(p("disk-e:/photos/a.jpg").root, RootKey::Disk("e".into()));
+        assert_eq!(p("disk-sennep-sd:/").to_string(), "disk-sennep-sd:/");
+        for bad in ["disk-:/x", "disk-E:/x", "disk-a--b:/x", "disk-a_b:/x", "disk-e:/../x"] {
+            assert_eq!(VPath::parse(bad).unwrap_err().code, "bad-path", "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_connected_disk_works_like_a_folder_and_has_no_trash() {
+        let d = tempfile::tempdir().unwrap();
+        let stick = tempfile::tempdir().unwrap();
+        std::fs::write(stick.path().join("readme.txt"), "hi").unwrap();
+        let f = Files::open(d.path().join("files"), d.path().join("parts.toml")).unwrap();
+        assert_eq!(f.read(&p("disk-e:/readme.txt"), false).unwrap_err().code, "not-found");
+        assert!(f.set_disks([("disk-e".to_string(), stick.path().to_path_buf())]));
+        assert!(!f.set_disks([("disk-e".to_string(), stick.path().to_path_buf())]), "unchanged");
+        assert_eq!(f.list(&p("disk-e:/"), false).unwrap()[0].name, "readme.txt");
+        f.write(&p("disk-e:/new.txt"), b"x", WriteMode::CreateOnly, false).unwrap();
+        assert_eq!(f.trash(&[p("disk-e:/new.txt")]).unwrap_err().code, "no-trash");
+        f.delete(&[p("disk-e:/new.txt")], false).unwrap();
+        assert_eq!(f.delete(&[p("disk-e:/")], false).unwrap_err().code, "protected");
+        assert_eq!(
+            f.rename(&p("disk-e:/readme.txt"), &p("home:/Documents/r.txt"), false).unwrap_err().code,
+            "bad-path"
+        );
+        f.set_disks([]);
+        assert_eq!(f.list(&p("disk-e:/"), false).unwrap_err().code, "not-found");
     }
 }

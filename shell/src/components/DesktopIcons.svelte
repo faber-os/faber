@@ -14,10 +14,19 @@
     type Placement,
   } from '../lib/desktop/iconGrid';
   import { useDesktop } from './desktopController.svelte';
-  import { download, entryMenu, openEntry, openInNotes, openProperties } from './fileOps';
-  import { entryIcon } from './fileLook';
-  import Icon, { type IconName } from './Icon.svelte';
+  import AppIcon from './AppIcon.svelte';
+  import {
+    download,
+    entryHeader,
+    entryMenu,
+    openEntry,
+    openInNotes,
+    openProperties,
+  } from './fileOps';
+  import FileIcon from './FileIcon.svelte';
+  import { fileLook } from './fileLook';
   import { menuTrigger, useMenu } from './menuController.svelte';
+  import { pinItem, runPinItem } from './programs';
   import type { WindowDef } from './windowDefs';
 
   let { defs }: { defs: WindowDef[] } = $props();
@@ -30,7 +39,6 @@
   interface DesktopIcon {
     key: string;
     label: string;
-    icon: IconName;
     def?: WindowDef;
     entry?: FileEntry;
   }
@@ -66,8 +74,10 @@
   });
 
   const icons = $derived<DesktopIcon[]>([
-    ...defs.flatMap((d) => (d.pin ? [{ key: d.pin, label: d.title, icon: d.icon, def: d }] : [])),
-    ...files.map((e) => ({ key: e.path, label: e.name, icon: entryIcon(e), entry: e })),
+    ...defs.flatMap((d) =>
+      d.program && d.onDesktop ? [{ key: d.program, label: d.title, def: d }] : [],
+    ),
+    ...files.map((e) => ({ key: e.path, label: e.name, entry: e })),
   ]);
   const saved = $derived(pending ?? core.settings?.desktop.icons ?? []);
   const placement = $derived(
@@ -183,6 +193,9 @@
       e.preventDefault();
       selected = (cur ? neighbour(cur.key, dir) : ordered[0])?.key ?? selected;
       void focusSelected();
+    } else if (cur?.entry && e.key === 'Enter' && e.altKey) {
+      e.preventDefault();
+      openProperties(desktop, cur.entry);
     } else if (cur && e.key === 'Enter') {
       e.preventDefault();
       open(cur);
@@ -234,6 +247,7 @@
       if (!r.ok) core.lastError = r.error;
       else {
         selected = to;
+        desktop.renameRecent(from, to);
         await moveSavedKey(from, to);
       }
       await load();
@@ -265,7 +279,7 @@
     const r =
       kind === 'folder'
         ? await core.createFolder(path)
-        : await core.writeFile(path, new Uint8Array());
+        : await core.writeFile(path, new Uint8Array(), 'create');
     if (!r.ok) {
       core.lastError = r.error;
       return;
@@ -279,14 +293,23 @@
     const key = target.closest<HTMLElement>('[data-key]')?.dataset.key;
     const i = icons.find((x) => x.key === key);
     if (i?.def) {
+      const d = i.def;
       selected = i.key;
-      return { label: i.label, entries: [item('open', 'Open')], onSelect: () => open(i) };
+      return {
+        label: i.label,
+        header: { title: d.title, detail: d.description, icon: d.icon },
+        entries: [item('open', 'Open', { icon: 'open', shortcut: 'Enter' }), pinItem(core, i.key)],
+        onSelect: (id: string) => {
+          if (!runPinItem(core, i.key, id)) open(i);
+        },
+      };
     }
     if (i?.entry) {
       const e = i.entry;
       selected = i.key;
       return {
         label: i.label,
+        header: entryHeader(e),
         entries: entryMenu(e),
         onSelect: (id: string) => {
           if (id === 'open') open(i);
@@ -302,12 +325,12 @@
     return {
       label: 'Desktop',
       entries: [
-        item('folder', 'New folder'),
-        item('text', 'New text file'),
+        item('folder', 'New folder', { icon: 'folder' }),
+        item('text', 'New text file', { icon: 'fileText' }),
         separator(),
-        item('line-up', 'Line up icons'),
-        item('wallpaper', 'Change wallpaper…'),
-        item('refresh', 'Refresh'),
+        item('line-up', 'Line up icons', { icon: 'grid' }),
+        item('wallpaper', 'Change wallpaper…', { icon: 'desktop' }),
+        item('refresh', 'Refresh', { icon: 'refresh' }),
       ],
       onSelect: (id: string) => {
         if (id === 'folder' || id === 'text') void create(id);
@@ -360,7 +383,12 @@
       onclick={() => click(i)}
       onkeydown={() => {}}
     >
-      <span class="plate" class:pin={!!i.def}><Icon name={i.icon} size={28} /></span>
+      {#if i.def}
+        <span class="plate"><AppIcon icon={i.def.icon} colour={i.def.colour} size={52} /></span>
+      {:else if i.entry}
+        {@const look = fileLook(i.entry)}
+        <span class="plate file"><FileIcon type={look.type} emblem={look.emblem} size={52} /></span>
+      {/if}
       {#if renaming === i.key}
         <input
           class="input rename"
@@ -417,15 +445,10 @@
     place-items: center;
     width: 52px;
     height: 52px;
-    border-radius: 13px;
-    background: var(--surface);
-    color: var(--text);
-    box-shadow:
-      0 0 0 1px oklch(0.3 0.01 250 / 0.14),
-      0 2px 6px -2px oklch(0.2 0.01 250 / 0.3);
+    border-radius: 14px;
   }
-  .plate.pin {
-    color: var(--accent-ink);
+  .plate.file {
+    filter: drop-shadow(0 1px 2px oklch(0.2 0.01 250 / 0.3));
   }
   .label {
     max-width: 100%;
@@ -450,9 +473,7 @@
     text-shadow: none;
   }
   .icon[aria-selected='true'] .plate {
-    box-shadow:
-      0 0 0 2px var(--accent),
-      0 2px 6px -2px oklch(0.2 0.01 250 / 0.3);
+    box-shadow: 0 0 0 2px var(--accent);
   }
   .icon:focus-visible .plate {
     outline: 2px solid var(--focus-ring);

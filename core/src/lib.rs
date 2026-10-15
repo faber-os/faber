@@ -8,6 +8,7 @@ pub mod names;
 // Layer 2: one job each; none of them knows about HTTP.
 pub mod config;
 pub mod connectors;
+pub mod disks;
 pub mod files;
 pub mod logs;
 pub mod ports;
@@ -49,6 +50,7 @@ impl Core {
             clock,
             discovery: Arc::new(ports::SystemDiscovery),
             usb_problems: Arc::new(ports::SystemUsbProblems),
+            disks: Arc::new(disks::SystemDisks),
             opener: Arc::new(ports::SystemOpener::new(replays.clone())),
             replays,
             connectors: connectors::built_in(),

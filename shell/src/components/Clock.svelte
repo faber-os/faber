@@ -1,4 +1,6 @@
 <script lang="ts">
+  /** `withDate`: the date under the time (the large taskbar). */
+  let { withDate = false }: { withDate?: boolean } = $props();
   let now = $state(new Date());
 
   $effect(() => {
@@ -25,7 +27,11 @@
   );
 </script>
 
-<time class="clock num" datetime={now.toISOString()} title={date}>{time}</time>
+<time class="clock num" class:stacked={withDate} datetime={now.toISOString()} title={date}
+  >{time}{#if withDate}<span class="date"
+      >{now.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span
+    >{/if}</time
+>
 
 <style>
   .clock {
@@ -36,5 +42,16 @@
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--text);
+  }
+  .clock.stacked {
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-end;
+    line-height: 1.25;
+  }
+  .date {
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text-muted);
   }
 </style>

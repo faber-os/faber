@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ConnectionStatus } from '../lib/state/types';
-  import Logo from './Logo.svelte';
+  import Wordmark from './Wordmark.svelte';
 
   /** The loading screen: shown until the core has answered, so nobody sees a half-built desktop. */
   let { status }: { status: ConnectionStatus } = $props();
@@ -13,10 +13,7 @@
 </script>
 
 <div class="boot" role="status" aria-live="polite">
-  <div class="mark">
-    <span class="nut"><Logo size={96} title="Faber" /></span>
-    <p class="name" aria-hidden="true">Faber</p>
-  </div>
+  <div class="mark"><Wordmark size={56} os /></div>
   <p class="line">
     {#if status === 'reconnecting' || slow}
       Still waiting for the Faber core. It may be starting up; if this stays, check that faber-core
@@ -41,25 +38,14 @@
     text-align: center;
   }
   .mark {
-    display: grid;
-    justify-items: center;
-    gap: var(--space-3);
-  }
-  .nut {
-    color: var(--accent);
     animation: settle 900ms var(--ease-out);
   }
-  /* The nut turns one flat (60°) as it seats, once. */
+  /* The lockup settles into place once, as a nut seats. */
   @keyframes settle {
     from {
-      transform: rotate(-60deg);
+      transform: translateY(6px);
       opacity: 0;
     }
-  }
-  .name {
-    font-size: 2rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
   }
   .line {
     max-width: 42ch;

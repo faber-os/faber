@@ -5,7 +5,7 @@ import { createHttp } from '../api/http';
 import { FakeWebSocket } from '../../test/fakeWebSocket';
 import { fakeFetch, type FakeFetch } from '../../test/fakeFetch';
 import { CoreState, LOG_CAPACITY } from './core.svelte';
-import type { PartInfo } from './types';
+import type { PartInfo, Settings } from './types';
 
 const demo: PartInfo = {
   name: 'demo',
@@ -21,9 +21,10 @@ function bin(msg: unknown): ArrayBuffer {
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
 }
 
-const SETTINGS = {
-  appearance: { theme: 'system' as const, wallpaper: 'aluminium' },
+const SETTINGS: Settings = {
+  appearance: { theme: 'system', style: 'aluminium', wallpaper: 'aluminium' },
   desktop: { icons: [] },
+  taskbar: { pinned: ['tool:parts'], size: 'small' },
   developer: { fullMachineFiles: false },
 };
 
@@ -89,9 +90,12 @@ describe('CoreState', () => {
 
   it('saves settings and keeps what the core answered', async () => {
     const { core } = setup();
-    const answer = { ...SETTINGS, appearance: { theme: 'dark', wallpaper: 'graphite' } };
+    const answer = {
+      ...SETTINGS,
+      appearance: { theme: 'dark', style: 'cobalt', wallpaper: 'graphite' },
+    };
     f.route({ method: 'PUT', path: '/api/v0/settings', body: answer });
-    const r = await core.saveSettings(answer as typeof SETTINGS);
+    const r = await core.saveSettings(answer as Settings);
     expect(r.ok).toBe(true);
     expect(core.settings).toEqual(answer);
   });

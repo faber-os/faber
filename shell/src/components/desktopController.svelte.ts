@@ -17,9 +17,31 @@ import {
   type WindowKind,
   type WindowState,
 } from '../lib/desktop/windows';
+import { TASKBAR_HEIGHTS } from '../lib/desktop/taskbar';
+import type { TabsState } from '../lib/desktop/tabs';
+import {
+  addRecent,
+  loadRecent,
+  renameRecent,
+  saveRecent,
+  type RecentFile,
+} from '../lib/desktop/launcher';
 
-export const TASKBAR_HEIGHT = 52;
 const SAVE_DELAY_MS = 300;
+
+/**
+ * A window's title-bar tabs (Notes, Files): what WindowFrame draws, and what to do when one is
+ * picked, closed or added. A window without tabs shows its title as a single tab-shaped label.
+ */
+export interface WindowTabs {
+  state: TabsState;
+  activate(tabId: string): void;
+  close(tabId: string): void;
+  /** Present when the window can open another tab (the + button). */
+  add?: () => void;
+  /** What + says to screen readers, e.g. "New note". */
+  addLabel?: string;
+}
 
 export interface OpenOptions {
   key?: string;
@@ -34,11 +56,17 @@ export interface OpenOptions {
 export class DesktopController {
   state = $state.raw<DesktopState>(emptyDesktop());
   viewport = $state.raw<Area>({ width: 1280, height: 800 });
+  /** Small or Large (Settings.taskbar.size). */
+  taskbarHeight = $state<number>(TASKBAR_HEIGHTS.small);
   /** Space for windows: the screen minus the taskbar. */
   area = $derived<Area>({
     width: this.viewport.width,
-    height: Math.max(0, this.viewport.height - TASKBAR_HEIGHT),
+    height: Math.max(0, this.viewport.height - this.taskbarHeight),
   });
+  /** Title-bar tabs, by window id, for the windows that have them. */
+  tabs = $state.raw<Record<string, WindowTabs>>({});
+  /** Files opened lately (this browser only), newest first, for the start menu. */
+  recent = $state.raw<RecentFile[]>([]);
   compact = $derived(isCompactScreen(this.viewport));
 
   readonly kinds: Record<string, WindowKind>;
@@ -51,7 +79,22 @@ export class DesktopController {
     this.kinds = kinds;
     this.storage = storage;
     this.geometry = loadGeometry(storage);
+    this.recent = loadRecent(storage);
     this.viewport = viewport;
+  }
+
+  /** A file was opened: it goes to the top of the recent files. */
+  noteRecent(path: string, now = Date.now()): void {
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    this.recent = addRecent(this.recent, { path, name, at: now });
+    saveRecent(this.storage, this.recent);
+  }
+
+  /** A file was renamed or moved: its recent entry follows it. */
+  renameRecent(from: string, to: string): void {
+    if (!this.recent.some((f) => f.path === from)) return;
+    this.recent = renameRecent(this.recent, from, to);
+    saveRecent(this.storage, this.recent);
   }
 
   kind(win: WindowState): WindowKind {
@@ -96,6 +139,27 @@ export class DesktopController {
   close(id: string): void {
     this.closeGuards.delete(id);
     this.state = closeWindow(this.state, id);
+    if (id in this.tabs) {
+      const { [id]: _gone, ...rest } = this.tabs;
+      this.tabs = rest;
+    }
+  }
+
+  /** A window reports its tabs (called from an effect whenever they change). */
+  setTabs(id: string, tabs: WindowTabs | null): void {
+    untrack(() => {
+      if (tabs) this.tabs = { ...this.tabs, [id]: tabs };
+      else if (id in this.tabs) {
+        const { [id]: _gone, ...rest } = this.tabs;
+        this.tabs = rest;
+      }
+    });
+  }
+
+  setTaskbarHeight(h: number): void {
+    if (h === this.taskbarHeight) return;
+    this.taskbarHeight = h;
+    this.setViewport(this.viewport);
   }
 
   /**

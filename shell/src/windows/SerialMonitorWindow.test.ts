@@ -142,6 +142,27 @@ describe('Serial monitor', () => {
     expect(await screen.findByText(/Saved/)).toHaveTextContent('2.0 KiB');
   });
 
+  it('closing while recording shows what the core saved, from its stop report', async () => {
+    const shell = await setup();
+    const id = await openPort(shell);
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+    shell.receive({ type: 'serial-recording', id, path: 'home:/Recordings/r.fbcap' });
+    shell.receive({ type: 'serial-data', id, tUs: 1, data: new Uint8Array(10) });
+    await expect.poll(() => document.body.textContent).toContain('(10 B)');
+    await userEvent.click(screen.getByRole('button', { name: 'Close port' }));
+    expect(lastSent(shell)).toEqual({ type: 'serial-close', id });
+    // What this window counted, until the core's own count arrives.
+    expect(await screen.findByText(/Saved/)).toHaveTextContent('10 B');
+    shell.receive({
+      type: 'serial-recording-stopped',
+      id,
+      path: 'home:/Recordings/r.fbcap',
+      bytes: 3072,
+    });
+    shell.receive({ type: 'serial-closed', id });
+    await expect.poll(() => screen.getByText(/Saved/).textContent).toContain('3.0 KiB');
+  });
+
   it('goes back to naming when the core refuses the name', async () => {
     const shell = await setup();
     const id = await openPort(shell);

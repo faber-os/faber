@@ -13,7 +13,7 @@
 
 <div class="about">
   <div class="hero">
-    <Wordmark size={44} />
+    <Wordmark size={40} os />
     <p class="tagline">
       Latin for <em>maker</em>. An open-source operating system for the machines you build.
     </p>

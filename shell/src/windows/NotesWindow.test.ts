@@ -102,7 +102,7 @@ describe('Notes', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(win().title).toBe('plan.txt · Notes'));
     expect(sent(shell)).toBe('step 1');
-    expect(win().params).toEqual({ path: target });
+    expect(shell.desktop.tabs[win().id]?.state.tabs.map((t) => t.key)).toEqual([target]);
   });
 
   it('finds text with Ctrl+F and steps through the matches', async () => {
@@ -136,5 +136,61 @@ describe('Notes', () => {
     expect(editor()).toHaveAttribute('wrap', 'off');
     await userEvent.click(screen.getByRole('button', { name: 'Monospace' }));
     expect(editor()).not.toHaveClass('mono');
+  });
+
+  describe('tabs', () => {
+    const tabsOf = (shell: ReturnType<typeof fakeShell>, id: string) =>
+      shell.desktop.tabs[id]!.state;
+
+    it('starts with one tab and adds a new note as another tab', async () => {
+      const { shell, win } = setup(null);
+      await waitFor(() => expect(tabsOf(shell, win().id).tabs).toHaveLength(1));
+      await userEvent.click(screen.getByRole('button', { name: /^New$/ }));
+      const tabs = tabsOf(shell, win().id);
+      expect(tabs.tabs.map((t) => t.title)).toHaveLength(2);
+      expect(tabs.activeId).toBe(tabs.tabs[1]!.id);
+      expect(shell.desktop.state.windows).toHaveLength(1);
+      expect(win().title).toMatch(/^Untitled \d+ · Notes$/);
+    });
+
+    it('marks a tab with unsaved changes and asks before closing just that tab', async () => {
+      const { shell, win } = setup(null);
+      await userEvent.type(editor(), 'idea');
+      await waitFor(() => expect(tabsOf(shell, win().id).tabs[0]!.dirty).toBe(true));
+      await userEvent.click(screen.getByRole('button', { name: /^New$/ }));
+      const first = tabsOf(shell, win().id).tabs[0]!;
+      shell.desktop.tabs[win().id]!.close(first.id);
+      const dialog = await screen.findByRole('alertdialog', { name: /^Save changes to Untitled/ });
+      // Asking brings that tab to the front.
+      expect(tabsOf(shell, win().id).activeId).toBe(first.id);
+      await userEvent.click(within(dialog).getByRole('button', { name: "Don't save" }));
+      await waitFor(() => expect(tabsOf(shell, win().id).tabs).toHaveLength(1));
+      expect(shell.desktop.state.windows).toHaveLength(1);
+    });
+
+    it('closing the window asks about each tab with unsaved changes in turn', async () => {
+      const { shell, win } = setup(null);
+      await userEvent.type(editor(), 'one');
+      await userEvent.click(screen.getByRole('button', { name: /^New$/ }));
+      await userEvent.type(editor(), 'two');
+      await waitFor(() => expect(tabsOf(shell, win().id).tabs.every((t) => t.dirty)).toBe(true));
+      shell.desktop.requestClose(win().id);
+      let dialog = await screen.findByRole('alertdialog');
+      await userEvent.click(within(dialog).getByRole('button', { name: "Don't save" }));
+      expect(shell.desktop.state.windows).toHaveLength(1);
+      dialog = await screen.findByRole('alertdialog');
+      await userEvent.click(within(dialog).getByRole('button', { name: "Don't save" }));
+      await waitFor(() => expect(shell.desktop.state.windows).toHaveLength(0));
+    });
+
+    it('cancelling one question keeps the window open', async () => {
+      const { shell, win } = setup(null);
+      await userEvent.type(editor(), 'one');
+      shell.desktop.requestClose(win().id);
+      const dialog = await screen.findByRole('alertdialog');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      expect(shell.desktop.state.windows).toHaveLength(1);
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
   });
 });

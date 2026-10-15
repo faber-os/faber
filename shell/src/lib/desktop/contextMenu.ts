@@ -16,6 +16,19 @@ export interface MenuItem {
   disabledReason?: string;
   /** Destroys something (Delete for good). Drawn in the danger colour. */
   danger?: boolean;
+  /** An icon name (components/Icon.svelte) drawn before the label. */
+  icon?: string;
+  /** A choice that is on now (Taskbar size → Large): drawn with a check mark. */
+  checked?: boolean;
+}
+
+/** What a menu is about, drawn at its top: "drive-test.md, 2 KB · Documents". */
+export interface MenuHeader {
+  title: string;
+  detail?: string;
+  /** An icon name, or a file type when `file` is set (components/FileIcon.svelte). */
+  icon?: string;
+  file?: boolean;
 }
 
 export interface MenuSeparator {
@@ -41,6 +54,8 @@ export function item(
   if (opts.shortcut !== undefined) out.shortcut = opts.shortcut;
   if (opts.disabledReason !== undefined) out.disabledReason = opts.disabledReason;
   if (opts.danger) out.danger = true;
+  if (opts.icon !== undefined) out.icon = opts.icon;
+  if (opts.checked !== undefined) out.checked = opts.checked;
   return out;
 }
 

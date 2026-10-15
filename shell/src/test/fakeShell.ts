@@ -50,8 +50,12 @@ export function part(name: string, overrides: Partial<PartInfo> = {}): PartInfo 
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  appearance: { theme: 'system', wallpaper: 'aluminium' },
+  appearance: { theme: 'system', style: 'aluminium', wallpaper: 'aluminium' },
   desktop: { icons: [] },
+  taskbar: {
+    pinned: ['tool:parts', 'accessory:files', 'accessory:notes', 'tool:serial-monitor'],
+    size: 'small',
+  },
   developer: { fullMachineFiles: false },
 };
 

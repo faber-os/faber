@@ -5,7 +5,8 @@
 
 use crate::clock::SharedClock;
 use crate::config::{self, ConfigError, PartConfig, PartsConfig};
-use crate::files::{self, Entry, FileError, Files, VPath};
+use crate::disks::{Disk, DiskDiscovery};
+use crate::files::{self, Entry, FileError, Files, VPath, WriteMode};
 use crate::names::{PartName, SignalAddress};
 use crate::ports::{
     Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortProblem, PortReader, PortWriter,
@@ -36,6 +37,8 @@ pub struct MachineOptions {
     pub discovery: Arc<dyn SerialDiscovery>,
     /// Finds things plugged in over USB that the computer can't talk to.
     pub usb_problems: Arc<dyn UsbProblemDiscovery>,
+    /// Finds USB sticks and SD cards, so Files can show them.
+    pub disks: Arc<dyn DiskDiscovery>,
     pub opener: Arc<dyn PortOpener>,
     pub replays: ReplayLibrary,
     pub connectors: Vec<Definition>,
@@ -70,7 +73,7 @@ impl From<FileError> for MachineError {
     fn from(e: FileError) -> Self {
         let kind = match e.code {
             "not-found" => ErrorKind::NotFound,
-            "already-exists" | "protected" => ErrorKind::Conflict,
+            "already-exists" | "protected" | "no-trash" => ErrorKind::Conflict,
             "machine-files-off" => ErrorKind::Forbidden,
             "io-error" => ErrorKind::Internal,
             _ => ErrorKind::BadRequest,
@@ -133,6 +136,7 @@ struct State {
     config_problem: Option<ConfigError>,
     ports: Vec<PortEntry>,
     port_problems: Vec<PortProblem>,
+    disks: Vec<Disk>,
     claims: Claims,
     running: BTreeMap<PartName, Running>,
 }
@@ -143,6 +147,7 @@ pub struct Machine {
     status: Arc<StatusBoard>,
     discovery: Arc<dyn SerialDiscovery>,
     usb_problems: Arc<dyn UsbProblemDiscovery>,
+    disks: Arc<dyn DiskDiscovery>,
     opener: Arc<dyn PortOpener>,
     replays: ReplayLibrary,
     connectors: Vec<Definition>,
@@ -182,6 +187,7 @@ impl Machine {
             status: Arc::new(StatusBoard::default()),
             discovery: opts.discovery,
             usb_problems: opts.usb_problems,
+            disks: opts.disks,
             opener: opts.opener,
             replays: opts.replays,
             connectors: opts.connectors,
@@ -195,6 +201,7 @@ impl Machine {
                 config_problem,
                 ports: Vec::new(),
                 port_problems: Vec::new(),
+                disks: Vec::new(),
                 claims: Claims::default(),
                 running: BTreeMap::new(),
             }),
@@ -312,9 +319,10 @@ impl Machine {
         self.state.lock().expect("machine lock").port_problems.clone()
     }
 
-    /// Looks for new or removed ports (and USB problems), and starts parts whose port just
-    /// appeared. Asks the OS before taking the lock, so a slow OS never blocks the machine.
+    /// Looks for new or removed ports (and USB problems and disks), and starts parts whose port
+    /// just appeared. Asks the OS before taking the lock, so a slow OS never blocks the machine.
     pub fn refresh_ports(&self) {
+        self.refresh_disks();
         self.replays.sync_dir(&self.recordings_dir());
         let found = catalog(&self.discovery.list(), &self.replays.names());
         let mut failed = self.usb_problems.list();
@@ -327,6 +335,29 @@ impl Machine {
             self.ports_changed.send_modify(|n| *n += 1);
         }
         self.reconcile(&mut st);
+    }
+
+    /// A disk that was plugged in or pulled out is announced as its root folder (`disk-e:/`)
+    /// changing, which tells Files to fetch the list of places again.
+    fn refresh_disks(&self) {
+        let found = self.disks.list();
+        let changed: Vec<VPath> = {
+            let mut st = self.state.lock().expect("machine lock");
+            if st.disks == found {
+                return;
+            }
+            let ids = |d: &[Disk]| d.iter().map(|d| d.id.clone()).collect::<std::collections::BTreeSet<_>>();
+            let changed = ids(&st.disks)
+                .symmetric_difference(&ids(&found))
+                .filter_map(|id| VPath::parse(&format!("{id}:/")).ok())
+                .collect();
+            self.files.set_disks(found.iter().map(|d| (d.id.clone(), d.mount.clone())));
+            st.disks = found;
+            changed
+        };
+        if !changed.is_empty() {
+            self.notify_folders(&changed);
+        }
     }
 
     pub fn add_part(&self, new: NewPart) -> Result<PartView, MachineError> {
@@ -621,12 +652,19 @@ impl Machine {
         let _ = self.files_changed.send(folders);
     }
 
-    pub fn file_roots(&self) -> Vec<(VPath, &'static str, Option<&'static str>)> {
-        let mut roots = vec![(VPath::home(&[]), "Home", None)];
+    /// The places Files shows: home, then connected disks, then (developer setting) the machine.
+    pub fn file_roots(&self) -> Vec<(VPath, String, Option<&'static str>)> {
+        let mut roots = vec![(VPath::home(&[]), "Home".to_string(), None)];
+        let disks = self.state.lock().expect("machine lock").disks.clone();
+        roots.extend(
+            disks
+                .into_iter()
+                .filter_map(|d| Some((VPath::parse(&format!("{}:/", d.id)).ok()?, d.label, None))),
+        );
         if self.machine_files() {
             roots.push((
                 VPath { root: files::RootKey::Machine, parts: vec![] },
-                "This computer",
+                "This computer".to_string(),
                 Some("You're browsing the whole computer. Deleting or changing system files can break it, and there's no Trash here."),
             ));
         }
@@ -645,12 +683,20 @@ impl Machine {
 
     /// Writes a file. `home:/System/parts.toml` is the machine config: it is validated first,
     /// then saved and applied, exactly like adding a part in the shell.
-    pub fn write_file(&self, path: &str, bytes: &[u8]) -> Result<(), MachineError> {
+    pub fn write_file(&self, path: &str, bytes: &[u8], mode: WriteMode) -> Result<(), MachineError> {
         let p = VPath::parse(path)?;
         if Files::is_config(&p) {
+            if mode == WriteMode::CreateOnly {
+                return Err(FileError::new_public(
+                    "already-exists",
+                    format!("{p} already exists."),
+                    "Open it and edit it instead.",
+                )
+                .into());
+            }
             return self.write_config_text(bytes);
         }
-        self.files.write(&p, bytes, self.machine_files())?;
+        self.files.write(&p, bytes, mode, self.machine_files())?;
         self.notify_files(std::slice::from_ref(&p));
         if p.parent().is_some_and(|d| d == VPath::home(&["Recordings"])) {
             self.refresh_ports();
@@ -751,7 +797,7 @@ impl Machine {
                 "Use the port replay:ld19-sample when you add a part.",
             ));
         }
-        self.files.write(&p, SAMPLE_LD19_BYTES, false)?;
+        self.files.write(&p, SAMPLE_LD19_BYTES, WriteMode::CreateOnly, false)?;
         self.notify_files(std::slice::from_ref(&p));
         self.refresh_ports();
         Ok(p.to_string())
@@ -994,6 +1040,15 @@ mod tests {
     #[derive(Default)]
     struct FakeUsbProblems(Mutex<Vec<FailedUsb>>);
 
+    #[derive(Default)]
+    struct FakeDisks(Mutex<Vec<Disk>>);
+
+    impl DiskDiscovery for FakeDisks {
+        fn list(&self) -> Vec<Disk> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
     impl UsbProblemDiscovery for FakeUsbProblems {
         fn list(&self) -> Vec<FailedUsb> {
             self.0.lock().unwrap().clone()
@@ -1037,6 +1092,7 @@ mod tests {
             clock: Arc::new(MonotonicClock::new()),
             discovery,
             usb_problems,
+            disks: Arc::new(FakeDisks::default()),
             opener: Arc::new(SystemOpener::new(replays.clone())),
             replays,
             connectors: vec![ldrobot_ld19::definition()],
@@ -1064,6 +1120,7 @@ mod tests {
             clock: Arc::new(MonotonicClock::new()),
             discovery: Arc::clone(&discovery) as Arc<dyn SerialDiscovery>,
             usb_problems: Arc::new(FakeUsbProblems::default()),
+            disks: Arc::new(FakeDisks::default()),
             opener: Arc::new(SystemOpener::new(replays.clone())),
             replays,
             connectors: vec![ldrobot_ld19::definition()],
@@ -1315,12 +1372,12 @@ mod tests {
 connector = \"ldrobot-ld19\"
 port = \"replay:demo-ld19\"
 ";
-        m.write_file("home:/System/parts.toml", good.as_bytes()).unwrap();
+        m.write_file("home:/System/parts.toml", good.as_bytes(), WriteMode::Replace).unwrap();
         wait_for_status(&m, "lidar", |s| *s == PartStatus::Running);
         let bad = "[parts.lidar]
 connector = 
 ";
-        let e = m.write_file("home:/System/parts.toml", bad.as_bytes()).unwrap_err();
+        let e = m.write_file("home:/System/parts.toml", bad.as_bytes(), WriteMode::Replace).unwrap_err();
         assert_eq!((e.code, e.kind), ("config-invalid", ErrorKind::Unprocessable));
         assert!(e.message.contains("line 2"), "{e:?}");
         let (_, on_disk) = m.read_file("home:/System/parts.toml").unwrap();
@@ -1373,7 +1430,7 @@ connector =
         let mut rx = m.files_changed();
         m.create_folder("home:/Documents/projects").unwrap();
         assert_eq!(rx.try_recv().unwrap(), ["home:/Documents"]);
-        m.write_file("home:/Desktop/todo.txt", b"solder").unwrap();
+        m.write_file("home:/Desktop/todo.txt", b"solder", WriteMode::Replace).unwrap();
         assert_eq!(rx.try_recv().unwrap(), ["home:/Desktop"]);
         m.add_part(demo("lidar")).unwrap();
         assert_eq!(rx.try_recv().unwrap(), ["home:/System"], "adding a part changes parts.toml");
@@ -1414,6 +1471,47 @@ connector =
         m.add_part(demo("lidar")).unwrap();
         let e = m.open_serial("replay:demo-ld19", 230_400).err().unwrap();
         assert_eq!(e.code, "port-claimed");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_plugged_in_disk_becomes_a_place_in_files_and_goes_away_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let stick = tempfile::tempdir().unwrap();
+        std::fs::write(stick.path().join("scan.fbcap"), b"x").unwrap();
+        let disks = Arc::new(FakeDisks::default());
+        let replays = ReplayLibrary::with_demo();
+        let m = Machine::start(MachineOptions {
+            data_dir: dir.path().to_path_buf(),
+            clock: Arc::new(MonotonicClock::new()),
+            discovery: no_ports(),
+            usb_problems: Arc::new(FakeUsbProblems::default()),
+            disks: Arc::clone(&disks) as Arc<dyn DiskDiscovery>,
+            opener: Arc::new(SystemOpener::new(replays.clone())),
+            replays,
+            connectors: vec![ldrobot_ld19::definition()],
+            timing: Timing::default(),
+            port_scan: None,
+        })
+        .unwrap();
+        let mut changes = m.files_changed();
+        disks.0.lock().unwrap().push(Disk {
+            id: "disk-e".into(),
+            label: "SENNEP SD (E:)".into(),
+            mount: stick.path().to_path_buf(),
+        });
+        m.refresh_ports();
+        assert_eq!(changes.try_recv().unwrap(), vec!["disk-e:/".to_string()]);
+        let roots = m.file_roots();
+        assert_eq!((roots[1].0.to_string(), roots[1].1.as_str()), ("disk-e:/".into(), "SENNEP SD (E:)"));
+        assert_eq!(m.list_files("disk-e:/").unwrap()[0].name, "scan.fbcap");
+        m.refresh_ports();
+        assert!(changes.try_recv().is_err(), "nothing changed, so nothing is announced");
+        disks.0.lock().unwrap().clear();
+        m.refresh_ports();
+        assert_eq!(changes.try_recv().unwrap(), vec!["disk-e:/".to_string()]);
+        assert_eq!(m.file_roots().len(), 1);
+        assert_eq!(m.list_files("disk-e:/").unwrap_err().code, "not-found");
         m.shutdown();
     }
 }

@@ -107,6 +107,33 @@ describe('Context menus', () => {
     expect(shell.desktop.state.windows.map((w) => w.kind)).toEqual(['settings']);
   });
 
+  it("shows what was right-clicked at the top of a file's menu, with Move to Trash last", async () => {
+    setup();
+    const file = await within(desktopList()).findByRole('option', { name: 'todo.txt' });
+    await fireEvent.contextMenu(file, { clientX: 50, clientY: 50 });
+    const menu = await screen.findByRole('menu', { name: 'todo.txt' });
+    expect(menu.querySelector('.header')).toHaveTextContent('todo.txt 12 B · Desktop');
+    const items = within(menu).getAllByRole('menuitem');
+    expect(items.at(-1)).toHaveTextContent('Move to Trash');
+    expect(items.at(-1)).toHaveClass('danger');
+    expect(within(menu).getByRole('menuitem', { name: 'Rename' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'F2',
+    );
+  });
+
+  it('pins a program to the taskbar from its desktop icon', async () => {
+    const shell = setup([{ method: 'PUT', path: '/api/v0/settings', body: DEFAULT_SETTINGS }]);
+    await fireEvent.contextMenu(icon('Settings'), { clientX: 50, clientY: 50 });
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Pin to taskbar' }));
+    await waitFor(() =>
+      expect(
+        (shell.fetch.calls.find((c) => c.method === 'PUT')?.body as typeof DEFAULT_SETTINGS).taskbar
+          .pinned,
+      ).toContain('accessory:settings'),
+    );
+  });
+
   it('opens from the keyboard with Shift+F10 on an icon, with the first item focused', async () => {
     const shell = setup();
     const file = await within(desktopList()).findByRole('option', { name: 'todo.txt' });
@@ -151,12 +178,11 @@ describe('Context menus', () => {
   it('has window actions on taskbar buttons', async () => {
     const shell = setup();
     shell.desktop.open('about');
-    const task = await within(screen.getByRole('list', { name: 'Open windows' })).findByRole(
-      'button',
-      {
-        name: /About Faber/,
-      },
-    );
+    const task = await within(
+      screen.getByRole('list', { name: 'Programs and windows' }),
+    ).findByRole('button', {
+      name: /About Faber/,
+    });
     await fireEvent.contextMenu(task, { clientX: 100, clientY: 580 });
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Minimise' }));
     expect(shell.desktop.state.windows[0]!.minimised).toBe(true);

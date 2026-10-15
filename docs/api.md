@@ -99,19 +99,20 @@ Paths are `<root>:/<path>` with `/` separators, e.g. `home:/Desktop/notes.txt`. 
 | Root | What | Available |
 |---|---|---|
 | `home` | Faber's home folder: `Desktop`, `Documents`, `Recordings`, `System`, `Trash` (fixed folders, `special` in listings) | always |
+| `disk-<name>` | A connected USB stick or SD card, e.g. `disk-e:/` (Windows drive E:) or `disk-sennep-sd:/` (Linux `/media/<user>/SENNEP SD`). `<name>` is lowercase letters, digits and single dashes. | while it is plugged in; the core looks every port scan (2 s) |
 | `machine` | The whole computer (`machine:/` lists drives on Windows, `/` on Linux) | only with the developer setting `fullMachineFiles` on |
 
 | Method and path | Body / result |
 |---|---|
-| `GET /api/v0/files/roots` | `FileRoot[]` |
+| `GET /api/v0/files/roots` | `FileRoot[]`: home, then connected disks (their `label`, e.g. "SENNEP SD (E:)"), then `machine` if on |
 | `GET /api/v0/files/list?path=…` | `FolderListing`. Folders first, then files, by name. |
 | `GET /api/v0/files/content?path=…` | The raw bytes. `&download=1` adds `Content-Disposition: attachment`. |
-| `PUT /api/v0/files/content?path=…` | Raw bytes as the body: creates or overwrites the file → `204`. Max 16 MB. |
+| `PUT /api/v0/files/content?path=…` | Raw bytes as the body: creates or overwrites the file → `204`. Max 16 MB. `&mode=create` refuses with `409 already-exists` instead of overwriting (uploads). |
 | `POST /api/v0/files/folder` | `PathRequest` → `201` |
 | `POST /api/v0/files/move` | `MoveRequest`: rename or move → `204` |
 | `POST /api/v0/files/trash` | `PathsRequest`: moves to `home:/Trash` → `204` |
 | `POST /api/v0/files/restore` | `PathsRequest` with Trash paths: back to where they came from → `204` |
-| `POST /api/v0/files/delete` | `PathsRequest`: deletes **for good**. Only for paths in the Trash, or in `machine:` → `204` |
+| `POST /api/v0/files/delete` | `PathsRequest`: deletes **for good**. Only for paths in the Trash, on a disk, or in `machine:` → `204` |
 | `POST /api/v0/files/empty-trash` | → `204` |
 | `POST /api/v0/files/samples` | Copies the sample LD19 recording into `home:/Recordings` → `201` |
 
@@ -122,10 +123,18 @@ Rules the core enforces (never the shell):
 - `home:/System` holds `parts.toml`, which is the machine config itself. Writing it is validated
   first: a broken config is refused with `422 config-invalid`, its message saying the line. A valid
   one is saved and applied at once. Nothing else can be created in System.
+- Only the home folder has a Trash. Trashing anything on a disk or in `machine:` is refused with
+  `409 no-trash`; the shell offers "Delete for good" instead. A whole disk (`disk-e:/`) can't be
+  deleted (`protected`).
+- A move stays within its root; moving between home and a disk is refused (`bad-path`) until copy
+  lands.
+- A disk that is plugged in or pulled out is announced as `files-changed` with its root
+  (`["disk-e:/"]`): fetch `files/roots` again. A path on a disk that is gone answers
+  `404 not-found`.
 - Files in `home:/Recordings` ending in `.fbcap` are replay ports (`replay:<file name>`).
 
 File error codes: `bad-path`, `not-found`, `already-exists`, `protected`, `not-a-folder`,
-`not-a-file`, `too-large`, `config-invalid`, `machine-files-off`, `io-error`.
+`not-a-file`, `too-large`, `config-invalid`, `machine-files-off`, `no-trash`, `io-error`.
 
 ## Settings
 

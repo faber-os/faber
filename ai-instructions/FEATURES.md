@@ -16,4 +16,10 @@ Phase 1 is built (see `docs/roadmap.md`).
 | Demo recording | Implemented | `replay:demo-ld19` built into the core, so Faber works with no hardware | 2026-10-15 | Core | — |
 | Shell v0 | Implemented | Svelte desktop: taskbar, start menu, windows, Parts + Add part, laser-scan viewer, serial monitor, logs, about | 2026-10-15 | API v0 | — |
 | CI | Implemented | fmt, clippy, tests (Linux + Windows), arch rules, WIT, shell checks, browser e2e against the release build | 2026-10-15 | — | — |
+| Files, Notes, Settings, recordings | Implemented | Home folder with Trash, System folder (validated parts.toml), developer full-machine access, serial monitor recordings as replay ports, optional sample (D32–D35) | 2026-10-15 | Core | — |
+| Shell design picks | Implemented | D38: logo lockup, icon plates, menus, taskbar sizes + pin/unpin, tabbed windows, start menu with power options (disabled until the image), Files views + zoom, six styles × light/dark | 2026-10-15 | Shell v0 | — |
+| Removable disks | Implemented | D39: USB sticks and SD cards as `disk-<name>:/` places in Files (Windows WMI, Linux /proc/mounts), no Trash | 2026-10-15 | Files | — |
+| Uploads without overwrite | Implemented | `PUT files/content?mode=create`; the shell asks Replace / Keep both / Skip | 2026-10-15 | Files | — |
+| Restart / shut down | Planned | Power items exist in the start menu but are disabled until the machine image (Phase 6) | — | Image | Phase 6 |
+| Copy / paste, multi-select in Files | Planned | Also unlocks moving between disks and home | — | Files | — |
 | Real LD19 on the PC | Planned | Mikkel plugs in the LD19 and adds it via its USB port | — | Phase 1 | Mikkel |

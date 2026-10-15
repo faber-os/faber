@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { DesktopController, TASKBAR_HEIGHT } from './desktopController.svelte';
+import { DesktopController } from './desktopController.svelte';
+import { TASKBAR_HEIGHTS } from '../lib/desktop/taskbar';
+
+const TASKBAR_HEIGHT = TASKBAR_HEIGHTS.small;
 import type { WindowKind } from '../lib/desktop/windows';
 import type { StorageLike } from '../lib/desktop/geometryStore';
 
@@ -105,5 +108,28 @@ describe('DesktopController', () => {
     remove();
     d.requestClose(id);
     expect(d.state.windows).toHaveLength(0);
+  });
+
+  it('gives the windows less room with the large taskbar, and refits them', () => {
+    const d = new DesktopController(kinds, null, { width: 1200, height: 700 });
+    const id = d.open('parts');
+    d.setRect(id, { x: 0, y: 300, w: 400, h: 340 });
+    d.setTaskbarHeight(64);
+    expect(d.area.height).toBe(700 - 64);
+    const r = d.state.windows.find((w) => w.id === id)!.rect;
+    expect(r.y + r.h).toBeLessThanOrEqual(700 - 64);
+  });
+
+  it("forgets a window's tabs when it closes", () => {
+    const d = new DesktopController(kinds, null, { width: 1600, height: 1000 });
+    const id = d.open('parts');
+    d.setTabs(id, {
+      state: { tabs: [], activeId: null, nextId: 1 },
+      activate: () => {},
+      close: () => {},
+    });
+    expect(d.tabs[id]).toBeDefined();
+    d.close(id);
+    expect(d.tabs[id]).toBeUndefined();
   });
 });

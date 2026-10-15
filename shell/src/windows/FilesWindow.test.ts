@@ -40,7 +40,7 @@ describe('Files', () => {
     await userEvent.dblClick(robot);
     expect(await within(list()).findByRole('option', { name: /wiring\.md/ })).toBeVisible();
     expect(screen.getByRole('navigation', { name: 'Folder path' })).toHaveTextContent(
-      /Home\s*\/\s*Documents\s*\/\s*robot/,
+      /Home\s*Documents\s*robot/,
     );
     await userEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(await within(list()).findByRole('option', { name: /notes\.txt/ })).toBeVisible();
@@ -152,8 +152,8 @@ describe('Files', () => {
     const menu = shell.menu.current!;
     expect(menu.entries.flatMap((e) => (e.kind === 'item' ? [e.label] : []))).toEqual([
       'Restore',
-      'Delete for good',
       'Properties',
+      'Delete for good',
     ]);
     shell.menu.choose('restore');
     await waitFor(() =>
@@ -204,20 +204,91 @@ describe('Files', () => {
     expect(props?.params.path).toBe('home:/Recordings/ld19-sample.fbcap');
   });
 
-  it('uploads dropped or picked files into the folder, never over an existing one', async () => {
+  const put = (name: string, mode?: 'create') =>
+    `/api/v0/files/content?path=${encodeURIComponent(`home:/Documents/${name}`)}${mode ? '&mode=create' : ''}`;
+  const EXISTS = {
+    status: 409,
+    body: { error: { code: 'already-exists', message: 'It is already there.', hint: 'Pick.' } },
+  };
+
+  it('uploads a new file without overwriting anything', async () => {
+    const shell = setup('home:/Documents', [
+      listing('home:/Documents', []),
+      { method: 'PUT', path: put('b.txt', 'create'), status: 204 },
+    ]);
+    await screen.findByText(/This folder is empty/);
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await userEvent.upload(input, new File(['hi'], 'b.txt', { type: 'text/plain' }));
+    await waitFor(() =>
+      expect(shell.fetch.calls.filter((c) => c.method === 'PUT').map((c) => c.path)).toEqual([
+        put('b.txt', 'create'),
+      ]),
+    );
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('asks when the name is taken, and keeps both under a new name', async () => {
     const shell = setup('home:/Documents', [
       listing('home:/Documents', [{ name: 'a.txt' }]),
-      {
-        method: 'PUT',
-        path: '/api/v0/files/content?path=home%3A%2FDocuments%2Fa%202.txt',
-        status: 204,
-      },
+      { method: 'PUT', path: put('a.txt', 'create'), ...EXISTS },
+      { method: 'PUT', path: put('a 2.txt', 'create'), status: 204 },
     ]);
     await within(await screen.findByRole('listbox')).findByRole('option', { name: /a\.txt/ });
     const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
     await userEvent.upload(input, new File(['hi'], 'a.txt', { type: 'text/plain' }));
-    await waitFor(() => expect(shell.fetch.calls.some((c) => c.method === 'PUT')).toBe(true));
+    const dialog = await screen.findByRole('alertdialog', {
+      name: '“a.txt” is already in Documents',
+    });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Keep both' }));
     expect(await screen.findByText(/a\.txt → a 2\.txt/)).toBeInTheDocument();
+    expect(shell.fetch.calls.filter((c) => c.method === 'PUT').map((c) => c.path)).toEqual([
+      put('a.txt', 'create'),
+      put('a 2.txt', 'create'),
+    ]);
+  });
+
+  it('replaces the file that is there only when asked to', async () => {
+    const shell = setup('home:/Documents', [
+      listing('home:/Documents', [{ name: 'a.txt' }]),
+      { method: 'PUT', path: put('a.txt', 'create'), ...EXISTS },
+      { method: 'PUT', path: put('a.txt'), status: 204 },
+    ]);
+    await within(await screen.findByRole('listbox')).findByRole('option', { name: /a\.txt/ });
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await userEvent.upload(input, new File(['hi'], 'a.txt', { type: 'text/plain' }));
+    const dialog = await screen.findByRole('alertdialog');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Replace' }));
+    expect(await screen.findByText('Replaced a.txt.')).toBeInTheDocument();
+    expect(shell.fetch.calls.filter((c) => c.method === 'PUT').map((c) => c.path)).toEqual([
+      put('a.txt', 'create'),
+      put('a.txt'),
+    ]);
+  });
+
+  it('skips every taken name at once with "do the same for the others"', async () => {
+    const shell = setup('home:/Documents', [
+      listing('home:/Documents', [{ name: 'a.txt' }, { name: 'b.txt' }]),
+      { method: 'PUT', path: put('a.txt', 'create'), ...EXISTS },
+      { method: 'PUT', path: put('b.txt', 'create'), ...EXISTS },
+      { method: 'PUT', path: put('c.txt', 'create'), status: 204 },
+    ]);
+    await within(await screen.findByRole('listbox')).findByRole('option', { name: /a\.txt/ });
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await userEvent.upload(input, [
+      new File(['1'], 'a.txt'),
+      new File(['2'], 'b.txt'),
+      new File(['3'], 'c.txt'),
+    ]);
+    const dialog = await screen.findByRole('alertdialog');
+    await userEvent.click(within(dialog).getByRole('checkbox'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Skip' }));
+    expect(await screen.findByText('Skipped a.txt, b.txt.')).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(shell.fetch.calls.filter((c) => c.method === 'PUT').map((c) => c.path)).toEqual([
+      put('a.txt', 'create'),
+      put('b.txt', 'create'),
+      put('c.txt', 'create'),
+    ]);
   });
 
   it('shows This computer with its warning only when developer settings allow it', async () => {
@@ -238,5 +309,133 @@ describe('Files', () => {
     shell.fetch.route(listing('home:/Documents', [{ name: 'a.txt' }, { name: 'b.txt' }]));
     shell.filesChanged(['home:/']);
     expect(await within(list()).findByRole('option', { name: /b\.txt/ })).toBeVisible();
+  });
+
+  it('zooms from details to small and large icons with Ctrl and the wheel, and Ctrl 0', async () => {
+    setup('home:/Documents', [listing('home:/Documents', [{ name: 'a.txt' }])]);
+    await within(await screen.findByRole('listbox')).findByRole('option', { name: /a\.txt/ });
+    const details = screen.getByRole('radio', { name: 'Details' });
+    expect(details).toBeChecked();
+    expect(screen.getByRole('complementary', { name: 'Details' })).toBeInTheDocument();
+    const scroll = list().parentElement!;
+    await fireEvent.wheel(scroll, { deltaY: -100, ctrlKey: true });
+    expect(screen.getByRole('radio', { name: 'Small icons' })).toBeChecked();
+    await fireEvent.wheel(scroll, { deltaY: -100, ctrlKey: true });
+    expect(screen.getByRole('radio', { name: 'Large icons' })).toBeChecked();
+    expect(screen.queryByRole('complementary', { name: 'Details' })).not.toBeInTheDocument();
+    // Without Ctrl the wheel just scrolls.
+    await fireEvent.wheel(scroll, { deltaY: 100 });
+    expect(screen.getByRole('radio', { name: 'Large icons' })).toBeChecked();
+    await fireEvent.keyDown(list(), { key: '-', ctrlKey: true });
+    expect(screen.getByRole('radio', { name: 'Small icons' })).toBeChecked();
+    await fireEvent.keyDown(list(), { key: '0', ctrlKey: true });
+    expect(details).toBeChecked();
+  });
+
+  it('shows the selected file in the details panel', async () => {
+    setup('home:/Recordings', [listing('home:/Recordings', [{ name: 'bench.fbcap', size: 4096 }])]);
+    const rec = await within(await screen.findByRole('listbox')).findByRole('option', {
+      name: /bench\.fbcap/,
+    });
+    await userEvent.click(rec);
+    const panel = screen.getByRole('complementary', { name: 'Details' });
+    expect(panel).toHaveTextContent('Recording');
+    expect(panel).toHaveTextContent('replay:bench');
+    expect(within(panel).getByRole('button', { name: 'Add a part on it' })).toBeInTheDocument();
+    expect(document.querySelector('.status')).toHaveTextContent('1 item · 1 selected');
+  });
+
+  const DISK = { id: 'disk-e', label: 'SENNEP SD (E:)', path: 'disk-e:/' };
+  const diskListing = (status = 200) => ({
+    path: `/api/v0/files/list?path=${encodeURIComponent('disk-e:/')}`,
+    status,
+    body:
+      status === 200
+        ? {
+            path: 'disk-e:/',
+            entries: [{ name: 'log.txt', kind: 'file', size: 1, path: 'disk-e:/log.txt' }],
+          }
+        : { error: { code: 'not-found', message: 'disk-e:/ is not there.', hint: '' } },
+  });
+
+  it('lists connected disks under Disks, and none when nothing is plugged in', async () => {
+    const shell = setup('home:/Documents', [listing('home:/Documents', [])]);
+    await screen.findByText(/This folder is empty/);
+    expect(screen.queryByText('Disks')).not.toBeInTheDocument();
+    shell.fetch.route({ path: '/api/v0/files/roots', body: [HOME_ROOT, DISK] });
+    shell.fetch.route(listing('disk-e:/', [{ name: 'log.txt' }]));
+    // Plugging in a disk: the core names its root.
+    shell.filesChanged(['disk-e:/']);
+    const disks = await screen.findByRole('list', { name: 'Disks' });
+    await userEvent.click(within(disks).getByRole('button', { name: 'SENNEP SD (E:)' }));
+    expect(await within(list()).findByRole('option', { name: /log\.txt/ })).toBeVisible();
+    expect(screen.getByText(/It has no Trash/)).toBeInTheDocument();
+  });
+
+  it('deletes for good on a disk, after asking, since disks have no Trash', async () => {
+    const shell = setup('disk-e:/', [
+      { path: '/api/v0/files/roots', body: [HOME_ROOT, DISK] },
+      diskListing(),
+      { method: 'POST', path: '/api/v0/files/delete', status: 204 },
+    ]);
+    const row = await within(await screen.findByRole('listbox')).findByRole('option', {
+      name: /log\.txt/,
+    });
+    await fireEvent.contextMenu(row, { clientX: 50, clientY: 50 });
+    const labels = shell.menu.current!.entries.flatMap((e) => (e.kind === 'item' ? [e.label] : []));
+    expect(labels).toContain('Delete for good…');
+    expect(labels).not.toContain('Move to Trash');
+    shell.menu.choose('delete');
+    const dialog = await screen.findByRole('alertdialog', { name: /Delete “log\.txt” for good\?/ });
+    expect(dialog).toHaveTextContent('Disks have no Trash');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete for good' }));
+    await waitFor(() =>
+      expect(shell.fetch.calls.find((c) => c.path.endsWith('/files/delete'))?.body).toEqual({
+        paths: ['disk-e:/log.txt'],
+      }),
+    );
+    expect(shell.fetch.calls.some((c) => c.path.endsWith('/files/trash'))).toBe(false);
+  });
+
+  it('goes back home, saying why, when the disk it shows is pulled out', async () => {
+    const shell = setup('disk-e:/', [
+      { path: '/api/v0/files/roots', body: [HOME_ROOT, DISK] },
+      listing('home:/Desktop', [{ name: 'todo.txt' }]),
+      diskListing(),
+    ]);
+    await within(await screen.findByRole('listbox')).findByRole('option', { name: /log\.txt/ });
+    shell.fetch.route(diskListing(404));
+    shell.fetch.route({ path: '/api/v0/files/roots', body: [HOME_ROOT] });
+    shell.filesChanged(['disk-e:/']);
+    expect(await screen.findByText(/The disk was removed/)).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole('listbox')).findByRole('option', { name: /todo\.txt/ }),
+    ).toBeVisible();
+  });
+
+  it('opens a folder in a new tab, and closes tabs', async () => {
+    const shell = setup('home:/Documents', [
+      listing('home:/Documents', [{ name: 'robot', kind: 'folder' }]),
+      listing('home:/Documents/robot', [{ name: 'wiring.md' }]),
+    ]);
+    const robot = await within(await screen.findByRole('listbox')).findByRole('option', {
+      name: /robot/,
+    });
+    await fireEvent.contextMenu(robot, { clientX: 50, clientY: 50 });
+    shell.menu.choose('open-tab');
+    const id = shell.desktop.state.windows[0]!.id;
+    await waitFor(() =>
+      expect(shell.desktop.tabs[id]!.state.tabs.map((t) => t.title)).toEqual([
+        'Documents',
+        'robot',
+      ]),
+    );
+    expect(
+      await within(await screen.findByRole('listbox')).findByRole('option', { name: /wiring\.md/ }),
+    ).toBeVisible();
+    expect(shell.desktop.state.windows[0]!.title).toBe('robot · Files');
+    const tabs = shell.desktop.tabs[id]!;
+    tabs.close(tabs.state.activeId!);
+    await waitFor(() => expect(shell.desktop.state.windows[0]!.title).toBe('Documents · Files'));
   });
 });

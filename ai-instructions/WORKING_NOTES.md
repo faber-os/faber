@@ -1,7 +1,7 @@
 # Working notes
 
 ## State
-- All design decisions D01–D30 are accepted and there are no open questions (`docs/decisions.md`). Capabilities are specified (`docs/capabilities.md`). Phase 1 is built and passes CI locally; the only open Phase 1 item is Mikkel testing the real LD19. Next: Phase 2, "Drive before you wire" (simulation, D36/D37). WASM packages are now Phase 3.
+- All design decisions D01–D39 are accepted and there are no open questions (`docs/decisions.md`). Capabilities are specified (`docs/capabilities.md`). Phase 1 is built and passes CI locally; the only open Phase 1 item is Mikkel testing the real LD19. Next: Phase 2, "Drive before you wire" (simulation, D36/D37). WASM packages are now Phase 3.
 - WIT sketches share one package version (`faber:capabilities@0.1.0`). Per-capability versioning (`distance@1`) still needs a concrete scheme before the API is frozen (Phase 3).
 - `private/` (git-ignored) holds Mikkel's explainers: WASM, A/B updates, licences + the Apache patent clause, wire formats, package signing, frontend options, the name brainstorm. Never link to it from public docs.
 
@@ -10,6 +10,12 @@
 - **Signing keys (D27):** the Faber maintainer (Mikkel) holds the offline OS-image key and the registry-index key. Plan key rotation before the first signed release. No trust is based on GitHub accounts.
 - **The first-chat idea "start with an install script" was replaced by D17** (develop on a PC, ship a real A/B image at the first public release).
 - **The name:** only `Faber` / `faber` / `FABER` (CLAUDE.md rule 10). The GitHub org and npm scope are `faber-os`, because the bare names are taken.
+- **Default theme is System**, not Light. The shell agent suggested making Light the default; left as System since Mikkel picked "system/light/dark" as the switch. Change in `core/src/settings.rs` if he wants light first.
+- **Signal style's red accent** sits close to the danger red used for delete. Kept for now; move it to orange if it confuses.
+- **Start menu shows all programs** (not its own pins): one pin system, the taskbar's (principle "one obvious way").
+- **Disks:** a move between roots is refused (`bad-path`) until copy exists. Disk ids come from the drive letter on Windows (`disk-e`) and the mount label on Linux; two Linux sticks with the same label would collide (not handled yet).
+- **Recent files** in the start menu live in the browser's storage, since the core keeps no list.
+- **Processes:** never kill by name (`taskkill /IM node.exe` hit other programs). Run probe cores with `CARGO_TARGET_DIR=target/agent` on another port and stop them by PID.
 
 ## Context
 - Viam is the closest prior art (typed component APIs + a module registry), but it is cloud-first, AGPL, and has no OS image, sandbox or maker tools. Faber's niche is the gap list in `docs/research/prior-art-appliance-os.md`.

@@ -13,8 +13,15 @@ export interface WindowDef extends WindowKind {
   component: Component<WindowProps>;
   /** Where the start menu lists it; null for windows opened from elsewhere (viewers). */
   menu: 'parts' | 'tools' | 'accessories' | 'faber' | null;
-  /** Its desktop icon key (`tool:<id>` or `accessory:<id>`, docs/api.md), if it has one. */
-  pin?: string;
+  /**
+   * Its program key (`tool:<id>` or `accessory:<id>`, docs/api.md), for programs that can be
+   * pinned to the taskbar and have a desktop icon. Viewers and dialogs have none.
+   */
+  program?: string;
+  /** Shown as an icon on the desktop. */
+  onDesktop?: boolean;
+  /** Its icon colour: `--app-<colour>` (src/lib/desktop/styles.ts, APP_COLOURS). */
+  colour: string;
   /** One line for the start menu. */
   description: string;
 }

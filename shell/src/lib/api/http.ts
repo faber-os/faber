@@ -35,8 +35,11 @@ export interface CoreHttp {
   getRoots(): Promise<FileRoot[]>;
   listFolder(path: string): Promise<FolderListing>;
   readFile(path: string): Promise<Uint8Array>;
-  /** Creates or overwrites the file (at most 16 MB). */
-  writeFile(path: string, bytes: Uint8Array | Blob): Promise<void>;
+  /**
+   * Writes the file (at most 16 MB). `replace` (the default) creates or overwrites it; `create`
+   * only creates it, and is refused with `409 already-exists` when it is already there.
+   */
+  writeFile(path: string, bytes: Uint8Array | Blob, mode?: WriteMode): Promise<void>;
   createFolder(path: string): Promise<void>;
   move(from: string, to: string): Promise<void>;
   trash(paths: string[]): Promise<void>;
@@ -53,6 +56,8 @@ export interface CoreHttp {
   putSettings(settings: Settings): Promise<Settings>;
   setDeveloper(change: DeveloperChange): Promise<Settings>;
 }
+
+export type WriteMode = 'replace' | 'create';
 
 /** What one request sends: JSON for everything except file contents, which go as raw bytes. */
 type Body = { json: unknown } | { raw: Uint8Array | Blob } | undefined;
@@ -141,8 +146,9 @@ export function createHttp(
     getRoots: () => request('GET', '/files/roots'),
     listFolder: (path) => request('GET', `/files/list${q(path)}`),
     readFile: (path) => requestBytes('GET', `/files/content${q(path)}`),
-    writeFile: async (path, bytes) => {
-      await requestBytes('PUT', `/files/content${q(path)}`, { raw: bytes });
+    writeFile: async (path, bytes, mode = 'replace') => {
+      const m = mode === 'create' ? '&mode=create' : '';
+      await requestBytes('PUT', `/files/content${q(path)}${m}`, { raw: bytes });
     },
     createFolder: (path) => request('POST', '/files/folder', { path }),
     move: (from, to) => request('POST', '/files/move', { from, to }),

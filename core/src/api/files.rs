@@ -1,7 +1,7 @@
 //! Files and settings routes (docs/api.md, "Files" and "Settings").
 
 use super::{ApiJson, AppState, Failure, blocking, convert, dto};
-use crate::files::MAX_FILE_BYTES;
+use crate::files::{MAX_FILE_BYTES, WriteMode};
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
@@ -34,6 +34,9 @@ struct PathQuery {
     path: String,
     #[serde(default)]
     download: Option<u8>,
+    /// `create`: refuse with `already-exists` instead of overwriting (uploads).
+    #[serde(default)]
+    mode: Option<String>,
 }
 
 async fn roots(State(s): State<AppState>) -> Json<Vec<dto::FileRoot>> {
@@ -41,7 +44,7 @@ async fn roots(State(s): State<AppState>) -> Json<Vec<dto::FileRoot>> {
         s.machine
             .file_roots()
             .into_iter()
-            .map(|(p, label, warning)| convert::file_root(&p, label, warning))
+            .map(|(p, label, warning)| convert::file_root(&p, &label, warning))
             .collect(),
     )
 }
@@ -73,7 +76,19 @@ async fn write(
     Query(q): Query<PathQuery>,
     body: Bytes,
 ) -> Result<StatusCode, Failure> {
-    blocking(move || s.machine.write_file(&q.path, &body)).await??;
+    let mode = match q.mode.as_deref() {
+        None | Some("replace") => WriteMode::Replace,
+        Some("create") => WriteMode::CreateOnly,
+        Some(other) => {
+            return Err(Failure::new(
+                StatusCode::BAD_REQUEST,
+                "bad-request",
+                format!("Unknown write mode \"{other}\"."),
+                "Use mode=create, mode=replace, or leave it out.",
+            ));
+        }
+    };
+    blocking(move || s.machine.write_file(&q.path, &body, mode)).await??;
     Ok(StatusCode::NO_CONTENT)
 }
 

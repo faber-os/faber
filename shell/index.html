@@ -19,7 +19,20 @@
         var dark =
           pref === 'dark' ||
           (pref !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        var root = document.documentElement;
+        root.dataset.theme = dark ? 'dark' : 'light';
+        // The colours of the style chosen last time (Settings → Appearance → Style).
+        try {
+          var tokens = JSON.parse(localStorage.getItem('faber.tokens') || 'null');
+          var set = tokens && tokens[dark ? 'dark' : 'light'];
+          for (var name in set) {
+            if (/^--[a-z0-9-]+$/.test(name) && /^oklch\([0-9. /]+\)$/.test(set[name])) {
+              root.style.setProperty(name, set[name]);
+            }
+          }
+        } catch (e) {
+          // Nothing remembered: tokens.css has the default style.
+        }
       })();
     </script>
   </head>

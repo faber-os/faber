@@ -28,13 +28,47 @@ pub enum Theme {
 #[ts(export)]
 pub struct Appearance {
     pub theme: Theme,
+    /// A built-in style id (colours and accent), e.g. `aluminium`. Every style has a light and a
+    /// dark version; `theme` picks which.
+    pub style: String,
     /// A built-in wallpaper id, e.g. `aluminium`.
     pub wallpaper: String,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: Theme::System, wallpaper: "aluminium".into() }
+        Appearance { theme: Theme::System, style: "aluminium".into(), wallpaper: "aluminium".into() }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum TaskbarSize {
+    /// Icons only.
+    #[default]
+    Small,
+    /// Bigger buttons with labels (good for touch screens).
+    Large,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct Taskbar {
+    /// Programs pinned to the taskbar, in order: `tool:<id>` or `accessory:<id>`.
+    pub pinned: Vec<String>,
+    pub size: TaskbarSize,
+}
+
+impl Default for Taskbar {
+    fn default() -> Self {
+        Taskbar {
+            pinned: ["tool:parts", "accessory:files", "accessory:notes", "tool:serial-monitor"]
+                .map(String::from)
+                .to_vec(),
+            size: TaskbarSize::Small,
+        }
     }
 }
 
@@ -70,6 +104,7 @@ pub struct DeveloperSettings {
 pub struct Settings {
     pub appearance: Appearance,
     pub desktop: DesktopLayout,
+    pub taskbar: Taskbar,
     pub developer: DeveloperSettings,
 }
 
@@ -234,6 +269,43 @@ mod tests {
             .change_developer(DeveloperChange { full_machine_files: false, acknowledged_risk: false })
             .unwrap();
         assert!(!off.developer.full_machine_files, "turning it off needs no confirmation");
+    }
+
+    #[test]
+    fn new_fields_default_sensibly_and_old_files_still_load() {
+        let d = Settings::default();
+        assert_eq!(d.appearance.style, "aluminium");
+        assert_eq!(d.taskbar.size, TaskbarSize::Small);
+        assert_eq!(
+            d.taskbar.pinned,
+            ["tool:parts", "accessory:files", "accessory:notes", "tool:serial-monitor"]
+        );
+        let dir = tempfile::tempdir().unwrap();
+        // A settings.toml from before the style and taskbar existed.
+        std::fs::write(
+            dir.path().join(FILE_NAME),
+            "[appearance]
+theme = \"dark\"
+wallpaper = \"graphite\"
+",
+        )
+        .unwrap();
+        let s = SettingsStore::load(dir.path()).get();
+        assert_eq!(s.appearance.theme, Theme::Dark);
+        assert_eq!(s.appearance.style, "aluminium");
+        assert_eq!(s.taskbar, Taskbar::default());
+    }
+
+    #[test]
+    fn pins_and_taskbar_size_are_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path());
+        let mut s = store.get();
+        s.taskbar.pinned = vec!["accessory:files".into()];
+        s.taskbar.size = TaskbarSize::Large;
+        s.appearance.style = "cobalt".into();
+        store.update(s.clone()).unwrap();
+        assert_eq!(SettingsStore::load(dir.path()).get(), s);
     }
 
     #[test]

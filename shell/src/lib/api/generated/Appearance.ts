@@ -3,6 +3,11 @@ import type { Theme } from "./Theme";
 
 export type Appearance = { theme: Theme, 
 /**
+ * A built-in style id (colours and accent), e.g. `aluminium`. Every style has a light and a
+ * dark version; `theme` picks which.
+ */
+style: string, 
+/**
  * A built-in wallpaper id, e.g. `aluminium`.
  */
 wallpaper: string, };

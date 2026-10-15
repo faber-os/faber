@@ -83,7 +83,15 @@ export class CoreSocket {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private wanted = false;
   private readonly subs = new Map<number, { topic: Topic; handlers: SubscriptionHandlers }>();
-  private readonly serials = new Map<number, { handlers: SerialHandlers; opened: boolean }>();
+  /**
+   * Open serial sessions. After `serial-close` a session stays here (`closing`) until the core's
+   * `serial-closed`, so what the core still sends about it (the `serial-recording-stopped` that
+   * reports a recording the close ended) reaches its handlers.
+   */
+  private readonly serials = new Map<
+    number,
+    { handlers: SerialHandlers; opened: boolean; closing: boolean }
+  >();
   private readonly statusListeners = new Set<(s: ConnectionStatus) => void>();
   private readonly errorListeners = new Set<(e: ErrorBody) => void>();
 
@@ -146,10 +154,11 @@ export class CoreSocket {
       handlers.onClosed();
       return { send: () => {}, close: () => {}, startRecording: () => {}, stopRecording: () => {} };
     }
-    this.serials.set(id, { handlers, opened: false });
+    this.serials.set(id, { handlers, opened: false, closing: false });
     this.send({ type: 'serial-open', id, port, baud });
     const whileOpen = (fn: () => void) => {
-      if (this.serials.get(id)?.opened) fn();
+      const s = this.serials.get(id);
+      if (s?.opened && !s.closing) fn();
     };
     return {
       send: (data) => whileOpen(() => this.send({ type: 'serial-send', id, data })),
@@ -158,9 +167,11 @@ export class CoreSocket {
       stopRecording: () => whileOpen(() => this.send({ type: 'serial-record-stop', id })),
       close: () => {
         const s = this.serials.get(id);
-        if (!s) return;
-        this.serials.delete(id);
+        if (!s || s.closing) return;
         this.send({ type: 'serial-close', id });
+        // Closed as far as the window is concerned; the entry waits for the core's last word.
+        if (s.opened && this.isOpen()) s.closing = true;
+        else this.serials.delete(id);
         s.handlers.onClosed();
       },
     };
@@ -214,6 +225,13 @@ export class CoreSocket {
     const id = msg.id as number;
 
     const serial = this.serials.get(id);
+    if (serial?.closing) {
+      // Closed by us: only the recording report and the end of the session still matter.
+      if (msg.type === 'serial-recording-stopped')
+        serial.handlers.onRecordingStopped?.(msg.path, msg.bytes);
+      else if (msg.type === 'serial-closed') this.serials.delete(id);
+      return;
+    }
     if (serial) {
       const h = serial.handlers;
       if (msg.type === 'serial-opened') {
@@ -250,7 +268,7 @@ export class CoreSocket {
   private endSerials(reason: string): void {
     const all = [...this.serials.values()];
     this.serials.clear();
-    for (const s of all) s.handlers.onClosed(reason);
+    for (const s of all) if (!s.closing) s.handlers.onClosed(reason);
   }
 
   private emitError(e: ErrorBody): void {

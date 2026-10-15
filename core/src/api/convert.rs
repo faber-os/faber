@@ -1,7 +1,7 @@
 //! Machine types → wire types (docs/api.md). The only place that knows both.
 
 use super::dto;
-use crate::files::{Entry, Kind, Root, Special, VPath};
+use crate::files::{Entry, Kind, Special, VPath};
 use crate::logs;
 use crate::machine::{MachineError, PartView, PortView};
 use crate::ports::{PortKind, PortProblem};
@@ -97,12 +97,8 @@ pub fn connector(m: &Manifest) -> dto::ConnectorInfo {
 }
 
 pub fn file_root(p: &VPath, label: &str, warning: Option<&str>) -> dto::FileRoot {
-    let id = match p.root() {
-        Root::Home => "home",
-        Root::Machine => "machine",
-    };
     dto::FileRoot {
-        id: id.into(),
+        id: p.root_id(),
         label: label.into(),
         path: p.to_string(),
         warning: warning.map(str::to_string),

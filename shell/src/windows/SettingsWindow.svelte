@@ -2,14 +2,38 @@
   import { useCore } from '../lib/state/context';
   import type { ErrorBody, Settings, Theme } from '../lib/state/types';
   import { WALLPAPERS, resolveWallpaper } from '../lib/desktop/wallpapers';
+  import { STYLES, resolveStyle, styleSwatch } from '../lib/desktop/styles';
+  import { isPinned } from '../lib/desktop/taskbar';
+  import AppIcon from '../components/AppIcon.svelte';
   import Dialog from '../components/Dialog.svelte';
+  import { useDesktop } from '../components/desktopController.svelte';
   import ErrorNotice from '../components/ErrorNotice.svelte';
-  import type { WindowProps } from '../components/windowDefs';
+  import Icon from '../components/Icon.svelte';
+  import type { WindowDef, WindowProps } from '../components/windowDefs';
 
-  let props: WindowProps = $props();
+  let { win }: WindowProps = $props();
 
   const core = useCore();
+  const desktop = useDesktop();
   const CONFIRM_WORD = 'machine';
+
+  /** The sidebar, in groups; each item scrolls to its section. */
+  const NAV = [
+    {
+      group: 'You',
+      items: [
+        { id: 'appearance', label: 'Appearance', icon: 'sun' },
+        { id: 'desktop', label: 'Desktop and taskbar', icon: 'taskbar' },
+      ],
+    },
+    { group: 'Advanced', items: [{ id: 'developer', label: 'Developer', icon: 'warning' }] },
+  ] as const;
+  type SectionId = (typeof NAV)[number]['items'][number]['id'];
+
+  let current = $state<SectionId>('appearance');
+  let scroller: HTMLElement | undefined = $state();
+  // The desktop is built from the window registry, so its kinds are the full definitions.
+  const programs = (Object.values(desktop.kinds) as WindowDef[]).filter((d) => d.program);
 
   let error = $state<ErrorBody | null>(null);
   let saving = $state(false);
@@ -19,6 +43,8 @@
 
   const settings = $derived(core.settings);
   const wallpaper = $derived(resolveWallpaper(settings?.appearance.wallpaper));
+  const style = $derived(resolveStyle(settings?.appearance.style).id);
+  const pinned = $derived(settings?.taskbar.pinned ?? []);
   const fullMachine = $derived(settings?.developer.fullMachineFiles ?? false);
   const confirmed = $derived(understood && typed.trim().toLowerCase() === CONFIRM_WORD);
 
@@ -33,6 +59,55 @@
 
   function setTheme(theme: Theme) {
     void change((s) => ({ ...s, appearance: { ...s.appearance, theme } }));
+  }
+
+  function setStyle(id: string) {
+    void change((s) => ({ ...s, appearance: { ...s.appearance, style: id } }));
+  }
+
+  function setTaskbarSize(size: 'small' | 'large') {
+    void change((s) => ({ ...s, taskbar: { ...s.taskbar, size } }));
+  }
+
+  function setPin(key: string, on: boolean) {
+    void change((s) => ({
+      ...s,
+      taskbar: {
+        ...s.taskbar,
+        pinned: on
+          ? [...s.taskbar.pinned.filter((k) => k !== key), key]
+          : s.taskbar.pinned.filter((k) => k !== key),
+      },
+    }));
+  }
+
+  function go(id: SectionId) {
+    current = id;
+    const el = scroller?.querySelector(`#${win.id}-${id}`);
+    // Not every browser engine has it (the test DOM doesn't); the sidebar still marks the section.
+    el?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+  }
+
+  // Opened at one section (the taskbar's "Taskbar settings…"): go there once the page is drawn.
+  $effect(() => {
+    const want = win.params.section as SectionId | undefined;
+    if (!want || !scroller || !settings) return;
+    go(want);
+    desktop.update(win.id, { params: {} });
+  });
+
+  /** Follow the scrolling: the section nearest the top is the one marked in the sidebar. */
+  function onScroll() {
+    if (!scroller) return;
+    const top = scroller.getBoundingClientRect().top;
+    let best: SectionId = 'appearance';
+    for (const g of NAV) {
+      for (const it of g.items) {
+        const el = scroller.querySelector(`#${win.id}-${it.id}`);
+        if (el && el.getBoundingClientRect().top - top < 80) best = it.id;
+      }
+    }
+    current = best;
   }
 
   function setWallpaper(id: string) {
@@ -65,25 +140,41 @@
 </script>
 
 <div class="settings">
+  <nav class="side" aria-label="Settings sections">
+    {#each NAV as g (g.group)}
+      <p class="group">{g.group}</p>
+      {#each g.items as it (it.id)}
+        <button
+          class="nav-item"
+          class:on={current === it.id}
+          aria-current={current === it.id ? 'true' : undefined}
+          onclick={() => go(it.id)}
+        >
+          <Icon name={it.icon} size={17} /><span>{it.label}</span>
+        </button>
+      {/each}
+    {/each}
+  </nav>
+
   {#if !settings}
     <p class="loading">Loading settings…</p>
   {:else}
-    <div class="scroll">
+    <div class="scroll" bind:this={scroller} onscroll={onScroll}>
       {#if error}<ErrorNotice {error} />{/if}
 
-      <section aria-labelledby="appearance">
-        <h3 id="appearance">Appearance</h3>
+      <section id="{win.id}-appearance" aria-labelledby="{win.id}-appearance-h">
+        <h3 id="{win.id}-appearance-h">Appearance</h3>
         <div class="row">
           <div class="text">
-            <p class="name" id="theme-label">Theme</p>
-            <p class="desc">Applies to every screen showing this machine.</p>
+            <p class="name" id="{win.id}-theme-label">Mode</p>
+            <p class="desc">Follow this screen or browser, or pick one. Applies to every screen.</p>
           </div>
-          <div class="segmented" role="radiogroup" aria-labelledby="theme-label">
+          <div class="segmented" role="radiogroup" aria-labelledby="{win.id}-theme-label">
             {#each [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] as const as [value, label] (value)}
               <label
                 ><input
                   type="radio"
-                  name="theme"
+                  name="{win.id}-theme"
                   {value}
                   checked={settings.appearance.theme === value}
                   disabled={saving}
@@ -94,14 +185,49 @@
           </div>
         </div>
 
-        <fieldset class="walls">
+        <fieldset class="choices">
+          <legend class="name">Style</legend>
+          <p class="desc legend-desc">
+            Every style has a light and a dark version; the mode above picks which.
+          </p>
+          <div class="style-grid">
+            {#each STYLES as st (st.id)}
+              {@const sw = styleSwatch(st)}
+              <label class="style-choice" title={st.description}>
+                <input
+                  type="radio"
+                  name="{win.id}-style"
+                  value={st.id}
+                  checked={style === st.id}
+                  disabled={saving}
+                  onchange={() => setStyle(st.id)}
+                />
+                <span class="style-swatch" aria-hidden="true">
+                  <span class="half" style:background={sw.light}
+                    ><span class="dot" style:background={sw.accentLight}></span><span
+                      class="aa light">Aa</span
+                    ></span
+                  >
+                  <span class="half" style:background={sw.dark}
+                    ><span class="dot" style:background={sw.accentDark}></span><span class="aa dark"
+                      >Aa</span
+                    ></span
+                  >
+                </span>
+                <span class="style-name">{st.label}</span>
+              </label>
+            {/each}
+          </div>
+        </fieldset>
+
+        <fieldset class="choices">
           <legend class="name">Wallpaper</legend>
           <div class="wall-grid">
             {#each WALLPAPERS as w (w.id)}
               <label class="wall-choice">
                 <input
                   type="radio"
-                  name="wallpaper"
+                  name="{win.id}-wallpaper"
                   value={w.id}
                   checked={wallpaper === w.id}
                   disabled={saving}
@@ -116,29 +242,82 @@
         </fieldset>
       </section>
 
-      <section aria-labelledby="developer">
-        <h3 id="developer">Developer</h3>
+      <section id="{win.id}-desktop" aria-labelledby="{win.id}-desktop-h">
+        <h3 id="{win.id}-desktop-h">Desktop and taskbar</h3>
+        <div class="row">
+          <div class="text">
+            <p class="name" id="{win.id}-size-label">Taskbar size</p>
+            <p class="desc">Large has bigger buttons with names, for the 7" touch screen.</p>
+          </div>
+          <div class="segmented" role="radiogroup" aria-labelledby="{win.id}-size-label">
+            {#each [['small', 'Small'], ['large', 'Large']] as const as [value, label] (value)}
+              <label
+                ><input
+                  type="radio"
+                  name="{win.id}-size"
+                  {value}
+                  checked={settings.taskbar.size === value}
+                  disabled={saving}
+                  onchange={() => setTaskbarSize(value)}
+                />{label}</label
+              >
+            {/each}
+          </div>
+        </div>
+        <fieldset class="choices">
+          <legend class="name">Pinned to the taskbar</legend>
+          <p class="desc legend-desc">
+            Pinned programs are always on the taskbar, in the order you pinned them. You can also
+            right-click a program anywhere to pin or unpin it.
+          </p>
+          <ul class="pins">
+            {#each programs as d (d.kind)}
+              <li>
+                <label class="pin-row">
+                  <AppIcon icon={d.icon} colour={d.colour} size={30} />
+                  <span class="pin-name">{d.title}</span>
+                  <input
+                    class="switch"
+                    type="checkbox"
+                    role="switch"
+                    aria-label="Pin {d.title} to the taskbar"
+                    checked={isPinned(pinned, d.program!)}
+                    disabled={saving}
+                    onchange={(e) => setPin(d.program!, e.currentTarget.checked)}
+                  />
+                </label>
+              </li>
+            {/each}
+          </ul>
+        </fieldset>
+      </section>
+
+      <section id="{win.id}-developer" aria-labelledby="{win.id}-developer-h">
+        <h3 id="{win.id}-developer-h">Developer</h3>
         <p class="intro">
           For people building Faber or connectors. Leave these off unless you know why you need
           them.
         </p>
-        <div class="row">
+        <div class="row danger-card">
           <div class="text">
-            <label class="name" for="full-machine">Allow Files to see the whole machine</label>
-            <p class="desc" id="full-machine-desc">
+            <label class="name" for="{win.id}-full-machine"
+              >Allow Files to see the whole machine</label
+            >
+            <p class="desc" id="{win.id}-full-machine-desc">
               {#if fullMachine}
                 On. Files shows “This computer” with every drive and system folder.
               {:else}
-                Off. Files only shows Faber's home folder.
+                Off. Files only shows Faber's home folder and disks. Deleting system files can break
+                this computer, and there is no Trash outside Faber's home folder.
               {/if}
             </p>
           </div>
           <input
-            id="full-machine"
+            id="{win.id}-full-machine"
             class="switch"
             type="checkbox"
             role="switch"
-            aria-describedby="full-machine-desc"
+            aria-describedby="{win.id}-full-machine-desc"
             checked={fullMachine}
             disabled={saving}
             onchange={toggleMachine}
@@ -188,10 +367,76 @@
   .settings {
     position: relative;
     display: flex;
-    flex-direction: column;
     flex: 1;
     min-height: 0;
     background: var(--surface);
+    container-type: inline-size;
+  }
+  .side {
+    flex: none;
+    width: 190px;
+    padding: var(--space-4) var(--space-2);
+    border-right: 1px solid var(--line);
+    background: var(--surface-2);
+    overflow-y: auto;
+    display: grid;
+    align-content: start;
+    gap: 2px;
+  }
+  .group {
+    padding: var(--space-3) var(--space-3) var(--space-1);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    color: var(--text-muted);
+  }
+  .group:first-child {
+    padding-top: 0;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    min-height: var(--touch);
+    padding: 0 var(--space-3);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: none;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    text-align: left;
+  }
+  .nav-item:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+  .nav-item.on {
+    background: var(--selected);
+    color: var(--text);
+    font-weight: 700;
+  }
+  .nav-item.on :global(svg) {
+    color: var(--accent-ink);
+  }
+  @container (max-width: 560px) {
+    .settings {
+      flex-direction: column;
+    }
+    .side {
+      width: auto;
+      display: flex;
+      padding: var(--space-1) var(--space-2);
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+      overflow-x: auto;
+    }
+    .group {
+      display: none;
+    }
+    .nav-item {
+      width: auto;
+      white-space: nowrap;
+    }
   }
   .loading {
     padding: var(--space-5);
@@ -199,6 +444,7 @@
   }
   .scroll {
     flex: 1;
+    min-width: 0;
     overflow-y: auto;
     display: grid;
     align-content: start;
@@ -208,15 +454,12 @@
   section {
     display: grid;
     gap: var(--space-4);
+    scroll-margin-top: var(--space-4);
   }
   h3 {
-    font-size: var(--text-xs);
+    font-size: var(--text-xl);
     font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    padding-bottom: var(--space-2);
-    border-bottom: 1px solid var(--line);
+    letter-spacing: -0.01em;
   }
   .intro {
     margin-top: calc(var(--space-2) * -1);
@@ -228,6 +471,8 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-4);
+    padding-bottom: var(--space-4);
+    border-bottom: 1px solid var(--line);
   }
   .text {
     min-width: 0;
@@ -239,20 +484,89 @@
     font-size: var(--text-sm);
     color: var(--text-muted);
   }
-  .walls {
+  .choices {
     margin: 0;
-    padding: 0;
+    padding: 0 0 var(--space-4);
     border: 0;
+    border-bottom: 1px solid var(--line);
     min-width: 0;
   }
-  .walls legend {
+  .choices legend {
     padding: 0;
-    margin-bottom: var(--space-2);
+    margin-bottom: var(--space-1);
+  }
+  .legend-desc {
+    margin-bottom: var(--space-3);
+  }
+  .style-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--space-3);
+  }
+  .style-choice {
+    position: relative;
+    display: grid;
+    gap: var(--space-2);
+    padding: 6px;
+    border-radius: var(--radius-lg);
+    box-shadow: inset 0 0 0 1px var(--line);
+    cursor: pointer;
+  }
+  .style-choice:hover {
+    background: var(--hover);
+  }
+  .style-choice input,
+  .wall-choice input {
+    position: absolute;
+    opacity: 0;
+  }
+  .style-choice:has(input:checked) {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .style-choice:has(input:focus-visible),
+  .wall-choice:has(input:focus-visible) {
+    outline: 2px solid var(--focus-ring);
+  }
+  .style-swatch {
+    display: flex;
+    height: 60px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: inset 0 0 0 1px oklch(0.3 0.01 250 / 0.12);
+  }
+  .half {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    padding: 6px;
+  }
+  .dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+  }
+  .aa {
+    font-size: var(--text-xs);
+    font-weight: 650;
+    line-height: 1;
+  }
+  .aa.light {
+    color: oklch(0.235 0.008 250);
+  }
+  .aa.dark {
+    color: oklch(0.94 0.003 250);
+  }
+  .style-name {
+    padding: 0 4px 2px;
+    font-size: var(--text-sm);
+    font-weight: 650;
   }
   .wall-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
     gap: var(--space-3);
+    margin-top: var(--space-2);
   }
   .wall-choice {
     position: relative;
@@ -264,10 +578,6 @@
   }
   .wall-choice:hover {
     background: var(--hover);
-  }
-  .wall-choice input {
-    position: absolute;
-    opacity: 0;
   }
   .swatch {
     display: block;
@@ -281,12 +591,40 @@
       0 0 0 2px var(--surface),
       0 0 0 4px var(--accent);
   }
-  .wall-choice:has(input:focus-visible) {
-    outline: 2px solid var(--focus-ring);
-  }
   .wall-name {
     font-size: var(--text-sm);
     font-weight: 650;
+  }
+  .pins {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 2px;
+  }
+  .pin-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: 48px;
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-md);
+  }
+  .pin-row:hover {
+    background: var(--hover);
+  }
+  .pin-name {
+    flex: 1;
+    font-weight: 600;
+  }
+  .danger-card {
+    padding: var(--space-4);
+    border: 1px solid oklch(0.62 0.19 27 / 0.35);
+    border-radius: var(--radius-lg);
+    background: var(--danger-soft);
+  }
+  .danger-card .name {
+    color: var(--danger);
   }
   .risks {
     margin: 0;

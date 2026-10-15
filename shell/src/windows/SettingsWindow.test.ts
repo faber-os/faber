@@ -13,13 +13,14 @@ function setup(routes: Parameters<typeof fakeShell>[0] = []) {
   return shell;
 }
 
+const MACHINE = 'Allow Files to see the whole machine';
 const ON = { ...DEFAULT_SETTINGS, developer: { fullMachineFiles: true } };
 
 describe('Settings', () => {
   it('changes the theme for every screen through the core', async () => {
     const dark = {
       ...DEFAULT_SETTINGS,
-      appearance: { theme: 'dark' as const, wallpaper: 'aluminium' },
+      appearance: { ...DEFAULT_SETTINGS.appearance, theme: 'dark' as const },
     };
     const shell = setup([{ method: 'PUT', path: '/api/v0/settings', body: dark }]);
     await userEvent.click(await screen.findByRole('radio', { name: 'Dark' }));
@@ -43,7 +44,7 @@ describe('Settings', () => {
     await screen.findByRole('radio', { name: 'System' });
     shell.pushSettings({
       ...DEFAULT_SETTINGS,
-      appearance: { theme: 'light', wallpaper: 'graphite' },
+      appearance: { theme: 'light', style: 'aluminium', wallpaper: 'graphite' },
     });
     await waitFor(() => expect(screen.getByRole('radio', { name: 'Light' })).toBeChecked());
   });
@@ -74,10 +75,10 @@ describe('Settings', () => {
 
   it('cancelling the warning leaves it off', async () => {
     const shell = setup();
-    await userEvent.click(await screen.findByRole('switch'));
+    await userEvent.click(await screen.findByRole('switch', { name: MACHINE }));
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('switch')).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: MACHINE })).not.toBeChecked();
     expect(shell.fetch.calls.some((c) => c.method === 'POST')).toBe(false);
   });
 
@@ -86,7 +87,7 @@ describe('Settings', () => {
       { method: 'POST', path: '/api/v0/settings/developer', body: DEFAULT_SETTINGS },
     ]);
     shell.pushSettings(ON);
-    const toggle = await screen.findByRole('switch');
+    const toggle = await screen.findByRole('switch', { name: MACHINE });
     await waitFor(() => expect(toggle).toBeChecked());
     await userEvent.click(toggle);
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
@@ -95,6 +96,49 @@ describe('Settings', () => {
         fullMachineFiles: false,
         acknowledgedRisk: false,
       }),
+    );
+  });
+
+  const lastPut = (shell: ReturnType<typeof fakeShell>) =>
+    shell.fetch.calls.filter((c) => c.method === 'PUT').at(-1)?.body as
+      typeof DEFAULT_SETTINGS | undefined;
+
+  it('picks a style from the style cards', async () => {
+    const shell = setup([{ method: 'PUT', path: '/api/v0/settings', body: DEFAULT_SETTINGS }]);
+    const group = await screen.findByRole('group', { name: 'Style' });
+    expect(within(group).getAllByRole('radio')).toHaveLength(6);
+    expect(within(group).getByRole('radio', { name: 'Aluminium' })).toBeChecked();
+    await userEvent.click(within(group).getByRole('radio', { name: 'Cobalt' }));
+    await waitFor(() => expect(lastPut(shell)?.appearance.style).toBe('cobalt'));
+  });
+
+  it('sets the taskbar size and what is pinned to it', async () => {
+    const shell = setup([{ method: 'PUT', path: '/api/v0/settings', body: DEFAULT_SETTINGS }]);
+    await userEvent.click(await screen.findByRole('radio', { name: 'Large' }));
+    await waitFor(() => expect(lastPut(shell)?.taskbar.size).toBe('large'));
+    const logs = screen.getByRole('switch', { name: 'Pin Logs to the taskbar' });
+    expect(logs).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Pin Parts to the taskbar' })).toBeChecked();
+    await userEvent.click(logs);
+    await waitFor(() => expect(lastPut(shell)?.taskbar.pinned).toContain('tool:logs'));
+  });
+
+  it('has a sidebar of sections in groups', async () => {
+    setup();
+    const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
+    expect(
+      within(nav)
+        .getAllByRole('button')
+        .map((b) => b.textContent?.trim()),
+    ).toEqual(['Appearance', 'Desktop and taskbar', 'Developer']);
+    expect(within(nav).getByRole('button', { name: 'Appearance' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    );
+    await userEvent.click(within(nav).getByRole('button', { name: 'Developer' }));
+    expect(within(nav).getByRole('button', { name: 'Developer' })).toHaveAttribute(
+      'aria-current',
+      'true',
     );
   });
 });

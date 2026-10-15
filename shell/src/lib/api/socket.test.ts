@@ -387,6 +387,82 @@ describe('CoreSocket', () => {
       expect(onRecordingStopped).toHaveBeenCalledWith('home:/Recordings/bench_test.fbcap', 4096);
     });
 
+    it('still reports the recording a close ended, until the core says the session is over', () => {
+      const s = make();
+      s.connect();
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      const onClosed = vi.fn();
+      const onData = vi.fn();
+      const onRecordingStopped = vi.fn();
+      const session = s.openSerial('serial:COM3', 9600, {
+        onOpened: () => {},
+        onData,
+        onClosed,
+        onError: () => {},
+        onRecording: () => {},
+        onRecordingStopped,
+      });
+      ws.receive(bin({ type: 'serial-opened', id: 1, port: 'serial:COM3' }));
+      session.startRecording('bench_test');
+      ws.receive(
+        bin({ type: 'serial-recording', id: 1, path: 'home:/Recordings/bench_test.fbcap' }),
+      );
+
+      session.close();
+      expect(sentMsgpack(ws).at(-1)).toEqual({ type: 'serial-close', id: 1 });
+      expect(onClosed).toHaveBeenCalledTimes(1);
+
+      // Data still in flight is not shown any more, and nothing more can be sent.
+      ws.receive(bin({ type: 'serial-data', id: 1, tUs: 9, data: new Uint8Array([1]) }));
+      expect(onData).not.toHaveBeenCalled();
+      session.send(new Uint8Array([2]));
+      session.close();
+      expect(sentMsgpack(ws).at(-1)).toEqual({ type: 'serial-close', id: 1 });
+
+      ws.receive(
+        bin({
+          type: 'serial-recording-stopped',
+          id: 1,
+          path: 'home:/Recordings/bench_test.fbcap',
+          bytes: 512,
+        }),
+      );
+      expect(onRecordingStopped).toHaveBeenCalledWith('home:/Recordings/bench_test.fbcap', 512);
+      ws.receive(bin({ type: 'serial-closed', id: 1 }));
+      expect(onClosed).toHaveBeenCalledTimes(1);
+
+      // After serial-closed the session is gone: a stray report reaches nobody.
+      ws.receive(
+        bin({
+          type: 'serial-recording-stopped',
+          id: 1,
+          path: 'home:/Recordings/x.fbcap',
+          bytes: 1,
+        }),
+      );
+      expect(onRecordingStopped).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not report a closed session as lost when the connection drops', () => {
+      const s = make();
+      s.connect();
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      const onClosed = vi.fn();
+      const session = s.openSerial('serial:COM3', 9600, {
+        onOpened: () => {},
+        onData: () => {},
+        onClosed,
+        onError: () => {},
+      });
+      ws.receive(bin({ type: 'serial-opened', id: 1, port: 'serial:COM3' }));
+      session.close();
+      ws.drop();
+      expect(onClosed).toHaveBeenCalledTimes(1);
+      expect(onClosed).toHaveBeenCalledWith();
+    });
+
     it('does not ask to record before the port is open', () => {
       const s = make();
       s.connect();

@@ -2,5 +2,6 @@
 import type { Appearance } from "./Appearance";
 import type { DesktopLayout } from "./DesktopLayout";
 import type { DeveloperSettings } from "./DeveloperSettings";
+import type { Taskbar } from "./Taskbar";
 
-export type Settings = { appearance: Appearance, desktop: DesktopLayout, developer: DeveloperSettings, };
+export type Settings = { appearance: Appearance, desktop: DesktopLayout, taskbar: Taskbar, developer: DeveloperSettings, };

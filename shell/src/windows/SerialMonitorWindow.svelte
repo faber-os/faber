@@ -133,8 +133,8 @@
   }
 
   function close() {
-    // Closing ends a recording too; the core's own confirmation can't reach a closed session,
-    // so say what was saved from what this window counted.
+    // Closing ends a recording too. Say what was saved from what this window counted; the core's
+    // own count (serial-recording-stopped, which still arrives after the close) replaces it.
     if (rec === 'recording' && recPath) lastRecording = { path: recPath, bytes: recBytes };
     session?.close();
     session = null;

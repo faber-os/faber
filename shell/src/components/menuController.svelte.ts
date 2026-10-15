@@ -3,6 +3,7 @@ import {
   isMenuTrigger,
   normaliseMenu,
   type MenuEntry,
+  type MenuHeader,
   type Point,
 } from '../lib/desktop/contextMenu';
 import { LongPress } from '../lib/desktop/longPress';
@@ -12,12 +13,15 @@ export interface MenuRequest {
   onSelect: (id: string) => void;
   /** Read by screen readers as the menu's name, e.g. "notes.txt". */
   label?: string;
+  /** Shown at the top: what was right-clicked. */
+  header?: MenuHeader;
 }
 
 export interface OpenMenu {
   entries: MenuEntry[];
   onSelect: (id: string) => void;
   label: string;
+  header: MenuHeader | null;
   at: Point;
   /** Gets focus back when the menu closes without choosing (as Windows does). */
   opener: HTMLElement | null;
@@ -36,6 +40,7 @@ export class MenuController {
       entries,
       onSelect: req.onSelect,
       label: req.label ?? 'Menu',
+      header: req.header ?? null,
       at,
       opener,
       fromKeyboard,

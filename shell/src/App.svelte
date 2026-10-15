@@ -11,6 +11,7 @@
   import { MenuController, provideMenu } from './components/menuController.svelte';
   import { provideTheme, ThemeController } from './components/theme.svelte';
   import { WINDOW_DEFS, WINDOW_KINDS } from './windows/registry';
+  import { taskbarHeight } from './lib/desktop/taskbar';
 
   const core = createCore();
   const storage = browserStorage();
@@ -32,11 +33,26 @@
   }
 
   $effect(() => {
-    if (core.settings) theme.setPreference(core.settings.appearance.theme);
+    if (!core.settings) return;
+    theme.setPreference(core.settings.appearance.theme);
+    theme.setStyle(core.settings.appearance.style);
+    desktop.setTaskbarHeight(taskbarHeight(core.settings.taskbar.size));
   });
 
   $effect(() => {
     document.documentElement.dataset.theme = theme.resolved;
+  });
+
+  // The style's colours, set on the page root. Until the settings arrive, index.html's copy of
+  // the last style (or tokens.css) paints, so a non-default style doesn't flash.
+  $effect(() => {
+    if (!theme.style) return;
+    const root = document.documentElement.style;
+    for (const [name, value] of Object.entries(theme.tokens)) root.setProperty(name, value);
+  });
+
+  $effect(() => {
+    document.documentElement.style.setProperty('--taskbar-h', `${desktop.taskbarHeight}px`);
   });
 
   // Ready once connected with settings; a core that never sends settings still gets in after 3 s.

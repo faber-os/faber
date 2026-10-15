@@ -50,6 +50,20 @@
     wrap: 'M4.5 7h15M4.5 12h11.5a3 3 0 0 1 0 6H12M14 16l-2 2 2 2M4.5 17h4',
     save: 'M5.5 4.5h10l3 3v12h-13zM8.5 4.5v4h6v-4M8.5 19.5v-5h7v5',
     open: 'M3.5 6.5a1 1 0 0 1 1-1h4.6l2 2.2h7.4v2.3M3.5 6.5v12h14l3-8.5h-14l-3 8.5',
+    pin: 'M9 4.5h6M10 4.5v5.5l-3 3.5h10l-3-3.5V4.5M12 13.5v6',
+    unpin: 'M9 4.5h6M10 4.5v5.5l-3 3.5h10l-3-3.5V4.5M12 13.5v6M4.5 4.5l15 15',
+    power: 'M12 3.5v8M7 6.5a7 7 0 1 0 10 0',
+    restart: 'M5 12a7 7 0 1 0 2.05-4.95M5 5v4h4',
+    rename: 'M5 19h4L19 9l-4-4L5 15zM13 7l4 4',
+    disk: 'M4.5 13.5h15v5h-15zM6.5 13.5l2-8h7l2 8M16 16h.01',
+    sd: 'M7.5 3.5h7l3 3v14h-10zM10 3.5v3M12.5 3.5v3M15 4.5v2',
+    check: 'M5.5 12.5l4 4 9-9',
+    details: 'M4.5 6h15M4.5 10h15M4.5 14h15M4.5 18h15',
+    iconsSmall:
+      'M4.5 4.5h4v4h-4zM10 4.5h4v4h-4zM15.5 4.5h4v4h-4zM4.5 10h4v4h-4zM10 10h4v4h-4zM15.5 10h4v4h-4zM4.5 15.5h4v4h-4zM10 15.5h4v4h-4zM15.5 15.5h4v4h-4z',
+    newWindow: 'M4.5 5.5h15v13h-15zM4.5 9h15M12 11.5v5M9.5 14h5',
+    taskbar: 'M3.5 5.5h17v13h-17zM3.5 15h17M7 17h.01M11 17h2',
+    home: 'M4.5 11l7.5-6.5 7.5 6.5M6.5 9.5v10h11v-10',
   } as const;
 
   /** Solid shapes drawn on top of the outline, for the few icons that need one. */
@@ -61,6 +75,11 @@
   };
 
   export type IconName = keyof typeof PATHS;
+
+  /** The outline of an icon, for drawings that place it themselves (FileIcon's emblems). */
+  export function iconPath(name: IconName): string {
+    return PATHS[name];
+  }
 </script>
 
 <script lang="ts">

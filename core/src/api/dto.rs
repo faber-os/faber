@@ -467,7 +467,8 @@ pub struct PathsRequest {
 
 // Settings types live in `crate::settings` (layer 2 owns its data); re-exported for the wire.
 pub use crate::settings::{
-    Appearance, DesktopLayout, DeveloperChange, DeveloperSettings, IconPosition, Settings, Theme,
+    Appearance, DesktopLayout, DeveloperChange, DeveloperSettings, IconPosition, Settings, Taskbar,
+    TaskbarSize, Theme,
 };
 
 #[cfg(test)]

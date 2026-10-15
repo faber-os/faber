@@ -57,7 +57,10 @@ ever two of these.
 | **Viewer** | The default live view the core has for every capability (a plot for `distance`, a 2D scan for `laser-scan`, a 3D orientation for `imu`). Any part gets one for free. |
 | **Home folder** | Faber's own files, inside the data folder: Desktop, Documents, Recordings, System and Trash. Files and Notes work here. |
 | **System folder** | The folder in the home folder that shows the machine config (`parts.toml`). Saving a file there is checked first: a broken config is refused with its line number. |
-| **Trash** | Where deleted files go. Emptying it deletes them for good. |
+| **Trash** | Where deleted files go. Emptying it deletes them for good. Only the home folder has one. |
+| **Disk** | A USB stick or SD card plugged into the machine. Files shows it under Disks while it is connected. |
+| **Style** | A colour set for the desktop (Aluminium, Cobalt, Workshop, Blueprint, Graphite, Signal). Each has a light and a dark version. |
+| **Pinned** | A program kept on the taskbar even when it is closed. |
 | **Recording** | A capture (`.fbcap`) of a port's bytes, made with the serial monitor's Record button and kept in Recordings. Any recording can be replayed as a port. |
 | **Developer settings** | Settings for people building Faber or connectors, behind a warning. Includes full-machine file access. |
 | **Simulated part** | A part with no hardware behind it: the core simulates its capability, either by hand (`manual`: values you set, or a pattern) or in the world. Same name and signals as the real part, so apps can't tell the difference. |

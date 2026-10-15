@@ -1,4 +1,4 @@
-import { CoreError, type CoreHttp } from '../api/http';
+import { CoreError, type CoreHttp, type WriteMode } from '../api/http';
 import type { CoreSocket, SerialHandlers, SerialSession } from '../api/socket';
 import { RingBuffer } from './ringBuffer';
 import type {
@@ -195,8 +195,13 @@ export class CoreState {
   readFile(path: string): Promise<Result<Uint8Array>> {
     return this.call(() => this.http.readFile(path));
   }
-  writeFile(path: string, bytes: Uint8Array | Blob): Promise<Result<void>> {
-    return this.call(() => this.http.writeFile(path, bytes));
+  /** `create` never overwrites: an existing file is refused with `already-exists`. */
+  writeFile(
+    path: string,
+    bytes: Uint8Array | Blob,
+    mode: WriteMode = 'replace',
+  ): Promise<Result<void>> {
+    return this.call(() => this.http.writeFile(path, bytes, mode));
   }
   createFolder(path: string): Promise<Result<void>> {
     return this.call(() => this.http.createFolder(path));

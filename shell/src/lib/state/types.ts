@@ -25,3 +25,6 @@ export type { IconPosition } from '../api/generated/IconPosition';
 export type { Settings } from '../api/generated/Settings';
 export type { SpecialFolder } from '../api/generated/SpecialFolder';
 export type { Theme } from '../api/generated/Theme';
+export type { Appearance } from '../api/generated/Appearance';
+export type { Taskbar } from '../api/generated/Taskbar';
+export type { TaskbarSize } from '../api/generated/TaskbarSize';

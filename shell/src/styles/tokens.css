@@ -40,7 +40,7 @@
 
   --touch: 40px;
   --taskbar-h: 52px;
-  --titlebar-h: 40px;
+  --titlebar-h: 42px;
 
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-fast: 110ms;
@@ -97,6 +97,34 @@
   --scan-axis: oklch(0.3 0.01 250 / 0.2);
   --scan-label: oklch(0.46 0.01 250);
   --scan-origin: oklch(0.487 0.083 186);
+
+  /* Title-bar tabs sit on this, a step darker than a window's chrome. */
+  --chrome-tabs: oklch(0.925 0.004 250);
+
+  /* Program icons: one colour per program, on a plate (src/lib/desktop/styles.ts, APP_COLOURS). */
+  --plate: oklch(0.995 0.001 250);
+  --app-parts: oklch(0.487 0.083 186);
+  --app-files: oklch(0.58 0.13 68);
+  --app-notes: oklch(0.5 0.02 248);
+  --app-serial: oklch(0.47 0.09 248);
+  --app-settings: oklch(0.37 0.015 248);
+  --app-logs: oklch(0.5 0.1 296);
+  --app-viewer: oklch(0.48 0.1 160);
+  --app-about: oklch(0.45 0.02 250);
+
+  /* File-type icons (components/FileIcon.svelte). The same in every style. */
+  --file-folder: oklch(0.834 0.141 85);
+  --file-folder-back: oklch(0.76 0.14 80);
+  --file-folder-edge: oklch(0.53 0.103 82);
+  --file-paper: oklch(0.995 0.001 250);
+  --file-edge: oklch(0.6 0.01 250);
+  --file-ink: oklch(0.55 0.01 250);
+  --file-config: oklch(0.47 0.09 248);
+  --file-code: oklch(0.5 0.1 296);
+  --file-recording: oklch(0.487 0.083 186);
+  --file-image: oklch(0.55 0.12 150);
+  --file-sun: oklch(0.75 0.15 75);
+  --file-disk: oklch(0.45 0.01 250);
 }
 
 /* The theme is resolved in JS (Settings: system, light or dark) and set as data-theme. */
@@ -151,4 +179,29 @@
   --scan-axis: oklch(0.95 0.005 250 / 0.16);
   --scan-label: oklch(0.72 0.006 250);
   --scan-origin: oklch(0.74 0.095 184);
+
+  --chrome-tabs: oklch(0.205 0.004 250);
+
+  --plate: oklch(0.31 0.005 250);
+  --app-parts: oklch(0.78 0.1 184);
+  --app-files: oklch(0.82 0.13 80);
+  --app-notes: oklch(0.8 0.02 248);
+  --app-serial: oklch(0.78 0.09 248);
+  --app-settings: oklch(0.86 0.01 248);
+  --app-logs: oklch(0.78 0.09 296);
+  --app-viewer: oklch(0.8 0.1 160);
+  --app-about: oklch(0.82 0.02 250);
+
+  --file-folder: oklch(0.74 0.13 82);
+  --file-folder-back: oklch(0.62 0.12 78);
+  --file-folder-edge: oklch(0.45 0.09 80);
+  --file-paper: oklch(0.37 0.005 250);
+  --file-edge: oklch(0.58 0.008 250);
+  --file-ink: oklch(0.72 0.008 250);
+  --file-config: oklch(0.78 0.09 248);
+  --file-code: oklch(0.78 0.09 296);
+  --file-recording: oklch(0.78 0.1 184);
+  --file-image: oklch(0.76 0.12 150);
+  --file-sun: oklch(0.82 0.14 80);
+  --file-disk: oklch(0.8 0.01 250);
 }

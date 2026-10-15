@@ -136,6 +136,20 @@ describe('files', () => {
     expect([...(call.raw as Uint8Array)]).toEqual([1, 2]);
   });
 
+  it('creates a file without overwriting, reporting already-exists', async () => {
+    const error = { code: 'already-exists', message: 'a.txt is already there.', hint: 'Pick.' };
+    const f = fakeFetch([
+      {
+        method: 'PUT',
+        path: '/api/v0/files/content?path=home%3A%2Fa.txt&mode=create',
+        status: 409,
+        body: { error },
+      },
+    ]);
+    const p = createHttp(f.fetch).writeFile('home:/a.txt', new Uint8Array([1]), 'create');
+    await expect(p).rejects.toMatchObject({ status: 409, body: error });
+  });
+
   it('turns a refused config into a CoreError with the line in the message', async () => {
     const error = {
       code: 'config-invalid',
