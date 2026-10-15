@@ -1,7 +1,7 @@
-//! The connectors built into this core: the LD19, plus the generic parts that can only be
-//! simulated until bridges arrive (docs/simulation.md, section 3). From Phase 3 connectors come
-//! from packages.
+//! The connectors built into this core: the LD19, the FaberLink bridge (`faber-bridge`), and the
+//! generic parts (docs/simulation.md, section 3). From Phase 3 connectors also come from packages.
 
+pub mod bridge;
 pub mod generic;
 
 use faber_connector::{Definition, Problem};

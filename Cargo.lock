@@ -770,6 +770,8 @@ dependencies = [
  "faber-capabilities",
  "faber-connector",
  "faber-test-guest",
+ "faberlink",
+ "faberlink-interop",
  "fs4",
  "futures-util",
  "jiff",
