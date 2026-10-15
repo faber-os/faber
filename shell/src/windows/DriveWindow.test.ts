@@ -135,6 +135,16 @@ describe('Drive window', () => {
     expect(calls('POST', '/command').length).toBe(n);
   });
 
+  it('lets go of the lease when the browser goes to the background', async () => {
+    const { calls } = setup({ confirmed: true });
+    await screen.findByTestId('drive-pad');
+    await fireEvent.keyDown(window, { key: 'w', code: 'KeyW' });
+    await waitFor(() => expect(calls('POST', '/command').length).toBeGreaterThan(0));
+    await fireEvent.blur(window);
+    await waitFor(() => expect(calls('DELETE', '/lease?lease=L1')).toHaveLength(1));
+    await fireEvent.focus(window);
+  });
+
   it('lets go of the lease when the window closes', async () => {
     const { view, calls } = setup({ confirmed: true });
     await screen.findByTestId('drive-pad');

@@ -52,9 +52,15 @@
   const machine = $derived(core.settings?.machine.name ?? 'faber');
   const unit = $derived(core.settings?.units.length ?? 'metric');
   const estopped = $derived(core.estop?.engaged === true);
+  /** False while the browser itself is in the background (another app or tab in front). */
+  let pageFocused = $state(true);
   /** Driving only happens in the window in front, while it shows, once D46 is answered. */
   const active = $derived(
-    core.drivingConfirmed && visible && desktop.state.focusedId === win.id && !estopped,
+    core.drivingConfirmed &&
+      visible &&
+      pageFocused &&
+      desktop.state.focusedId === win.id &&
+      !estopped,
   );
 
   let status = $state<LeaseStatus>({ kind: 'free' });
@@ -221,7 +227,12 @@
   );
 </script>
 
-<svelte:window onkeydown={keydown} onkeyup={keyup} onblur={clearControls} />
+<svelte:window
+  onkeydown={keydown}
+  onkeyup={keyup}
+  onblur={() => (pageFocused = false)}
+  onfocus={() => (pageFocused = true)}
+/>
 
 <div class="drive">
   {#if !part}
