@@ -35,6 +35,9 @@ import type {
   Command,
   CommandResult,
   EstopStatus,
+  FlashBoard,
+  FlashRequest,
+  FlashResult,
   LeaseEndReason,
   LeaseGrant,
   LeaseInfo,
@@ -64,6 +67,9 @@ export interface CoreDeps {
 
 /** The machine in the simulated world now: a `world` message (docs/api.md). */
 export type WorldUpdate = Omit<Extract<ServerMessage, { type: 'world' }>, 'type' | 'id'>;
+
+/** The Arduino flasher's progress on a port: a `flash` message (docs/api.md). */
+export type FlashProgress = Omit<Extract<ServerMessage, { type: 'flash' }>, 'type' | 'id'>;
 
 export interface WorldHandlers {
   /** 20 times a second while watched. */
@@ -349,6 +355,29 @@ export class CoreState {
   /** Asks a free port whether a FaberLink board is on it; a board found is suggested for it. */
   checkBoard(port: string): Promise<Result<BoardCheck>> {
     return this.call(() => this.http.checkBoard(port));
+  }
+
+  flasherBoards(): Promise<Result<FlashBoard[]>> {
+    return this.call(() => this.http.getFlasherBoards());
+  }
+
+  /** Replaces the program on the board on `port`. Only ever after the user confirmed it. */
+  flash(port: string, req: FlashRequest): Promise<Result<FlashResult>> {
+    return this.call(() => this.http.flash(port, req));
+  }
+
+  /** The flasher's progress on every port, while watched. */
+  watchFlash(onProgress: (p: FlashProgress) => void): () => void {
+    return this.socket.subscribe(
+      { kind: 'flash' },
+      {
+        onMessage: (m) => {
+          if (m.type !== 'flash') return;
+          const { type: _type, id: _id, ...progress } = m;
+          onProgress(progress);
+        },
+      },
+    );
   }
 
   /** Replace the settings. `developer` must be unchanged; use `setDeveloper` for that. */

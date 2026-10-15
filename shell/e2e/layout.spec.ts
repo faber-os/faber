@@ -73,6 +73,7 @@ test('no window cuts its content off, also after the browser shrinks', async ({ 
   ).toBeVisible();
   const kinds = await openEveryProgram(page);
   expect(kinds).toContain('drive');
+  expect(kinds).toContain('arduino-flasher');
   await openSimViewers(page);
   expect(await clipped(page)).toEqual([]);
 

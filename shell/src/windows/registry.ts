@@ -4,6 +4,7 @@ import AboutWindow from './AboutWindow.svelte';
 import DistanceWindow from './DistanceWindow.svelte';
 import DriveWindow from './DriveWindow.svelte';
 import FilesWindow from './FilesWindow.svelte';
+import FlasherWindow from './FlasherWindow.svelte';
 import InstallPackageWindow from './InstallPackageWindow.svelte';
 import LaserScanWindow from './LaserScanWindow.svelte';
 import LogsWindow from './LogsWindow.svelte';
@@ -153,6 +154,24 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 680, h: 500 },
     minSize: { w: 380, h: 320 },
     component: SerialMonitorWindow,
+  },
+  {
+    // Puts a program on an Arduino (docs/api.md, "The Arduino flasher").
+    kind: 'arduino-flasher',
+    get title() {
+      return t('programs.flasher.title');
+    },
+    get description() {
+      return t('programs.flasher.description');
+    },
+    icon: 'chip',
+    menu: 'tools',
+    program: 'tool:arduino-flasher',
+    colour: 'flasher',
+    multiple: false,
+    defaultSize: { w: 560, h: 600 },
+    minSize: { w: 340, h: 380 },
+    component: FlasherWindow,
   },
   {
     kind: 'logs',
