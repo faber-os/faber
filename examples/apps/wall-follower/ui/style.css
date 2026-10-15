@@ -1,9 +1,89 @@
-body {
-  font-family: system-ui, sans-serif;
-  margin: 1rem;
-  line-height: 1.4;
+/* The shell's look comes in as CSS custom properties (applyTheme in app.js); these are the
+   fallbacks for the moment before it arrives. */
+:root {
+  --surface: #fbfbfc;
+  --text: #1d2126;
+  --text-muted: #5e6670;
+  --line: #d8dce1;
+  --accent: #0f6f6a;
+  --ok: #1f7a3d;
+  --danger: #b3261e;
+  --radius-md: 7px;
+  --font-ui: system-ui, sans-serif;
 }
 
-code {
-  font-size: 0.9em;
+body {
+  margin: 0;
+  padding: 1rem;
+  font-family: var(--font-ui);
+  line-height: 1.4;
+  color: var(--text);
+  background: var(--surface);
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.state {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.state[data-on='true'] {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.label,
+.hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.value {
+  margin: 0.25rem 0;
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  position: relative;
+  height: 8px;
+  margin: 0.25rem 0 0.5rem;
+  border-radius: var(--radius-md);
+  background: var(--line);
+  overflow: hidden;
+}
+
+.bar > div {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+
+/* The target, 0.3 m of the bar's 1 m. */
+.target {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 30%;
+  width: 2px;
+  background: var(--text);
+}
+
+.problem {
+  color: var(--danger);
+  font-size: 0.85rem;
 }
