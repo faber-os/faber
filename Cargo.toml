@@ -4,7 +4,9 @@ members = [
     "core",
     "sdk/rust/capabilities",
     "sdk/rust/connector",
+    "sdk/rust/connector-wasm",
     "connectors/ldrobot-ld19",
+    "core/tests/wasm-guests/misbehaving",
     "tools/arch-check",
 ]
 

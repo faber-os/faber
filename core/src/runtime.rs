@@ -437,12 +437,12 @@ fn run_once(
         if Instant::now() >= next_tick && call.is_ok() {
             let now = deps.clock.now_us();
             if let Err(panic) = catch_unwind(AssertUnwindSafe(|| connector.on_tick(&mut ctx, now))) {
-                break RunEnd::Crashed(connector_bug(&panic_message(&panic)));
+                break RunEnd::Crashed(crash_problem(&panic));
             }
             next_tick = Instant::now() + deps.timing.tick;
         }
         if let Err(panic) = call {
-            break RunEnd::Crashed(connector_bug(&panic_message(&panic)));
+            break RunEnd::Crashed(crash_problem(&panic));
         }
         if let Some(bug) = ctx.bug.take() {
             break RunEnd::Crashed(bug);
@@ -451,6 +451,16 @@ fn run_once(
     reader_stop.store(true, Ordering::Relaxed);
     let _ = reader_thread.join();
     end
+}
+
+/// What a crash means for the user. A sandboxed connector that traps or hits a limit ends its
+/// call by unwinding with the [`Problem`] to show (`crate::wasm` does); anything else is a panic,
+/// which is a bug.
+fn crash_problem(panic: &Box<dyn std::any::Any + Send>) -> Problem {
+    match panic.downcast_ref::<Problem>() {
+        Some(p) => p.clone(),
+        None => connector_bug(&panic_message(panic)),
+    }
 }
 
 fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
@@ -780,6 +790,29 @@ mod tests {
         };
         assert!(p.message.contains("crashed 3 times"));
         assert_eq!(opener.opens.load(Ordering::SeqCst), 3);
+    }
+
+    /// Ends its call the way a sandboxed connector does when it traps or hits a limit.
+    struct Sandboxed;
+    impl Connector for Sandboxed {
+        fn on_bytes(&mut self, _: &mut dyn Context, _: u64, _: &[u8]) {
+            std::panic::resume_unwind(Box::new(Problem::new("It took too long.", "It restarts by itself.")));
+        }
+    }
+
+    #[test]
+    fn a_crash_that_carries_a_problem_shows_that_problem_and_restarts() {
+        let opener = Arc::new(FakeOpener::new(vec![vec![1]]));
+        let d = deps(Arc::clone(&opener));
+        let mut sp = spec(Settings::new());
+        sp.create = Arc::new(|_: &Settings| Ok(Box::new(Sandboxed) as Box<dyn Connector>));
+        let _h = start(sp, d.clone());
+        let PartStatus::Failed(p) = wait_for(&d.status, |s| matches!(s, PartStatus::Failed(_))) else {
+            unreachable!()
+        };
+        assert_eq!(p, Problem::new("It took too long.", "It restarts by itself."));
+        wait_for(&d.status, |s| matches!(s, PartStatus::Stopped(_)));
+        assert_eq!(opener.opens.load(Ordering::SeqCst), 3, "restarted like any crash");
     }
 
     #[test]

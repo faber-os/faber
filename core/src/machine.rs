@@ -12,6 +12,7 @@ pub use world::{DEFAULT_WORLD, WorldChanged, WorldView};
 use crate::backup::{self, Archive, BackupError, Item};
 use crate::clock::SharedClock;
 use crate::config::{self, ConfigError, PartConfig, PartsConfig, Simulate, Source};
+use crate::connectors::LoadProblem;
 use crate::disks::{Disk, DiskDiscovery};
 use crate::estop::Estop;
 use crate::files::{self, Entry, FileError, Files, Special, VPath, WriteMode};
@@ -224,6 +225,8 @@ pub struct Machine {
     opener: Arc<dyn PortOpener>,
     replays: ReplayLibrary,
     connectors: Vec<Definition>,
+    /// Installed connectors that couldn't be loaded, and why ([`Machine::report_connector_problems`]).
+    connector_problems: Mutex<Vec<LoadProblem>>,
     timing: Timing,
     data_dir: PathBuf,
     config_path: PathBuf,
@@ -275,6 +278,7 @@ impl Machine {
             opener: opts.opener,
             replays: opts.replays,
             connectors: opts.connectors,
+            connector_problems: Mutex::new(Vec::new()),
             timing: opts.timing,
             data_dir: opts.data_dir.clone(),
             config_path,
@@ -373,6 +377,16 @@ impl Machine {
     /// Every connector with how it runs (built-in, declarative, …).
     pub fn connector_kinds(&self) -> Vec<(ConnectorKind, Manifest)> {
         self.connectors.iter().map(|d| (d.kind, d.manifest.clone())).collect()
+    }
+
+    /// Installed connectors that couldn't be loaded ([`crate::connectors::LoadProblem`]), so the
+    /// API can say why one is missing. Set once, by whoever loaded them (`all_connectors`).
+    pub fn report_connector_problems(&self, problems: Vec<LoadProblem>) {
+        *self.connector_problems.lock().expect("connector problems lock") = problems;
+    }
+
+    pub fn connector_problems(&self) -> Vec<LoadProblem> {
+        self.connector_problems.lock().expect("connector problems lock").clone()
     }
 
     fn definition(&self, id: &str) -> Option<&Definition> {

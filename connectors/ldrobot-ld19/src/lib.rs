@@ -53,6 +53,10 @@ pub fn definition() -> Definition {
     Definition::new(manifest(), create)
 }
 
+// The same connector as a WebAssembly component (docs/packages.md §2).
+#[cfg(target_arch = "wasm32")]
+faber_connector_wasm::export!(definition);
+
 fn create(settings: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
     faber_connector::settings::Reader::new(settings, &manifest().settings, "the LD19 connector")?;
     Ok(Box::new(Ld19::default()))

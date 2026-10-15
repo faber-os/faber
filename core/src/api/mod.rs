@@ -32,6 +32,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/system", get(system))
         .route("/api/v0/about", get(about))
         .route("/api/v0/connectors", get(connectors))
+        .route("/api/v0/connectors/problems", get(connector_problems))
         .route("/api/v0/ports", get(ports))
         .route("/api/v0/ports/problems", get(port_problems))
         .route("/api/v0/parts", get(parts).post(add_part))
@@ -148,6 +149,10 @@ async fn about(State(s): State<AppState>) -> Result<Json<dto::AboutInfo>, Failur
 
 async fn connectors(State(s): State<AppState>) -> Json<Vec<dto::ConnectorInfo>> {
     Json(s.machine.connector_kinds().iter().map(|(kind, m)| convert::connector(m, *kind)).collect())
+}
+
+async fn connector_problems(State(s): State<AppState>) -> Json<Vec<dto::ConnectorProblem>> {
+    Json(s.machine.connector_problems().iter().map(convert::connector_problem).collect())
 }
 
 async fn ports(State(s): State<AppState>) -> Json<Vec<dto::PortInfo>> {

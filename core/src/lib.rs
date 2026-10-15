@@ -27,6 +27,7 @@ pub mod translations;
 // Layer 3: runs parts (`runtime` and `suggest` too; see docs/development.md).
 pub mod declarative;
 pub mod simparts;
+pub mod wasm;
 
 // Layer 4: ties everything together.
 pub mod machine;
@@ -56,7 +57,7 @@ impl Core {
     ) -> std::io::Result<Core> {
         // Replay ports come from home:/Recordings (D35); the machine keeps this in sync.
         let replays = ports::ReplayLibrary::default();
-        let connectors = all_connectors(&data_dir);
+        let (connectors, connector_problems) = all_connectors_with_problems(&data_dir);
         let machine = machine::Machine::start(machine::MachineOptions {
             data_dir,
             clock,
@@ -70,6 +71,7 @@ impl Core {
             port_scan: Some(Duration::from_secs(2)),
             world: Arc::new(simparts::SimWorld::new()),
         })?;
+        machine.report_connector_problems(connector_problems);
         Ok(Core { machine, logs })
     }
 
@@ -100,18 +102,35 @@ impl Core {
 /// `<data>/connectors/<id>/` (each folder read by the engine for its kind). An installed one can't
 /// replace a built-in one.
 pub fn all_connectors(data_dir: &std::path::Path) -> Vec<faber_connector::Definition> {
+    all_connectors_with_problems(data_dir).0
+}
+
+/// [`all_connectors`], plus the installed folders that couldn't be used and why, for
+/// `GET /api/v0/connectors/problems`. Never fails: a bad folder is logged and left out.
+pub fn all_connectors_with_problems(
+    data_dir: &std::path::Path,
+) -> (Vec<faber_connector::Definition>, Vec<connectors::LoadProblem>) {
     let mut defs = connectors::built_in();
-    let (installed, _problems) = declarative::installed::load_installed(&data_dir.join("connectors"));
+    let folder = data_dir.join("connectors");
+    // Each engine reads only the folders of its own kind, so no folder is reported twice.
+    let (mut installed, mut problems) = wasm::load_installed(&folder, wasm::Limits::default());
+    let (declarative, declarative_problems) = declarative::installed::load_installed(&folder);
+    installed.extend(declarative);
+    problems.extend(declarative_problems);
     for d in installed {
         if defs.iter().any(|b| b.manifest.id == d.manifest.id) {
-            tracing::error!(
-                target: "core",
-                "the installed connector {} has the id of a connector that is already there; it is not loaded.                  Rename its id and its folder.",
-                d.manifest.id
+            let problem = faber_connector::Problem::new(
+                format!(
+                    "The installed connector {} has the id of a connector that is already there.",
+                    d.manifest.id
+                ),
+                "It is not loaded. Rename its id and its folder.",
             );
+            tracing::error!(target: "core", "{} {}", problem.message, problem.hint);
+            problems.push(connectors::LoadProblem { folder: d.manifest.id.clone(), problem });
             continue;
         }
         defs.push(d);
     }
-    defs
+    (defs, problems)
 }

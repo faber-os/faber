@@ -4,7 +4,17 @@
 
 pub mod generic;
 
-use faber_connector::Definition;
+use faber_connector::{Definition, Problem};
+
+/// An installed connector folder (`<data>/connectors/<id>/`) that couldn't be used, and why. The
+/// core runs without it. Every engine that loads installed connectors (wasm, declarative) reports
+/// with this.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoadProblem {
+    /// The folder's name, e.g. `my-sensor`.
+    pub folder: String,
+    pub problem: Problem,
+}
 
 pub fn built_in() -> Vec<Definition> {
     let mut defs = vec![ldrobot_ld19::definition()];

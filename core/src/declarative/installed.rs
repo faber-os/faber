@@ -3,16 +3,9 @@
 //! package installer writes these folders; until it exists they can be copied in by hand.
 
 use super::{FILE_NAME, definition, manifest};
+pub use crate::connectors::LoadProblem;
 use faber_connector::{Definition, Problem};
 use std::path::Path;
-
-/// A connector folder that couldn't be used, and why. The core runs without it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LoadProblem {
-    /// The folder's name, e.g. `my-sensor`.
-    pub folder: String,
-    pub problem: Problem,
-}
 
 /// Loads every declarative connector in `dir`. A missing `dir` means none are installed.
 /// Folders of other kinds (wasm) are left to their own engine.

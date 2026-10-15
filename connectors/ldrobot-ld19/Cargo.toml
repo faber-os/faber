@@ -15,3 +15,8 @@ workspace = true
 faber-capabilities = { version = "0.1.0", path = "../../sdk/rust/capabilities" }
 faber-connector = { version = "0.1.0", path = "../../sdk/rust/connector" }
 toml = "1.1.8"
+
+# Built as a sandboxed WebAssembly component too (docs/packages.md §2): the same code, plus the
+# component glue, only when compiling for wasm.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+faber-connector-wasm = { version = "0.1.0", path = "../../sdk/rust/connector-wasm" }

@@ -1,0 +1,97 @@
+package faber:connector@0.1.0;
+
+/// What a connector and the core hand each other: the capability types from
+/// `faber:capabilities`, wrapped the way the Rust SDK (`faber-connector`) wraps them.
+interface types {
+  use faber:capabilities/types@0.1.0.{timestamp};
+  use faber:capabilities/laser-scan@0.1.0.{reading as laser-scan-reading};
+  use faber:capabilities/distance@0.1.0.{reading as distance-reading};
+  use faber:capabilities/motor@0.1.0.{reading as motor-reading, command as motor-command};
+  use faber:capabilities/planar-base@0.1.0.{reading as planar-base-reading, command as planar-base-command};
+  use faber:capabilities/estop@0.1.0.{reading as estop-reading};
+  use faber:capabilities/pose@0.1.0.{reading as pose-reading};
+  use faber:capabilities/position@0.1.0.{reading as position-reading};
+
+  /// One reading of any capability a connector can publish.
+  variant reading {
+    laser-scan(laser-scan-reading),
+    distance(distance-reading),
+    motor(motor-reading),
+    planar-base(planar-base-reading),
+    estop(estop-reading),
+    pose(pose-reading),
+    position(position-reading),
+  }
+
+  /// One command for an actuator, already lease-checked and clamped by the core.
+  variant command {
+    motor(motor-command),
+    planar-base(planar-base-command),
+  }
+
+  /// What the part did with a command: the command as it was applied (after its own clamping).
+  record applied { command: command }
+
+  /// What is wrong and what the user should try, in plain words.
+  record problem { message: string, hint: string }
+
+  variant command-error {
+    /// This connector takes no commands, or not this one.
+    unsupported,
+    /// The part can't act right now.
+    not-ready(problem),
+  }
+
+  /// The connector's own view of how it is doing. The core turns it into the part's state.
+  variant health {
+    starting,
+    running,
+    degraded(problem),
+    failed(problem),
+  }
+
+  /// One value from the part's `[parts.<name>.settings]` table in parts.toml. `other` carries
+  /// anything else (a table, a date, a mixed list) as TOML text, so the connector can explain
+  /// what it expected instead.
+  variant setting-value {
+    boolean(bool),
+    integer(s64),
+    float(f64),
+    text(string),
+    text-list(list<string>),
+    other(string),
+  }
+
+  /// A setting that can't be used, with what to do about it.
+  record settings-error { key: string, message: string, hint: string }
+
+  enum log-level { debug, info, warn, error }
+}
+
+/// What a running connector may do. Nothing else exists inside the sandbox: no files, network,
+/// environment or clock (time is passed in), so a connector can only publish its own signals.
+interface context {
+  use types.{reading, health, log-level};
+
+  /// Publishes a reading on one of the manifest's `provides` names. Any other name is refused
+  /// and stops the part, like a bug in a built-in connector.
+  publish: func(signal: string, reading: reading);
+  set-health: func(health: health);
+  log: func(level: log-level, message: string);
+}
+
+/// One connector instance runs one part. Bytes in, readings out, like the Rust `Connector` trait.
+world connector {
+  use types.{setting-value, settings-error, command, applied, command-error};
+  use faber:capabilities/types@0.1.0.{timestamp};
+
+  import context;
+
+  /// Called once, before anything else, with the part's settings.
+  export create: func(settings: list<tuple<string, setting-value>>) -> result<_, settings-error>;
+  /// Bytes arrived from the part's port at `t-us` (the core's clock).
+  export on-bytes: func(t-us: timestamp, bytes: list<u8>);
+  /// Called about every 100 ms, even when no bytes arrive.
+  export on-tick: func(now-us: timestamp);
+  export command: func(cmd: command) -> result<applied, command-error>;
+}

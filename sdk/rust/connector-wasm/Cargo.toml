@@ -1,0 +1,23 @@
+[package]
+name = "faber-connector-wasm"
+version = "0.1.0"
+description = "Builds a Faber connector as a sandboxed WebAssembly component: the same Rust as a built-in, plus one export! line."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# Not the workspace lints: the generated component glue (wit-bindgen) needs `unsafe`, so this
+# crate denies it everywhere except the `bindings` module instead of forbidding it.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dependencies]
+faber-capabilities = { version = "0.1.0", path = "../capabilities" }
+faber-connector = { version = "0.1.0", path = "../connector" }
+toml = "1.1.8"
+wit-bindgen = { version = "0.63.0", default-features = false, features = ["macros", "realloc", "std"] }

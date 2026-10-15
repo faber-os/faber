@@ -220,6 +220,20 @@ pub struct PortInfo {
     pub suggestions: Vec<Suggestion>,
 }
 
+/// A connector installed in `<data>/connectors/` that the core couldn't load. The core runs
+/// without it; this says why, so a missing connector isn't a mystery.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ConnectorProblem {
+    /// Its folder in `<data>/connectors/`, e.g. `my-sensor`.
+    pub folder: String,
+    /// What is wrong, in plain words.
+    pub message: String,
+    /// The next thing to try.
+    pub hint: String,
+}
+
 /// Something plugged in over USB that the computer can't talk to, so it never became a port
 /// (e.g. a cable without data wires). Shown so an empty port list isn't a mystery.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]

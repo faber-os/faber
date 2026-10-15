@@ -1,0 +1,24 @@
+faber-manifest = 1
+
+# The LD19 as a wasm connector package (docs/packages.md §5). Must say exactly what
+# `ldrobot_ld19::manifest()` says; tests/package.rs checks it.
+[package]
+id = "ldrobot-ld19"
+type = "connector"
+kind = "wasm"
+version = "0.1.0"
+name = "LDROBOT LD19 / STL-19P LiDAR"
+module = "connector.wasm"
+
+[ports]
+serial = { baud = 230400 }
+
+# Range from the LD19 datasheet: 0.02–12 m.
+[[provides]]
+capability = "laser-scan@1"
+info = { range-min-m = 0.02, range-max-m = 12.0 }
+
+[[usb-hints]]
+vid = 0x10c4
+pid = 0xea60
+reason = "The LD19 kit comes with this CP2102 adapter. It is a common USB serial chip, so it could also be something else."

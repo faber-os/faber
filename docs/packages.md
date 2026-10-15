@@ -1,7 +1,9 @@
 # Phase 3 design: packages and sandboxing
 
 Status: **design v1, proposed** (2026-10-15). Builds on D03, D07, D08, D09, D10 and D18. The
-roadmap's Phase 3 says what "done" means; this says how. Nothing here is built yet.
+roadmap's Phase 3 says what "done" means; this says how. Built so far: the wasm sandbox and its
+WIT (§3, §4, Phase 3a) and the declarative engine (§6, Phase 3c); packages, the installer and the
+tools (§5, §7) are next.
 
 ## 1. What a user and a contributor do
 
@@ -51,6 +53,28 @@ world connector {
 - Bytes in, readings out, exactly like the Rust `Connector` trait today, so built-in and wasm
   connectors share one supervisor (restart with backoff, health, logs).
 
+**Built (Phase 3a).** The WIT is `wit/connector/connector.wit`; the readings, commands, health and
+settings values are the capability types from `wit/capabilities` (`setting-value` carries anything
+WIT has no case for as TOML text, so a connector sees exactly what parts.toml holds). A connector
+author writes the same Rust as for a built-in one and adds one line,
+`faber_connector_wasm::export!(definition);` (`sdk/rust/connector-wasm`). The core's host is
+`core/src/wasm/`. It loads every `kind = "wasm"` folder in `<data>/connectors/<id>/` (`faber.toml`
+plus `connector.wasm`) at start; `GET /api/v0/connectors` shows them as `kind: "wasm"`, and
+`GET /api/v0/connectors/problems` says why a folder couldn't be used. The proof is
+`core/tests/wasm.rs`: the LD19, built both ways, gives identical readings on the recorded capture
+(232 of 232, and the same health changes).
+
+- **Target: `wasm32-unknown-unknown`, then wrapped as a component** (`wasm-tools component new`, or
+  the `wit-component` crate as the tests do). `wasm32-wasip2` makes a component directly, but Rust's
+  standard library there imports 14 WASI interfaces (stdio, environment, clocks, exit) even for a
+  connector that uses none of them, and the core refuses those. `unknown-unknown` imports nothing
+  but the connector world.
+- A component may import only `faber:` interfaces, and functions only from `context` (the
+  capability interfaces it takes types from also declare commands for apps). Anything else is
+  refused when it loads, with the names it asked for.
+- A panic in the connector is logged by the SDK (`panicked: …`) just before the trap, so the part's
+  problem says what panicked, as it does for a built-in connector.
+
 ## 4. Limits
 
 | Limit | Default | Why |
@@ -61,6 +85,12 @@ world connector {
 
 A connector that hits a limit is failed with a plain message ("my-sensor took longer than 20 ms
 to handle data and was stopped") and restarted with the usual backoff.
+
+**Built (Phase 3a).** Memory through a Wasmtime `ResourceLimiter`; time through epoch
+interruption, with a 5 ms epoch tick, so a call gets at least 20 ms and at most 25 ms. A trap, a
+limit or a publish to an undeclared signal ends the call by unwinding with the problem to show;
+the runtime treats it as a crash (failed, then restarted with backoff, stopped after repeated
+crashes) and starts a fresh instance. Connector log lines are capped at 50 a second per instance.
 
 ## 5. The package file
 
@@ -114,8 +144,9 @@ brings the buses; until then they are tested against a fake bus.
 
 - `faber` CLI (crate `tools/faber-cli`): `faber new connector <name>` (template), `faber check`
   (builds, runs the manifest checks and the captures), `faber pack`.
-- The template targets `wasm32-wasip2` with `cargo component`-free plain `cargo build`, uses the
-  `faber-connector` SDK, and has a capture test from day one (principles: examples tested in CI).
+- The template targets `wasm32-unknown-unknown` (not `wasm32-wasip2`, see §3) with plain
+  `cargo build`, wraps the module as a component, uses the `faber-connector` SDK plus
+  `faber-connector-wasm`, and has a capture test from day one (principles: examples tested in CI).
 
 ## 8. Where it lives
 
@@ -132,6 +163,12 @@ brings the buses; until then they are tested against a fake bus.
 
 1. **Binary size.** Wasmtime adds roughly 10–20 MB to `faber-core` and makes builds slower. Fine
    for a Pi 5 with an SD card, but worth knowing. (Recommendation: accept; it is the sandbox.)
+   **Measured (Phase 3a, Windows x86-64, release):** `faber-core` grew from 9.1 MB to 22.9 MB
+   (+13.7 MB), and a clean release build of it from about 1 to about 3 minutes. Speed on the LD19
+   capture (14,264 chunks, 232 revolutions): built-in about 65,000 readings/s, wasm about
+   35,000 readings/s, so wasm takes about twice as long, roughly 0.45 µs per call. The LD19 needs
+   10 readings/s. Compiling the LD19 component (325 KB) at start takes about 40 ms in a release
+   core (about 0.6 s in a debug one). Not yet measured on a Pi 5.
 2. **Native connectors** (camera, ML) wait for the Pi image in Phase 6, where systemd can sandbox
    them. OK to leave them out of Phase 3?
 3. **Who may install a local package** before users exist (Phase 6)? Recommendation: anyone, with

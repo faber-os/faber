@@ -2,6 +2,7 @@
 
 use super::dto;
 use crate::config::Simulate;
+use crate::connectors::LoadProblem;
 use crate::files::{Entry, Kind, Special, VPath};
 use crate::leases::{EndReason, Lease};
 use crate::logs;
@@ -162,6 +163,14 @@ pub fn port(p: &PortView) -> dto::PortInfo {
             .iter()
             .map(|s| dto::Suggestion { connector: s.connector.clone(), reason: s.reason.clone() })
             .collect(),
+    }
+}
+
+pub fn connector_problem(p: &LoadProblem) -> dto::ConnectorProblem {
+    dto::ConnectorProblem {
+        folder: p.folder.clone(),
+        message: p.problem.message.clone(),
+        hint: p.problem.hint.clone(),
     }
 }
 
