@@ -25,6 +25,7 @@ core/                     faber-core: the single Rust process (lib + binary)
 sdk/rust/capabilities/    faber-capabilities: capability data types (mirror of wit/)
 sdk/rust/connector/       faber-connector: the connector trait and manifest types (and faber.toml)
 sdk/rust/connector-wasm/  faber-connector-wasm: builds a connector as a WebAssembly component
+sdk/rust/faberlink/       faberlink: the FaberLink bridge protocol, core side (docs/faberlink.md)
 connectors/ldrobot-ld19/  first connector: built in, and the same code as a WebAssembly component
 shell/                    the web desktop (Svelte 5 + Vite + TypeScript)
 tools/arch-check/         enforces the crate dependency rules below
@@ -50,6 +51,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | `faber-connector` | `faber-capabilities`, `serde`, `toml` | I/O, async runtimes, `faber-core` |
 | `faber-connector-wasm` | `faber-connector`, `faber-capabilities`, `toml`, `wit-bindgen` (the component glue; its generated code is the only `unsafe` allowed outside the core's dependencies) | I/O, `faber-core` |
 | connectors (`connectors/*`, and the core's test guests in `core/tests/wasm-guests/*`) | `faber-connector`, `faber-capabilities`, `toml`, and `faber-connector-wasm` for their wasm build | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
+| `faberlink` (the bridge protocol, [faberlink.md](faberlink.md)) | `faber-capabilities` | any I/O crate. It turns bytes into messages and back; the clock is passed in. |
 | `faber-core` | everything above, plus I/O crates | — |
 | `faber-cli` (the `faber` command) | `faber-core` (its package checks and its sandbox, so `faber check` accepts exactly what a machine runs), `faber-connector`, `faber-capabilities`, `clap`, `toml`, `wit-component` | anything else |
 
