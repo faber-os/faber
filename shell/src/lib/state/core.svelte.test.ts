@@ -515,3 +515,49 @@ describe('CoreState driving', () => {
     expect(core.drivingConfirmed).toBe(true);
   });
 });
+
+describe('CoreState and the simulated world', () => {
+  it('subscribes to the world topic only while someone watches it', () => {
+    const { core, ws } = setup();
+    expect(sentTopics(ws).some((m) => m.topic?.kind === 'world')).toBe(false);
+    const states: number[] = [];
+    const changed: string[] = [];
+    const stop = core.watchWorld({
+      onState: (s) => states.push(s.pose.x),
+      onChanged: (name) => changed.push(name),
+    });
+    const sub = sentTopics(ws).find((m) => m.topic?.kind === 'world')!;
+    const world = {
+      type: 'world',
+      id: sub.id,
+      pose: { x: 1.5, y: 2, yaw: 0 },
+      velocity: { vx: 0, vy: 0, omega: 0 },
+      bumped: false,
+      movers: [],
+      tUs: 7,
+    };
+    ws.receive(bin(world));
+    ws.receive(bin({ type: 'world-changed', id: sub.id, name: 'maze' }));
+    expect(states).toEqual([1.5]);
+    expect(changed).toEqual(['maze']);
+    stop();
+    expect(sentTopics(ws).at(-1)).toMatchObject({ type: 'unsubscribe', id: sub.id });
+  });
+
+  it('reads, switches and resets the world through the core', async () => {
+    const { core } = setup();
+    const view = { name: 'maze', title: 'Maze' };
+    f.route({ path: '/api/v0/worlds', body: [{ name: 'maze' }] });
+    f.route({ path: '/api/v0/world', body: view });
+    f.route({ method: 'PUT', path: '/api/v0/world', body: view });
+    f.route({ method: 'POST', path: '/api/v0/world/reset', status: 204 });
+    expect(await core.loadWorlds()).toEqual({ ok: true, value: [{ name: 'maze' }] });
+    expect(await core.loadWorld()).toEqual({ ok: true, value: view });
+    expect((await core.setWorld('maze')).ok).toBe(true);
+    expect((await core.resetWorld()).ok).toBe(true);
+    expect(f.calls.filter((c) => c.method !== 'GET').map((c) => c.path)).toEqual([
+      '/api/v0/world',
+      '/api/v0/world/reset',
+    ]);
+  });
+});

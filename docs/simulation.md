@@ -201,7 +201,11 @@ model what a sensor at about 0.3 m would hit (table legs, not table tops).
 - **Drive** (tool): joystick pad, keys, speed limit slider, lease status ("You're driving base"),
   the D46 confirm once per session, and a big Stop.
 - **World** (tool): top view of the world, the machine, laser points, distance cones, moving
-  obstacles; world picker and Reset position.
+  obstacles; world picker and Reset position. Overhead shapes (table tops) are drawn lighter, a
+  trail shows the last 5 s, and "Bumped" shows while the base is bumped. It follows the machine
+  by default; dragging stops that, and Fit the world shows all of it. Laser points are placed
+  with the pose at the scan's own time. With no world part yet it says how to add one and opens
+  Add part on Simulated → In the world.
 - **Taskbar:** a red **Stop** button whenever a part that can move exists; it shows "Stopped" and
   a Release button when the e-stop is engaged. Pause/Break engages it from any window.
 - **Parts:** simulated parts show a "Simulated" badge; manual ones get a value slider and a

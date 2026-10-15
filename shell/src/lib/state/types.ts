@@ -59,3 +59,8 @@ export type { PlanarBaseReading } from '../api/generated/PlanarBaseReading';
 export type { Simulate } from '../api/generated/Simulate';
 export type { Simulation } from '../api/generated/Simulation';
 export type { Twist2d } from '../api/generated/Twist2d';
+export type { Mount } from '../api/generated/Mount';
+export type { Pose } from '../api/generated/Pose';
+export type { WorldInfo } from '../api/generated/WorldInfo';
+export type { WorldView } from '../api/generated/WorldView';
+export type { WorldMover } from '../api/generated/WorldMover';

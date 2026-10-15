@@ -36,7 +36,10 @@ import type {
   LeaseInfo,
   Pattern,
   Simulation,
+  WorldInfo,
+  WorldView,
 } from './types';
+import type { ServerMessage } from '../api/generated/ServerMessage';
 import { canMove } from './driving';
 import type { Result } from './result';
 
@@ -53,6 +56,17 @@ export interface CoreDeps {
   schedule?: (fn: () => void) => void;
   /** Wall-clock time (ms since the epoch). */
   now?: () => number;
+}
+
+/** The machine in the simulated world now: a `world` message (docs/api.md). */
+export type WorldUpdate = Omit<Extract<ServerMessage, { type: 'world' }>, 'type' | 'id'>;
+
+export interface WorldHandlers {
+  /** 20 times a second while watched. */
+  onState(state: WorldUpdate): void;
+  /** The world was switched; read its geometry again. */
+  onChanged(name: string): void;
+  onError?(error: ErrorBody): void;
 }
 
 export interface SignalHandlers {
@@ -432,6 +446,38 @@ export class CoreState {
   }
   putSimulation(part: string, pattern: Pattern): Promise<Result<Simulation>> {
     return this.call(() => this.http.putSimulation(part, pattern));
+  }
+
+  /**
+   * The machine in the simulated world, live. The core sends it 20 times a second only while
+   * someone subscribes, so the topic is taken per watcher and given back when it stops.
+   */
+  watchWorld(handlers: WorldHandlers): () => void {
+    return this.socket.subscribe(
+      { kind: 'world' },
+      {
+        onMessage: (m) => {
+          if (m.type === 'world') {
+            const { type: _type, id: _id, ...state } = m;
+            handlers.onState(state);
+          } else if (m.type === 'world-changed') handlers.onChanged(m.name);
+        },
+        onError: handlers.onError,
+      },
+    );
+  }
+
+  loadWorlds(): Promise<Result<WorldInfo[]>> {
+    return this.call(() => this.http.getWorlds());
+  }
+  loadWorld(): Promise<Result<WorldView>> {
+    return this.call(() => this.http.getWorld());
+  }
+  setWorld(name: string): Promise<Result<WorldView>> {
+    return this.call(() => this.http.putWorld(name));
+  }
+  resetWorld(): Promise<Result<void>> {
+    return this.call(() => this.http.resetWorld());
   }
 
   openSerial(port: string, baud: number, handlers: SerialHandlers): SerialSession {

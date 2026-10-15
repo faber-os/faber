@@ -31,6 +31,7 @@ describe('Start menu', () => {
     ).toEqual([
       'Parts',
       'Drive',
+      'World',
       'Serial monitor',
       'Logs',
       'Files',
