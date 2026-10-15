@@ -19,12 +19,16 @@ interface types {
     roll: f32, pitch: f32, yaw: f32,
   }
 
+  /// Why a command was not applied. The same codes as the core API (docs/api.md). Values
+  /// beyond a part's limits are clamped, not refused.
   enum command-error {
-    no-lease,
-    lease-expired,
+    /// No lease, or a lease for another part.
+    lease-required,
+    /// The lease ended (released, expired or revoked).
+    lease-ended,
     estop-engaged,
-    unsupported,
-    out-of-range,
+    /// Not a command this part accepts (see its info).
+    bad-command,
     part-not-ready,
   }
 }

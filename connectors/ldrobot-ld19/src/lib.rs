@@ -198,7 +198,9 @@ mod tests {
         assert!(ctx.published.len() >= 2);
         for (name, reading) in &ctx.published {
             assert_eq!(name, "laser-scan");
-            let Reading::LaserScan(r) = reading;
+            let Reading::LaserScan(r) = reading else {
+                panic!("an LD19 publishes only laser scans: {reading:?}")
+            };
             assert!(r.validate().is_ok());
         }
     }

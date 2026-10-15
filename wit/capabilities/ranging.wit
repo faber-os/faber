@@ -2,7 +2,8 @@ package faber:capabilities@0.1.0;
 
 interface distance {
   use types.{timestamp, mount};
-  enum status { ok, too-close, too-far, no-target, failed }
+  /// `meters` is always a finite number; `status` says whether it is a real measurement.
+  enum status { ok, too-close, too-far, no-target, error }
   enum kind { ultrasonic, laser-tof, infrared, radar }
   record info { min-m: f32, max-m: f32, field-of-view-rad: f32, kind: kind }
   record settings { rate-hz: f32, mount: mount }
