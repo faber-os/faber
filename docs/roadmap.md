@@ -32,13 +32,37 @@ Goal: `faber-core` runs on Windows and shows live data from real hardware over U
 - [x] End-to-end test in a real browser, against the release build (shell compiled into the core)
 - [ ] Tested with the real LD19 on Mikkel's PC
 
-A `distance` viewer moves to Phase 3, together with the first distance connector (no viewer
-without something to view).
+A `distance` viewer moves to Phase 2, where simulated parts give it something to view.
 
 **Done when:** you plug the LD19 into the PC, add it as a part, and see the scan live in a
 browser window at `localhost`.
 
-## Phase 2: Packages and sandboxing
+## Phase 2: Drive before you wire (simulation)
+
+Goal: write and test driving and safety code with no motors or sensors connected (D36, D37).
+
+- Actuator and ranging capabilities: `motor`, `planar-base`, `distance`, with commands over the API
+- **Leases, safe states and the e-stop** in the core (moved here from the bridges phase, so they are
+  tested in simulation before real motors exist)
+- **Simulated parts** for every implemented capability: sensors give values you set (slider) or a
+  pattern (steady, sine, noise, step); actuators accept commands and report a plausible state
+- **The world**: 2D and kinematic only. A floor plan, the machine's footprint and pose, and
+  simulated `laser-scan` / `distance` / `planar-base` computed from each part's `mount`
+- **Prebuilt worlds**, realistic layouts to test against:
+  - an empty test floor;
+  - an apartment: rooms, doorways, a hallway and furniture with thin legs (hard for LiDARs);
+  - an office or classroom: desks, chairs, narrow gaps;
+  - a warehouse: long aisles and shelves;
+  - a corridor maze;
+  - an obstacle course with a person walking a path (a moving obstacle)
+- A manual-drive window (on-screen joystick) and a world viewer: the room, the machine, and its rays
+- Your own driving code can run as a program that talks to the API, until apps exist (Phase 5)
+
+**Done when:** SENNEP's parts are simulated in the apartment world, a program drives the base
+with the lease held, the simulated LiDAR scan shows the room, and dropping the lease or pressing
+the e-stop stops the base.
+
+## Phase 3: Packages and sandboxing
 
 - WIT interfaces for the starter capabilities and the port API
 - Wasmtime runtime: load, limit, restart, permissions
@@ -49,17 +73,17 @@ browser window at `localhost`.
 
 **Done when:** a third party could write a connector from the template, and the core runs it sandboxed.
 
-## Phase 3: Bridges and safety
+## Phase 4: Bridges
 
 - **FaberLink** v1 protocol and Arduino library, designed fresh (D22). SENNEP's Mega firmware is retrofitted onto it
 - `faber-bridge` connector
-- Leases, safe states, e-stop button, bridge heartbeat
+- Bridge heartbeat (leases, safe states and the e-stop exist since Phase 2)
 - Built-in tool: **Arduino flasher**
 
 **Done when:** a Mega with FaberLink exposes motors and distance sensors, an app holding a lease
 drives a motor, and killing the app stops the motor.
 
-## Phase 4: Apps and the SENNEP app
+## Phase 5: Apps and the SENNEP app
 
 - App manifest, roles, install-time role assignment
 - `@faber-os/shell` JS SDK for app UIs
@@ -69,7 +93,7 @@ drives a motor, and killing the app stops the motor.
 
 **Done when:** SENNEP drives by hand from a browser window through Faber on the PC (Mega over USB).
 
-## Phase 5: The Pi and the image
+## Phase 6: The Pi and the image
 
 - Port manager: I2C, SPI, GPIO, Pi UARTs, device-tree overlays, detect-then-suggest for I²C and USB
 - Tools: **I2C scanner**, **GPIO panel**, **Ports**, **Signal plotter**
@@ -81,7 +105,7 @@ drives a motor, and killing the app stops the motor.
 **Done when:** flash the card, boot SENNEP's Pi, open `faber.local`, and get the same desktop as
 on the 7" screen.
 
-## Phase 6: The store (first public release, v0.1)
+## Phase 7: The store (first public release, v0.1)
 
 - `faber-registry` repo + CI validation
 - Store window in the shell: browse, permissions dialog, install, update, rollback
@@ -92,6 +116,10 @@ on the 7" screen.
 **Done when:** someone who isn't Mikkel publishes a connector and someone else installs it.
 
 ## Later (unordered)
+
+- **World creator**: draw your own sandbox (walls, furniture, obstacles, moving paths) for your
+  project, or start from a real LiDAR recording of a room
+- Optional mecanum wheel model in the world, to test wheel kinematics (`motor` ×4 → `planar-base`)
 
 - MQTT bridge, which also brings Home Assistant discovery for free
 - ROS 2 bridge

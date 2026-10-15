@@ -3,7 +3,7 @@
 //! A connector turns one kind of hardware into capabilities. It never does I/O itself: the core
 //! opens the port and hands the connector **bytes in**; the connector hands back **readings out**
 //! through a [`Context`]. That keeps connectors pure, testable without hardware, and ready to be
-//! compiled to WebAssembly (Phase 2) with the same shape.
+//! compiled to WebAssembly (Phase 3) with the same shape.
 //!
 //! See docs/architecture.md §4 and docs/development.md.
 

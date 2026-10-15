@@ -48,6 +48,7 @@ impl Core {
             data_dir,
             clock,
             discovery: Arc::new(ports::SystemDiscovery),
+            usb_problems: Arc::new(ports::SystemUsbProblems),
             opener: Arc::new(ports::SystemOpener::new(replays.clone())),
             replays,
             connectors: connectors::built_in(),

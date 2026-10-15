@@ -1,4 +1,4 @@
-//! The connectors built into this core (Phase 1). From Phase 2 they come from packages.
+//! The connectors built into this core (Phase 1). From Phase 3 they come from packages.
 
 use faber_connector::Definition;
 

@@ -6,7 +6,7 @@ versions in `shell/src/lib/api/generated/` are generated from them by `cargo tes
 the generated files by hand.
 
 Phase 1 listens on **`127.0.0.1:7878` only** and has no login (D16: auth comes before any remote
-access, in Phase 5).
+access, in Phase 6).
 
 ## Conventions
 
@@ -26,6 +26,7 @@ access, in Phase 5).
 | `GET /api/v0/system` | `SystemInfo` |
 | `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run |
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
+| `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
 | `GET /api/v0/parts` | `PartInfo[]` |
 | `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. Errors: `400 invalid-name`, `400 unknown-connector`, `400 unknown-port`, `409 name-taken`, `409 port-claimed` |
 | `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part` |
@@ -54,7 +55,7 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 |---|---|---|
 | `signal` | `address`, `maxHz?` | `signal` messages with readings of `part/name` |
 | `parts` | — | a `parts` message now and after every change |
-| `ports` | — | a `ports` message now and after every change |
+| `ports` | — | a `ports` message now and after every change, including a change in `problems` |
 | `settings` | — | a `settings` message now and after every change |
 | `files` | — | `files-changed` with the folders whose contents changed (through the core). `home:/` means "a lot changed": refresh everything shown. |
 | `logs` | — | the recent log (up to 1000 entries) as `log` messages, then each new entry. Every new subscription gets the recent log again, so a client that reconnects should start its log view afresh. |
@@ -164,6 +165,39 @@ path, bytes}`. The new recording becomes a replay port at once. Names follow the
 | `usb:<vid>:<pid>` | A USB serial adapter, e.g. `usb:10c4:ea60` (CP2102). If two identical adapters are plugged in, they become `usb:<vid>:<pid>:<serial number>`. |
 | `serial:<name>` | A serial port without USB information, e.g. `serial:COM3` or `serial:/dev/ttyAMA0`. Its `kind` is `bluetooth` for Bluetooth serial links. |
 | `replay:<name>` | A recording in `home:/Recordings` played back in a loop at real speed (D35). The LD19 sample is added with `POST /api/v0/files/samples` (D32). |
+
+## Port problems
+
+Something plugged in over USB that the computer can't talk to never becomes a port, so the port
+list alone would just be empty. The core also looks for these (with every port scan, every 2 s)
+and reports each one as a `PortProblem`:
+
+```json
+{
+  "code": "usb-no-answer",
+  "label": "Plugged in, but the computer can't talk to it",
+  "detail": "Something is plugged in over USB, but it didn't answer when the computer tried to start talking to it (Windows: \"port reset failed\").",
+  "hint": "Unplug it and plug it back in firmly. If that doesn't help: try another USB cable (some cables only carry power, not data), ..."
+}
+```
+
+They come in two places: `GET /api/v0/ports/problems`, and the optional `problems` field of the
+`ports` WebSocket message, which is **left out when there are none** (so `{ type, id, ports }` is
+still a complete message). Two things failing the same way give two entries.
+
+| `code` | What happened |
+|---|---|
+| `usb-no-answer` | It didn't answer at all (Windows: "port reset failed") |
+| `usb-garbled` | Its answers didn't get through properly (Windows: "device descriptor request failed", "set address failed") |
+| `usb-invalid-answer` | It answers, but not by the USB rules: bad connection, or crashed firmware |
+| `usb-link-failed` | A USB 3 connection never came up |
+| `usb-not-recognised` | Another failure where the computer couldn't find out what it is |
+| `usb-no-driver` | It answers, but there is no driver for it (e.g. CH340, CP210x) |
+| `usb-stopped` | Windows stopped it because it reported a problem (the code is in `detail`) |
+
+Show `label` as the headline, `detail` under it and `hint` as the thing to try. Things the user
+disabled on purpose are never reported. Today this works on **Windows** only; on Linux the list is
+always empty (a failed USB connection there only shows up in the kernel log).
 
 ## Capture files (`.fbcap`)
 

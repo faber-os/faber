@@ -8,8 +8,9 @@ use crate::config::{self, ConfigError, PartConfig, PartsConfig};
 use crate::files::{self, Entry, FileError, Files, VPath};
 use crate::names::{PartName, SignalAddress};
 use crate::ports::{
-    Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortReader, PortWriter, ReplayLibrary,
-    SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME, SerialDiscovery, catalog, spawn_reader,
+    Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortProblem, PortReader, PortWriter,
+    ReplayLibrary, SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME, SerialDiscovery, UsbProblemDiscovery, catalog,
+    port_problem, spawn_reader,
 };
 use crate::router::Router;
 use crate::runtime::{self, PartHandle, PartStatus, RunDeps, RunSpec, StatusBoard, Timing};
@@ -33,6 +34,8 @@ pub struct MachineOptions {
     pub data_dir: PathBuf,
     pub clock: SharedClock,
     pub discovery: Arc<dyn SerialDiscovery>,
+    /// Finds things plugged in over USB that the computer can't talk to.
+    pub usb_problems: Arc<dyn UsbProblemDiscovery>,
     pub opener: Arc<dyn PortOpener>,
     pub replays: ReplayLibrary,
     pub connectors: Vec<Definition>,
@@ -129,6 +132,7 @@ struct State {
     /// Set when parts.toml can't be read; then nothing runs and nothing is written.
     config_problem: Option<ConfigError>,
     ports: Vec<PortEntry>,
+    port_problems: Vec<PortProblem>,
     claims: Claims,
     running: BTreeMap<PartName, Running>,
 }
@@ -138,6 +142,7 @@ pub struct Machine {
     router: Arc<Router>,
     status: Arc<StatusBoard>,
     discovery: Arc<dyn SerialDiscovery>,
+    usb_problems: Arc<dyn UsbProblemDiscovery>,
     opener: Arc<dyn PortOpener>,
     replays: ReplayLibrary,
     connectors: Vec<Definition>,
@@ -176,6 +181,7 @@ impl Machine {
             router: Arc::new(Router::new()),
             status: Arc::new(StatusBoard::default()),
             discovery: opts.discovery,
+            usb_problems: opts.usb_problems,
             opener: opts.opener,
             replays: opts.replays,
             connectors: opts.connectors,
@@ -188,6 +194,7 @@ impl Machine {
                 config,
                 config_problem,
                 ports: Vec::new(),
+                port_problems: Vec::new(),
                 claims: Claims::default(),
                 running: BTreeMap::new(),
             }),
@@ -235,7 +242,8 @@ impl Machine {
         self.status.watch()
     }
 
-    /// Fires when ports appear, vanish, or are claimed or released.
+    /// Fires when ports appear, vanish, or are claimed or released, and when the list of
+    /// [`port_problems`](Machine::port_problems) changes.
     pub fn ports_changed(&self) -> watch::Receiver<u64> {
         self.ports_changed.subscribe()
     }
@@ -299,13 +307,23 @@ impl Machine {
             .collect()
     }
 
-    /// Looks for new or removed ports, and starts parts whose port just appeared.
+    /// Things plugged in over USB that the computer can't talk to, so they never became a port.
+    pub fn port_problems(&self) -> Vec<PortProblem> {
+        self.state.lock().expect("machine lock").port_problems.clone()
+    }
+
+    /// Looks for new or removed ports (and USB problems), and starts parts whose port just
+    /// appeared. Asks the OS before taking the lock, so a slow OS never blocks the machine.
     pub fn refresh_ports(&self) {
         self.replays.sync_dir(&self.recordings_dir());
         let found = catalog(&self.discovery.list(), &self.replays.names());
+        let mut failed = self.usb_problems.list();
+        failed.sort(); // the OS's order isn't stable; only a real change may send `ports`
+        let problems: Vec<PortProblem> = failed.iter().filter_map(port_problem).collect();
         let mut st = self.state.lock().expect("machine lock");
-        if st.ports != found {
+        if st.ports != found || st.port_problems != problems {
             st.ports = found;
+            st.port_problems = problems;
             self.ports_changed.send_modify(|n| *n += 1);
         }
         self.reconcile(&mut st);
@@ -962,7 +980,7 @@ fn write_atomically(path: &Path, text: &str) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::clock::MonotonicClock;
-    use crate::ports::{DEMO_LD19, Discovered, SystemOpener, Usb};
+    use crate::ports::{DEMO_LD19, Discovered, FailedUsb, SystemOpener, Usb};
     use std::time::Instant;
 
     struct FakeDiscovery(Mutex<Vec<Discovered>>);
@@ -970,6 +988,23 @@ mod tests {
     impl SerialDiscovery for FakeDiscovery {
         fn list(&self) -> Vec<Discovered> {
             self.0.lock().unwrap().clone()
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeUsbProblems(Mutex<Vec<FailedUsb>>);
+
+    impl UsbProblemDiscovery for FakeUsbProblems {
+        fn list(&self) -> Vec<FailedUsb> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    fn reset_failed(os_id: &str) -> FailedUsb {
+        FailedUsb {
+            os_id: os_id.into(),
+            hardware_ids: vec![r"USB\RESET_FAILURE".into()],
+            problem_code: Some(43),
         }
     }
 
@@ -988,11 +1023,20 @@ mod tests {
     }
 
     fn machine(dir: &Path, discovery: Arc<FakeDiscovery>) -> Arc<Machine> {
+        machine_with(dir, discovery, Arc::new(FakeUsbProblems::default()))
+    }
+
+    fn machine_with(
+        dir: &Path,
+        discovery: Arc<FakeDiscovery>,
+        usb_problems: Arc<FakeUsbProblems>,
+    ) -> Arc<Machine> {
         let replays = ReplayLibrary::with_demo();
         Machine::start(MachineOptions {
             data_dir: dir.to_path_buf(),
             clock: Arc::new(MonotonicClock::new()),
             discovery,
+            usb_problems,
             opener: Arc::new(SystemOpener::new(replays.clone())),
             replays,
             connectors: vec![ldrobot_ld19::definition()],
@@ -1019,6 +1063,7 @@ mod tests {
             data_dir: dir.path().to_path_buf(),
             clock: Arc::new(MonotonicClock::new()),
             discovery: Arc::clone(&discovery) as Arc<dyn SerialDiscovery>,
+            usb_problems: Arc::new(FakeUsbProblems::default()),
             opener: Arc::new(SystemOpener::new(replays.clone())),
             replays,
             connectors: vec![ldrobot_ld19::definition()],
@@ -1043,6 +1088,73 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(m.ports().iter().all(|p| p.entry.id.to_string() != "usb:10c4:ea60"));
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_usb_problem_appearing_or_going_away_is_a_ports_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let usb = Arc::new(FakeUsbProblems::default());
+        let m = machine_with(dir.path(), no_ports(), Arc::clone(&usb));
+        let mut changes = m.ports_changed();
+        changes.borrow_and_update();
+        assert!(m.port_problems().is_empty());
+
+        usb.0.lock().unwrap().push(reset_failed(r"USB\VID_0000&PID_0001\5&1"));
+        m.refresh_ports();
+        assert!(changes.has_changed().unwrap(), "a new problem must re-send the ports topic");
+        assert_eq!(m.port_problems().len(), 1);
+        assert_eq!(m.port_problems()[0].code, "usb-no-answer");
+
+        changes.borrow_and_update();
+        m.refresh_ports();
+        assert!(!changes.has_changed().unwrap(), "the same problem again is not a change");
+
+        usb.0.lock().unwrap().clear();
+        m.refresh_ports();
+        assert!(changes.has_changed().unwrap(), "a problem going away must re-send the ports topic");
+        assert!(m.port_problems().is_empty());
+        m.shutdown();
+    }
+
+    #[test]
+    fn the_order_the_os_lists_problems_in_is_not_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let usb = Arc::new(FakeUsbProblems::default());
+        let m = machine_with(dir.path(), no_ports(), Arc::clone(&usb));
+        let a = reset_failed(r"USB\VID_0000&PID_0001\5&A");
+        let b = FailedUsb {
+            os_id: r"USB\VID_1A86&PID_7523\5&B".into(),
+            hardware_ids: vec![r"USB\VID_1A86&PID_7523".into()],
+            problem_code: Some(28),
+        };
+        *usb.0.lock().unwrap() = vec![a.clone(), b.clone()];
+        m.refresh_ports();
+        let mut changes = m.ports_changed();
+        changes.borrow_and_update();
+        *usb.0.lock().unwrap() = vec![b, a];
+        m.refresh_ports();
+        assert!(!changes.has_changed().unwrap());
+        assert_eq!(m.port_problems().len(), 2);
+        m.shutdown();
+    }
+
+    #[test]
+    fn things_disabled_on_purpose_are_not_problems() {
+        let dir = tempfile::tempdir().unwrap();
+        let usb = Arc::new(FakeUsbProblems::default());
+        let m = machine_with(dir.path(), no_ports(), Arc::clone(&usb));
+        let mut changes = m.ports_changed();
+        changes.borrow_and_update();
+        let disabled = FailedUsb {
+            os_id: r"USB\VID_10C4&PID_EA60\0001".into(),
+            hardware_ids: vec![],
+            problem_code: Some(22),
+        };
+        usb.0.lock().unwrap().push(disabled);
+        m.refresh_ports();
+        assert!(!changes.has_changed().unwrap());
+        assert!(m.port_problems().is_empty());
         m.shutdown();
     }
 

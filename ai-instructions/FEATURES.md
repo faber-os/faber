@@ -7,7 +7,7 @@ Phase 1 is built (see `docs/roadmap.md`).
 | Design docs | Implemented | README, architecture, glossary, decisions (D01–D28), roadmap, research | 2026-10-15 | — | — |
 | Name | Implemented | **Faber** (was the working name AlmaOS); identifier rules in `docs/research/naming.md` | 2026-10-15 | — | — |
 | Licence | Implemented | Apache-2.0 + NOTICE | 2026-10-15 | — | — |
-| Repo | Implemented | https://github.com/faber-os/faber (public); `faber-registry` comes in Phase 6 | 2026-10-15 | — | — |
+| Repo | Implemented | https://github.com/faber-os/faber (public); `faber-registry` comes in Phase 7 | 2026-10-15 | — | — |
 | `faber-core` crate name | Implemented | Placeholder 0.0.1 published on crates.io to reserve the name | 2026-10-15 | — | — |
 | Capability spec | Implemented (design) | 41 capabilities, common rules and the lease in `docs/capabilities.md`; WIT sketches in `wit/capabilities/` | 2026-10-15 | — | — |
 | Design principles | Implemented (design) | Ease of use first, `docs/principles.md` (D30) | 2026-10-15 | — | — |

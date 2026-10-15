@@ -4,7 +4,7 @@ use super::dto;
 use crate::files::{Entry, Kind, Root, Special, VPath};
 use crate::logs;
 use crate::machine::{MachineError, PartView, PortView};
-use crate::ports::PortKind;
+use crate::ports::{PortKind, PortProblem};
 use crate::runtime::PartStatus;
 use faber_connector::{Manifest, PortRequirement, Problem};
 
@@ -67,6 +67,15 @@ pub fn port(p: &PortView) -> dto::PortInfo {
             .iter()
             .map(|s| dto::Suggestion { connector: s.connector.clone(), reason: s.reason.clone() })
             .collect(),
+    }
+}
+
+pub fn port_problem(p: &PortProblem) -> dto::PortProblem {
+    dto::PortProblem {
+        code: p.code.to_string(),
+        label: p.label.clone(),
+        detail: p.detail.clone(),
+        hint: p.hint.clone(),
     }
 }
 

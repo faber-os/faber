@@ -7,6 +7,7 @@ mod claims;
 mod id;
 mod replay;
 mod stream;
+mod usb_problems;
 
 pub use catalog::{Discovered, PortEntry, PortKind, Usb, catalog};
 pub use claims::{ClaimError, Claimant, Claims};
@@ -15,6 +16,7 @@ pub use replay::{
     DEMO_LD19, Pacing, Replay, ReplayEntry, ReplayLibrary, SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME,
 };
 pub use stream::{PortEvent, PortOpener, PortReader, PortWriter, SystemOpener, spawn_reader};
+pub use usb_problems::{FailedUsb, PortProblem, SystemUsbProblems, UsbProblemDiscovery, port_problem};
 
 /// Lists the serial ports the OS knows about. A trait so tests can fake hardware.
 pub trait SerialDiscovery: Send + Sync {

@@ -28,7 +28,7 @@ fn main() -> ExitCode {
     if !args.listen.ip().is_loopback() {
         eprintln!(
             "faber-core: {} is reachable from other computers, but Faber has no login yet.\n\
-             Use 127.0.0.1 for now. Remote access arrives together with login (Phase 5).",
+             Use 127.0.0.1 for now. Remote access arrives together with login (Phase 6).",
             args.listen
         );
         return ExitCode::FAILURE;

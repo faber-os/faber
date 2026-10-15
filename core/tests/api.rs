@@ -8,7 +8,9 @@ use faber_core::api::{self, dto};
 use faber_core::clock::MonotonicClock;
 use faber_core::logs::LogBook;
 use faber_core::machine::{Machine, MachineOptions};
-use faber_core::ports::{Discovered, ReplayLibrary, SerialDiscovery, SystemOpener};
+use faber_core::ports::{
+    Discovered, FailedUsb, ReplayLibrary, SerialDiscovery, SystemOpener, UsbProblemDiscovery,
+};
 use faber_core::runtime::Timing;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
@@ -26,10 +28,29 @@ impl SerialDiscovery for FakeSerialPorts {
     }
 }
 
+/// USB things the computer can't talk to, which the test can plug in and out.
+#[derive(Default)]
+struct FakeUsbProblems(std::sync::Mutex<Vec<FailedUsb>>);
+impl UsbProblemDiscovery for FakeUsbProblems {
+    fn list(&self) -> Vec<FailedUsb> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+/// What Windows 11 reports for a cable it can't talk to (seen on a long passive extension).
+fn port_reset_failed() -> FailedUsb {
+    FailedUsb {
+        os_id: r"USB\VID_0000&PID_0001\5&DAB2676&0&5".into(),
+        hardware_ids: vec![r"USB\RESET_FAILURE".into()],
+        problem_code: Some(43),
+    }
+}
+
 struct TestCore {
     app: axum::Router,
     machine: Arc<Machine>,
     serial: Arc<FakeSerialPorts>,
+    usb_problems: Arc<FakeUsbProblems>,
     _dir: tempfile::TempDir,
 }
 
@@ -38,10 +59,12 @@ fn core() -> TestCore {
     let clock = Arc::new(MonotonicClock::new());
     let replays = ReplayLibrary::with_demo();
     let serial = Arc::new(FakeSerialPorts::default());
+    let usb_problems = Arc::new(FakeUsbProblems::default());
     let machine = Machine::start(MachineOptions {
         data_dir: dir.path().to_path_buf(),
         clock: clock.clone(),
         discovery: Arc::clone(&serial) as Arc<dyn SerialDiscovery>,
+        usb_problems: Arc::clone(&usb_problems) as Arc<dyn UsbProblemDiscovery>,
         opener: Arc::new(SystemOpener::new(replays.clone())),
         replays,
         connectors: faber_core::connectors::built_in(),
@@ -50,7 +73,7 @@ fn core() -> TestCore {
     })
     .unwrap();
     let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
-    TestCore { app, machine, serial, _dir: dir }
+    TestCore { app, machine, serial, usb_problems, _dir: dir }
 }
 
 impl Drop for TestCore {
@@ -83,6 +106,21 @@ async fn call(
 
 fn demo_part(name: &str) -> serde_json::Value {
     json!({"name": name, "connector": "ldrobot-ld19", "port": "replay:demo-ld19"})
+}
+
+/// Waits (up to 5 s) until the part `name` is running, so its signals exist.
+async fn wait_until_running(app: &axum::Router, name: &str) {
+    let start = std::time::Instant::now();
+    loop {
+        let (_, parts) = call(app, "GET", "/api/v0/parts", None).await;
+        let running =
+            parts.as_array().unwrap().iter().any(|p| p["name"] == name && p["state"]["kind"] == "running");
+        if running {
+            return;
+        }
+        assert!(start.elapsed() < Duration::from_secs(5), "{name} never started: {parts}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -199,6 +237,8 @@ async fn a_real_ld19_recording_streams_whole_revolutions_over_the_websocket() {
 async fn json_mode_delivers_readable_scans() {
     let c = core();
     call(&c.app, "POST", "/api/v0/parts", Some(demo_part("lidar"))).await;
+    // A signal only exists once its part runs; subscribing earlier is `unknown-signal`.
+    wait_until_running(&c.app, "lidar").await;
     let addr = serve(c.app.clone()).await;
     let mut ws = connect(addr, "json").await;
     let sub =
@@ -312,6 +352,85 @@ async fn the_ports_topic_pushes_a_newly_plugged_adapter() {
     let cp2102 = ports.iter().find(|p| p.id == "usb:10c4:ea60").unwrap();
     assert_eq!(cp2102.label, "CP2102 USB to UART Bridge (COM5)");
     assert_eq!(cp2102.suggestions[0].connector, "ldrobot-ld19");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_ports_topic_says_when_something_is_plugged_in_but_cant_be_talked_to() {
+    let c = core();
+    let addr = serve(c.app.clone()).await;
+    let mut ws = connect(addr, "msgpack").await;
+    send(&mut ws, &dto::ClientMessage::Subscribe { id: 1, topic: dto::Topic::Ports }).await;
+    let dto::ServerMessage::Ports { problems, .. } =
+        wait_for(&mut ws, |m| matches!(m, dto::ServerMessage::Ports { .. })).await
+    else {
+        unreachable!()
+    };
+    assert!(problems.is_empty());
+
+    c.usb_problems.0.lock().unwrap().push(port_reset_failed());
+    let machine = Arc::clone(&c.machine);
+    tokio::task::spawn_blocking(move || machine.refresh_ports()).await.unwrap();
+    let dto::ServerMessage::Ports { problems, .. } = wait_for(
+        &mut ws,
+        |m| matches!(m, dto::ServerMessage::Ports { problems, .. } if !problems.is_empty()),
+    )
+    .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(problems.len(), 1);
+    assert_eq!(problems[0].code, "usb-no-answer");
+    assert_eq!(problems[0].label, "Plugged in, but the computer can't talk to it");
+    assert!(problems[0].hint.contains("cable"));
+
+    c.usb_problems.0.lock().unwrap().clear();
+    let machine = Arc::clone(&c.machine);
+    tokio::task::spawn_blocking(move || machine.refresh_ports()).await.unwrap();
+    wait_for(&mut ws, |m| matches!(m, dto::ServerMessage::Ports { problems, .. } if problems.is_empty()))
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn port_problems_are_left_out_of_the_json_when_there_are_none() {
+    let c = core();
+    let addr = serve(c.app.clone()).await;
+    let mut ws = connect(addr, "json").await;
+    let subscribe = json!({ "type": "subscribe", "id": 1, "topic": { "kind": "ports" } });
+    ws.send(Message::text(subscribe.to_string())).await.unwrap();
+    let first = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(Ok(Message::Text(t))) = ws.next().await {
+                let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+                if v["type"] == "ports" {
+                    return v;
+                }
+            }
+        }
+    })
+    .await
+    .expect("a ports message within 5 s");
+    assert!(first.get("problems").is_none(), "existing clients see the old shape: {first}");
+}
+
+#[tokio::test]
+async fn port_problems_have_their_own_endpoint_and_leave_the_port_list_alone() {
+    let c = core();
+    let (s, problems) = call(&c.app, "GET", "/api/v0/ports/problems", None).await;
+    assert_eq!((s, problems), (StatusCode::OK, json!([])));
+
+    c.usb_problems.0.lock().unwrap().push(port_reset_failed());
+    let machine = Arc::clone(&c.machine);
+    tokio::task::spawn_blocking(move || machine.refresh_ports()).await.unwrap();
+    let (s, problems) = call(&c.app, "GET", "/api/v0/ports/problems", None).await;
+    assert_eq!(s, StatusCode::OK);
+    let p = &problems[0];
+    assert_eq!(p["code"], "usb-no-answer");
+    assert_eq!(p["label"], "Plugged in, but the computer can't talk to it");
+    assert!(p["detail"].as_str().unwrap().contains("didn't answer"));
+    assert!(p["hint"].as_str().is_some_and(|h| !h.is_empty()));
+
+    let (_, ports) = call(&c.app, "GET", "/api/v0/ports", None).await;
+    assert!(ports.is_array(), "GET /api/v0/ports still returns PortInfo[]");
 }
 
 async fn put_bytes(app: &axum::Router, path: &str, bytes: &'static [u8]) -> (StatusCode, serde_json::Value) {

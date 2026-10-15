@@ -342,7 +342,8 @@ fn subscribe(
             Ok(tokio::spawn(async move {
                 loop {
                     let ports = machine.ports().iter().map(convert::port).collect();
-                    if out.send(dto::ServerMessage::Ports { id, ports }).await.is_err()
+                    let problems = machine.port_problems().iter().map(convert::port_problem).collect();
+                    if out.send(dto::ServerMessage::Ports { id, ports, problems }).await.is_err()
                         || changes.changed().await.is_err()
                     {
                         return;

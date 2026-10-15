@@ -131,6 +131,22 @@ pub struct PortInfo {
     pub suggestions: Vec<Suggestion>,
 }
 
+/// Something plugged in over USB that the computer can't talk to, so it never became a port
+/// (e.g. a cable without data wires). Shown so an empty port list isn't a mystery.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PortProblem {
+    /// Stable, kebab-case, e.g. `usb-no-answer`.
+    pub code: String,
+    /// One line, e.g. "Plugged in, but the computer can't talk to it".
+    pub label: String,
+    /// What happened, in plain words.
+    pub detail: String,
+    /// The next thing to try.
+    pub hint: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "kebab-case")]
 #[ts(export)]
@@ -296,6 +312,10 @@ pub enum ServerMessage {
     Ports {
         id: u32,
         ports: Vec<PortInfo>,
+        /// Left out when there are none.
+        #[ts(as = "Option<Vec<PortProblem>>", optional)]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        problems: Vec<PortProblem>,
     },
     Log {
         id: u32,

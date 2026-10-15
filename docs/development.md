@@ -23,7 +23,7 @@ agents alike.
 core/                     faber-core: the single Rust process (lib + binary)
 sdk/rust/capabilities/    faber-capabilities: capability data types (mirror of wit/)
 sdk/rust/connector/       faber-connector: the connector trait and manifest types
-connectors/ldrobot-ld19/  first connector (built-in Rust in Phase 1, WASM in Phase 2)
+connectors/ldrobot-ld19/  first connector (built-in Rust in Phase 1, WASM in Phase 3)
 shell/                    the web desktop (Svelte 5 + Vite + TypeScript)
 tools/arch-check/         enforces the crate dependency rules below
 wit/                      capability interfaces (the future plugin API)

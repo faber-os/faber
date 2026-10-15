@@ -6,6 +6,9 @@ See also the "Later" section of `docs/roadmap.md`.
 - (medium) Home Assistant integration through MQTT discovery: Faber parts show up in HA.
 - (low) ROS 2 bridge.
 
+## Core
+- (high, before the Pi image) Port problems on Linux ("plugged in, but the computer can't talk to it"; Windows works, `core/src/ports/usb_problems.rs`). A USB device that fails to enumerate gets no sysfs entry and no udev event; the only trace is the kernel log (`usb 1-1.2: device descriptor read/64, error -71`, `device not accepting address`, `unable to enumerate USB device`). Plan: give the core service `CAP_SYSLOG` (Debian sets `kernel.dmesg_restrict=1`), follow `/dev/kmsg` from the last boot, map those lines to the same `PortProblem` codes, and clear an entry when a device later enumerates on the same hub port or after a timeout. Check first whether newer kernels' `/sys/bus/usb/devices/*/usb*-port*/state` shows a port that sees a connection but no device: that would be cheaper and need no capability.
+
 ## Shell
 - (medium) Typed visual wiring view (parts → apps), Node-RED-like but with capabilities.
 - (medium) Record and replay signals (SENNEP's LiDAR recordings already prove the value).

@@ -60,6 +60,8 @@ ever two of these.
 | **Trash** | Where deleted files go. Emptying it deletes them for good. |
 | **Recording** | A capture (`.fbcap`) of a port's bytes, made with the serial monitor's Record button and kept in Recordings. Any recording can be replayed as a port. |
 | **Developer settings** | Settings for people building Faber or connectors, behind a warning. Includes full-machine file access. |
+| **Simulated part** | A part with no hardware behind it: the core simulates its capability, either by hand (`manual`: values you set, or a pattern) or in the world. Same name and signals as the real part, so apps can't tell the difference. |
+| **World** | The core's 2D simulation of a space (floor plan, obstacles) with the machine in it. Simulated parts with a `mount` measure and move in it. Faber ships prebuilt worlds. |
 | **SDK** | The libraries, templates and WIT files for writing connectors and apps. |
 | **WIT** | The interface language used to define capabilities for WASM packages ([Component Model guide](https://component-model.bytecodealliance.org)). |
 

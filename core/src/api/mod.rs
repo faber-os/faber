@@ -29,6 +29,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/system", get(system))
         .route("/api/v0/connectors", get(connectors))
         .route("/api/v0/ports", get(ports))
+        .route("/api/v0/ports/problems", get(port_problems))
         .route("/api/v0/parts", get(parts).post(add_part))
         .route("/api/v0/parts/{name}", delete(remove_part))
         .route("/api/v0/ws", get(ws::upgrade))
@@ -123,6 +124,10 @@ async fn connectors(State(s): State<AppState>) -> Json<Vec<dto::ConnectorInfo>> 
 
 async fn ports(State(s): State<AppState>) -> Json<Vec<dto::PortInfo>> {
     Json(s.machine.ports().iter().map(convert::port).collect())
+}
+
+async fn port_problems(State(s): State<AppState>) -> Json<Vec<dto::PortProblem>> {
+    Json(s.machine.port_problems().iter().map(convert::port_problem).collect())
 }
 
 async fn parts(State(s): State<AppState>) -> Json<Vec<dto::PartInfo>> {
