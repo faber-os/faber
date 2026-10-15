@@ -1,3 +1,5 @@
+faber-manifest = 1
+
 # The LD19 as a wasm connector package (docs/packages.md §5). Must say exactly what
 # `ldrobot_ld19::manifest()` says; tests/package.rs checks it.
 [package]

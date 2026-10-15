@@ -148,7 +148,7 @@ async fn about(State(s): State<AppState>) -> Result<Json<dto::AboutInfo>, Failur
 }
 
 async fn connectors(State(s): State<AppState>) -> Json<Vec<dto::ConnectorInfo>> {
-    Json(s.machine.definitions().iter().map(|d| convert::connector(&d.manifest, d.kind)).collect())
+    Json(s.machine.connector_kinds().iter().map(|(kind, m)| convert::connector(m, *kind)).collect())
 }
 
 async fn connector_problems(State(s): State<AppState>) -> Json<Vec<dto::ConnectorProblem>> {

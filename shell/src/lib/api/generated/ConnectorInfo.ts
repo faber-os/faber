@@ -5,8 +5,7 @@ import type { SettingInfo } from "./SettingInfo";
 
 export type ConnectorInfo = { id: string, name: string, version: string, 
 /**
- * How it runs: `built-in` (part of Faber), `wasm` (a sandboxed WebAssembly component from
- * `<data>/connectors/`), later `declarative` and `native`.
+ * How it runs: `built-in`, `declarative` (only a faber.toml) or `wasm`; `native` later.
  */
 kind: string, port: PortRequirementInfo, provides: Array<ProvideInfo>, 
 /**

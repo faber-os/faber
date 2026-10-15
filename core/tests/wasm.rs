@@ -401,6 +401,7 @@ mod installed {
     fn start(data: &Path) -> (Arc<Machine>, axum::Router) {
         let clock = Arc::new(MonotonicClock::new());
         let replays = ReplayLibrary::with_demo();
+        let (connectors, problems) = faber_core::all_connectors_with_problems(data);
         let machine = Machine::start(MachineOptions {
             data_dir: data.to_path_buf(),
             clock: clock.clone(),
@@ -409,12 +410,13 @@ mod installed {
             disks: Arc::new(Nothing),
             opener: Arc::new(SystemOpener::new(replays.clone())),
             replays,
-            connectors: faber_core::connectors::built_in(),
+            connectors,
             timing: Timing::default(),
             port_scan: None,
             world: Arc::new(faber_core::simparts::SimWorld::new()),
         })
         .unwrap();
+        machine.report_connector_problems(problems);
         let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
         (machine, app)
     }
@@ -439,6 +441,7 @@ mod installed {
         std::fs::create_dir_all(&dir).unwrap();
         let toml = std::fs::read_to_string(workspace().join("connectors/ldrobot-ld19/faber.toml")).unwrap();
         let toml = toml.replace("id = \"ldrobot-ld19\"", &format!("id = \"{id}\""));
+        assert!(toml.starts_with("faber-manifest = 1"), "every faber.toml says its format first");
         std::fs::write(dir.join("faber.toml"), toml).unwrap();
         std::fs::write(dir.join("connector.wasm"), wasm).unwrap();
     }
@@ -482,7 +485,8 @@ mod installed {
         let data = tempfile::tempdir().unwrap();
         let broken = data.path().join("connectors/broken");
         std::fs::create_dir_all(&broken).unwrap();
-        std::fs::write(broken.join("faber.toml"), "[package]\nid = 3").unwrap();
+        std::fs::write(broken.join("faber.toml"), "faber-manifest = 1\n[package]\nkind = \"wasm\"\nid = 3\n")
+            .unwrap();
         if let Some(wasm) = component("ldrobot-ld19") {
             install_ld19(data.path(), "ldrobot-ld19", &wasm);
         }
@@ -498,7 +502,7 @@ mod installed {
         assert!(!problems[0]["hint"].as_str().unwrap().is_empty());
         if problems.len() > 1 {
             assert_eq!(problems[1]["folder"], "ldrobot-ld19");
-            assert!(problems[1]["message"].as_str().unwrap().contains("built into Faber already"));
+            assert!(problems[1]["message"].as_str().unwrap().contains("already there"));
         }
         let connectors = call(&app, "GET", "/api/v0/connectors", None).await;
         let ld19: Vec<_> =

@@ -2,6 +2,7 @@
 
 use super::dto;
 use crate::config::Simulate;
+use crate::connectors::LoadProblem;
 use crate::files::{Entry, Kind, Special, VPath};
 use crate::leases::{EndReason, Lease};
 use crate::logs;
@@ -12,7 +13,6 @@ use crate::ports::{PortKind, PortProblem};
 use crate::runtime::PartStatus;
 use crate::simparts::WorldState;
 use crate::simulation::Pattern;
-use crate::wasm::LoadProblem;
 use faber_connector::{ConnectorKind, Manifest, PortRequirement, Problem, SettingKind, SettingSpec};
 
 pub fn error_body(e: &MachineError) -> dto::ErrorBody {
@@ -334,7 +334,6 @@ mod tests {
     fn connectors_are_described_from_their_manifest() {
         let c = connector(&ldrobot_ld19::manifest(), ConnectorKind::BuiltIn);
         assert_eq!(c.kind, "built-in");
-        assert_eq!(connector(&ldrobot_ld19::manifest(), ConnectorKind::Wasm).kind, "wasm");
         assert_eq!(c.id, "ldrobot-ld19");
         assert_eq!(c.port, dto::PortRequirementInfo::Serial { baud: 230_400 });
         assert_eq!(c.provides[0].name, "laser-scan");

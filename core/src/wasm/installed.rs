@@ -3,19 +3,14 @@
 //! package installer (Phase 3) writes these folders; until then they can be copied in by hand.
 
 use super::{Limits, definition};
-use faber_connector::{ConnectorKind, Definition, Problem, manifest_file};
+use crate::connectors::LoadProblem;
+use faber_connector::{Definition, Problem, manifest_file};
 use std::path::Path;
 
-/// A connector folder that couldn't be used, and why. The core runs without it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LoadProblem {
-    /// The folder's name, e.g. `my-sensor`.
-    pub folder: String,
-    pub problem: Problem,
-}
-
-/// Loads every wasm connector in `dir`. A missing `dir` means none are installed. Folders of
-/// other kinds (declarative) are left to their own engine.
+/// Loads every wasm connector in `dir`. A missing `dir` means none are installed. Only folders
+/// whose `[package] kind` is `wasm` are ours: others (declarative), and files with no readable
+/// kind, are left to the declarative engine, which explains what is wrong with them. So no folder
+/// is reported twice.
 pub fn load_installed(dir: &Path, limits: Limits) -> (Vec<Definition>, Vec<LoadProblem>) {
     let mut defs = Vec::new();
     let mut problems = Vec::new();
@@ -46,17 +41,13 @@ pub fn load_installed(dir: &Path, limits: Limits) -> (Vec<Definition>, Vec<LoadP
 }
 
 fn load_one(folder: &Path, name: &str, limits: Limits) -> Result<Option<Definition>, Problem> {
-    let manifest_path = folder.join(manifest_file::FILE_NAME);
-    let text = std::fs::read_to_string(&manifest_path).map_err(|e| {
-        Problem::new(
-            format!("The connector folder \"{name}\" has no readable faber.toml ({e})."),
-            "Install the connector again, or remove the folder.",
-        )
-    })?;
-    let package = manifest_file::parse(&text)?;
-    if package.kind != ConnectorKind::Wasm {
+    // A folder without a readable faber.toml is the declarative engine's to report.
+    let Ok(text) = std::fs::read_to_string(folder.join(manifest_file::FILE_NAME)) else { return Ok(None) };
+    if manifest_file::package_kind(&text).as_deref() != Some("wasm") {
         return Ok(None);
     }
+    let package = manifest_file::parse(&text)
+        .map_err(|p| Problem::new(format!("connectors/{name}/faber.toml: {}", p.message), p.hint))?;
     let id = &package.manifest.id;
     if id != name {
         return Err(Problem::new(
@@ -79,6 +70,8 @@ mod tests {
     use super::*;
 
     const TOML: &str = r#"
+        faber-manifest = 1
+
         [package]
         id = "my-sensor"
         type = "connector"
@@ -114,8 +107,9 @@ mod tests {
     fn bad_folders_are_explained_and_skipped() {
         let root = tempfile::tempdir().unwrap();
         folder(root.path(), "a-no-toml", None, None);
-        folder(root.path(), "b-bad-toml", Some("[package"), None);
-        folder(root.path(), "c-wrong-name", Some(TOML), Some(b"\0asm"));
+        folder(root.path(), "b-unreadable", Some("[package"), None);
+        folder(root.path(), "c-wrong-name", Some(TOML), Some(&[0, 0x61, 0x73, 0x6d]));
+        folder(root.path(), "d-old-format", Some(&TOML.replace("faber-manifest = 1", "")), None);
         folder(root.path(), "my-sensor", Some(TOML), Some(b"not wasm at all"));
         let other = TOML.replace("my-sensor", "no-module");
         folder(root.path(), "no-module", Some(&other), None);
@@ -129,13 +123,19 @@ mod tests {
         let got: Vec<(&str, &str)> =
             problems.iter().map(|p| (p.folder.as_str(), p.problem.message.as_str())).collect();
         let expect = [
-            ("a-no-toml", "no readable faber.toml"),
-            ("b-bad-toml", "can't be read"),
             ("c-wrong-name", "holds the connector \"my-sensor\""),
+            (
+                "d-old-format",
+                "connectors/d-old-format/faber.toml: This faber.toml doesn't say which manifest format",
+            ),
             ("my-sensor", "isn't a WebAssembly component"),
             ("no-module", "no readable connector.wasm"),
         ];
-        assert_eq!(got.len(), expect.len(), "{got:?}; a declarative folder is not ours to load");
+        assert_eq!(
+            got.len(),
+            expect.len(),
+            "{got:?}; folders without a wasm kind are the declarative engine's to report"
+        );
         for ((folder, message), (want_folder, words)) in got.iter().zip(expect) {
             assert_eq!(*folder, want_folder);
             assert!(message.contains(words), "{folder}: {message}");

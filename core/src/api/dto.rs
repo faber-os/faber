@@ -84,8 +84,7 @@ pub struct ConnectorInfo {
     pub id: String,
     pub name: String,
     pub version: String,
-    /// How it runs: `built-in` (part of Faber), `wasm` (a sandboxed WebAssembly component from
-    /// `<data>/connectors/`), later `declarative` and `native`.
+    /// How it runs: `built-in`, `declarative` (only a faber.toml) or `wasm`; `native` later.
     pub kind: String,
     pub port: PortRequirementInfo,
     pub provides: Vec<ProvideInfo>,

@@ -13,6 +13,10 @@ use serde::Deserialize;
 /// The file name inside a package folder.
 pub const FILE_NAME: &str = "faber.toml";
 
+/// The version of the manifest format this reads: `faber-manifest = 1`, the first line of every
+/// `faber.toml`, whatever its kind.
+pub const FORMAT: i64 = 1;
+
 /// What `faber.toml` says beyond the [`Manifest`]: how the connector runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PackageManifest {
@@ -25,6 +29,7 @@ pub struct PackageManifest {
 #[derive(Deserialize)]
 #[serde(rename_all = "kebab-case")]
 struct File {
+    faber_manifest: Option<toml::Value>,
     package: Package,
     #[serde(default)]
     ports: Ports,
@@ -106,6 +111,14 @@ fn problem(message: impl Into<String>, hint: impl Into<String>) -> Problem {
     Problem::new(message, hint)
 }
 
+/// The `kind` in `[package]`, read without checking anything else, so a loader can pick the
+/// reader for the file (wasm, declarative, …) and leave other kinds alone. `None`: the file has no
+/// readable kind.
+pub fn package_kind(text: &str) -> Option<String> {
+    let doc: toml::Table = toml::from_str(text).ok()?;
+    doc.get("package")?.get("kind")?.as_str().map(str::to_string)
+}
+
 /// Reads a `faber.toml`. Errors say what is wrong and how to fix it.
 pub fn parse(text: &str) -> Result<PackageManifest, Problem> {
     let file: File = toml::from_str(text).map_err(|e| {
@@ -114,6 +127,7 @@ pub fn parse(text: &str) -> Result<PackageManifest, Problem> {
             "Compare it with the example in docs/architecture.md, section 4.",
         )
     })?;
+    check_format(file.faber_manifest.as_ref())?;
     let p = file.package;
     if p.package_type != "connector" {
         return Err(problem(
@@ -155,6 +169,28 @@ pub fn parse(text: &str) -> Result<PackageManifest, Problem> {
         .validate()
         .map_err(|e| problem(format!("faber.toml isn't a valid connector: {}.", why(&e)), why_hint(&e)))?;
     Ok(PackageManifest { manifest, kind, module })
+}
+
+/// The same rule, and words, as the declarative reader: no line is refused, a newer one asks for
+/// a newer Faber.
+fn check_format(format: Option<&toml::Value>) -> Result<(), Problem> {
+    let Some(format) = format else {
+        return Err(problem(
+            "This faber.toml doesn't say which manifest format it is written in.",
+            format!("Add faber-manifest = {FORMAT} as its first line."),
+        ));
+    };
+    match format.as_integer() {
+        Some(FORMAT) => Ok(()),
+        Some(n) if n > FORMAT => Err(problem(
+            format!("This faber.toml is manifest format {n}, but this Faber reads format {FORMAT}."),
+            "Update Faber, or use a version of the connector made for this Faber.",
+        )),
+        _ => Err(problem(
+            format!("faber-manifest = {format} is not a manifest format."),
+            format!("Write faber-manifest = {FORMAT}."),
+        )),
+    }
 }
 
 fn why(e: &ManifestError) -> String {
@@ -284,6 +320,8 @@ mod tests {
     use faber_capabilities::laser_scan;
 
     const LD19: &str = r#"
+        faber-manifest = 1
+
         [package]
         id = "ldrobot-ld19"
         type = "connector"
@@ -385,6 +423,12 @@ mod tests {
     fn mistakes_are_explained() {
         let cases = [
             ("not toml at all [", "can't be read"),
+            (&LD19.replace("faber-manifest = 1", ""), "doesn't say which manifest format"),
+            (
+                &LD19.replace("faber-manifest = 1", "faber-manifest = 2"),
+                "format 2, but this Faber reads format 1",
+            ),
+            (&LD19.replace("faber-manifest = 1", "faber-manifest = \"one\""), "not a manifest format"),
             (&LD19.replace("type = \"connector\"", "type = \"app\""), "not a connector"),
             (&LD19.replace("kind = \"wasm\"", "kind = \"native\""), "kind \"native\""),
             (&LD19.replace("serial = { baud = 230400 }", ""), "exactly one port"),
@@ -397,6 +441,35 @@ mod tests {
             assert!(e.message.contains(words), "{words}: {e:?}");
             assert!(!e.hint.is_empty());
         }
+    }
+
+    #[test]
+    fn a_newer_format_asks_for_a_newer_faber() {
+        let e = parse(&LD19.replace("faber-manifest = 1", "faber-manifest = 2")).unwrap_err();
+        assert!(e.hint.starts_with("Update Faber"), "{e:?}");
+    }
+
+    #[test]
+    fn the_kind_is_read_without_reading_the_rest() {
+        assert_eq!(package_kind(LD19).as_deref(), Some("wasm"));
+        assert_eq!(
+            package_kind(
+                "[package]
+kind = \"declarative\"
+[[provides]]
+line = 3"
+            )
+            .as_deref(),
+            Some("declarative")
+        );
+        assert_eq!(
+            package_kind(
+                "[package]
+id = 3"
+            ),
+            None
+        );
+        assert_eq!(package_kind("not toml ["), None);
     }
 
     #[test]

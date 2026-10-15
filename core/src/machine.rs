@@ -12,6 +12,7 @@ pub use world::{DEFAULT_WORLD, WorldChanged, WorldView};
 use crate::backup::{self, Archive, BackupError, Item};
 use crate::clock::SharedClock;
 use crate::config::{self, ConfigError, PartConfig, PartsConfig, Simulate, Source};
+use crate::connectors::LoadProblem;
 use crate::disks::{Disk, DiskDiscovery};
 use crate::estop::Estop;
 use crate::files::{self, Entry, FileError, Files, Special, VPath, WriteMode};
@@ -32,9 +33,10 @@ use crate::simparts::{self, WorldEngine};
 use crate::simulation::{self, Outlet, PartSpec};
 use crate::suggest::{Suggestion, suggestions};
 use crate::translations::Translations;
-use crate::wasm::{self, LoadProblem};
 use faber_capabilities::{Capability, Info, Mount, Reading, estop};
-use faber_connector::{Definition, Health, Manifest, PortRequirement, Problem, Provide, Settings};
+use faber_connector::{
+    ConnectorKind, Definition, Health, Manifest, PortRequirement, Problem, Provide, Settings,
+};
 use safety::Runner;
 use std::collections::BTreeMap;
 use std::io;
@@ -223,8 +225,8 @@ pub struct Machine {
     opener: Arc<dyn PortOpener>,
     replays: ReplayLibrary,
     connectors: Vec<Definition>,
-    /// Installed connectors that couldn't be loaded, and why.
-    connector_problems: Vec<LoadProblem>,
+    /// Installed connectors that couldn't be loaded, and why ([`Machine::report_connector_problems`]).
+    connector_problems: Mutex<Vec<LoadProblem>>,
     timing: Timing,
     data_dir: PathBuf,
     config_path: PathBuf,
@@ -266,7 +268,6 @@ impl Machine {
         let translations = Translations::open(&config_dir);
         let router = Arc::new(Router::new());
         opts.world.attach(Arc::clone(&router));
-        let (connectors, connector_problems) = with_installed(opts.connectors, &opts.data_dir);
         let machine = Arc::new(Machine {
             clock: opts.clock,
             router,
@@ -276,8 +277,8 @@ impl Machine {
             disks: opts.disks,
             opener: opts.opener,
             replays: opts.replays,
-            connectors,
-            connector_problems,
+            connectors: opts.connectors,
+            connector_problems: Mutex::new(Vec::new()),
             timing: opts.timing,
             data_dir: opts.data_dir.clone(),
             config_path,
@@ -373,15 +374,19 @@ impl Machine {
         self.connectors.iter().map(|d| d.manifest.clone()).collect()
     }
 
-    /// Every connector this core can run: the built-in ones, then those installed in
-    /// `<data>/connectors/`.
-    pub fn definitions(&self) -> &[Definition] {
-        &self.connectors
+    /// Every connector with how it runs (built-in, declarative, …).
+    pub fn connector_kinds(&self) -> Vec<(ConnectorKind, Manifest)> {
+        self.connectors.iter().map(|d| (d.kind, d.manifest.clone())).collect()
     }
 
-    /// Installed connectors that couldn't be loaded. Fixed at start.
-    pub fn connector_problems(&self) -> &[LoadProblem] {
-        &self.connector_problems
+    /// Installed connectors that couldn't be loaded ([`crate::connectors::LoadProblem`]), so the
+    /// API can say why one is missing. Set once, by whoever loaded them (`all_connectors`).
+    pub fn report_connector_problems(&self, problems: Vec<LoadProblem>) {
+        *self.connector_problems.lock().expect("connector problems lock") = problems;
+    }
+
+    pub fn connector_problems(&self) -> Vec<LoadProblem> {
+        self.connector_problems.lock().expect("connector problems lock").clone()
     }
 
     fn definition(&self, id: &str) -> Option<&Definition> {
@@ -1464,26 +1469,6 @@ impl Drop for SerialSession {
             m.close_serial(&self.port);
         }
     }
-}
-
-/// The built-in connectors plus the wasm connectors installed in `<data>/connectors/`
-/// (docs/packages.md §5). A folder that can't be used is logged and reported, never fatal.
-fn with_installed(mut connectors: Vec<Definition>, data_dir: &Path) -> (Vec<Definition>, Vec<LoadProblem>) {
-    let (installed, mut problems) =
-        wasm::load_installed(&data_dir.join("connectors"), wasm::Limits::default());
-    for d in installed {
-        if connectors.iter().any(|c| c.manifest.id == d.manifest.id) {
-            let problem = Problem::new(
-                format!("The connector \"{}\" is built into Faber already.", d.manifest.id),
-                "Remove its folder from connectors in the data folder, or give the package another id.",
-            );
-            tracing::error!(target: "core::machine", "{} {}", problem.message, problem.hint);
-            problems.push(LoadProblem { folder: d.manifest.id.clone(), problem });
-        } else {
-            connectors.push(d);
-        }
-    }
-    (connectors, problems)
 }
 
 fn scan_ports(machine: Weak<Machine>, stop: Arc<AtomicBool>, every: Duration) {
