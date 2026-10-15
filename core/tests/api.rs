@@ -83,7 +83,7 @@ fn core() -> TestCore {
         connectors: faber_core::connectors::built_in(),
         timing: Timing::default(),
         port_scan: None,
-        world: Arc::new(faber_core::simulation::NoWorld),
+        world: Arc::new(faber_core::simparts::SimWorld::new()),
     })
     .unwrap();
     let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });

@@ -3,12 +3,10 @@
 //! A simulated part has the same name and capabilities as the real one; only its source changes.
 //! This module holds
 //! - **the seam** every kind of simulation plugs into: [`SimulatedPart`] (a running simulated
-//!   part), [`Outlet`] (where its readings and health go) and [`WorldEngine`] (what starts
-//!   `simulate = "world"` parts);
+//!   part), [`Outlet`] (where its readings and health go) and [`PartSpec`] (what starts one).
+//!   `simulate = "world"` parts run in the world engine (`simparts`), on top of this seam;
 //! - **manual** simulated parts (`simulate = "manual"`): sensors publish a value or a
-//!   [`Pattern`] at their rate, actuators report the commands they get as their state;
-//! - [`NoWorld`], the stand-in until the world engine is plugged in: its parts wait, `Degraded`,
-//!   with a message that says so.
+//!   [`Pattern`] at their rate, actuators report the commands they get as their state.
 //!
 //! Nothing here knows about leases or clamping: the machine checks the lease and clamps every
 //! command to the part's info before a simulated part sees it, exactly as for a real part.
@@ -60,37 +58,6 @@ pub trait SimulatedPart: Send {
     /// The pattern a manual sensor follows now.
     fn pattern(&self) -> Option<Pattern> {
         None
-    }
-}
-
-/// What runs `simulate = "world"` parts: the world engine implements this, and the machine
-/// starts every world part through it. Until a world engine is plugged in, [`NoWorld`] does.
-pub trait WorldEngine: Send + Sync {
-    fn start(&self, part: PartSpec) -> Box<dyn SimulatedPart>;
-}
-
-/// The world engine before there is one: world parts wait, `Degraded`, and refuse commands.
-pub struct NoWorld;
-
-impl WorldEngine for NoWorld {
-    fn start(&self, part: PartSpec) -> Box<dyn SimulatedPart> {
-        part.outlet.set_health(Health::Degraded(waiting_for_the_world()));
-        Box::new(Waiting)
-    }
-}
-
-fn waiting_for_the_world() -> Problem {
-    Problem::new(
-        "Waiting for the world: this core has no simulated world yet, so the part has no values.",
-        "Use simulate = \"manual\" for now to set its values by hand, or update Faber.",
-    )
-}
-
-struct Waiting;
-
-impl SimulatedPart for Waiting {
-    fn command(&mut self, _: Command) -> Result<Applied, CommandError> {
-        Err(CommandError::NotReady(waiting_for_the_world()))
     }
 }
 
@@ -668,17 +635,5 @@ mod tests {
         assert_eq!(r.commanded.vx, 0.3);
         assert_eq!(part.set_pattern(Pattern::Steady { value: 1.0 }), Err(PatternError::NotASensor));
         assert_eq!(part.pattern(), None);
-    }
-
-    #[test]
-    fn world_parts_wait_for_the_world_until_there_is_one() {
-        let outlet = Arc::new(Recorder::default());
-        let clock = Arc::new(ManualClock::new(0));
-        let mut part = NoWorld.start(spec(Info::PlanarBase(base_info()), Arc::clone(&outlet), clock, 1.0));
-        let Some(Health::Degraded(p)) = outlet.health.lock().unwrap().last().cloned() else { panic!() };
-        assert!(p.message.contains("Waiting for the world"), "{p:?}");
-        let e = part.command(Command::PlanarBase(planar_base::Command::STOP)).unwrap_err();
-        assert!(matches!(e, CommandError::NotReady(_)));
-        assert_eq!(part.set_pattern(Pattern::Steady { value: 1.0 }), Err(PatternError::NotManual));
     }
 }
