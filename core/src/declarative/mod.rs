@@ -35,7 +35,7 @@ pub fn from_package(package: Declarative) -> Definition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use faber_capabilities::{Reading, distance, position};
+    use faber_capabilities::{Reading, battery, distance, position};
     use faber_connector::testing::RecordingContext;
     use faber_connector::{Connector, Health, Settings};
 
@@ -193,6 +193,78 @@ mod tests {
                 Reading::Pose(faber_capabilities::pose::Reading::planar(4, "odom", 1.5, -2.0, 0.0))
             )]
         );
+    }
+
+    /// Any capability's fields can come from a line. A battery's level, which no sensor sends,
+    /// is worked out from its voltage and info, with the capability's hysteresis.
+    #[test]
+    fn a_battery_monitor_gives_volts_and_amps_and_faber_works_out_the_level() {
+        let text = manifest(
+            "[[provides]]
+capability = \"battery@1\"
+             info = { chemistry = \"li-ion\", cells-in-series = 3, capacity-ah = 15 }
+             line = { pattern = \"V={volts:f32} I={amps:f32}\", fields.amps.scale = -0.001 }",
+            "",
+        );
+        let mut c = connector(&text);
+        let mut ctx = RecordingContext::new();
+        let lines = "V=12.1 I=800
+V=10.4 I=900
+V=10.55 I=0
+V=10.7 I=0
+V=9.8 I=2000
+";
+        feed(c.as_mut(), &mut ctx, &[(1, lines)]);
+        let seen: Vec<(f32, Option<f32>, battery::Level)> = ctx
+            .published
+            .iter()
+            .map(|(_, r)| {
+                let Reading::Battery(b) = r else { panic!("{r:?}") };
+                (b.volts, b.amps, b.level)
+            })
+            .collect();
+        use battery::Level::*;
+        assert_eq!(
+            seen,
+            [
+                (12.1, Some(-0.8), Ok),
+                (10.4, Some(-0.9), Low),
+                (10.55, Some(0.0), Low),
+                (10.7, Some(0.0), Ok),
+                (9.8, Some(-2.0), Critical)
+            ]
+        );
+        let given = manifest(
+            "[[provides]]
+capability = \"battery@1\"
+line = { pattern = \"V={volts:f32}\", set = { level = \"low\" } }",
+            "",
+        );
+        let mut c = connector(&given);
+        let mut ctx = RecordingContext::new();
+        feed(
+            c.as_mut(),
+            &mut ctx,
+            &[(
+                1, "V=12
+",
+            )],
+        );
+        let Reading::Battery(b) = &ctx.published[0].1 else { panic!() };
+        assert_eq!(b.level, Low, "a level the manifest gives is used as it is");
+    }
+
+    #[test]
+    fn a_battery_without_a_level_needs_its_info() {
+        let text = manifest(
+            "[[provides]]
+capability = \"battery@1\"
+line = { pattern = \"V={volts:f32}\" }",
+            "",
+        );
+        let e = definition(&text).unwrap_err();
+        assert!(e.message.contains("needs its info"), "{e}");
+        assert!(e.hint.contains("cells-in-series"), "{e:?}");
     }
 
     #[test]

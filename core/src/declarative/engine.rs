@@ -2,10 +2,10 @@
 //! I/O; the core hands it bytes and the time they arrived.
 
 use super::lines::{Frame, Framer};
-use super::manifest::{Declarative, FieldRule, Parse, Rule, provide};
+use super::manifest::{Declarative, Derive, FieldRule, Parse, Rule, provide};
 use super::nmea;
 use super::values;
-use faber_capabilities::{Info, Reading, Timestamp};
+use faber_capabilities::{Info, Reading, Timestamp, battery};
 use faber_connector::settings::Reader;
 use faber_connector::{
     Connector, Context, Health, PortRequirement, Problem, Provide, Settings, SettingsError,
@@ -37,13 +37,14 @@ impl Declarative {
         for (rule, provided) in self.rules.iter().zip(self.provides(settings)?) {
             let parse = match &rule.parse {
                 Parse::Nmea => RunParse::Nmea,
-                Parse::Pattern { fields, set, status_from_range, .. } => RunParse::Pattern {
+                Parse::Pattern { fields, set, derive, .. } => RunParse::Pattern {
                     scales: fields
                         .iter()
                         .map(|f| Ok((f.scale.resolve(&reader)?, f.offset.resolve(&reader)?)))
                         .collect::<Result<_, SettingsError>>()?,
                     set: set.resolve(&reader, specs)?,
-                    status_from_range: *status_from_range,
+                    derive: *derive,
+                    level: None,
                 },
             };
             rules.push(RunRule { info: provided.info, parse });
@@ -63,7 +64,9 @@ enum RunParse {
         /// (scale, offset) per pattern field, in order.
         scales: Vec<(f64, f64)>,
         set: Map<String, Value>,
-        status_from_range: bool,
+        derive: Derive,
+        /// The battery level reported last, for [`Derive::LevelFromVolts`]'s hysteresis.
+        level: Option<battery::Level>,
     },
     Nmea,
 }
@@ -146,8 +149,8 @@ impl LineConnector {
         };
         let mut why = None;
         let mut used = false;
-        for (rule, run) in self.package.rules.iter().zip(&self.rules) {
-            match &run.parse {
+        for (rule, run) in self.package.rules.iter().zip(&mut self.rules) {
+            match &mut run.parse {
                 RunParse::Nmea => match nmea::parse(line) {
                     Ok(sentence) => {
                         used = true;
@@ -159,8 +162,9 @@ impl LineConnector {
                         why.get_or_insert(e);
                     }
                 },
-                RunParse::Pattern { scales, set, status_from_range } => {
-                    match pattern_reading(rule, run, scales, set, *status_from_range, t_us, line) {
+                RunParse::Pattern { scales, set, derive, level } => {
+                    match pattern_reading(rule, run.info.as_ref(), scales, set, (*derive, level), t_us, line)
+                    {
                         Ok(None) => {}
                         Ok(Some(r)) => {
                             used = true;
@@ -197,10 +201,10 @@ impl LineConnector {
 /// The reading a pattern rule makes of `line`: `Ok(None)` if the line has another shape.
 fn pattern_reading(
     rule: &Rule,
-    run: &RunRule,
+    info: Option<&Info>,
     scales: &[(f64, f64)],
     set: &Map<String, Value>,
-    status_from_range: bool,
+    (derive, level): (Derive, &mut Option<battery::Level>),
     t_us: Timestamp,
     line: &str,
 ) -> Result<Option<Reading>, String> {
@@ -210,12 +214,21 @@ fn pattern_reading(
     for ((field, (_, raw)), (scale, offset)) in fields.iter().zip(raw).zip(scales) {
         values::set_path(&mut obj, &field.name, value(field, raw, *scale, *offset));
     }
-    if status_from_range {
-        values::set_path(&mut obj, "status", "ok".into());
+    match derive {
+        Derive::StatusFromRange => values::set_path(&mut obj, "status", "ok".into()),
+        Derive::LevelFromVolts => values::set_path(&mut obj, "level", "ok".into()),
+        Derive::Nothing => {}
     }
     let mut reading = values::reading(rule.capability, t_us, obj)?;
-    if status_from_range && let (Reading::Distance(d), Some(Info::Distance(info))) = (&reading, &run.info) {
-        reading = Reading::Distance(info.reading(t_us, d.meters));
+    match (derive, &mut reading, info) {
+        (Derive::StatusFromRange, Reading::Distance(d), Some(Info::Distance(info))) => {
+            *d = info.reading(t_us, d.meters);
+        }
+        (Derive::LevelFromVolts, Reading::Battery(b), Some(Info::Battery(info))) => {
+            b.level = info.level(b.volts, *level);
+            *level = Some(b.level);
+        }
+        _ => {}
     }
     debug_assert_eq!(reading.capability(), rule.capability);
     Ok(Some(reading))

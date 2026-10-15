@@ -175,6 +175,7 @@ What each capability supports:
 | `distance@1` | yes | Name a field `meters`. Without a `status` field, Faber works it out from `info`: below `min-m` is `too-close`, above `max-m` is `too-far` (and `meters` is held at that edge); without `info` it is `ok`. |
 | `position@1` | yes | Use `format = "nmea"` (section 5). A pattern works too: `fix` goes under `set` (it is a word), `satellites` can be a `u32` field. |
 | `pose@1` | yes | Nested fields and `set`, as above. |
+| `battery@1` | yes | Name a field `volts` (and `amps`, `charge`, `celsius` if the monitor sends them; current is negative while discharging, so a monitor that sends discharge milliamps takes `scale = -0.001`). Without a `level` field, Faber works it out from `volts` and `info` (`chemistry` and `cells-in-series`, which it then needs): the same thresholds and hysteresis as every battery (docs/capabilities.md). |
 | `estop@1` | not usefully | `engaged` is true/false, which no field type reads. |
 | `laser-scan@1` | no | A scan doesn't fit on one line: write a wasm connector. |
 | `motor@1`, `planar-base@1` | no | They take commands, and a declarative connector only reads. |
