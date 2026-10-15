@@ -32,7 +32,8 @@ access, in Phase 6).
 | `GET /api/v0/about` | `AboutInfo`: `version`, `api` (the fingerprint), `dataFolder` (where config and files live on this computer), `uptimeS` (seconds since the core started), `os`, `timeZone` (the machine's own). |
 | `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run: the built-in ones and those installed in `<data>/connectors/<id>/`. `kind` says how it runs: `built-in`, `declarative` (only a `faber.toml`, run by the core's engine; [connectors-declarative.md](connectors-declarative.md)) or `wasm`. Each `provides` entry carries its capability's `info` (limits, e.g. a distance sensor's range) with the default settings; a part's own limits are in its `signals` (below). `port` is `{"kind": "serial", "baud": …}` or `{"kind": "bridge"}` (the generic connectors: real hardware like this sits on a FaberLink board and appears as the board's own part, so a part on such a connector is only ever simulated). `settings` describes every setting a part of this kind takes, in form order: `key`, `label`, `description` (both in English for now), `unit?`, `advanced` (shown behind "Advanced"), and `kind` with its values: `number` (`default`, `min?`, `minExclusive?`, `max?`, `suggested?`: where a new part's form starts), `bool` (`default`), `choice` (`default`, `choices`: `value`, `label`), `string` (`default`) or `part-list` (other parts' names, empty by default). `default` is what a part gets when parts.toml leaves the setting out. |
 | `GET /api/v0/connectors/problems` | `ConnectorProblem[]`: installed connectors (wasm or declarative) the core couldn't load, when it started or since a package was installed or removed, each with its `folder` in `<data>/connectors/`, a `message` and a `hint`. The core runs without them. |
-| `GET /api/v0/packages`, `POST /api/v0/packages`, `DELETE /api/v0/packages/{id}` | Connector packages: see [Packages](#packages). |
+| `GET /api/v0/packages`, `POST /api/v0/packages`, `DELETE /api/v0/packages/{id}` | Connector and app packages: see [Packages](#packages). |
+| `GET /api/v0/apps`, `POST /api/v0/apps/{id}/enable` and `/disable`, `PUT /api/v0/apps/{id}/roles` | Apps: see [Apps](#apps). |
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
 | `POST /api/v0/ports/check-board` | `{"port": "usb:2341:0042"}` → `200 BoardCheck`, after up to 2.5 s: is a FaberLink board on this port? See [FaberLink boards](#faberlink-boards-bridges). |
@@ -55,7 +56,8 @@ reconciles. The file stays the source of truth (D13).
 
 `GET /api/v0/signals/{part}/{name}` → `200 SignalValue` `{address, capability, reading}`: the
 newest reading (`null` until the part has published one), events included. `404 unknown-signal`
-when no such signal exists right now. The WebSocket `signal` topic streams them; this is for
+when no such signal exists right now. An app's derived signals read the same way, with
+`app:<id>` for the part: `GET /api/v0/signals/app:wall-follower/wall-distance`. The WebSocket `signal` topic streams them; this is for
 simple programs that poll over plain HTTP (e.g. `examples/drive-square.py` checks `bumped`).
 
 ## WebSocket: `GET /api/v0/ws?format=msgpack|json`
@@ -88,10 +90,11 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `packages` | — | a `packages` message (`packages`: `PackageInfo[]`, as `GET /api/v0/packages`) now and after every install, uninstall or reload of the connectors, so every browser tab sees an install at once. If `packages.toml` can't be read, an `error` (`io-error`) instead. |
 | `world` | — | a `world` message 20 times a second for as long as the subscription lasts, and `world-changed` (`name`) whenever the world is switched. See [The simulated world](#the-simulated-world). |
 | `flash` | — | a `flash` message (`port`, `stage`, `done`, `total`) after every page the Arduino flasher writes or reads back, on any port. See [The Arduino flasher](#the-arduino-flasher). |
+| `apps` | — | an `apps` message (`apps`: `AppInfo[]`, as `GET /api/v0/apps`) now and whenever an app is installed, removed, turned on or off, gets other parts, or changes state. See [Apps](#apps). |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
 `serial-opened`, `serial-data`, `serial-closed`, `leases`, `lease-granted`, `lease-ended`, `estop`,
-`packages`, `world`, `world-changed`, `flash`, `error`. Each carries the `id` of the subscription
+`packages`, `apps`, `world`, `world-changed`, `flash`, `error`. Each carries the `id` of the subscription
 or serial session it belongs to. `error` may come without an `id`.
 
 **Serial sessions**, step by step:
@@ -486,6 +489,70 @@ outside the package such as `../x` or `/etc/x`, a missing `faber.toml`, `README.
 named inside the package file, e.g. `my-sensor-0.1.0.faberpkg: faber.toml line 7: …`,
 a rule that doesn't read, or a component that isn't one or asks for more than the connector world,
 such as WASI), `409 package-id-taken` (its id is a built-in connector's).
+
+An **app's package** ([apps.md](apps.md)) has `type = "app"` in its `faber.toml` and holds
+`faber.toml`, `README.md`, `LICENSE`, optionally `icon.svg`, its logic's component (one `.wasm`,
+named by `module`) and its UI in `ui/` (at most 1000 files of 10 MB each, plain names of letters,
+digits, `.`, `-` and `_`, none hidden, and only web file types: html, css, js, mjs, json, map, txt,
+svg, png, jpg, jpeg, gif, webp, ico, woff, woff2, wasm). It installs into `<data>/apps/<id>/`; an
+update keeps the app's saved `state.toml`. Its preview answers `200 AppPackagePreview`: `app` (an
+`AppInfo` as `GET /api/v0/apps` will list it, off and with no parts picked), `readme`,
+`replaces?` and `checked`. It is listed in `GET /api/v0/packages` with `kind: "app"` and an empty
+`usedBy`. **Uninstalling an app is refused while it is turned on** (`409 app-enabled`: turn it off
+first, so nothing it drives stops by surprise); uninstalling it also removes its `[apps.<id>]` from
+`config/apps.toml`. Apps and connectors share ids: `409 package-id-taken` when an app's package
+has the id of an installed connector, or the other way round. `422 package-not-loadable` covers an
+app too: a manifest mistake with its line, a missing `ui/index.html`, or a component that isn't
+one or asks for more than the app world.
+
+## Apps
+
+An app ([apps.md](apps.md)) uses capabilities through **roles** (`[[requires]]` in its manifest):
+the user picks which parts fill them, and turns it on. `config/apps.toml` holds both (the file is
+the source of truth, D13; edits keep its comments):
+
+```toml
+[apps.wall-follower]
+enabled = true
+
+[apps.wall-follower.roles]
+base = "base"
+lidar = "lidar"
+proximity = ["front", "rear"]   # a role with count = "1..": a list
+```
+
+An app **runs** when it is on and every role has a part that provides the role's capability. It
+drives its `command = true` roles under leases held as `app:<id>`, exactly like any other holder:
+every command renews the lease, a lease not renewed in time ends and stops the part, the e-stop
+ends it, and an operator can take over (`{"takeOver": true}`): the app's next command answers
+`lease-ended` (`taken-over`), and it may ask again (refused while the operator drives). The D46
+confirm before driving is the shell's: for an app, turning it on is the user's go-ahead. Its leases
+end when it is turned off, when it stops or traps, and when the core stops.
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/apps` | `AppInfo[]`: `id`, `name`, `version`, `publisher?`, `enabled`, `state` (a `PartState`: the same states as a part, below), `logic` (it has a component), `tickHz?`, `roles` (`role`, `capability`, `command`, `count`: `1` or `1..`, `parts`: the parts picked), `publishes` (`name`, `capability`, `address`: `app:<id>/<name>`), `ui?` (`/apps/<id>/ui/index.html`) and `window?` (`title?`, `icon?` (a URL, for an icon under `ui/`), `width?`, `height?`, `pinned`). |
+| `GET /api/v0/apps/{id}` | One `AppInfo`. `404 unknown-app`. |
+| `POST /api/v0/apps/{id}/enable` | Turns it on (`enabled = true` in apps.toml): `200 AppInfo`. It starts when its roles are filled. `404 unknown-app`, `422 config-broken` (apps.toml can't be read: the message has its line). |
+| `POST /api/v0/apps/{id}/disable` | Turns it off: its logic stops, its leases end and its parts get their safe state before this answers. `200 AppInfo`. |
+| `PUT /api/v0/apps/{id}/roles` | `{"roles": {"lidar": "lidar", "proximity": ["front", "rear"]}}` (a part's name, or a list): exactly these roles get these parts; roles left out get none. An app that is on restarts with its new parts. `200 AppInfo`. Errors: `400 unknown-role`, `400 too-many-parts` (more than one for a `count = "1"` role), `400 bad-request` (a part twice), `422 unknown-part`, `422 role-mismatch` (the part doesn't provide the role's capability: the message says what it provides). Sub-parts (`mega.left`) fill roles like any part. |
+| `GET /apps/{id}/ui/{path}` | The app's UI files, for the shell's app window. Only files the installer accepts, with their type from their extension, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Content-Security-Policy: default-src 'self'; connect-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`: a UI can't reach the network or the API, only the shell, through `postMessage` (Phase 5b). `404 not-found` for anything else. |
+
+**States** (`state.kind`, with `message` and `hint` where there is a problem):
+
+| Kind | When |
+|---|---|
+| `stopped` | Turned off ("The app is turned off."), or Faber stopped it after it crashed 5 times in a row (the message says the last crash; turn it off and on to retry). |
+| `invalid` | On, but a role has no part ("The role "lidar" has no part …"), or apps.toml can't be read. |
+| `conflict` | On, but a part filling a role was removed, or doesn't provide the role's capability right now. It starts by itself when the part is back. |
+| `starting`, `running` | Its logic is starting, or runs at its `tickHz`. A UI-only app is `running` while on. |
+| `failed` | Its logic crashed: a trap, a panic ("The app stopped because of a bug: it panicked (…)"), more than 32 MB of memory, more than 20 ms in one call, or a broken rule (publishing a signal its manifest doesn't declare). Its leases have ended; Faber restarts it after 1, 2, 4, … s. |
+
+**Derived signals** (D24) are published as `app:<id>/<name>` while the app runs, read-only: they
+appear in `GET /api/v0/signals/…` and the `signal` topic, but there are no leases or commands on
+them (`404 unknown-part`). A part's name can never contain `:`, so no part clashes with them.
+
+App logs are in the log with the source `app:<id>`.
 
 ## Recordings
 

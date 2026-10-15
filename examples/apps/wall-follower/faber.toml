@@ -1,0 +1,37 @@
+faber-manifest = 1
+
+[package]
+id = "wall-follower"
+type = "app"
+version = "0.1.0"
+name = "Wall follower"
+publisher = "Faber"
+module = "app.wasm"             # its logic, built by faber pack
+ui = "ui/"                      # a small window
+tick-hz = 20                    # 20 times a second: more often than the LiDAR's 10 scans
+
+[window]
+title = "Wall follower"
+width = 420
+height = 260
+
+# The LiDAR it looks at the wall with.
+[[requires]]
+role = "lidar"
+capability = "laser-scan@1"
+
+# The base it drives. command = true: the app takes a lease on it while it runs.
+[[requires]]
+role = "base"
+capability = "planar-base@1"
+command = true
+
+[[suggests]]
+connector = "ldrobot-ld19"
+for-role = "lidar"
+
+# How far the base's right side is from the wall, for anyone to watch:
+# app:wall-follower/wall-distance.
+[[publishes]]
+name = "wall-distance"
+capability = "distance@1"

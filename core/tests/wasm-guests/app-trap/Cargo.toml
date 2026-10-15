@@ -1,0 +1,16 @@
+[package]
+name = "faber-test-app"
+version = "0.1.0"
+description = "An app that drives forward and traps on purpose, to test the core's app sandbox (core/tests/apps.rs)."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+faber-app-wasm = { version = "0.1.0", path = "../../../../sdk/rust/app-wasm" }
+faber-capabilities = { version = "0.1.0", path = "../../../../sdk/rust/capabilities" }

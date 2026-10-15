@@ -57,7 +57,7 @@ fn bridge_of<'a>(st: &'a State, part: &PartName) -> Option<&'a BridgeHandle> {
 }
 
 /// What a part provides now: its own (with its settings), or a sub-part's, from its board.
-fn provides_of(st: &State, part: &PartName) -> Vec<Provide> {
+pub(super) fn provides_of(st: &State, part: &PartName) -> Vec<Provide> {
     if part.is_sub() {
         return bridge_of(st, part)
             .and_then(|b| b.sub_part(part))
@@ -151,7 +151,7 @@ impl Machine {
     }
 
     /// A part in parts.toml, or a sub-part its bridge's board has (or parts.toml names).
-    fn known_part(st: &State, name: &str) -> Result<PartName, MachineError> {
+    pub(super) fn known_part(st: &State, name: &str) -> Result<PartName, MachineError> {
         let exists = |n: &PartName| match n.bridge() {
             None => st.config.parts.contains_key(n),
             Some(b) => {
@@ -565,12 +565,24 @@ fn pattern_error(part: &PartName, e: PatternError) -> MachineError {
 }
 
 /// Runs [`Machine::sweep`] until `stop` is set or the machine is gone.
+/// Also reconciles the apps every [`APPS_EVERY`], so an app follows its parts (one removed,
+/// a board's part appearing) without anyone asking.
 pub(super) fn sweep_leases(machine: Weak<Machine>, stop: Arc<AtomicBool>) {
+    let mut apps_checked = std::time::Instant::now();
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(SWEEP_EVERY);
         match machine.upgrade() {
-            Some(m) => m.sweep(),
+            Some(m) => {
+                m.sweep();
+                if apps_checked.elapsed() >= APPS_EVERY {
+                    m.reconcile_apps();
+                    apps_checked = std::time::Instant::now();
+                }
+            }
             None => return,
         }
     }
 }
+
+/// How often the sweeper reconciles the apps with the parts.
+const APPS_EVERY: Duration = Duration::from_millis(200);

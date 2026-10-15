@@ -1,13 +1,16 @@
-//! Layer 2: connector packages on disk (docs/packages.md §5).
+//! Layer 2: connector and app packages on disk (docs/packages.md §5, docs/apps.md).
 //!
 //! A `.faberpkg` is a zip holding `faber.toml` at its root, the connector's component (wasm),
 //! `README.md`, `LICENSE`, and optionally `icon.svg`, recordings in `captures/` and bridge
-//! firmware in `firmware/<board>.hex` (declared in `[[firmware]]`). This module:
+//! firmware in `firmware/<board>.hex` (declared in `[[firmware]]`). An app's package holds its
+//! logic's component (if it has logic) and its UI in `ui/` (if it has one) instead of recordings
+//! and firmware. This module:
 //! - **reads and checks a package file** ([`open`]): sizes, paths, which files it holds, and its
 //!   `[package]` header, all before anything is written;
 //! - **installs it** ([`Store::prepare`], then [`Prepared::swap_in`]): unpacked into a staging
 //!   folder, checked there by the loader for its kind (which the caller passes in, so this layer
-//!   needs no engine), then moved to `<data>/connectors/<id>/`, keeping the previous version
+//!   needs no engine), then moved to `<data>/connectors/<id>/` (an app to `<data>/apps/<id>/`,
+//!   with the state it saved), keeping the previous version
 //!   until the caller has seen the new one load;
 //! - **remembers what is installed** in `<data>/config/packages.toml`;
 //! - **writes package files** ([`pack`]) for the `faber` CLI.
@@ -34,6 +37,53 @@ const LICENSE: &str = "LICENSE";
 const ICON: &str = "icon.svg";
 const CAPTURES: &str = "captures/";
 const FIRMWARE: &str = "firmware/";
+const UI: &str = "ui/";
+
+/// An app's saved state (docs/apps.md), in its folder. Never in a package; kept across updates.
+pub const APP_STATE: &str = "state.toml";
+
+/// The most files an app's `ui/` may hold, and the largest one.
+pub const UI_MAX_FILES: usize = 1000;
+pub const UI_MAX_FILE_BYTES: u64 = 10 << 20;
+
+/// The files an app's UI may hold, by extension, with the type the core serves them as.
+pub const UI_TYPES: &[(&str, &str)] = &[
+    ("html", "text/html; charset=utf-8"),
+    ("css", "text/css; charset=utf-8"),
+    ("js", "text/javascript; charset=utf-8"),
+    ("mjs", "text/javascript; charset=utf-8"),
+    ("json", "application/json"),
+    ("map", "application/json"),
+    ("txt", "text/plain; charset=utf-8"),
+    ("svg", "image/svg+xml"),
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("gif", "image/gif"),
+    ("webp", "image/webp"),
+    ("ico", "image/x-icon"),
+    ("woff", "font/woff"),
+    ("woff2", "font/woff2"),
+    ("wasm", "application/wasm"),
+];
+
+/// The type a UI file is served as, from its name; `None` for a file an app's UI can't hold.
+pub fn ui_content_type(path: &str) -> Option<&'static str> {
+    let ext = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    UI_TYPES.iter().find(|(e, _)| *e == ext).map(|(_, t)| *t)
+}
+
+/// A path inside `ui/` the core serves: plain names of letters, digits, `.`, `-` and `_`, none
+/// hidden (starting with `.`), with an extension from [`UI_TYPES`].
+pub fn ui_path_ok(rel: &str) -> bool {
+    !rel.is_empty()
+        && rel.split('/').all(|seg| {
+            !seg.is_empty()
+                && !seg.starts_with('.')
+                && seg.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+        })
+        && ui_content_type(rel).is_some()
+}
 
 /// Why a package can't be read, installed or removed, in words the user can act on.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,6 +230,9 @@ fn check_files(files: BTreeMap<String, Vec<u8>>) -> Result<Opened, PackageError>
     if !files.contains_key(LICENSE) {
         return Err(missing(LICENSE, "It says what you may do with the connector."));
     }
+    if header.kind == manifest_file::APP_TYPE {
+        return check_app_files(header, readme, files);
+    }
     let wasm = matches!(header.kind.as_str(), "wasm");
     if !wasm && header.kind != "declarative" {
         return Err(PackageError::invalid(
@@ -309,6 +362,65 @@ fn check_firmware(
     Ok(boards)
 }
 
+/// An app's package: faber.toml, README.md, LICENSE, optionally icon.svg, at most one component
+/// (its logic) and its UI in `ui/`. Whether it needs the component or the UI is its manifest's
+/// business, checked when it loads.
+fn check_app_files(
+    header: PackageHeader,
+    readme: String,
+    files: BTreeMap<String, Vec<u8>>,
+) -> Result<Opened, PackageError> {
+    let mut modules = 0;
+    let mut ui_files = 0;
+    let mut unknown = Vec::new();
+    for (name, data) in &files {
+        match name.as_str() {
+            MANIFEST | README | LICENSE | ICON => {}
+            n if n.ends_with(".wasm") && !n.contains('/') => modules += 1,
+            n if n.starts_with(UI) => {
+                if !ui_path_ok(&n[UI.len()..]) {
+                    let types: Vec<&str> = UI_TYPES.iter().map(|(e, _)| *e).collect();
+                    return Err(PackageError::invalid(
+                        format!("The app's UI holds a file Faber doesn't serve: \"{n}\"."),
+                        format!(
+                            "UI files have plain names (letters, digits, ., - and _, none starting with .) and are one of: {}.",
+                            types.join(", ")
+                        ),
+                    ));
+                }
+                if data.len() as u64 > UI_MAX_FILE_BYTES {
+                    return Err(PackageError::new(
+                        "package-too-big",
+                        format!(
+                            "{n} is larger than {} MB, the most one UI file may be.",
+                            UI_MAX_FILE_BYTES >> 20
+                        ),
+                        "Make it smaller: compress images, and leave source maps out of the package.",
+                    ));
+                }
+                ui_files += 1;
+            }
+            n => unknown.push(n.to_string()),
+        }
+    }
+    if !unknown.is_empty() {
+        return Err(PackageError::invalid(
+            format!("The package holds files Faber doesn't expect: {}.", unknown.join(", ")),
+            "An app's package holds faber.toml, README.md, LICENSE, its logic's .wasm, its UI in ui/, and optionally icon.svg.",
+        ));
+    }
+    if ui_files > UI_MAX_FILES {
+        return Err(PackageError::invalid(
+            format!("The app's UI has {ui_files} files; Faber installs at most {UI_MAX_FILES}."),
+            "Bundle the UI (most web build tools do) so it needs fewer files.",
+        ));
+    }
+    if modules > 1 {
+        return Err(PackageError::invalid("The package holds more than one .wasm file.", rebuild_hint()));
+    }
+    Ok(Opened { header, readme, captures: Vec::new(), firmware: Vec::new(), files })
+}
+
 /// Writes a package file from its files (path inside the package → contents). Checks it the way
 /// [`open`] does, so a package that packs also opens.
 pub fn pack(files: &BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>, PackageError> {
@@ -376,6 +488,7 @@ const LIST_HEADER: &str = "# Connector packages installed on this machine (docs/
 #[derive(Clone, Debug)]
 pub struct Store {
     connectors: PathBuf,
+    apps: PathBuf,
     work: PathBuf,
     list: PathBuf,
 }
@@ -384,6 +497,7 @@ impl Store {
     pub fn new(data_dir: &Path) -> Store {
         Store {
             connectors: data_dir.join("connectors"),
+            apps: data_dir.join("apps"),
             work: data_dir.join("packages"),
             list: data_dir.join("config").join(LIST_FILE),
         }
@@ -427,6 +541,17 @@ impl Store {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Err(missing()),
             Err(e) => Err(PackageError::io(&format!("read connectors/{id}/firmware/{board}.hex"), &e)),
         }
+    }
+
+    /// Where installed apps live, one folder per app.
+    pub fn apps_dir(&self) -> &Path {
+        &self.apps
+    }
+
+    /// The folder a package of `kind` with this id is installed in.
+    fn folder(&self, kind: &str, id: &str) -> PathBuf {
+        let base = if kind == manifest_file::APP_TYPE { &self.apps } else { &self.connectors };
+        base.join(id)
     }
 
     /// Every installed package, by id.
@@ -515,7 +640,7 @@ impl Store {
                 "Refresh the list; it may have been uninstalled already. Built-in connectors can't be uninstalled.",
             ));
         };
-        let folder = self.connectors.join(id);
+        let folder = self.folder(&installed.kind, id);
         let removing = self.work.join("removing").join(id);
         let gone = || -> io::Result<()> {
             remove_dir(&removing)?;
@@ -525,7 +650,7 @@ impl Store {
             }
             remove_dir(&removing)
         };
-        gone().map_err(|e| PackageError::io(&format!("remove connectors/{id}"), &e))?;
+        gone().map_err(|e| PackageError::io(&format!("remove the folder of {id}"), &e))?;
         self.write_list(&list)?;
         Ok(installed)
     }
@@ -554,14 +679,19 @@ impl<T> Prepared<T> {
         let _ = remove_dir(&self.staged);
     }
 
-    /// Moves the package into `<data>/connectors/<id>/`. The version it replaces is kept aside
-    /// until [`Swapped::keep`] (the new one loaded) or [`Swapped::roll_back`].
+    /// Moves the package into `<data>/connectors/<id>/` (an app into `<data>/apps/<id>/`, with
+    /// the state it saved). The version it replaces is kept aside until [`Swapped::keep`] (the
+    /// new one loaded) or [`Swapped::roll_back`].
     pub fn swap_in(self) -> Result<Swapped, PackageError> {
         let id = self.opened.header.id.clone();
-        let folder = self.store.connectors.join(&id);
+        let folder = self.store.folder(&self.opened.header.kind, &id);
         let previous = self.store.work.join("previous").join(&id);
         let swap = || -> io::Result<bool> {
-            std::fs::create_dir_all(&self.store.connectors)?;
+            std::fs::create_dir_all(folder.parent().expect("has a parent"))?;
+            let state = folder.join(APP_STATE);
+            if state.is_file() {
+                std::fs::copy(&state, self.staged.join(APP_STATE))?;
+            }
             remove_dir(&previous)?;
             let had_previous = folder.exists();
             if had_previous {
@@ -580,7 +710,7 @@ impl<T> Prepared<T> {
             Ok(h) => h,
             Err(e) => {
                 let _ = remove_dir(&self.staged);
-                return Err(PackageError::io(&format!("install into connectors/{id}"), &e));
+                return Err(PackageError::io(&format!("install {id}"), &e));
             }
         };
         Ok(Swapped {
@@ -936,6 +1066,74 @@ mod tests {
         std::fs::write(dir.path().join("config/packages.toml"), "[packages").unwrap();
         let e = store.list().unwrap_err();
         assert!(e.message.contains("packages.toml can't be read") && e.hint.contains("delete it"), "{e:?}");
+    }
+
+    const APP: &str = "faber-manifest = 1\n[package]\nid = \"wall-follower\"\ntype = \"app\"\n\
+        version = \"0.1.0\"\nname = \"Wall follower\"\nmodule = \"app.wasm\"\nui = \"ui/\"\n";
+
+    fn app_files(version: &str, extra: &[(&str, &[u8])]) -> BTreeMap<String, Vec<u8>> {
+        let mut f = files(extra);
+        f.insert(MANIFEST.into(), APP.replace("0.1.0", version).into_bytes());
+        f.insert("app.wasm".into(), b"\0asm".to_vec());
+        f.insert("ui/index.html".into(), b"<!doctype html>".to_vec());
+        f.insert("ui/assets/app-1.js".into(), b"1".to_vec());
+        f
+    }
+
+    #[test]
+    fn an_app_package_holds_its_logic_and_its_ui() {
+        let p = open(&pack(&app_files("0.1.0", &[])).unwrap()).unwrap();
+        assert_eq!((p.header.id.as_str(), p.header.kind.as_str()), ("wall-follower", "app"));
+        for (name, words) in [
+            ("ui/.env", "doesn't serve"),
+            ("ui/run.exe", "doesn't serve"),
+            ("ui/a b.html", "doesn't serve"),
+            ("ui/x/.git/config.txt", "doesn't serve"),
+            ("captures/a.fbcap", "doesn't expect"),
+            ("state.toml", "doesn't expect"),
+            ("other.wasm", "more than one .wasm"),
+        ] {
+            let e = pack(&app_files("0.1.0", &[(name, b"x")])).unwrap_err();
+            assert!(e.message.contains(words), "{name}: {e:?}");
+        }
+        let big = vec![0u8; UI_MAX_FILE_BYTES as usize + 1];
+        let e = from_files(app_files("0.1.0", &[("ui/big.png", &big)])).unwrap_err();
+        assert_eq!(e.code, "package-too-big", "{e:?}");
+        let many: Vec<(String, Vec<u8>)> =
+            (0..=UI_MAX_FILES).map(|i| (format!("ui/f{i}.js"), b"1".to_vec())).collect();
+        let many: Vec<(&str, &[u8])> = many.iter().map(|(n, d)| (n.as_str(), d.as_slice())).collect();
+        assert!(from_files(app_files("0.1.0", &many)).unwrap_err().message.contains("at most"));
+        // A connector's package never holds a UI.
+        assert!(pack(&files(&[("ui/index.html", b"x")])).unwrap_err().message.contains("ui/index.html"));
+    }
+
+    #[test]
+    fn ui_files_are_served_by_their_extension() {
+        assert_eq!(ui_content_type("index.HTML"), Some("text/html; charset=utf-8"));
+        assert_eq!(ui_content_type("a/b.js"), Some("text/javascript; charset=utf-8"));
+        assert_eq!(ui_content_type("noext"), None);
+        assert!(ui_path_ok("assets/app-1.2_x.js") && !ui_path_ok("assets/../x.js") && !ui_path_ok(""));
+    }
+
+    #[test]
+    fn an_app_installs_into_apps_and_keeps_its_state_across_an_update() {
+        let (dir, store) = store();
+        let open_app = |v: &str| open(&pack(&app_files(v, &[])).unwrap()).unwrap();
+        store.prepare(open_app("0.1.0"), |_| Ok(())).unwrap().swap_in().unwrap().keep("t", "a").unwrap();
+        let folder = dir.path().join("apps/wall-follower");
+        assert!(folder.join("ui/index.html").is_file() && folder.join("app.wasm").is_file());
+        assert!(!dir.path().join("connectors").exists());
+        assert_eq!(store.get("wall-follower").unwrap().unwrap().kind, "app");
+        std::fs::write(folder.join(APP_STATE), "laps = \"3\"\n").unwrap();
+
+        let s = store.prepare(open_app("0.2.0"), |_| Ok(())).unwrap().swap_in().unwrap();
+        assert_eq!(std::fs::read_to_string(folder.join(APP_STATE)).unwrap(), "laps = \"3\"\n");
+        s.roll_back().unwrap();
+        assert!(std::fs::read_to_string(folder.join("faber.toml")).unwrap().contains("0.1.0"));
+        assert!(folder.join(APP_STATE).is_file(), "the old version keeps it too");
+
+        store.uninstall("wall-follower").unwrap();
+        assert!(!folder.exists(), "uninstalling removes the app and its state");
     }
 
     #[test]

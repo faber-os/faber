@@ -1,0 +1,109 @@
+package faber:app@0.1.0;
+
+/// What an app sees of its roles (docs/apps.md §4): only the names in its manifest's
+/// `[[requires]]`, never the parts behind them, their ports or their connectors.
+interface roles {
+  use faber:connector/types@0.1.0.{reading};
+
+  /// One `[[requires]]` entry, and how many parts fill it now.
+  record role {
+    /// The role's name, e.g. `lidar`.
+    name: string,
+    /// The capability its parts provide, e.g. `laser-scan@1`.
+    capability: string,
+    /// Whether the app may drive it (`command = true`).
+    command: bool,
+    /// How many parts fill it: 1, or more for `count = "1.."`. Index them from 0.
+    parts: u32,
+  }
+
+  /// Every role, in the manifest's order.
+  all: func() -> list<role>;
+  /// The newest reading of the part at `index` in `role`, or none (no such role or part, or it
+  /// hasn't published yet).
+  latest: func(role: string, index: u32) -> option<reading>;
+  /// Like `latest`, but only a reading this app hasn't polled before: call it every tick to
+  /// follow a signal ("subscribe by polling").
+  poll: func(role: string, index: u32) -> option<reading>;
+}
+
+/// Driving the roles declared with `command = true`. The core holds the lease for the app (as
+/// `app:<id>`), so the app never sees a lease id. Every accepted command renews the lease; one
+/// that isn't renewed in time ends, and the part stops (the dead man's switch).
+interface drive {
+  use faber:connector/types@0.1.0.{command};
+
+  /// Why a lease or a command was refused.
+  variant drive-error {
+    /// No role with this name and index that the app may drive.
+    no-such-role,
+    /// Someone else drives the part; who.
+    held(string),
+    /// The app holds no lease on the role: it never asked, or released it.
+    lease-required,
+    /// The app's lease ended, and why (`taken-over`, `expired`, `estop`, `part-removed`, …).
+    /// Ask again to keep going.
+    lease-ended(string),
+    /// The e-stop is engaged; nothing may move until someone releases it.
+    estop-engaged,
+    /// The part doesn't take this command; what is wrong.
+    bad-command(string),
+    /// The part can't act right now; what is wrong.
+    part-not-ready(string),
+  }
+
+  /// Takes the lease on the part filling `role` (index `index`). Asking again while holding it
+  /// renews it.
+  acquire: func(role: string, index: u32) -> result<_, drive-error>;
+  /// Keeps the lease alive without a command.
+  renew: func(role: string, index: u32) -> result<_, drive-error>;
+  /// Lets go of the lease; the part gets its safe state.
+  release: func(role: string, index: u32);
+  /// Sends a command under the app's lease. Answers the command as applied (after clamping to
+  /// the part's limits).
+  send: func(role: string, index: u32, command: command) -> result<command, drive-error>;
+}
+
+/// Derived signals (D24): computed data under the app's own name, `app:<id>/<name>`.
+interface publish {
+  use faber:connector/types@0.1.0.{reading};
+
+  /// Publishes on one of the manifest's `[[publishes]]` names, with its capability. Anything
+  /// else is a bug: it stops the app.
+  publish: func(name: string, reading: reading);
+}
+
+/// A small key-value store that outlives restarts, saved by the core in
+/// `<data>/apps/<id>/state.toml`. At most 64 KB of keys and values together.
+interface state {
+  get: func(key: string) -> option<string>;
+  /// Fails, saying why, when the store would grow past its limit.
+  set: func(key: string, value: string) -> result<_, string>;
+  remove: func(key: string);
+  keys: func() -> list<string>;
+}
+
+/// Lines in the core's log, as `app:<id>`.
+interface log {
+  use faber:connector/types@0.1.0.{log-level};
+
+  log: func(level: log-level, message: string);
+}
+
+/// An app's logic. No files, network, environment or clock: time is passed in.
+world app {
+  use faber:capabilities/types@0.1.0.{timestamp};
+
+  import roles;
+  import drive;
+  import publish;
+  import state;
+  import log;
+
+  /// Called once when the app starts (it was enabled, its roles changed, or it restarted).
+  export start: func(now-us: timestamp);
+  /// Called `tick-hz` times a second, with the core's clock.
+  export tick: func(now-us: timestamp);
+  /// Called once when the app stops. Its leases end after this, whatever it does.
+  export stop: func();
+}

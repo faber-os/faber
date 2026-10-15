@@ -41,6 +41,7 @@ const SERVER_TYPE_LIST: Record<ServerMessage['type'], true> = {
   'lease-ended': true,
   estop: true,
   packages: true,
+  apps: true,
   world: true,
   'world-changed': true,
   flash: true,

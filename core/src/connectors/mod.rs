@@ -28,6 +28,11 @@ impl ShownAs {
         ShownAs(format!("connectors/{folder}/"))
     }
 
+    /// An installed app, in `<data>/apps/<folder>/`.
+    pub fn installed_app(folder: &str) -> ShownAs {
+        ShownAs(format!("apps/{folder}/"))
+    }
+
     /// The files inside a package file, e.g. `my-sensor-0.1.0.faberpkg`.
     pub fn package(file: &str) -> ShownAs {
         ShownAs(format!("{file}: "))

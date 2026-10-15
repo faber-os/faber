@@ -295,6 +295,123 @@ pub struct PackageInfo {
     pub firmware: Vec<String>,
 }
 
+// ---------------------------------------------------------------------------------------------
+// Apps (docs/apps.md, docs/api.md "Apps").
+
+/// One role an app requires (`[[requires]]`), and the parts picked for it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppRole {
+    pub role: String,
+    /// What a part must provide to fill it.
+    pub capability: Capability,
+    /// The app may drive it (it takes a lease on it, as `app:<id>`).
+    pub command: bool,
+    /// `1` (one part) or `1..` (one or more).
+    pub count: String,
+    /// The parts picked for it, in order. Empty: none yet (the app can't run).
+    pub parts: Vec<String>,
+}
+
+/// A derived signal an app publishes (`[[publishes]]`, D24): read-only, never a part's.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppSignal {
+    pub name: String,
+    pub capability: Capability,
+    /// Where it is published: `app:<id>/<name>`.
+    pub address: String,
+}
+
+/// How an app's UI opens in the shell (`[window]`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppWindow {
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// A URL under the app's own files, e.g. `/apps/<id>/ui/icon.svg`, when it has an icon.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    pub pinned: bool,
+}
+
+/// An installed app (`GET /api/v0/apps`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// Turned on by the user. It runs once every role has a part.
+    pub enabled: bool,
+    /// The same states as a part's: `stopped` while it is off.
+    pub state: PartState,
+    /// It has logic that runs in the background (a wasm component).
+    pub logic: bool,
+    /// How often its logic runs, when it has logic.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tick_hz: Option<u32>,
+    pub roles: Vec<AppRole>,
+    pub publishes: Vec<AppSignal>,
+    /// Where its UI starts (`/apps/<id>/ui/index.html`), when it has one.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<String>,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<AppWindow>,
+}
+
+/// What an app's package would install (`POST /api/v0/packages?mode=preview` with an app's
+/// package; a connector's answers a [`PackagePreview`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppPackagePreview {
+    /// The app as the core loaded it from the package. It installs turned off, with no parts
+    /// picked for its roles.
+    pub app: AppInfo,
+    /// Its README.md, as text (Markdown). Never HTML.
+    pub readme: String,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
+    pub checked: bool,
+}
+
+/// The parts for one role: one part's name, or a list (for a `count = "1.."` role).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(untagged)]
+#[ts(export)]
+pub enum RoleParts {
+    One(String),
+    Many(Vec<String>),
+}
+
+/// `PUT /api/v0/apps/{id}/roles`: the parts for each role. Roles left out get no part.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(export)]
+pub struct AppRolesRequest {
+    pub roles: std::collections::BTreeMap<String, RoleParts>,
+}
+
 /// Something plugged in over USB that the computer can't talk to, so it never became a port
 /// (e.g. a cable without data wires). Shown so an empty port list isn't a mystery.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -556,6 +673,9 @@ pub enum Topic {
     /// The Arduino flasher's progress: a `flash` message after every page it writes or reads
     /// back, on any port.
     Flash,
+    /// The installed apps: an `apps` list now and whenever one is installed, removed, turned on
+    /// or off, gets other parts, or changes state.
+    Apps,
 }
 
 /// Messages from the shell to the core.
@@ -685,6 +805,11 @@ pub enum ServerMessage {
     Packages {
         id: u32,
         packages: Vec<PackageInfo>,
+    },
+    /// Every installed app (the `apps` topic), as `GET /api/v0/apps` lists them.
+    Apps {
+        id: u32,
+        apps: Vec<AppInfo>,
     },
     /// The machine in the simulated world now (the `world` topic, 20 times a second).
     #[serde(rename_all = "camelCase")]

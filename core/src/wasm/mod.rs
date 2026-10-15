@@ -14,79 +14,23 @@
 //! A trap or a limit ends the call by unwinding with the [`Problem`] to show, which the runtime
 //! treats as a crash (`runtime::crash_problem`): the part fails with that message and restarts.
 
-mod convert;
 mod installed;
 
+pub use crate::sandbox::Limits;
 pub use installed::{load_folder, load_installed};
 
+use crate::sandbox::bindings::faber::connector::types as wit;
+use crate::sandbox::{self, LogLimit, MemoryLimit, PANIC_PREFIX, bindings, convert, engine, ticks};
 use faber_capabilities::{Command, Reading, Timestamp};
 use faber_connector::{
     Applied, CommandError, Connector, ConnectorKind, Context, Definition, Health, Manifest, Problem,
     Settings, SettingsError,
 };
 use std::panic::resume_unwind;
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 use wasmtime::component::{Component, HasSelf, Linker};
-use wasmtime::{Config, Engine, ResourceLimiter, Store, Trap};
-
-#[allow(clippy::all)]
-mod bindings {
-    wasmtime::component::bindgen!({
-        path: ["../wit/capabilities", "../wit/connector"],
-        world: "faber:connector/connector@0.1.0",
-    });
-}
-
-use bindings::faber::connector::types as wit;
-
-/// What one instance may use (docs/packages.md §4).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Limits {
-    /// Linear memory, per instance.
-    pub memory_bytes: usize,
-    /// Wall time per call into the component.
-    pub call_time: Duration,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Limits { memory_bytes: 32 << 20, call_time: Duration::from_millis(20) }
-    }
-}
-
-/// How often the engine's epoch advances; a call's deadline is counted in these.
-const EPOCH_TICK: Duration = Duration::from_millis(5);
-
-/// The prefix of the error log line the guest SDK writes just before it traps on a panic
-/// (`faber_connector_wasm::PANIC_PREFIX`).
-const PANIC_PREFIX: &str = "panicked: ";
-
-/// Log lines one instance may write per second; the rest are dropped and counted.
-const LOG_LINES_PER_S: u32 = 50;
-const LOG_LINE_MAX: usize = 2000;
-
-/// The one engine every wasm connector runs on, with the thread that advances its epoch.
-fn engine() -> &'static Engine {
-    static ENGINE: OnceLock<Engine> = OnceLock::new();
-    ENGINE.get_or_init(|| {
-        let mut config = Config::new();
-        config.wasm_component_model(true);
-        config.epoch_interruption(true);
-        let engine = Engine::new(&config).expect("the wasm engine's configuration is valid");
-        let ticking = engine.clone();
-        std::thread::Builder::new()
-            .name("wasm-epoch".into())
-            .spawn(move || {
-                loop {
-                    std::thread::sleep(EPOCH_TICK);
-                    ticking.increment_epoch();
-                }
-            })
-            .expect("spawn the wasm epoch thread");
-        engine
-    })
-}
+use wasmtime::{Store, Trap};
 
 fn bug_hint() -> &'static str {
     "Faber restarts it automatically. If this keeps happening, report it to the connector's author."
@@ -112,7 +56,7 @@ pub fn definition(manifest: Manifest, wasm: &[u8], limits: Limits) -> Result<Def
     };
     let component = Component::new(engine, wasm)
         .map_err(|e| not_loadable(format!("it isn't a WebAssembly component ({e})")))?;
-    let forbidden = forbidden_imports(engine, &component);
+    let forbidden = sandbox::forbidden_imports(engine, &component, &[CONTEXT]);
     if !forbidden.is_empty() {
         return Err(Problem::new(
             format!(
@@ -139,43 +83,17 @@ pub fn definition(manifest: Manifest, wasm: &[u8], limits: Limits) -> Result<Def
 /// The only interface a connector may call.
 const CONTEXT: &str = "faber:connector/context@0.1.0";
 
-/// Everything a component imports beyond the connector world: anything outside `faber:`, and
-/// any function outside `context` (the capability interfaces it takes types from also declare
-/// commands for apps).
-fn forbidden_imports(engine: &Engine, component: &Component) -> Vec<String> {
-    use wasmtime::component::types::ComponentItem;
-    let mut out = Vec::new();
-    for (name, item) in component.component_type().imports(engine) {
-        if !name.starts_with("faber:") {
-            out.push(name.to_string());
-            continue;
-        }
-        match item.ty {
-            ComponentItem::ComponentInstance(instance) if name != CONTEXT => {
-                for (func, kind) in instance.exports(engine) {
-                    if matches!(kind.ty, ComponentItem::ComponentFunc(_)) {
-                        out.push(format!("{name}#{func}"));
-                    }
-                }
-            }
-            ComponentItem::ComponentInstance(_) | ComponentItem::Type(_) => {}
-            _ => out.push(name.to_string()),
-        }
-    }
-    out
-}
-
 impl Compiled {
     fn create(&self, settings: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
         let host = Host {
             name: self.manifest.name.clone(),
             id: self.manifest.id.clone(),
             signals: Arc::clone(&self.signals),
-            memory: MemoryLimit { max: self.limits.memory_bytes, hit: false },
+            memory: MemoryLimit::new(self.limits.memory_bytes),
             events: Vec::new(),
             refused: None,
             panic: None,
-            log_window: (Instant::now(), 0, 0),
+            log: LogLimit::default(),
         };
         let mut store = Store::new(engine(), host);
         store.limiter(|h| &mut h.memory);
@@ -203,38 +121,8 @@ impl Compiled {
     }
 }
 
-/// Epoch ticks for a call that may take `limit`: never less than `limit`, at most a tick more.
-fn ticks(limit: Duration) -> u64 {
-    (limit.as_micros().div_ceil(EPOCH_TICK.as_micros()) + 1) as u64
-}
-
 fn store_deadline(store: &mut Store<Host>, ticks: u64) {
     store.set_epoch_deadline(ticks);
-}
-
-/// Keeps one instance under its memory limit, and remembers hitting it.
-struct MemoryLimit {
-    max: usize,
-    hit: bool,
-}
-
-impl ResourceLimiter for MemoryLimit {
-    fn memory_growing(
-        &mut self,
-        _current: usize,
-        desired: usize,
-        _: Option<usize>,
-    ) -> wasmtime::Result<bool> {
-        if desired > self.max {
-            self.hit = true;
-            return Ok(false);
-        }
-        Ok(true)
-    }
-
-    fn table_growing(&mut self, _current: usize, desired: usize, _: Option<usize>) -> wasmtime::Result<bool> {
-        Ok(desired <= 100_000)
-    }
 }
 
 /// What a connector did during one call, replayed into the part's [`Context`] after it.
@@ -254,8 +142,7 @@ struct Host {
     refused: Option<Problem>,
     /// The guest's last panic message, written just before it traps.
     panic: Option<String>,
-    /// Start of the current second, lines logged in it, lines dropped in it.
-    log_window: (Instant, u32, u32),
+    log: LogLimit,
 }
 
 impl bindings::faber::connector::context::Host for Host {
@@ -290,25 +177,7 @@ impl bindings::faber::connector::context::Host for Host {
         {
             self.panic = Some(text.to_string());
         }
-        let (start, lines, dropped) = &mut self.log_window;
-        if start.elapsed() >= Duration::from_secs(1) {
-            if *dropped > 0 {
-                tracing::warn!(target: "core::wasm", "{}: {dropped} log lines dropped (too many)", self.id);
-            }
-            *start = Instant::now();
-            (*lines, *dropped) = (0, 0);
-        }
-        if *lines >= LOG_LINES_PER_S {
-            *dropped += 1;
-            return;
-        }
-        *lines += 1;
-        let mut text = message;
-        if text.len() > LOG_LINE_MAX {
-            let cut = (0..=LOG_LINE_MAX).rev().find(|i| text.is_char_boundary(*i)).unwrap_or(0);
-            text.truncate(cut);
-            text.push('…');
-        }
+        let Some(text) = self.log.admit(&self.id, message) else { return };
         log_line(level, &self.id, &text);
     }
 }
@@ -455,25 +324,5 @@ impl Connector for WasmConnector {
         self.call(ctx, "handle a command", |c, s| c.call_command(s, cmd))
             .map(|a| Applied { command: convert::command_from_wit(a.command) })
             .map_err(convert::command_error_from_wit)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_call_gets_at_least_its_time_and_at_most_a_tick_more() {
-        let t = ticks(Duration::from_millis(20));
-        assert!(Duration::from_millis(20) <= EPOCH_TICK * (t as u32 - 1));
-        assert!(EPOCH_TICK * (t as u32 - 1) <= Duration::from_millis(20) + EPOCH_TICK);
-    }
-
-    #[test]
-    fn the_default_limits_are_the_documented_ones() {
-        assert_eq!(
-            Limits::default(),
-            Limits { memory_bytes: 32 * 1024 * 1024, call_time: Duration::from_millis(20) }
-        );
     }
 }

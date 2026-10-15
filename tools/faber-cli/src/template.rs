@@ -1,6 +1,7 @@
 //! `faber new connector <name>`: a ready project from `templates/connector-rust` (a wasm
 //! connector in Rust) or `templates/connector-declarative` (only a `faber.toml`). Both build,
 //! check and pass their tests against a recorded capture before you change a line.
+//! `faber new app <name>`: a ready app from `templates/app-rust` (logic in Rust, and a UI).
 
 use crate::CliError;
 use faber_connector::capture::{self, Chunk};
@@ -46,6 +47,14 @@ const RUST: &[(&str, &str)] = template!("connector-rust":
 const DECLARATIVE: &[(&str, &str)] =
     template!("connector-declarative": "faber.toml", "README.md", "LICENSE", ".gitignore");
 
+const APP: &[(&str, &str)] = template!("app-rust":
+    "Cargo.toml", "faber.toml", "README.md", "LICENSE", ".gitignore", "src/lib.rs", "ui/index.html",
+);
+/// The app template's own names.
+const APP_ID: &str = "my-app";
+const APP_CRATE: &str = "my_app";
+const APP_NAME: &str = "My app";
+
 /// Where the recording both templates are tested against goes.
 pub const SAMPLE: &str = "captures/sample.fbcap";
 
@@ -78,10 +87,51 @@ pub fn sdk_dir() -> String {
 
 /// Writes a new connector project called `name` into `parent/name`, and returns its folder.
 pub fn new_connector(name: &str, kind: Kind, parent: &Path) -> Result<PathBuf, CliError> {
+    let files = match kind {
+        Kind::Wasm => RUST,
+        Kind::Declarative => DECLARATIVE,
+    };
+    let dir = write_project(name, "connector", "acme-ranger", parent, files, (ID, CRATE, NAME))?;
+    write_file(&dir, SAMPLE, &sample_capture())?;
+    Ok(dir)
+}
+
+/// Writes a new app project called `name` into `parent/name`, and returns its folder.
+pub fn new_app(name: &str, parent: &Path) -> Result<PathBuf, CliError> {
+    write_project(name, "app", "wall-follower", parent, APP, (APP_ID, APP_CRATE, APP_NAME))
+}
+
+fn write_file(dir: &Path, rel: &str, bytes: &[u8]) -> Result<(), CliError> {
+    let path = dir.join(rel);
+    let made = path
+        .parent()
+        .map(std::fs::create_dir_all)
+        .unwrap_or(Ok(()))
+        .and_then(|_| std::fs::write(&path, bytes));
+    made.map_err(|e| {
+        CliError::new(
+            format!("{} can't be written: {e}", path.display()),
+            "Check that you may write to this folder.",
+        )
+    })
+}
+
+/// Copies a template into `parent/name`, with the template's own id, crate name and display
+/// name (`names`) replaced by the new project's, and the SDK paths by this checkout's.
+fn write_project(
+    name: &str,
+    what: &str,
+    example: &str,
+    parent: &Path,
+    files: &[(&str, &str)],
+    names: (&str, &str, &str),
+) -> Result<PathBuf, CliError> {
     if !is_kebab_name(name) {
         return Err(CliError::new(
-            format!("\"{name}\" can't be a connector's name."),
-            "Use lowercase words joined by -, starting with a letter, like acme-ranger. It becomes the connector's id.",
+            format!("\"{name}\" can't be a{} {what}'s name.", if what.starts_with('a') { "n" } else { "" }),
+            format!(
+                "Use lowercase words joined by -, starting with a letter, like {example}. It becomes the {what}'s id."
+            ),
         ));
     }
     let dir = parent.join(name);
@@ -91,36 +141,18 @@ pub fn new_connector(name: &str, kind: Kind, parent: &Path) -> Result<PathBuf, C
             "Pick another name, or remove that folder first.",
         ));
     }
-    let files = match kind {
-        Kind::Wasm => RUST,
-        Kind::Declarative => DECLARATIVE,
-    };
+    let (id, crate_id, display_id) = names;
     let crate_name = name.replace('-', "_");
     let display = display_name(name);
     let sdk = sdk_dir();
-    let write = |rel: &str, bytes: &[u8]| -> Result<(), CliError> {
-        let path = dir.join(rel);
-        let made = path
-            .parent()
-            .map(std::fs::create_dir_all)
-            .unwrap_or(Ok(()))
-            .and_then(|_| std::fs::write(&path, bytes));
-        made.map_err(|e| {
-            CliError::new(
-                format!("{} can't be written: {e}", path.display()),
-                "Check that you may write to this folder.",
-            )
-        })
-    };
     for (rel, text) in files {
         let text = text
-            .replace(ID, name)
-            .replace(CRATE, &crate_name)
-            .replace(NAME, &display)
+            .replace(id, name)
+            .replace(crate_id, &crate_name)
+            .replace(display_id, &display)
             .replace(SDK_PATH, &sdk);
-        write(rel, text.as_bytes())?;
+        write_file(&dir, rel, text.as_bytes())?;
     }
-    write(SAMPLE, &sample_capture())?;
     Ok(dir)
 }
 
@@ -144,6 +176,22 @@ mod tests {
         assert_eq!(std::fs::read(project.join(SAMPLE)).unwrap(), sample_capture());
         assert!(project.join(".gitignore").exists());
         assert!(Path::new(&sdk_dir()).join("connector/Cargo.toml").exists(), "{}", sdk_dir());
+    }
+
+    #[test]
+    fn an_app_gets_its_id_crate_and_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = new_app("nearest-wall", dir.path()).unwrap();
+        let toml = std::fs::read_to_string(project.join("faber.toml")).unwrap();
+        assert!(toml.contains("id = \"nearest-wall\"") && toml.contains("name = \"Nearest wall\""), "{toml}");
+        assert!(toml.contains("type = \"app\""), "{toml}");
+        let cargo = std::fs::read_to_string(project.join("Cargo.toml")).unwrap();
+        assert!(cargo.contains(&format!("path = \"{}app-wasm\"", sdk_dir())), "{cargo}");
+        let ui = std::fs::read_to_string(project.join("ui/index.html")).unwrap();
+        assert!(ui.contains("app:nearest-wall/nearest"), "{ui}");
+        assert!(!project.join(SAMPLE).exists(), "an app has no recordings");
+        let e = new_app("Nearest Wall", dir.path()).unwrap_err();
+        assert!(e.message.contains("an app's name") && e.hint.contains("wall-follower"), "{e:?}");
     }
 
     #[test]

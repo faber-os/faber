@@ -17,7 +17,10 @@ pub mod leases;
 pub mod logs;
 pub mod packages;
 pub mod ports;
+pub mod roles;
 pub mod router;
+pub mod sandbox;
+
 pub mod runtime;
 pub mod settings;
 pub mod sim;
@@ -26,6 +29,7 @@ pub mod suggest;
 pub mod translations;
 
 // Layer 3: runs parts (`runtime` and `suggest` too; see docs/development.md).
+pub mod apps;
 pub mod bridge;
 pub mod declarative;
 pub mod simparts;

@@ -1,5 +1,10 @@
 # Phase 3 design: packages and sandboxing
 
+> **Apps (Phase 5a)** use the same package file, installer and sandbox: a package with
+> `[package] type = "app"` installs into `<data>/apps/<id>/` with its UI in `ui/`. What differs is
+> in [apps.md](apps.md) §8 and [api.md](api.md), "Packages". The engine, limits and import check
+> both kinds share now live in `core/src/sandbox/` (layer 2).
+
 Status: **built** (2026-10-15). Builds on D03, D07, D08, D09, D10 and D18. The roadmap's Phase 3
 says what "done" means; this says how, and each section says what was built: the wasm sandbox and
 its WIT (§3, §4, Phase 3a), the declarative engine (§6, Phase 3c), and packages, the installer and

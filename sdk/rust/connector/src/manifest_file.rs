@@ -28,11 +28,15 @@ pub struct PackageManifest {
     pub publisher: Option<String>,
 }
 
+/// `[package] type` of an app, and the [`PackageHeader::kind`] an app package has.
+pub const APP_TYPE: &str = "app";
+
 /// `[package]` alone, read without the rest of the file: what an installer shows and checks
 /// before it hands the whole file to the reader for its kind.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackageHeader {
     pub id: String,
+    /// `wasm` or `declarative` for a connector, `app` for an app.
     pub kind: String,
     pub version: String,
     pub name: String,
@@ -189,7 +193,12 @@ pub fn header(text: &str) -> Result<PackageHeader, Problem> {
         None => None,
         Some(_) => Some(text_of("publisher")?),
     };
-    Ok(PackageHeader { id, kind: text_of("kind")?, version, name: text_of("name")?, publisher })
+    // An app has no kind of its own (docs/apps.md §3): its kind is "app".
+    let kind = match package.get("type").and_then(toml::Value::as_str) {
+        Some(APP_TYPE) => APP_TYPE.to_string(),
+        _ => text_of("kind")?,
+    };
+    Ok(PackageHeader { id, kind, version, name: text_of("name")?, publisher })
 }
 
 fn example(key: &str) -> &'static str {
@@ -562,8 +571,12 @@ mod tests {
                 publisher: Some("Ada".into()),
             }
         );
+        let app = "faber-manifest = 1\n[package]\nid = \"wall-follower\"\ntype = \"app\"\n\
+                   version = \"0.1.0\"\nname = \"Wall follower\"\n";
+        assert_eq!(header(app).unwrap().kind, "app", "an app needs no kind");
         let cases = [
             (text.replace("faber-manifest = 1\n", ""), "which manifest format"),
+            (text.replace("kind = \"declarative\"\n", ""), "[package] has no kind"),
             (text.replace("\"my-sensor\"", "\"My Sensor\""), "not a valid connector id"),
             (text.replace("\"0.2.0\"", "\"1\""), "not a version number"),
             (text.replace("name = \"My sensor\"\n", ""), "[package] has no name"),

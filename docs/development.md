@@ -25,6 +25,7 @@ core/                     faber-core: the single Rust process (lib + binary)
 sdk/rust/capabilities/    faber-capabilities: capability data types (mirror of wit/)
 sdk/rust/connector/       faber-connector: the connector trait and manifest types (and faber.toml)
 sdk/rust/connector-wasm/  faber-connector-wasm: builds a connector as a WebAssembly component
+sdk/rust/app-wasm/        faber-app-wasm: builds an app's logic as a WebAssembly component (docs/apps.md)
 sdk/rust/faberlink/       faberlink: the FaberLink bridge protocol, core side (docs/faberlink.md)
 sdk/rust/flash/           faber-flash: the Arduino flasher's protocols (Intel HEX, STK500v1 and v2)
 connectors/ldrobot-ld19/  first connector: built in, and the same code as a WebAssembly component
@@ -33,8 +34,9 @@ tools/arch-check/         enforces the crate dependency rules below
 tools/faber-cli/          the `faber` command: new connector from a template, check, pack
 tools/faberlink-interop/  tests the Rust FaberLink session against the C++ library, compiled for the PC
 firmware/faberlink/       the FaberLink Arduino library (C++): the board side of a bridge
-templates/                the connector templates `faber new connector` copies (Rust/wasm, declarative)
-wit/                      capability interfaces, and the connector world (wit/connector)
+templates/                the templates `faber new connector` (Rust/wasm, declarative) and `faber new app` copy
+examples/apps/            example apps, tested in CI (the wall follower)
+wit/                      capability interfaces, the connector world (wit/connector) and the app world (wit/app)
 fixtures/                 test data, e.g. a real LD19 capture
 ```
 
@@ -53,12 +55,14 @@ faber-core ──► faber-connector ──► faber-capabilities
 | `faber-capabilities` | `serde`, plus `ts-rs` behind the `typescript` feature (code generation only) | anything with I/O |
 | `faber-connector` | `faber-capabilities`, `serde`, `toml` | I/O, async runtimes, `faber-core` |
 | `faber-connector-wasm` | `faber-connector`, `faber-capabilities`, `toml`, `wit-bindgen` (the component glue; its generated code is the only `unsafe` allowed outside the core's dependencies) | I/O, `faber-core` |
-| connectors (`connectors/*`, and the core's test guests in `core/tests/wasm-guests/*`) | `faber-connector`, `faber-capabilities`, `toml`, and `faber-connector-wasm` for their wasm build | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
+| apps (`examples/apps/*`, and the core's test apps in `core/tests/wasm-guests/app-*`) | `faber-app-wasm`, `faber-capabilities` | anything else. An app sees the machine only through its roles. |
+| connectors (`connectors/*`, and the core's other test guests in `core/tests/wasm-guests/*`) | `faber-connector`, `faber-capabilities`, `toml`, and `faber-connector-wasm` for their wasm build | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
+| `faber-app-wasm` | `faber-capabilities`, `wit-bindgen` (the component glue, as for `faber-connector-wasm`) | I/O, `faber-core` |
 | `faberlink` (the bridge protocol, [faberlink.md](faberlink.md)) | `faber-capabilities` | any I/O crate. It turns bytes into messages and back; the clock is passed in. |
 | `faber-flash` (the Arduino flasher: Intel HEX, STK500v1 for Optiboot, STK500v2 for the Mega) | nothing | any I/O crate. The serial port, its reset line and the clock come in through a trait; its simulated bootloaders are the tests' boards. |
 | `faberlink-interop` (tests only) | `cc` (a build dependency: it compiles the Arduino library's C++ core and a fake-board harness). Its FFI module is the only other `unsafe` code in the workspace. The core's tests use its fake board (a dev-dependency). | anything else |
 | `faber-core` | everything above, plus I/O crates | — |
-| `faber-cli` (the `faber` command) | `faber-core` (its package checks and its sandbox, so `faber check` accepts exactly what a machine runs), `faber-connector`, `faber-capabilities`, `clap`, `toml`, `wit-component` | anything else |
+| `faber-cli` (the `faber` command, for connectors and apps) | `faber-core` (its package checks and its sandbox, so `faber check` accepts exactly what a machine runs), `faber-connector`, `faber-capabilities`, `clap`, `toml`, `wit-component` | anything else |
 
 **Inside `faber-core`**, the modules form layers. A module may only use the layers below it:
 
@@ -66,8 +70,8 @@ faber-core ──► faber-connector ──► faber-capabilities
 |---|---|---|
 | 5 | `api` | HTTP + WebSocket. Translates between the wire and the machine. No logic of its own. |
 | 4 | `machine` | Ties everything together. The only place that changes what runs: it writes `parts.toml` first, then reconciles. |
-| 3 | `bridge`, `declarative`, `runtime`, `simparts`, `suggest`, `wasm` | Supervising parts, running FaberLink boards and their sub-parts (`faber-bridge`, [faberlink.md](faberlink.md)), the declarative connector engine (connectors that are only a `faber.toml`), the world engine that runs `simulate = "world"` parts, detect-then-suggest, and running wasm connectors in their sandbox (docs/packages.md). Built on layer 2. |
-| 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `packages`, `ports`, `router`, `settings`, `sim`, `simulation`, `translations` | One job each. They don't know about HTTP or each other. |
+| 3 | `apps`, `bridge`, `declarative`, `runtime`, `simparts`, `suggest`, `wasm` | Running apps' logic in its sandbox and filling their roles ([apps.md](apps.md)), supervising parts, running FaberLink boards and their sub-parts (`faber-bridge`, [faberlink.md](faberlink.md)), the declarative connector engine (connectors that are only a `faber.toml`), the world engine that runs `simulate = "world"` parts, detect-then-suggest, and running wasm connectors in their sandbox (docs/packages.md). Built on layer 2. |
+| 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `packages`, `ports`, `roles`, `router`, `sandbox`, `settings`, `sim`, `simulation`, `translations` | One job each. They don't know about HTTP or each other. `sandbox` is the WebAssembly engine, limits and WIT bindings that wasm connectors and app logic share. |
 | 1 | `clock`, `names` | Small pure building blocks. |
 
 This is enforced by `core/tests/layers.rs`, which fails with the file and line of any import that
@@ -102,7 +106,8 @@ that isn't. How translations work, and `npm run i18n:check`: [translations.md](t
 | The Arduino flasher | `cargo test` | `sdk/rust/flash`: Intel HEX (checksums, extended addresses, cut-off files) and both bootloader protocols against simulated bootloaders written from the specs (AVR061, AVR068): write, read back and compare a fake flash; no answer, a wrong chip, a board falling silent, a bad flash cell, damaged answers. `core/tests/flash.rs` flashes through the HTTP API behind a fake serial port. Never a real port |
 | FaberLink | `cargo test` | `sdk/rust/faberlink`: property tests for the framing, every message and capability layout, and the session state machine. `tools/faberlink-interop`: the Rust session against the Arduino library's C++ core, compiled on the PC with the `cc` crate (MSVC on Windows, g++/clang elsewhere) and driven over an in-memory pipe with a fake clock: handshake, readings, commands, the board's safety rules, corruption and version mismatch. `core/tests/bridge.rs` is the Phase 4 proof: the same C++ board behind a fake serial port, driven through the HTTP API |
 | Packages | `cargo test` | `core/tests/packages.rs`: preview, install while the core runs, parts restarting on an update, uninstall refused while used, and every refusal with its hint |
-| Interfaces | `wasm-tools component wit wit/capabilities`, and the connector world (see [wit/connector](../wit/connector/README.md)) | CI |
+| Apps | `cargo test` | `core/tests/apps.rs` is the Phase 5a proof: the wall-follower example (`examples/apps/wall-follower`), built and packed, installed on a test core, bound to a simulated SENNEP in the apartment, drives along a wall without bumping and publishes its derived signal; turning it off, a part leaving a role, an operator taking over and a trap in a test app (`core/tests/wasm-guests/app-trap`) each end its lease and stop the base. `tools/faber-cli/tests/first_app.rs` takes `faber new app` from the template to running on a core. Skipped like the wasm tests without the target |
+| Interfaces | `wasm-tools component wit wit/capabilities`, the connector world (see [wit/connector](../wit/connector/README.md)) and the app world (see [wit/app](../wit/app/README.md)) | CI |
 
 ## End-to-end tests
 

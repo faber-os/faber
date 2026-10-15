@@ -2,13 +2,16 @@
 resolver = "3"
 members = [
     "core",
+    "sdk/rust/app-wasm",
     "sdk/rust/capabilities",
     "sdk/rust/connector",
     "sdk/rust/connector-wasm",
     "sdk/rust/faberlink",
     "sdk/rust/flash",
     "connectors/ldrobot-ld19",
+    "core/tests/wasm-guests/app-trap",
     "core/tests/wasm-guests/misbehaving",
+    "examples/apps/wall-follower",
     "tools/arch-check",
     "tools/faberlink-interop",
     "tools/faber-cli",
