@@ -462,11 +462,28 @@ impl Session {
     pub fn set_estop(&mut self, engaged: bool, source: estop::Source, reason: &str) {
         self.estop = engaged;
         if matches!(self.state, State::Describing | State::Ready) {
-            let reason: String = reason.chars().take(60).collect();
+            let reason = fit(reason, self.max_reason_len());
             let m = Message::Estop(Estop { engaged, source, reason });
             self.send(&m).expect("a short reason always encodes");
         }
     }
+}
+
+impl Session {
+    /// The longest e-stop reason that fits the board's buffers (and never more than 60 bytes).
+    fn max_reason_len(&self) -> usize {
+        let max_payload = self.board.as_ref().map_or(frame::MAX_PAYLOAD as u8, |b| b.max_payload);
+        (max_payload as usize).saturating_sub(3).min(60)
+    }
+}
+
+/// `s` cut to at most `max` bytes, at a character boundary.
+fn fit(s: &str, max: usize) -> String {
+    let mut end = s.len().min(max);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
 }
 
 fn set_t_us(r: &mut Reading, t: u64) {
@@ -655,6 +672,30 @@ mod tests {
         );
         s.tick(101_000);
         assert_eq!(sent(&s.take_output()), [Message::Heartbeat(Heartbeat { estop: true })]);
+    }
+
+    #[test]
+    fn an_estop_reason_is_cut_to_fit_the_board() {
+        let mut s = Session::new(SessionConfig::default(), 0);
+        let mut b = Board { seq: 0 };
+        let ack = Message::HelloAck(HelloAck {
+            version: 1,
+            min_version: 1,
+            max_version: 1,
+            max_payload: 32,
+            heartbeat_timeout_ms: 250,
+            part_count: 0,
+            board: "uno".into(),
+            firmware: "f".into(),
+            firmware_version: "1".into(),
+        });
+        s.receive(&b.wire(ack), 0);
+        s.take_output();
+        s.set_estop(true, estop::Source::App, &"ø".repeat(40));
+        let out = sent(&s.take_output());
+        let [Message::Estop(e)] = &out[..] else { panic!("{out:?}") };
+        assert_eq!(e.reason, "ø".repeat(14), "29 bytes fit; a 2-byte character is never split");
+        assert_eq!(fit("abc", 10), "abc");
     }
 
     #[test]
