@@ -8,7 +8,10 @@
 //! See docs/architecture.md §4 and docs/development.md.
 
 pub mod capture;
+pub mod settings;
 pub mod testing;
+
+pub use settings::{Choice, Number, SettingKind, SettingSpec};
 
 use faber_capabilities::{Capability, Command, Info, Reading, Timestamp};
 
@@ -24,6 +27,9 @@ pub struct Manifest {
     pub version: String,
     pub port: PortRequirement,
     pub provides: Vec<Provide>,
+    /// Every setting a part of this kind takes, in the order a form shows them
+    /// ([`settings`]). Empty: it takes none.
+    pub settings: Vec<SettingSpec>,
     /// USB adapters this hardware often comes with, for detect-then-suggest (docs/principles.md).
     pub usb_hints: Vec<UsbHint>,
 }
@@ -179,6 +185,9 @@ pub enum ManifestError {
     NothingProvided,
     /// A provide's info is for another capability than the provide's.
     InfoMismatch(String),
+    /// A setting's declaration can't be used: why.
+    BadSetting(String),
+    DuplicateSetting(String),
 }
 
 impl Manifest {
@@ -199,6 +208,15 @@ impl Manifest {
             }
             if p.info.as_ref().is_some_and(|i| i.capability() != p.capability) {
                 return Err(ManifestError::InfoMismatch(p.name.clone()));
+            }
+        }
+        let mut keys = std::collections::BTreeSet::new();
+        for s in &self.settings {
+            if let Some(problem) = s.problem() {
+                return Err(ManifestError::BadSetting(problem));
+            }
+            if !keys.insert(s.key.as_str()) {
+                return Err(ManifestError::DuplicateSetting(s.key.clone()));
             }
         }
         Ok(())
@@ -229,6 +247,9 @@ mod tests {
             version: "0.1.0".into(),
             port: PortRequirement::Serial { baud: 9600 },
             provides: vec![Provide::default_for(Capability::LaserScan)],
+            settings: vec![
+                SettingSpec::number("rate-hz", "Rate", "How often it measures.", "Hz", 10.0).positive(),
+            ],
             usb_hints: Vec::new(),
         }
     }
@@ -270,6 +291,14 @@ mod tests {
         let mut m = manifest();
         m.provides[0].info = Some(Info::Estop(faber_capabilities::estop::Info { hardware_latching: false }));
         assert_eq!(m.validate(), Err(ManifestError::InfoMismatch("laser-scan".into())));
+
+        let mut m = manifest();
+        m.settings.push(m.settings[0].clone());
+        assert_eq!(m.validate(), Err(ManifestError::DuplicateSetting("rate-hz".into())));
+
+        let mut m = manifest();
+        m.settings[0].key = "Rate".into();
+        assert!(matches!(m.validate(), Err(ManifestError::BadSetting(_))));
     }
 
     #[test]

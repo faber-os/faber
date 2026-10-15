@@ -53,6 +53,7 @@ const ld19: ConnectorInfo = {
   kind: 'built-in',
   port: { kind: 'serial', baud: 230400 },
   provides: [{ name: 'laser-scan', capability: 'laser-scan@1' }],
+  settings: [],
 };
 
 const replay: PortInfo = {

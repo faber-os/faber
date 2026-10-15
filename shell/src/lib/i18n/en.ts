@@ -287,34 +287,17 @@ export const en = {
   'addPart.source.world.help':
     'The simulated world gives its values. A drive base becomes the machine in the world.',
 
-  // Add part form: the settings of a generic part (lib/state/connectorSettings.ts)
+  // Add part form: a connector's settings (lib/state/connectorSettings.ts). The labels and
+  // descriptions of the settings themselves come from the connector, in English (translations.md).
   'addPart.settings.legend': 'Set its limits',
   'addPart.settings.help':
     'Faber keeps every command within these. They are saved in parts.toml, where you can change them later.',
-  'addPart.settings.base.length': 'Length',
-  'addPart.settings.base.width': 'Width',
-  'addPart.settings.base.holonomic': 'Can drive sideways (mecanum or omni wheels)',
-  'addPart.settings.base.maxVx': 'Top speed forward',
-  'addPart.settings.base.maxVy': 'Top speed sideways',
-  'addPart.settings.base.maxOmega': 'Top turning speed',
-  'addPart.settings.base.maxAccel': 'Acceleration',
-  'addPart.settings.motor.maxVelocity': 'Top speed',
-  'addPart.settings.motor.kind': 'Kind of motor',
-  'addPart.settings.distance.minM': 'Closest it can measure',
-  'addPart.settings.distance.maxM': 'Farthest it can measure',
-  'addPart.settings.distance.fov': 'Field of view',
-  'addPart.settings.distance.kind': 'Kind of sensor',
-  'addPart.settings.choice.dc': 'DC motor',
-  'addPart.settings.choice.stepper': 'Stepper',
-  'addPart.settings.choice.bldc': 'Brushless (BLDC)',
-  'addPart.settings.choice.continuousServo': 'Continuous servo',
-  'addPart.settings.choice.ultrasonic': 'Ultrasonic',
-  'addPart.settings.choice.laserTof': 'Laser time-of-flight',
-  'addPart.settings.choice.infrared': 'Infrared',
-  'addPart.settings.choice.radar': 'Radar',
   'addPart.settings.notANumber': '{label} must be a number.',
-  'addPart.settings.mustBePositive': '{label} must be more than 0.',
-  'addPart.settings.mustNotBeNegative': "{label} can't be below 0.",
+  'addPart.settings.mustBeAbove': '{label} must be more than {min}.',
+  'addPart.settings.mustBeAtLeast': "{label} can't be below {min}.",
+  'addPart.settings.mustBeAtMost': "{label} can't be above {max}.",
+  'addPart.settings.advanced': 'Advanced settings',
+  'addPart.settings.noParts': 'There are no other parts to pick yet.',
 
   // Add part form: step 3, the name (also the checks in lib/state/partName.ts)
   'addPart.name.legend': 'Give it a name',

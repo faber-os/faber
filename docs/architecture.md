@@ -159,6 +159,28 @@ serial = { baud = 230400 }          # any UART or USB-serial port the user picks
 capability = "laser-scan@1"
 ```
 
+**Settings** are declared in the manifest too, one `[[settings]]` table each: its key, a label and
+a one-sentence description, its kind (`number`, `bool`, `choice`, `string` or `part-list`), and
+for a number its unit, default and limits (`min`, `min-exclusive`, `max`, and a `suggested` value a
+new part's form starts at). The shell builds the Add part form from them, and the connector reads
+its settings against them, so a default or a limit is written once. Built-in connectors declare
+the same thing in Rust (`faber_connector::SettingSpec`); the LD19 has none.
+
+```toml
+[[settings]]
+key = "max-m"
+label = "Farthest it can measure"
+description = "Anything farther reads as too far. From the sensor's datasheet."
+kind = "number"
+unit = "m"
+default = 4.0
+min = 0.0
+min-exclusive = true
+```
+
+A default is what a part gets when parts.toml leaves the setting out, so changing one changes
+existing machines; it stays put once released.
+
 **What a connector may touch:** only the ports it declared and the user assigned to the part.
 A WASM connector physically cannot open anything else: the port manager hands it a handle, not a
 path. Native connectors get only the device nodes of their claimed ports, enforced by systemd

@@ -1,6 +1,7 @@
 // The core's data types, as the UI may use them. The UI imports types from here, never from the
 // API layer directly (docs/development.md, shell layering).
 export type { ConnectorInfo } from '../api/generated/ConnectorInfo';
+export type { SettingInfo } from '../api/generated/SettingInfo';
 export type { ErrorBody } from '../api/generated/ErrorBody';
 export type { LaserScanInfo } from '../api/generated/LaserScanInfo';
 export type { LaserScanReading } from '../api/generated/LaserScanReading';
