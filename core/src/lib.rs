@@ -61,6 +61,8 @@ impl Core {
             connectors: connectors::built_in(),
             timing: runtime::Timing::default(),
             port_scan: Some(Duration::from_secs(2)),
+            // The world engine plugs in here (docs/simulation.md, section 7).
+            world: Arc::new(simulation::NoWorld),
         })?;
         Ok(Core { machine, logs })
     }

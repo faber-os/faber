@@ -57,6 +57,7 @@ impl From<MachineError> for Failure {
             ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             ErrorKind::Unprocessable => StatusCode::UNPROCESSABLE_ENTITY,
             ErrorKind::Forbidden => StatusCode::FORBIDDEN,
+            ErrorKind::Locked => StatusCode::LOCKED,
             ErrorKind::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
         };
         Failure(status, convert::error_body(&e))
