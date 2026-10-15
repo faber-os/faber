@@ -91,7 +91,10 @@ export class CoreState {
   connectorsError = $state.raw<ErrorBody | null>(null);
   /** Installed connectors the core couldn't load, with why (docs/api.md). */
   connectorProblems = $state.raw<ConnectorProblem[]>([]);
-  /** Installed connector packages; `null` until loaded (Settings → Connectors loads them). */
+  /**
+   * Installed connector packages, live from the `packages` topic (so an install in another tab
+   * shows here too); `null` until the core has sent them.
+   */
   packages = $state.raw<PackageInfo[] | null>(null);
   system = $state.raw<SystemInfo | null>(null);
   systemError = $state.raw<ErrorBody | null>(null);
@@ -227,6 +230,17 @@ export class CoreState {
         {
           onMessage: (m) => {
             if (m.type === 'estop') this.estop = m.status;
+          },
+        },
+      ),
+      s.subscribe(
+        { kind: 'packages' },
+        {
+          onMessage: (m) => {
+            if (m.type !== 'packages') return;
+            this.packages = m.packages;
+            // An install or uninstall, maybe in another tab: Add part's connectors change with it.
+            void this.loadConnectors();
           },
         },
       ),

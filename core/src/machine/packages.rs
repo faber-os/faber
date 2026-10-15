@@ -104,6 +104,16 @@ impl Machine {
         Store::new(&self.data_dir)
     }
 
+    /// Fires after every package install, uninstall or reload of `<data>/connectors/`, once
+    /// `packages.toml` says what is installed now.
+    pub fn packages_changed(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.packages_changed.subscribe()
+    }
+
+    fn announce_packages(&self) {
+        self.packages_changed.send_modify(|n| *n += 1);
+    }
+
     /// Every installed package (`GET /api/v0/packages`).
     pub fn packages(&self) -> Result<Vec<PackageView>, MachineError> {
         let list = self.package_store().list()?;
@@ -181,6 +191,7 @@ impl Machine {
             tracing::error!(target: "core::machine", "installing {id} failed: {} {}", problem.message, problem.hint);
             let rolled_back = swapped.roll_back();
             self.reload_connectors();
+            self.announce_packages();
             rolled_back?;
             return Err(MachineError::new(
                 ErrorKind::Unprocessable,
@@ -193,6 +204,7 @@ impl Machine {
         let installed = swapped.keep(&at.to_string(), source)?;
         tracing::info!(target: "core::machine", "installed the package {id} {} from {source}", installed.version);
         self.restart_parts_on(&mut st, &id);
+        self.announce_packages();
         let view = self.package_view(&st, installed);
         Ok((preview_of, Some(view)))
     }
@@ -214,6 +226,7 @@ impl Machine {
         tracing::info!(target: "core::machine", "uninstalled the package {id}");
         self.reload_connectors();
         self.reconcile(&mut st);
+        self.announce_packages();
         Ok(())
     }
 

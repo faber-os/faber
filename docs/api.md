@@ -81,11 +81,12 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `logs` | — | the recent log (up to 1000 entries) as `log` messages, then each new entry. Every new subscription gets the recent log again, so a client that reconnects should start its log view afresh. |
 | `leases` | — | a `leases` message with every live lease now, then `lease-granted` (`lease`) and `lease-ended` (`lease`, `reason`) as they happen. Lease ids are never sent here. If the client falls behind, it gets a fresh `leases` list. |
 | `estop` | — | an `estop` message (`status`: `engaged`, `engagedBy?`) now and on every engage and release. Every-message: none is lost. |
+| `packages` | — | a `packages` message (`packages`: `PackageInfo[]`, as `GET /api/v0/packages`) now and after every install, uninstall or reload of the connectors, so every browser tab sees an install at once. If `packages.toml` can't be read, an `error` (`io-error`) instead. |
 | `world` | — | a `world` message 20 times a second for as long as the subscription lasts, and `world-changed` (`name`) whenever the world is switched. See [The simulated world](#the-simulated-world). |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
 `serial-opened`, `serial-data`, `serial-closed`, `leases`, `lease-granted`, `lease-ended`, `estop`,
-`world`, `world-changed`, `error`. Each carries the `id` of the subscription
+`packages`, `world`, `world-changed`, `error`. Each carries the `id` of the subscription
 or serial session it belongs to. `error` may come without an `id`.
 
 **Serial sessions**, step by step:
@@ -352,6 +353,9 @@ says `checked: false`, and the shell says so before installing.
 | `POST /api/v0/packages?mode=preview&name=<file name>` | The package file as the body (any content type). Checks it in full, exactly as installing would, and installs nothing: `200 PackagePreview`: `connector` (a `ConnectorInfo`, as `GET /api/v0/connectors` will list it; its `port` is what it can touch), `publisher?`, `readme` (the README as text: show it as text or safe Markdown, never as HTML), `captures` (its recordings), `replaces?` (the version installed now) and `checked`. |
 | `POST /api/v0/packages?name=<file name>` | The same, and installs it into `<data>/connectors/<id>/`: `201 PackageInfo`. `name` is remembered as `source` (default `upload.faberpkg`). The version it replaces is kept until the new one has loaded; if it doesn't load, the old one is put back. |
 | `DELETE /api/v0/packages/{id}` | `204`. Removes the folder and its line in `packages.toml`. Errors: `404 not-installed`, `409 package-in-use` (a part uses its connector: the message names the parts; remove them first). |
+
+The WebSocket topic `packages` sends the list now and after every install or uninstall, from any
+browser tab or API client.
 
 Errors from `POST`, each with a hint: `400 bad-request` (a `mode` other than `preview`),
 `413 package-too-big` (over 50 MB, as a file or unpacked), `422 package-invalid` (not a zip, a path

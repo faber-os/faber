@@ -284,3 +284,59 @@ async fn a_load_problem_names_the_package_file_and_the_file_inside_it() {
     let message = e["error"]["message"].as_str().unwrap();
     assert!(message.starts_with("w.faberpkg: faber.toml"), "{message}");
 }
+
+mod ws {
+    use super::*;
+    use faber_core::api::dto;
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+    async fn connect(app: axum::Router) -> Ws {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (ws, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/api/v0/ws?format=msgpack")).await.unwrap();
+        ws
+    }
+
+    /// The next `packages` message, as (id, version) pairs, within 5 s.
+    async fn next_packages(ws: &mut Ws) -> Vec<(String, String)> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let Message::Binary(b) = ws.next().await.expect("socket open").unwrap() else { continue };
+                if let dto::ServerMessage::Packages { id: 1, packages } = rmp_serde::from_slice(&b).unwrap() {
+                    return packages.into_iter().map(|p| (p.id, p.version)).collect();
+                }
+            }
+        })
+        .await
+        .expect("a packages message within 5 s")
+    }
+
+    /// Every other browser tab learns about installs: the list on subscribe, then after every
+    /// install (including an update) and uninstall.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_packages_topic_sends_the_list_now_and_after_every_change() {
+        let c = core();
+        let mut ws = connect(c.app.clone()).await;
+        let subscribe = dto::ClientMessage::Subscribe { id: 1, topic: dto::Topic::Packages };
+        ws.send(Message::Binary(rmp_serde::to_vec_named(&subscribe).unwrap().into())).await.unwrap();
+        assert_eq!(next_packages(&mut ws).await, []);
+
+        call(&c.app, "POST", "/api/v0/packages", Some(Body::from(package(SENSOR)))).await;
+        let sensor = |v: &str| vec![("my-sensor".to_string(), v.to_string())];
+        assert_eq!(next_packages(&mut ws).await, sensor("0.1.0"));
+
+        let v2 = SENSOR.replace("0.1.0", "0.2.0");
+        call(&c.app, "POST", "/api/v0/packages", Some(Body::from(package(&v2)))).await;
+        assert_eq!(next_packages(&mut ws).await, sensor("0.2.0"));
+
+        // A preview and a refused package change nothing, so nothing is announced for them.
+        call(&c.app, "POST", "/api/v0/packages?mode=preview", Some(Body::from(package(SENSOR)))).await;
+        call(&c.app, "DELETE", "/api/v0/packages/my-sensor", None).await;
+        assert_eq!(next_packages(&mut ws).await, []);
+    }
+}

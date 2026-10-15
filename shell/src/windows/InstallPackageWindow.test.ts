@@ -96,6 +96,19 @@ describe('Install window', () => {
     expect(shell.desktop.state.windows.some((w) => w.id === win.id)).toBe(false);
   });
 
+  it('shows the version installed now, also when another tab installs one meanwhile', async () => {
+    const { shell } = setup([
+      { method: 'POST', path: `/api/v0/packages?mode=preview&${NAME}`, body: PREVIEW },
+    ]);
+    const dialog = await screen.findByTestId('install-package');
+    await waitFor(() => expect(dialog).toHaveTextContent('Acme ranger'));
+    expect(dialog).not.toHaveTextContent('Replaces version');
+    shell.pushPackages([{ ...INFO, version: '0.0.9' }]);
+    await waitFor(() => expect(dialog).toHaveTextContent('Replaces version 0.0.9.'));
+    shell.pushPackages([]);
+    await waitFor(() => expect(dialog).not.toHaveTextContent('Replaces version'));
+  });
+
   it('says why a package can not be installed, and offers no Install button', async () => {
     const error = {
       code: 'package-not-loadable',

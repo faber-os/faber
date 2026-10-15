@@ -174,7 +174,7 @@ describe('CoreState', () => {
     expect(core.connection).toBe('reconnecting');
   });
 
-  it('subscribes to parts, ports, logs, settings, files, leases and the e-stop on start', () => {
+  it('subscribes to parts, ports, logs, settings, files, leases, the e-stop and packages on start', () => {
     const { ws } = setup();
     expect(sentTopics(ws).map((m) => m.topic?.kind)).toEqual([
       'parts',
@@ -184,7 +184,22 @@ describe('CoreState', () => {
       'files',
       'leases',
       'estop',
+      'packages',
     ]);
+  });
+
+  it('keeps the packages from their topic and reads the connectors again with them', async () => {
+    const { core, ws } = setup();
+    await vi.waitFor(() => expect(core.connectors).toEqual([]));
+    const info = { id: 'acme', version: '0.1.0', usedBy: [] };
+    const acme = { id: 'acme' };
+    f.route({ path: '/api/v0/connectors', body: [acme] });
+    f.route({ path: '/api/v0/connectors/problems', body: [] });
+    const id = sentTopics(ws).find((m) => m.topic?.kind === 'packages')!.id;
+    ws.receive(bin({ type: 'packages', id, packages: [info] }));
+    expect(core.packages).toEqual([info]);
+    // Another tab installed it: Add part offers its connector here too.
+    await vi.waitFor(() => expect(core.connectors).toEqual([acme]));
   });
 
   it('keeps the settings from their topic', () => {

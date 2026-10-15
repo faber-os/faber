@@ -368,6 +368,25 @@ fn subscribe(
                 }
             }))
         }
+        dto::Topic::Packages => {
+            let machine = Arc::clone(&state.machine);
+            let mut changes = machine.packages_changed();
+            Ok(tokio::spawn(async move {
+                loop {
+                    let msg = match machine.packages() {
+                        Ok(list) => dto::ServerMessage::Packages {
+                            id,
+                            packages: list.iter().map(convert::package).collect(),
+                        },
+                        // packages.toml can't be read: say why (as GET does) and wait for a change.
+                        Err(e) => error(Some(id), e.code, e.message, e.hint),
+                    };
+                    if out.send(msg).await.is_err() || changes.changed().await.is_err() {
+                        return;
+                    }
+                }
+            }))
+        }
         dto::Topic::Files => {
             let mut rx = state.machine.files_changed();
             Ok(tokio::spawn(async move {

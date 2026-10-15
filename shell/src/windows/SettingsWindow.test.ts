@@ -382,6 +382,25 @@ describe('Settings: about and diagnostics', () => {
     expect(shell.fetch.calls.some((c) => c.method === 'DELETE')).toBe(true);
   });
 
+  it('shows a package another browser tab installs, without asking the core again', async () => {
+    const shell = setup([]);
+    const section = await screen.findByRole('region', { name: 'Connectors' });
+    await waitFor(() => expect(section).toHaveTextContent('No packages installed.'));
+    shell.pushPackages([
+      {
+        id: 'acme',
+        name: 'Acme ranger',
+        version: '0.2.0',
+        kind: 'wasm',
+        installedAt: '2026-10-15T10:00:00Z',
+        source: 'acme-0.2.0.faberpkg',
+        checked: false,
+        usedBy: [],
+      },
+    ]);
+    await waitFor(() => expect(section).toHaveTextContent('Acme ranger'));
+  });
+
   it('says which Faber this is and where its data is', async () => {
     setup([{ path: '/api/v0/about', body: ABOUT }]);
     const about = await screen.findByRole('region', { name: 'About and diagnostics' });

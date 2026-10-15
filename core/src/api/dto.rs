@@ -462,6 +462,9 @@ pub enum Topic {
     /// The machine in the simulated world: a `world` message 20 times a second, and
     /// `world-changed` when the world is switched.
     World,
+    /// The installed connector packages: a `packages` list now and after every install,
+    /// uninstall or reload of the connectors (so every browser tab sees an install at once).
+    Packages,
 }
 
 /// Messages from the shell to the core.
@@ -586,6 +589,11 @@ pub enum ServerMessage {
     Estop {
         id: u32,
         status: EstopStatus,
+    },
+    /// Every installed package (the `packages` topic), as `GET /api/v0/packages` lists them.
+    Packages {
+        id: u32,
+        packages: Vec<PackageInfo>,
     },
     /// The machine in the simulated world now (the `world` topic, 20 times a second).
     #[serde(rename_all = "camelCase")]
