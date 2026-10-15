@@ -503,4 +503,177 @@ mod backups {
         );
         reading_where(&c.app, "front/distance", |r| r["reading"]["meters"] == 1.5).await;
     }
+
+    const GAUGES: &str = "faber-manifest = 1\n[package]\nid = \"gauges\"\ntype = \"app\"\n\
+        version = \"0.1.0\"\nname = \"Gauges\"\nui = \"ui/\"\n\
+        [[requires]]\nrole = \"front\"\ncapability = \"distance@1\"\n";
+
+    /// A UI-only app: no logic, so no WebAssembly build is needed.
+    fn app_package(toml: &str) -> Vec<u8> {
+        let files: BTreeMap<String, Vec<u8>> = [
+            ("faber.toml", toml.as_bytes()),
+            ("README.md", b"# Gauges".as_slice()),
+            ("LICENSE", b"MIT".as_slice()),
+            ("ui/index.html", b"<p>gauges</p>".as_slice()),
+        ]
+        .into_iter()
+        .map(|(n, d)| (n.to_string(), d.to_vec()))
+        .collect();
+        packages::pack(&files).unwrap()
+    }
+
+    fn state_file(c: &TestCore) -> std::path::PathBuf {
+        c.dir.path().join("apps/gauges/state.toml")
+    }
+
+    async fn gauges(c: &TestCore) -> Value {
+        call(&c.app, "GET", "/api/v0/apps/gauges", None).await.1
+    }
+
+    async fn install(c: &TestCore, toml: &str) {
+        let body = Some(Body::from(app_package(toml)));
+        let (s, e) = call(&c.app, "POST", "/api/v0/packages?name=gauges.faberpkg", body).await;
+        assert_eq!(s, StatusCode::CREATED, "{e}");
+    }
+
+    /// An app with its parts, its on switch (apps.toml) and its saved state is set up exactly
+    /// as it was: on a machine that no longer has it, and over a later version of it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backup_brings_back_apps_their_state_and_their_roles() {
+        let c = core();
+        call(&c.app, "POST", "/api/v0/packages", Some(Body::from(package(SENSOR)))).await;
+        let part = json!({"name": "front", "connector": "my-sensor", "port": "replay:bench"});
+        json_call(&c.app, "POST", "/api/v0/parts", part).await;
+        install(&c, GAUGES).await;
+        let roles = json!({"roles": {"front": "front"}});
+        let (s, e) = json_call(&c.app, "PUT", "/api/v0/apps/gauges/roles", roles).await;
+        assert_eq!(s, StatusCode::OK, "{e}");
+        assert_eq!(call(&c.app, "POST", "/api/v0/apps/gauges/enable", None).await.0, StatusCode::OK);
+        std::fs::write(state_file(&c), "laps = \"3\"\n").unwrap();
+        std::fs::write(c.dir.path().join("apps/gauges/state.toml.tmp"), "half").unwrap();
+        let path = back_up(&c).await;
+
+        // Gone: turned off and uninstalled, its line in apps.toml with it.
+        assert_eq!(call(&c.app, "POST", "/api/v0/apps/gauges/disable", None).await.0, StatusCode::OK);
+        let (s, _) = call(&c.app, "DELETE", "/api/v0/packages/gauges", None).await;
+        assert_eq!(s, StatusCode::NO_CONTENT);
+        assert_eq!(gauges(&c).await["error"]["code"], "unknown-app");
+
+        let (s, e) = restore(&c, &path).await;
+        assert_eq!(s, StatusCode::NO_CONTENT, "{e}");
+        let a = gauges(&c).await;
+        assert_eq!(a["enabled"], true, "{a}");
+        assert_eq!(a["roles"][0]["parts"], json!(["front"]));
+        assert_eq!(a["state"]["kind"], "running", "{a}");
+        assert_eq!(std::fs::read_to_string(state_file(&c)).unwrap(), "laps = \"3\"\n");
+        assert!(!c.dir.path().join("apps/gauges/state.toml.tmp").exists(), "not backed up");
+        let (_, list) = call(&c.app, "GET", "/api/v0/packages", None).await;
+        let p = list.as_array().unwrap().iter().find(|p| p["id"] == "gauges").unwrap().clone();
+        assert_eq!((p["kind"].as_str(), p["source"].as_str()), (Some("app"), Some("gauges.faberpkg")));
+
+        // Over a later version with other state: the backup's version and state come back.
+        install(&c, &GAUGES.replace("0.1.0", "0.2.0")).await;
+        std::fs::write(state_file(&c), "laps = \"9\"\n").unwrap();
+        let (s, e) = restore(&c, &path).await;
+        assert_eq!(s, StatusCode::NO_CONTENT, "{e}");
+        assert_eq!(gauges(&c).await["version"], "0.1.0");
+        assert_eq!(std::fs::read_to_string(state_file(&c)).unwrap(), "laps = \"3\"\n");
+        assert!(!c.dir.path().join("packages/staging/gauges").exists(), "staging cleaned");
+    }
+
+    /// App code in a backup is never copied in blind either: every app goes through the package
+    /// checks and the staging load, its state is checked as the app reads it, and apps.toml is
+    /// checked like parts.toml. Any problem fails the whole restore before anything changes.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_tampered_app_in_a_backup_is_refused_and_nothing_changes() {
+        let c = core();
+        install(&c, GAUGES).await;
+        std::fs::write(state_file(&c), "laps = \"3\"\n").unwrap();
+        let path = back_up(&c).await;
+        call(&c.app, "DELETE", "/api/v0/packages/gauges", None).await;
+        let file = on_disk(&c, &path);
+        let original = std::fs::read(&file).unwrap();
+        let parts_before = std::fs::read_to_string(c.dir.path().join("config/parts.toml")).unwrap();
+
+        fn replace(
+            entry: &'static str,
+            from: &'static str,
+            to: &'static str,
+        ) -> impl Fn(&str, Vec<u8>) -> Option<Vec<u8>> {
+            move |name, data| {
+                Some(if name == entry {
+                    String::from_utf8(data).unwrap().replace(from, to).into_bytes()
+                } else {
+                    data
+                })
+            }
+        }
+        let keep = |_: &str, d: Vec<u8>| Some(d);
+        let broken_apps_toml: &[(&str, &[u8])] = &[("config/apps.toml", b"[apps.gauges]\nenabled = maybe\n")];
+        let cases: [(&Tamper<'_>, &str, &str); 6] = [
+            (
+                &|f| tamper(f, replace("apps/gauges/faber.toml", "ui = ", "uix = "), &[]),
+                "backup-invalid",
+                "apps/gauges/faber.toml line",
+            ),
+            (&|f| tamper(f, keep, &[("apps/gauges/run.sh", b"rm -rf /")]), "backup-invalid", "run.sh"),
+            (&|f| tamper(f, keep, &[("apps/gauges/ui/evil.exe", b"MZ")]), "backup-invalid", "evil.exe"),
+            (
+                &|f| tamper(f, replace("apps/gauges/state.toml", "\"3\"", "[3]"), &[]),
+                "backup-invalid",
+                "state.toml",
+            ),
+            (
+                &|f| tamper(f, |n, d| (n != "config/packages.toml").then_some(d), &[]),
+                "backup-invalid",
+                "packages.toml",
+            ),
+            (
+                &|f| tamper(f, keep, broken_apps_toml),
+                "config-invalid",
+                "apps.toml in the backup has a problem on line 2",
+            ),
+        ];
+        for (make, code, words) in cases {
+            std::fs::write(&file, &original).unwrap();
+            make(&file);
+            let (s, e) = restore(&c, &path).await;
+            let got = (s, e["error"]["code"].as_str());
+            assert_eq!(got, (StatusCode::UNPROCESSABLE_ENTITY, Some(code)), "{words}: {e}");
+            let message = e["error"]["message"].as_str().unwrap();
+            assert!(message.contains(words), "{words}: {message}");
+            if code == "backup-invalid" {
+                assert!(message.contains("The app \"gauges\""), "{message}");
+            }
+            assert!(!e["error"]["hint"].as_str().unwrap().is_empty());
+            assert_eq!(package_ids(&c).await, [], "{words}: nothing installed");
+            assert!(!c.dir.path().join("apps/gauges").exists(), "{words}");
+            assert!(!c.dir.path().join("packages/staging/gauges").exists(), "{words}: staging cleaned");
+            let parts = std::fs::read_to_string(c.dir.path().join("config/parts.toml")).unwrap();
+            assert_eq!(parts, parts_before);
+        }
+    }
+
+    /// A backup from before apps were backed up leaves the installed apps, their state and
+    /// apps.toml as they are.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_old_backup_without_apps_leaves_the_apps_alone() {
+        let c = core();
+        install(&c, GAUGES).await;
+        assert_eq!(call(&c.app, "POST", "/api/v0/apps/gauges/enable", None).await.0, StatusCode::OK);
+        std::fs::write(state_file(&c), "laps = \"3\"\n").unwrap();
+        let apps_toml = std::fs::read_to_string(c.dir.path().join("config/apps.toml")).unwrap();
+        let file = c.dir.path().join("files/Backups/faber-backup-2026-10-01-1200.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&file).unwrap());
+        w.start_file("config/parts.toml", zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(b"# from before apps\n").unwrap();
+        w.finish().unwrap();
+
+        let (s, e) = restore(&c, "home:/Backups/faber-backup-2026-10-01-1200.zip").await;
+        assert_eq!(s, StatusCode::NO_CONTENT, "{e}");
+        assert_eq!(package_ids(&c).await, [("gauges".to_string(), "0.1.0".to_string())]);
+        assert_eq!(std::fs::read_to_string(c.dir.path().join("config/apps.toml")).unwrap(), apps_toml);
+        assert_eq!(std::fs::read_to_string(state_file(&c)).unwrap(), "laps = \"3\"\n");
+        assert_eq!(gauges(&c).await["enabled"], true);
+    }
 }

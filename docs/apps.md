@@ -144,6 +144,6 @@ sandbox, then start, 20 ticks and stop with no parts picked) and `faber pack`.
 
 **Not built in 5a**: the shell (app windows in a sandboxed iframe, the message channel and
 `@faber-os/shell`, the role picker in the Install window, the "app" badge), roles filled by
-derived signals (`accept`), and apps in backups: a backup holds neither `config/apps.toml` nor
-`<data>/apps/` yet, though its `packages.toml` lists installed apps.
+derived signals (`accept`), and apps in backups (built in Phase 5b: see api.md, "Storage and
+backups").
 

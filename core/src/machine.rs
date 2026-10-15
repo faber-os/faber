@@ -1269,12 +1269,16 @@ impl Machine {
         // No install or uninstall half-way through while the connectors are copied.
         let _one_at_a_time = self.package_lock.lock().expect("package lock");
         let (packages_path, connectors, connector_ids) = self.packages_to_back_up()?;
+        let (apps_toml, apps, app_ids) = self.apps_to_back_up()?;
         let src = backup::Sources {
             parts_toml: &self.config_path,
             settings_toml: &settings_path,
             packages_toml: &packages_path,
             connectors: &connectors,
             connector_ids: &connector_ids,
+            apps_toml: &apps_toml,
+            apps: &apps,
+            app_ids: &app_ids,
             home: &home,
             include_recordings,
         };
@@ -1296,8 +1300,9 @@ impl Machine {
     }
 
     /// Restores a backup from the home folder. Everything in it is checked before anything
-    /// changes, so a broken parts.toml is refused with its line and nothing is touched, and every
-    /// connector in it is checked and loaded in staging exactly like installing its package.
+    /// changes, so a broken parts.toml or apps.toml is refused with its line and nothing is
+    /// touched, and every connector and app in it is checked and loaded in staging exactly like
+    /// installing its package (an app's saved state too).
     /// Files that the backup replaces go to the Trash; files and packages it doesn't have stay.
     pub fn restore_backup(&self, path: &str) -> Result<(), MachineError> {
         let p = VPath::parse(path)?;
@@ -1314,6 +1319,9 @@ impl Machine {
 
         // 1. Check everything first.
         world::read_config(archive.parts_toml()).map_err(|e| config_invalid(&e))?;
+        if let Some(text) = archive.apps_toml() {
+            crate::roles::parse(text).map_err(|e| apps_config_invalid(&e))?;
+        }
         let restored_settings = match archive.settings_toml() {
             None => None,
             Some(text) => Some(settings_file::parse(text).map_err(|e| {
@@ -1341,11 +1349,26 @@ impl Machine {
         )?;
         let _one_at_a_time = self.package_lock.lock().expect("package lock");
         let connectors = self.stage_backup_connectors(&mut archive)?;
+        let apps = match self.stage_backup_apps(&mut archive) {
+            Ok(apps) => apps,
+            Err(e) => {
+                connectors.into_iter().for_each(|c| c.discard());
+                return Err(e);
+            }
+        };
 
-        // 2. Then change things: the connectors first, so the parts find them, then the config
-        // and settings, as they matter most.
-        self.restore_connectors(connectors)?;
+        // 2. Then change things: the connectors first, so the parts find them, then the apps,
+        // then the config (the parts before the apps that use them) and settings, as they matter
+        // most.
+        if let Err(e) = self.restore_connectors(connectors) {
+            apps.into_iter().for_each(|a| a.discard());
+            return Err(e);
+        }
+        self.restore_apps(apps)?;
         self.write_config_text(archive.parts_toml().as_bytes())?;
+        if let Some(text) = archive.apps_toml() {
+            self.restore_apps_config(text)?;
+        }
         if let Some(s) = restored_settings {
             self.settings.restore(s)?;
         }
@@ -1870,6 +1893,14 @@ fn refuse_if_config_broken(st: &State) -> Result<(), MachineError> {
 }
 
 /// A parts.toml that can't be used, refused with the line it goes wrong on.
+fn apps_config_invalid(e: &crate::roles::RolesError) -> MachineError {
+    let message = match e.line {
+        Some(l) => format!("apps.toml in the backup has a problem on line {l}: {}", e.message),
+        None => format!("apps.toml in the backup has a problem: {}", e.message),
+    };
+    MachineError::new(ErrorKind::Unprocessable, "config-invalid", message, e.hint.clone())
+}
+
 fn config_invalid(e: &ConfigError) -> MachineError {
     let message = match e.line {
         Some(l) => format!("parts.toml has a problem on line {l}: {}", e.message),

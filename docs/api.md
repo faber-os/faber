@@ -377,14 +377,17 @@ gets ` (2)`. Inside, it is laid out like the data folder:
 config/parts.toml
 config/settings.toml        (if the settings were ever changed)
 config/packages.toml        (if a package was ever installed)
+config/apps.toml            (if an app was ever turned on or given parts)
 connectors/<id>/…           each installed package's connector, as installed
+apps/<id>/…                 each installed app, as installed, with its saved state.toml
 files/Desktop/…
 files/Documents/…
 files/Recordings/…          only with includeRecordings
 ```
 
-Only packages listed in `packages.toml` are backed up; a folder copied into `connectors/` by hand
-isn't a package and is left out.
+Only packages listed in `packages.toml` are backed up; a folder copied into `connectors/` or
+`apps/` by hand isn't a package and is left out. An app's `state.toml` is its data, so it is backed
+up with the app (the `.tmp` and `.broken` files Faber leaves while saving it are not).
 
 **Restore checks everything before anything changes:** the zip must be a Faber backup
 (`config/parts.toml`, and nothing outside the folders above: `backup-invalid`), `parts.toml` must
@@ -394,15 +397,24 @@ disk. **Connector code is never copied in blind:** every connector in the backup
 its `packages.toml` and goes through the same checks and staging load as
 `POST /api/v0/packages`. One that fails fails the whole restore with `422 backup-invalid`, naming
 the connector and why (e.g. `The connector "my-sensor" in this backup can't be restored:
-connectors/my-sensor/faber.toml line 13: …`). A backup made before connectors were backed up has
-none, and restores as before. Then:
+connectors/my-sensor/faber.toml line 13: …`). **Apps are checked the same way:** each must be
+listed as an app in the backup's `packages.toml` and passes the install checks and staging load
+(its logic compiled in the sandbox, its UI's files checked); its `state.toml` must read as the
+app reads it (text keys and values, at most 64 KB); and `apps.toml` must be valid
+(`422 config-invalid`, with the line, like `parts.toml`). A backup made before connectors or apps
+were backed up has none, and restores as before, leaving the installed ones (and `apps.toml`)
+alone. Then:
 
 - The connectors are put in place first, like an install: one installed already at the same
   version is left alone; another version replaces the installed one, and the parts on it restart.
   Its `source` is kept from the backup, `installedAt` is the time of the restore. Packages that
   aren't in the backup stay. If one doesn't load once in place, all are put back and the restore
   fails before anything else changes. The `packages` topic announces the change.
-- `parts.toml` is saved and applied at once (parts start or stop).
+- The apps are put in place the same way, with their runs stopped meanwhile (an app saves its
+  state when its run ends, so it can't overwrite the restored one). Each gets the state from the
+  backup; an app whose backup has no `state.toml` keeps the one it has.
+- `parts.toml` is saved and applied at once (parts start or stop), then `apps.toml` (if the backup
+  has one): apps that were on start again once their parts are there.
 - The settings are replaced, **except the developer settings**: a backup never turns
   whole-machine files on. A time zone this machine doesn't know falls back to its own.
 - Files are put back where they were. A file that is already there with other contents is first

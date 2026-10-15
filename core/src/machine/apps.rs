@@ -321,6 +321,41 @@ impl Machine {
         problems
     }
 
+    /// Runs `change` with the apps in `ids` stopped and no app started or stopped meanwhile (it
+    /// holds the apps lock), then reads `<data>/apps/` again and reconciles. A restore changes an
+    /// app's folder and its saved state this way: an app saves its state when its run ends, so its
+    /// run must have ended before the restored state is written.
+    pub(super) fn with_apps_stopped<T>(&self, ids: &[String], change: impl FnOnce() -> T) -> T {
+        let out = {
+            let mut a = self.apps.lock().expect("apps lock");
+            for id in ids {
+                if let Some(r) = a.running.remove(id) {
+                    r.stop();
+                }
+            }
+            let out = change();
+            let (defs, problems) = apps::load_installed(&self.apps_dir(), crate::sandbox::Limits::default());
+            a.definitions = defs;
+            a.problems = problems;
+            a.generation += 1;
+            out
+        };
+        self.reconcile_apps();
+        out
+    }
+
+    /// Replaces `config/apps.toml` with a backup's, which the caller checked, and reconciles.
+    pub(super) fn restore_apps_config(&self, text: &str) -> Result<(), MachineError> {
+        self.write_apps_config(text)?;
+        self.reconcile_apps();
+        Ok(())
+    }
+
+    /// Where `config/apps.toml` is, for a backup.
+    pub(super) fn apps_toml_path(&self) -> PathBuf {
+        self.apps_toml()
+    }
+
     /// Whether an installed app is turned on (it can't be uninstalled then).
     pub(super) fn app_enabled(&self, id: &str) -> bool {
         self.read_apps_config().1.is_ok_and(|c| c.entry(id).enabled)

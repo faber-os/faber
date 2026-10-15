@@ -12,7 +12,7 @@
 use super::{ErrorKind, Machine, MachineError, State};
 use crate::apps::AppDefinition;
 use crate::apps::manifest::AppManifest;
-use crate::backup::Archive;
+use crate::backup::{Archive, Folder};
 use crate::connectors::{LoadProblem, ShownAs};
 use crate::leases::EndReason;
 use crate::names::PartName;
@@ -30,13 +30,58 @@ pub(super) struct StagedConnector {
     source: String,
 }
 
+/// An app from a backup, checked and loaded in staging, waiting to be put in place with the state
+/// it had saved.
+pub(super) struct StagedApp {
+    prepared: Prepared<AppDefinition>,
+    /// The package file it was first installed from, as the backup's packages.toml says.
+    source: String,
+    /// Its `state.toml` in the backup, checked like the app reads it.
+    state: Option<Vec<u8>>,
+}
+
+impl StagedConnector {
+    pub(super) fn discard(self) {
+        self.prepared.discard();
+    }
+}
+
+impl StagedApp {
+    pub(super) fn discard(self) {
+        self.prepared.discard();
+    }
+}
+
 fn backup_invalid(id: &str, problem: Problem) -> MachineError {
+    backup_invalid_package("connector", id, problem)
+}
+
+fn backup_invalid_package(what: &str, id: &str, problem: Problem) -> MachineError {
     MachineError::new(
         ErrorKind::Unprocessable,
         "backup-invalid",
-        format!("The connector \"{id}\" in this backup can't be restored: {}", problem.message),
+        format!("The {what} \"{id}\" in this backup can't be restored: {}", problem.message),
         problem.hint,
     )
+}
+
+fn pick_a_faber_backup() -> &'static str {
+    "Pick a backup Faber made (in home:/Backups, named …-backup-….zip)."
+}
+
+/// An app's saved state from a backup, checked exactly as the app reads it: TOML text of string
+/// keys and values, at most 64 KB of them.
+fn check_app_state(bytes: &[u8]) -> Result<(), Problem> {
+    let bad =
+        |why: String| Problem::new(format!("its state.toml can't be used: {why}."), pick_a_faber_backup());
+    let text = std::str::from_utf8(bytes).map_err(|_| bad("it isn't text".into()))?;
+    let values: BTreeMap<String, String> =
+        toml::from_str(text).map_err(|e| bad(e.message().trim().to_string()))?;
+    let size: usize = values.iter().map(|(k, v)| k.len() + v.len()).sum();
+    if size > crate::apps::STATE_MAX_BYTES {
+        return Err(bad(format!("it holds more than {} KB", crate::apps::STATE_MAX_BYTES / 1024)));
+    }
+    Ok(())
 }
 
 fn now_rfc3339() -> String {
@@ -495,6 +540,165 @@ impl Machine {
             self.restart_parts_on(&mut st, &id);
         }
         self.announce_packages();
+        Ok(())
+    }
+
+    /// What a backup holds of the apps: `config/apps.toml`, the apps folder, and the installed
+    /// apps whose folder is there.
+    pub(super) fn apps_to_back_up(&self) -> Result<(PathBuf, PathBuf, Vec<String>), MachineError> {
+        let store = self.package_store();
+        let ids = store
+            .list()?
+            .into_iter()
+            .filter(|p| p.kind == APP_TYPE)
+            .map(|p| p.id)
+            .filter(|id| store.apps_dir().join(id).is_dir())
+            .collect();
+        Ok((self.apps_toml_path(), store.apps_dir().to_path_buf(), ids))
+    }
+
+    /// Step 1 of a restore, for the apps: each one in the backup is checked and loaded in staging
+    /// exactly like installing its package (its logic compiled in the sandbox, its UI checked),
+    /// and its saved state is checked as the app reads it. The first that fails fails the restore
+    /// (`backup-invalid`, naming it and why), and nothing is left staged.
+    pub(super) fn stage_backup_apps(&self, archive: &mut Archive) -> Result<Vec<StagedApp>, MachineError> {
+        let ids = archive.package_ids(Folder::Apps);
+        let connectors = archive.connector_ids();
+        if let Some(both) = ids.iter().find(|id| connectors.contains(id)) {
+            return Err(backup_invalid_package(
+                "app",
+                both,
+                Problem::new("The backup holds a connector with the same id.", pick_a_faber_backup()),
+            ));
+        }
+        let listed = archive.packages_toml().map(packages::parse_list).transpose();
+        let store = self.package_store();
+        let mut staged: Vec<StagedApp> = Vec::new();
+        for id in ids {
+            match self.stage_backup_app(&store, archive, &id, &listed) {
+                Ok(s) => staged.push(s),
+                Err(problem) => {
+                    staged.into_iter().for_each(StagedApp::discard);
+                    return Err(backup_invalid_package("app", &id, problem));
+                }
+            }
+        }
+        Ok(staged)
+    }
+
+    fn stage_backup_app(
+        &self,
+        store: &Store,
+        archive: &mut Archive,
+        id: &str,
+        listed: &Result<Option<BTreeMap<String, Installed>>, PackageError>,
+    ) -> Result<StagedApp, Problem> {
+        let problem = |e: PackageError| Problem::new(e.message, e.hint);
+        let listed = listed.as_ref().map_err(|e| problem(e.clone()))?;
+        let Some(entry) = listed.as_ref().and_then(|l| l.get(id)).filter(|e| e.kind == APP_TYPE) else {
+            return Err(Problem::new(
+                "The backup's config/packages.toml doesn't list it as an installed app.",
+                pick_a_faber_backup(),
+            ));
+        };
+        let mut files = archive
+            .package_files(Folder::Apps, id, packages::MAX_BYTES)
+            .map_err(|e| Problem::new(e.message, e.hint))?;
+        // The state is the app's data, not part of its package: it is checked on its own.
+        let state = files.remove(crate::apps::STATE_FILE);
+        if let Some(bytes) = &state {
+            check_app_state(bytes)?;
+        }
+        let opened = packages::from_files(files).map_err(problem)?;
+        if opened.header.id != id || opened.header.kind != APP_TYPE {
+            return Err(Problem::new(
+                format!("Its folder holds the {} \"{}\".", opened.header.kind, opened.header.id),
+                pick_a_faber_backup(),
+            ));
+        }
+        let shown = ShownAs::installed_app(id);
+        let prepared = store
+            .prepare(opened, |folder| {
+                crate::apps::load_folder(folder, &shown, crate::sandbox::Limits::default())
+            })
+            .map_err(problem)?;
+        Ok(StagedApp { prepared, source: entry.source.clone(), state })
+    }
+
+    /// Step 2 of a restore, for the apps: each staged one is put in place like an install, with
+    /// its runs stopped meanwhile. One installed already at the same version is left as it is;
+    /// another version replaces the installed one. Then each gets the state it had saved (an app
+    /// whose backup has no state keeps the one it has). If one doesn't load once in place, all
+    /// are put back and nothing else changes.
+    pub(super) fn restore_apps(&self, staged: Vec<StagedApp>) -> Result<(), MachineError> {
+        if staged.is_empty() {
+            return Ok(());
+        }
+        let ids: Vec<String> = staged.iter().map(|s| s.prepared.header().id.clone()).collect();
+        let result = self.with_apps_stopped(&ids, || self.put_apps_in_place(staged));
+        self.announce_packages();
+        result
+    }
+
+    fn put_apps_in_place(&self, staged: Vec<StagedApp>) -> Result<(), MachineError> {
+        let store = self.package_store();
+        let undo = |swapped: Vec<(String, Swapped, String)>| {
+            for (id, s, _) in swapped.into_iter().rev() {
+                if let Err(e) = s.roll_back() {
+                    tracing::error!(target: "core::backup", "couldn't put apps/{id} back: {} {}", e.message, e.hint);
+                }
+            }
+        };
+        let mut swapped = Vec::new();
+        let mut states = Vec::new();
+        let mut rest = staged.into_iter();
+        while let Some(s) = rest.next() {
+            let (id, version) = (s.prepared.header().id.clone(), s.prepared.header().version.clone());
+            if let Some(state) = s.state {
+                states.push((id.clone(), state));
+            }
+            let same =
+                store.get(&id).ok().flatten().is_some_and(|i| i.version == version && i.kind == APP_TYPE);
+            if same {
+                tracing::info!(target: "core::backup", "the backup's app {id} {version} is installed already");
+                s.prepared.discard();
+                continue;
+            }
+            match s.prepared.swap_in() {
+                Ok(done) => swapped.push((id, done, s.source)),
+                Err(e) => {
+                    rest.for_each(StagedApp::discard);
+                    undo(swapped);
+                    return Err(e.into());
+                }
+            }
+        }
+        // Each must load once in place, exactly as the core will load it.
+        let (_, problems) = crate::apps::load_installed(store.apps_dir(), crate::sandbox::Limits::default());
+        let failed = swapped.iter().find_map(|(id, _, _)| {
+            problems.iter().find(|p| &p.folder == id).map(|p| (id.clone(), p.problem.clone()))
+        });
+        if let Some((id, problem)) = failed {
+            undo(swapped);
+            return Err(backup_invalid_package("app", &id, problem));
+        }
+        let at = now_rfc3339();
+        for (id, done, source) in swapped {
+            let installed = done.keep(&at, &source)?;
+            tracing::info!(target: "core::backup", "restored the app {id} {}", installed.version);
+        }
+        for (id, state) in states {
+            let path = store.apps_dir().join(&id).join(crate::apps::STATE_FILE);
+            let text = String::from_utf8(state).unwrap_or_default(); // checked as text when staged
+            super::write_atomically(&path, &text).map_err(|e| {
+                MachineError::new(
+                    ErrorKind::Internal,
+                    "io-error",
+                    format!("Couldn't restore the saved state of the app \"{id}\": {e}"),
+                    "Check that the disk has space and isn't failing.",
+                )
+            })?;
+        }
         Ok(())
     }
 
