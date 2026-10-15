@@ -1,6 +1,7 @@
 # Faber
 
-> **Status: Phase 1.** The core and web desktop run on a PC with an LD19 LiDAR (or its built-in recording). Built for the Raspberry Pi 5,
+> **Status: Phase 3.** The core and web desktop run on a PC, with real or simulated hardware, and
+> anyone can write a sandboxed connector and install it. Built for the Raspberry Pi 5,
 > developed alongside a real robot.
 
 **Faber turns a Raspberry Pi into a hardware workbench you control from a browser.**
@@ -73,6 +74,23 @@ With `simulate = "world"` instead, the base really moves, in a simulated world: 
 with `name = "apartment"` and it drives its square in the living room, bumping into whatever
 is in the way. See [docs/api.md](docs/api.md#the-simulated-world).
 
+**Write a connector.** For hardware Faber doesn't know yet: start from the template, check it
+against the recording it comes with, and pack it.
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install --path tools/faber-cli
+faber new connector acme-ranger
+cd acme-ranger
+faber check
+faber pack
+```
+
+Then double-click `acme-ranger-0.1.0.faberpkg` in Faber's Files (or drop it on the desktop), and
+it is in **Add part**, running sandboxed. The whole walk-through:
+[docs/your-first-connector.md](docs/your-first-connector.md). A device that prints text lines
+needs no code at all: [docs/connectors-declarative.md](docs/connectors-declarative.md).
+
 ## The building blocks
 
 | | What | Example |
@@ -105,6 +123,9 @@ screen. More in [docs/architecture.md](docs/architecture.md).
 | [docs/glossary.md](docs/glossary.md) | Every term, with exactly one meaning |
 | [docs/decisions.md](docs/decisions.md) | Why things are the way they are, plus open questions |
 | [docs/roadmap.md](docs/roadmap.md) | Phases, from "runs on a PC" to "public store" |
+| [docs/your-first-connector.md](docs/your-first-connector.md) | Write a connector, check it, pack it and install it |
+| [docs/packages.md](docs/packages.md) | Packages and the sandbox: how connectors are built, checked and installed |
+| [docs/api.md](docs/api.md) | The core's REST and WebSocket API |
 | [docs/research/](docs/research/) | What HA, ESPHome, Viam, CasaOS, Umbrel, balena and others do, and what they miss |
 
 ## Licence

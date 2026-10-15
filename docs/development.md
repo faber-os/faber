@@ -91,6 +91,8 @@ that isn't. How translations work, and `npm run i18n:check`: [translations.md](t
 | Shell units | Vitest + Testing Library | `shell/src/**/*.test.ts` |
 | End-to-end | Playwright | `shell/e2e/`. Builds the shell, starts the real core with it compiled in (`embed-shell`), adds a part on the demo recording and checks that a scan is drawn, at desktop and 7" sizes |
 | Wasm connectors | `cargo test` | `core/tests/wasm.rs` builds the LD19 and a misbehaving test guest for `wasm32-unknown-unknown` and runs them in the sandbox. Without that target the tests are skipped with a message (`rustup target add wasm32-unknown-unknown`); CI sets `FABER_REQUIRE_WASM=1` so they always run there |
+| The `faber` CLI and its templates | `cargo test` | `tools/faber-cli`: `tests/first_connector.rs` is the Phase 3 proof (a new connector from the template, tested, checked, packed, installed through the API on a test core, run on a recording and uninstalled), skipped like the wasm tests without the target; the unit tests check and pack the declarative template and write the fixtures the templates and the e2e test use |
+| Packages | `cargo test` | `core/tests/packages.rs`: preview, install while the core runs, parts restarting on an update, uninstall refused while used, and every refusal with its hint |
 | Interfaces | `wasm-tools component wit wit/capabilities`, and the connector world (see [wit/connector](../wit/connector/README.md)) | CI |
 
 ## End-to-end tests
