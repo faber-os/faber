@@ -32,7 +32,7 @@ Phase 1 is built (see `docs/roadmap.md`).
 | Declarative connectors (Phase 3c) | Implemented | `faber.toml` only: serial line patterns with typed fields, NMEA (GGA/RMC/GSA) → `position@1`; loaded from `<data>/connectors/<id>/`; guide in `docs/connectors-declarative.md`; two tested examples | 2026-10-15 | — | — |
 | Wasm connectors (Phase 3a) | Implemented | Wasmtime 49 sandbox (32 MB, 20 ms per call), `faber:connector` WIT, guest macro (`faber-connector-wasm`), LD19 as wasm gives identical readings (232/232); `GET /connectors/problems` | 2026-10-15 | — | — |
 | Packages and faber CLI (Phase 3b) | Implemented | `.faberpkg` checked fully before install, live install/uninstall, Install window, Settings → Connectors, `position@1` viewer, `faber new/check/pack`, templates, first-connector guide and its end-to-end test | 2026-10-15 | 3a, 3c | — |
-| Phase 3 polish | In progress | backups include connectors (re-checked on restore), `packages` WS topic, staging error wording | — | 3b | — |
+| Phase 3 polish | Implemented | backups include installed connectors (re-checked on restore, all or nothing), `packages` WS topic, install errors name the package file, reproducible package bytes | 2026-10-15 | 3b | — |
 | FaberLink protocol (Phase 4a) | In progress | Rust crate + portable C++ library, interop tests on the PC | — | — | — |
 | Restart / shut down | Planned | Power items exist in the start menu but are disabled until the machine image (Phase 6) | — | Image | Phase 6 |
 | Copy / paste, multi-select in Files | Planned | Also unlocks moving between disks and home | — | Files | — |
