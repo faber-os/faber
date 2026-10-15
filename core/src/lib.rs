@@ -25,6 +25,7 @@ pub mod suggest;
 pub mod translations;
 
 // Layer 3: runs parts (`runtime` and `suggest` too; see docs/development.md).
+pub mod declarative;
 pub mod simparts;
 
 // Layer 4: ties everything together.
