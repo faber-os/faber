@@ -9,7 +9,7 @@
     settingFields,
     type SettingValues,
   } from '../lib/state/connectorSettings';
-  import type { ErrorBody, NewPart, Simulate } from '../lib/state/types';
+  import type { ErrorBody, NewPart, SettingInfo, Simulate } from '../lib/state/types';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
   import PortProblems from '../components/PortProblems.svelte';
@@ -19,10 +19,16 @@
     onadded,
     oncancel,
     initialPort = null,
+    initialSimulate = null,
+    initialConnector = null,
   }: {
     onadded: (name: string) => void;
     oncancel: () => void;
     initialPort?: string | null;
+    /** Start with Simulated on and this source picked (e.g. from the World window). */
+    initialSimulate?: Simulate | null;
+    /** Start with this connector picked, once the connectors are in. */
+    initialConnector?: string | null;
   } = $props();
 
   const core = useCore();
@@ -35,8 +41,11 @@
   let submitting = $state(false);
   let error = $state<ErrorBody | null>(null);
   /** The Simulated switch as the user left it; a generic connector turns it on regardless. */
-  let simulatedChoice = $state(false);
-  let mode = $state<Simulate>('manual');
+  // Seeded once from the props: the form is opened with a fresh mount each time.
+  // svelte-ignore state_referenced_locally
+  let simulatedChoice = $state(initialSimulate !== null);
+  // svelte-ignore state_referenced_locally
+  let mode = $state<Simulate>(initialSimulate ?? 'manual');
   let values = $state<SettingValues>({});
   let settingsProblem = $state<{ key: string; message: string } | null>(null);
 
@@ -49,7 +58,12 @@
   /** Generic connectors need a FaberLink bridge to be real (Phase 4): simulated only for now. */
   const needsBridge = $derived(chosen?.port.kind === 'bridge');
   const simulated = $derived(simulatedChoice || needsBridge);
-  const fields = $derived(settingFields(connector));
+  const fields = $derived(settingFields(chosen));
+  const mainFields = $derived(fields.filter((f) => !f.advanced));
+  const advancedFields = $derived(fields.filter((f) => f.advanced));
+  /** Parts a part list may name: every part there is (the core checks the rest). */
+  const otherParts = $derived((core.parts ?? []).map((p) => p.name));
+  let showAdvanced = $state(false);
   const modes = $derived([
     {
       id: 'manual' as Simulate,
@@ -76,8 +90,14 @@
 
   function chooseConnector(id: string) {
     connector = id;
-    values = defaultValues(settingFields(id));
+    values = defaultValues(settingFields(connectors?.find((c) => c.id === id) ?? null));
     settingsProblem = null;
+  }
+
+  function togglePart(key: string, name: string, on: boolean) {
+    const now = values[key];
+    const list = Array.isArray(now) ? now.filter((n) => n !== name) : [];
+    values = { ...values, [key]: on ? [...list, name] : list };
   }
 
   function pickPort(id: string) {
@@ -96,6 +116,14 @@
     if (started || !initialPort || !ports || !connectors) return;
     started = true;
     if (ports.some((p) => p.id === initialPort)) pickPort(initialPort);
+  });
+
+  // Started with a connector in mind (the World window's "Add a simulated base").
+  let connectorStarted = false;
+  $effect(() => {
+    if (connectorStarted || !initialConnector || !connectors) return;
+    connectorStarted = true;
+    if (connectors.some((c) => c.id === initialConnector)) chooseConnector(initialConnector);
   });
 
   async function submit(e: SubmitEvent) {
@@ -272,59 +300,103 @@
       {/if}
     </fieldset>
 
+    {#snippet field(f: SettingInfo)}
+      {@const id = `setting-${f.key}`}
+      {@const bad = settingsProblem?.key === f.key}
+      {#if f.kind === 'bool'}
+        <label class="check-row wide">
+          <input
+            class="check"
+            type="checkbox"
+            checked={values[f.key] === true}
+            aria-describedby="{id}-help"
+            onchange={(e) => (values = { ...values, [f.key]: e.currentTarget.checked })}
+          />
+          {f.label}
+        </label>
+      {:else if f.kind === 'part-list'}
+        <span class="label wide" id="{id}-label">{f.label}</span>
+        <div class="part-list wide" role="group" aria-labelledby="{id}-label">
+          {#each otherParts as name (name)}
+            {@const list = values[f.key]}
+            <label class="check-row">
+              <input
+                class="check"
+                type="checkbox"
+                checked={Array.isArray(list) && list.includes(name)}
+                onchange={(e) => togglePart(f.key, name, e.currentTarget.checked)}
+              />
+              <code>{name}</code>
+            </label>
+          {:else}
+            <p class="help">{t('addPart.settings.noParts')}</p>
+          {/each}
+        </div>
+      {:else}
+        <label class="label" for={id}>{f.label}</label>
+        <span class="value">
+          {#if f.kind === 'number'}
+            <input
+              {id}
+              class="input num"
+              type="number"
+              step="any"
+              inputmode="decimal"
+              value={values[f.key]}
+              aria-invalid={bad}
+              aria-describedby="{id}-help"
+              oninput={(e) => {
+                values = { ...values, [f.key]: e.currentTarget.value };
+                if (bad) settingsProblem = null;
+              }}
+            />
+            {#if f.unit}<span class="unit">{f.unit}</span>{/if}
+          {:else if f.kind === 'choice'}
+            <select
+              {id}
+              class="input"
+              value={values[f.key]}
+              aria-describedby="{id}-help"
+              onchange={(e) => (values = { ...values, [f.key]: e.currentTarget.value })}
+            >
+              {#each f.choices as c (c.value)}
+                <option value={c.value}>{c.label}</option>
+              {/each}
+            </select>
+          {:else}
+            <input
+              {id}
+              class="input"
+              value={values[f.key]}
+              aria-describedby="{id}-help"
+              oninput={(e) => (values = { ...values, [f.key]: e.currentTarget.value })}
+            />
+          {/if}
+        </span>
+      {/if}
+      <p class="help wide setting-help" id="{id}-help">{f.description}</p>
+      {#if bad}<p class="help bad wide">{settingsProblem?.message}</p>{/if}
+    {/snippet}
+
     {#if fields.length > 0}
       <fieldset class="step" class:flag={errorField === 'settings' || settingsProblem !== null}>
         <legend><span class="n">3</span> {t('addPart.settings.legend')}</legend>
         <p class="help settings-help">{t('addPart.settings.help')}</p>
         <div class="settings">
-          {#each fields as f (f.key)}
-            {@const id = `setting-${f.key}`}
-            {@const bad = settingsProblem?.key === f.key}
-            {#if f.kind === 'boolean'}
-              <label class="check-row wide">
-                <input
-                  class="check"
-                  type="checkbox"
-                  checked={values[f.key] === true}
-                  onchange={(e) => (values = { ...values, [f.key]: e.currentTarget.checked })}
-                />
-                {f.label()}
-              </label>
-            {:else}
-              <label class="label" for={id}>{f.label()}</label>
-              <span class="value">
-                {#if f.kind === 'number'}
-                  <input
-                    {id}
-                    class="input num"
-                    type="number"
-                    step="any"
-                    inputmode="decimal"
-                    value={values[f.key]}
-                    aria-invalid={bad}
-                    oninput={(e) => {
-                      values = { ...values, [f.key]: e.currentTarget.value };
-                      if (bad) settingsProblem = null;
-                    }}
-                  />
-                  <span class="unit">{f.unit}</span>
-                {:else}
-                  <select
-                    {id}
-                    class="input"
-                    value={values[f.key]}
-                    onchange={(e) => (values = { ...values, [f.key]: e.currentTarget.value })}
-                  >
-                    {#each f.choices as c (c.value)}
-                      <option value={c.value}>{c.label()}</option>
-                    {/each}
-                  </select>
-                {/if}
-              </span>
-              {#if bad}<p class="help bad wide">{settingsProblem?.message}</p>{/if}
-            {/if}
-          {/each}
+          {#each mainFields as f (f.key)}{@render field(f)}{/each}
         </div>
+        {#if advancedFields.length > 0}
+          <details
+            class="advanced"
+            open={showAdvanced || advancedFields.some((f) => f.key === settingsProblem?.key)}
+            ontoggle={(e) => (showAdvanced = e.currentTarget.open)}
+          >
+            <summary>{t('addPart.settings.advanced')}</summary>
+            <div class="settings">
+              {#each advancedFields as f (f.key)}{@render field(f)}{/each}
+            </div>
+          </details>
+        {/if}
       </fieldset>
     {/if}
 
@@ -605,6 +677,25 @@
   .unit {
     font-size: var(--text-sm);
     color: var(--text-muted);
+  }
+  .setting-help {
+    margin-top: calc(-1 * var(--space-1));
+    font-size: var(--text-xs);
+  }
+  .part-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+  }
+  .advanced {
+    margin-top: var(--space-3);
+  }
+  .advanced summary {
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-weight: 620;
+    color: var(--text-muted);
+    padding: var(--space-2) 0;
   }
   .check-row {
     display: flex;

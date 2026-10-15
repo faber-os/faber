@@ -12,10 +12,15 @@ use crate::ports::{PortKind, PortProblem};
 use crate::runtime::PartStatus;
 use crate::simparts::WorldState;
 use crate::simulation::Pattern;
-use faber_connector::{Manifest, PortRequirement, Problem};
+use faber_connector::{Manifest, PortRequirement, Problem, SettingKind, SettingSpec};
 
 pub fn error_body(e: &MachineError) -> dto::ErrorBody {
-    dto::ErrorBody { code: e.code.to_string(), message: e.message.clone(), hint: e.hint.clone() }
+    dto::ErrorBody {
+        code: e.code.to_string(),
+        message: e.message.clone(),
+        hint: e.hint.clone(),
+        reason: e.lease_ended.map(lease_end_reason),
+    }
 }
 
 fn state(kind: dto::PartStateKind, p: Option<&Problem>) -> dto::PartState {
@@ -45,7 +50,11 @@ pub fn part(p: &PartView) -> dto::PartInfo {
         signals: p
             .signals
             .iter()
-            .map(|(addr, cap)| dto::SignalInfo { address: addr.to_string(), capability: *cap })
+            .map(|s| dto::SignalInfo {
+                address: s.address.to_string(),
+                capability: s.capability,
+                info: s.info.clone(),
+            })
             .collect(),
         mount: p.mount,
     }
@@ -184,6 +193,37 @@ pub fn connector(m: &Manifest) -> dto::ConnectorInfo {
                 info: p.info.clone(),
             })
             .collect(),
+        settings: m.settings.iter().map(setting).collect(),
+    }
+}
+
+fn setting(s: &SettingSpec) -> dto::SettingInfo {
+    use dto::SettingKindInfo as K;
+    dto::SettingInfo {
+        key: s.key.clone(),
+        label: s.label.clone(),
+        description: s.description.clone(),
+        unit: s.unit.clone(),
+        advanced: s.advanced,
+        kind: match &s.kind {
+            SettingKind::Number(n) => K::Number {
+                default: n.default,
+                min: n.min,
+                min_exclusive: n.min_exclusive,
+                max: n.max,
+                suggested: n.suggested,
+            },
+            SettingKind::Bool { default } => K::Bool { default: *default },
+            SettingKind::Choice { default, choices } => K::Choice {
+                default: default.clone(),
+                choices: choices
+                    .iter()
+                    .map(|c| dto::ChoiceInfo { value: c.value.clone(), label: c.label.clone() })
+                    .collect(),
+            },
+            SettingKind::String { default } => K::String { default: default.clone() },
+            SettingKind::PartList => K::PartList,
+        },
     }
 }
 
@@ -291,5 +331,26 @@ mod tests {
             matches!(c.provides[0].info, Some(faber_capabilities::Info::LaserScan(_))),
             "the range is shown"
         );
+        assert_eq!(c.settings, [], "the LD19 has nothing to set");
+    }
+
+    #[test]
+    fn connectors_describe_their_settings_on_the_wire() {
+        let base = crate::connectors::generic::definitions().remove(0).manifest;
+        let json = serde_json::to_value(connector(&base)).unwrap();
+        let vx = json["settings"].as_array().unwrap().iter().find(|s| s["key"] == "max-vx").unwrap();
+        assert_eq!(
+            *vx,
+            serde_json::json!({
+                "key": "max-vx", "label": "Top speed forward",
+                "description": "Faster commands are slowed down to this.", "unit": "m/s",
+                "advanced": false, "kind": "number", "default": 0.5, "min": 0.0, "minExclusive": true,
+                "suggested": 0.6
+            })
+        );
+        let kinds: Vec<_> = json["settings"].as_array().unwrap().iter().map(|s| s["kind"].clone()).collect();
+        assert!(kinds.contains(&"bool".into()) && kinds.contains(&"part-list".into()), "{kinds:?}");
+        let back: dto::ConnectorInfo = serde_json::from_value(json).unwrap();
+        assert_eq!(back, connector(&base), "it reads back the same");
     }
 }

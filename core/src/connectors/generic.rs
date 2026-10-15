@@ -4,11 +4,14 @@
 //! [`PortRequirement::Bridge`].
 //!
 //! The settings are the part's limits, which become its capability info: the core clamps every
-//! command to them, and simulations respect them.
+//! command to them, and simulations respect them. Each manifest declares its settings
+//! ([`SettingSpec`]); the shell builds its form from them and a [`Reader`] reads them.
 
 use faber_capabilities::{Info, Twist2d, distance, motor, planar_base};
+use faber_connector::settings::Reader;
 use faber_connector::{
-    Connector, Context, Definition, Manifest, PortRequirement, Provide, Settings, SettingsError,
+    Choice, Connector, Context, Definition, Manifest, PortRequirement, Provide, SettingSpec, Settings,
+    SettingsError,
 };
 
 pub const PLANAR_BASE: &str = "generic-planar-base";
@@ -17,15 +20,16 @@ pub const DISTANCE: &str = "generic-distance";
 
 pub fn definitions() -> Vec<Definition> {
     vec![
-        definition(PLANAR_BASE, "Generic drive base", base_provides),
-        definition(MOTOR, "Generic motor", motor_provides),
-        definition(DISTANCE, "Generic distance sensor", distance_provides),
+        definition(PLANAR_BASE, "Generic drive base", base_settings(), base_provides),
+        definition(MOTOR, "Generic motor", motor_settings(), motor_provides),
+        definition(DISTANCE, "Generic distance sensor", distance_settings(), distance_provides),
     ]
 }
 
 fn definition(
     id: &str,
     name: &str,
+    settings: Vec<SettingSpec>,
     provides: fn(&Manifest, &Settings) -> Result<Vec<Provide>, SettingsError>,
 ) -> Definition {
     let mut manifest = Manifest {
@@ -34,6 +38,7 @@ fn definition(
         version: env!("CARGO_PKG_VERSION").into(),
         port: PortRequirement::Bridge,
         provides: Vec::new(),
+        settings,
         usb_hints: Vec::new(),
     };
     manifest.provides = provides(&manifest, &Settings::new()).expect("the defaults are valid");
@@ -43,6 +48,150 @@ fn definition(
         _ => create_distance,
     };
     Definition { manifest, create, provides }
+}
+
+/// A drive base's `length` × `width` (m) when its settings don't say.
+pub const DEFAULT_FOOTPRINT: (f64, f64) = (0.5, 0.4);
+
+/// How often a simulated part publishes. Every generic part takes it.
+fn rate(default_hz: f64) -> SettingSpec {
+    SettingSpec::number("rate-hz", "Rate", "How often a simulated part sends a new value.", "Hz", default_hz)
+        .positive()
+        .advanced()
+}
+
+/// The defaults are what an old parts.toml without these settings has always meant, so they
+/// stay. A new part's form starts at SENNEP's footprint (0.8 × 0.65 m) and limits (0.6 m/s).
+fn base_settings() -> Vec<SettingSpec> {
+    vec![
+        SettingSpec::number(
+            "length",
+            "Length",
+            "Front to back. The simulated world uses it as the machine's footprint.",
+            "m",
+            DEFAULT_FOOTPRINT.0,
+        )
+        .positive()
+        .suggested(0.8),
+        SettingSpec::number("width", "Width", "Side to side, wheels included.", "m", DEFAULT_FOOTPRINT.1)
+            .positive()
+            .suggested(0.65),
+        SettingSpec::bool(
+            "holonomic",
+            "Can drive sideways (mecanum or omni wheels)",
+            "Off for a base that only drives forward, backward and turns, like a tank.",
+            true,
+        ),
+        SettingSpec::number(
+            "max-vx",
+            "Top speed forward",
+            "Faster commands are slowed down to this.",
+            "m/s",
+            0.5,
+        )
+        .positive()
+        .suggested(0.6),
+        SettingSpec::number(
+            "max-vy",
+            "Top speed sideways",
+            "Only used when it can drive sideways.",
+            "m/s",
+            0.5,
+        )
+        .positive()
+        .suggested(0.6),
+        SettingSpec::number(
+            "max-omega",
+            "Top turning speed",
+            "How fast it may turn on the spot (1.5 rad/s is about a quarter turn a second).",
+            "rad/s",
+            1.5,
+        )
+        .positive(),
+        SettingSpec::number(
+            "max-accel",
+            "Acceleration",
+            "How quickly it changes speed. Lower is gentler on the wheels.",
+            "m/s²",
+            1.0,
+        )
+        .positive(),
+        rate(20.0),
+        SettingSpec::part_list(
+            "built-from",
+            "Built from motors",
+            "The motor parts it drives with. Driving the base locks them.",
+        )
+        .advanced(),
+    ]
+}
+
+fn motor_settings() -> Vec<SettingSpec> {
+    vec![
+        SettingSpec::number(
+            "max-velocity",
+            "Top speed",
+            "The fastest it may turn its shaft (10 rad/s is about 95 rpm).",
+            "rad/s",
+            10.0,
+        )
+        .positive(),
+        SettingSpec::choice(
+            "kind",
+            "Kind of motor",
+            "What drives it; shown in its info.",
+            "dc",
+            vec![
+                Choice::new("dc", "DC motor"),
+                Choice::new("stepper", "Stepper"),
+                Choice::new("bldc", "Brushless (BLDC)"),
+                Choice::new("continuous-servo", "Continuous servo"),
+            ],
+        ),
+        rate(20.0),
+    ]
+}
+
+fn distance_settings() -> Vec<SettingSpec> {
+    vec![
+        SettingSpec::number(
+            "min-m",
+            "Closest it can measure",
+            "Anything nearer reads as too close. From the sensor's datasheet.",
+            "m",
+            0.02,
+        )
+        .at_least(0.0),
+        SettingSpec::number(
+            "max-m",
+            "Farthest it can measure",
+            "Anything farther reads as too far. From the sensor's datasheet.",
+            "m",
+            4.0,
+        )
+        .positive(),
+        SettingSpec::number(
+            "fov-rad",
+            "Field of view",
+            "How wide its cone is (0.26 rad is 15°).",
+            "rad",
+            0.26,
+        )
+        .positive(),
+        SettingSpec::choice(
+            "kind",
+            "Kind of sensor",
+            "How it measures; shown in its info.",
+            "ultrasonic",
+            vec![
+                Choice::new("ultrasonic", "Ultrasonic"),
+                Choice::new("laser-tof", "Laser time-of-flight"),
+                Choice::new("infrared", "Infrared"),
+                Choice::new("radar", "Radar"),
+            ],
+        ),
+        rate(10.0),
+    ]
 }
 
 /// A generic part has nothing to run until bridges arrive; creating one only checks its settings.
@@ -76,9 +225,6 @@ fn distance_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, Setting
     Ok(vec![Provide::with_info(Info::Distance(distance_info(s)?))])
 }
 
-/// A drive base's `length` × `width` (m) when its settings don't say.
-pub const DEFAULT_FOOTPRINT: (f64, f64) = (0.5, 0.4);
-
 /// A drive base's footprint, `length` × `width` (m), from its settings. The world shows and
 /// collides it (docs/simulation.md, section 7). Settings were checked when the part was added;
 /// anything unreadable falls back to [`DEFAULT_FOOTPRINT`].
@@ -92,143 +238,56 @@ pub fn footprint(s: &Settings) -> (f64, f64) {
     (read("length", DEFAULT_FOOTPRINT.0), read("width", DEFAULT_FOOTPRINT.1))
 }
 
-/// Settings every simulated part may have: how often it publishes.
-const COMMON: &[&str] = &["rate-hz"];
-
 fn base_info(s: &Settings) -> Result<planar_base::Info, SettingsError> {
-    let r = Reader::new(
-        s,
-        "drive base",
-        &["holonomic", "max-vx", "max-vy", "max-omega", "max-accel", "length", "width", "built-from"],
-    )?;
-    let max =
-        Twist2d::new(r.positive("max-vx", 0.5)?, r.positive("max-vy", 0.5)?, r.positive("max-omega", 1.5)?);
-    let accel = r.positive("max-accel", 1.0)?;
-    r.positive("length", DEFAULT_FOOTPRINT.0 as f32)?;
-    r.positive("width", DEFAULT_FOOTPRINT.1 as f32)?;
-    r.positive("rate-hz", 20.0)?;
+    let specs = base_settings();
+    let r = Reader::new(s, &specs, "a generic drive base")?;
+    let num = |key: &str| r.number(key).map(|n| n as f32);
+    let max = Twist2d::new(num("max-vx")?, num("max-vy")?, num("max-omega")?);
+    let accel = num("max-accel")?;
+    num("length")?;
+    num("width")?;
+    num("rate-hz")?;
     // One acceleration setting: turning takes as long to reach full speed as driving does.
     let omega_accel = accel * max.omega / max.vx.max(max.vy);
     Ok(planar_base::Info {
-        holonomic: r.bool("holonomic", true)?,
+        holonomic: r.bool("holonomic")?,
         max_velocity: max,
         max_acceleration: Twist2d::new(accel, accel, omega_accel),
-        built_from: r.names("built-from")?,
+        built_from: r.part_list("built-from")?,
     })
 }
 
 fn motor_info(s: &Settings) -> Result<motor::Info, SettingsError> {
-    let r = Reader::new(s, "motor", &["max-velocity", "kind"])?;
-    r.positive("rate-hz", 20.0)?;
-    let kinds: Vec<&str> = motor::Kind::ALL.iter().map(|k| k.id()).collect();
-    let kind = r.choice("kind", "dc", &kinds)?;
+    let specs = motor_settings();
+    let r = Reader::new(s, &specs, "a generic motor")?;
+    r.number("rate-hz")?;
+    let kind = r.choice("kind")?;
     Ok(motor::Info {
-        kind: motor::Kind::ALL.iter().copied().find(|k| k.id() == kind).expect("checked by choice"),
+        kind: motor::Kind::ALL.iter().copied().find(|k| k.id() == kind).expect("declared kinds exist"),
         modes: motor::Modes { velocity: true, position: false, duty: true },
-        max_velocity_rad_s: Some(r.positive("max-velocity", 10.0)?),
+        max_velocity_rad_s: Some(r.number("max-velocity")? as f32),
     })
 }
 
 fn distance_info(s: &Settings) -> Result<distance::Info, SettingsError> {
-    let r = Reader::new(s, "distance sensor", &["min-m", "max-m", "fov-rad", "kind"])?;
-    r.positive("rate-hz", 10.0)?;
-    let kinds: Vec<&str> = distance::Kind::ALL.iter().map(|k| k.id()).collect();
-    let kind = r.choice("kind", "ultrasonic", &kinds)?;
-    let (min_m, max_m) = (r.number("min-m", 0.02)?, r.positive("max-m", 4.0)?);
-    if !(0.0..max_m).contains(&min_m) {
+    let specs = distance_settings();
+    let r = Reader::new(s, &specs, "a generic distance sensor")?;
+    r.number("rate-hz")?;
+    let kind = r.choice("kind")?;
+    let (min_m, max_m) = (r.number("min-m")? as f32, r.number("max-m")? as f32);
+    if min_m >= max_m {
         return Err(SettingsError {
             key: "min-m".into(),
-            message: format!("min-m ({min_m} m) must be at least 0 and less than max-m ({max_m} m)."),
+            message: format!("min-m ({min_m} m) must be less than max-m ({max_m} m)."),
             hint: "Use the range from the sensor's datasheet, e.g. min-m = 0.02 and max-m = 4.0.".into(),
         });
     }
     Ok(distance::Info {
         min_m,
         max_m,
-        field_of_view_rad: r.positive("fov-rad", 0.26)?,
-        kind: distance::Kind::ALL.iter().copied().find(|k| k.id() == kind).expect("checked by choice"),
+        field_of_view_rad: r.number("fov-rad")? as f32,
+        kind: distance::Kind::ALL.iter().copied().find(|k| k.id() == kind).expect("declared kinds exist"),
     })
-}
-
-/// Reads settings with defaults, and explains every mistake.
-struct Reader<'a> {
-    s: &'a Settings,
-}
-
-impl<'a> Reader<'a> {
-    /// Refuses keys that are neither in `known` nor in [`COMMON`].
-    fn new(s: &'a Settings, what: &str, known: &[&str]) -> Result<Reader<'a>, SettingsError> {
-        if let Some(key) = s.keys().find(|k| !known.contains(&k.as_str()) && !COMMON.contains(&k.as_str())) {
-            let mut all: Vec<&str> = known.iter().chain(COMMON).copied().collect();
-            all.sort_unstable();
-            return Err(SettingsError {
-                key: key.clone(),
-                message: format!("A generic {what} has no setting called \"{key}\"."),
-                hint: format!("Its settings are {}. Check the spelling.", all.join(", ")),
-            });
-        }
-        Ok(Reader { s })
-    }
-
-    fn number(&self, key: &str, default: f32) -> Result<f32, SettingsError> {
-        match self.s.get(key) {
-            None => Ok(default),
-            Some(v) => match v.as_float().or_else(|| v.as_integer().map(|i| i as f64)) {
-                Some(n) if n.is_finite() => Ok(n as f32),
-                _ => Err(SettingsError {
-                    key: key.into(),
-                    message: format!("{key} must be a number, not {v}."),
-                    hint: format!("For example {key} = {default}."),
-                }),
-            },
-        }
-    }
-
-    fn positive(&self, key: &str, default: f32) -> Result<f32, SettingsError> {
-        let n = self.number(key, default)?;
-        if n > 0.0 {
-            return Ok(n);
-        }
-        Err(SettingsError {
-            key: key.into(),
-            message: format!("{key} must be more than 0, not {n}."),
-            hint: format!("For example {key} = {default}."),
-        })
-    }
-
-    fn bool(&self, key: &str, default: bool) -> Result<bool, SettingsError> {
-        match self.s.get(key) {
-            None => Ok(default),
-            Some(v) => v.as_bool().ok_or_else(|| SettingsError {
-                key: key.into(),
-                message: format!("{key} must be true or false, not {v}."),
-                hint: format!("For example {key} = {default}."),
-            }),
-        }
-    }
-
-    fn choice(&self, key: &str, default: &'a str, options: &[&'a str]) -> Result<&'a str, SettingsError> {
-        let Some(v) = self.s.get(key) else { return Ok(default) };
-        v.as_str().and_then(|s| options.iter().copied().find(|o| *o == s)).ok_or_else(|| SettingsError {
-            key: key.into(),
-            message: format!("{key} = {v} is not one of the choices."),
-            hint: format!(
-                "Use one of {}.",
-                options.iter().map(|o| format!("\"{o}\"")).collect::<Vec<_>>().join(", ")
-            ),
-        })
-    }
-
-    /// A list of part names, e.g. `built-from = ["fl", "fr"]`.
-    fn names(&self, key: &str) -> Result<Vec<String>, SettingsError> {
-        let Some(v) = self.s.get(key) else { return Ok(Vec::new()) };
-        let bad = || SettingsError {
-            key: key.into(),
-            message: format!("{key} must be a list of part names, not {v}."),
-            hint: format!("For example {key} = [\"front-left\", \"front-right\"]."),
-        };
-        v.as_array().ok_or_else(bad)?.iter().map(|n| n.as_str().map(str::to_string).ok_or_else(bad)).collect()
-    }
 }
 
 #[cfg(test)]
@@ -319,6 +378,63 @@ mod tests {
         assert_eq!(footprint(&settings("length = 0.8\nwidth = 0.65\n")), (0.8, 0.65));
         assert_eq!(footprint(&settings("length = 1\n")), (1.0, DEFAULT_FOOTPRINT.1));
         assert_eq!(footprint(&Settings::new()), DEFAULT_FOOTPRINT);
+    }
+
+    #[test]
+    fn manifests_declare_every_setting_they_read() {
+        let keys = |id: &str| -> Vec<String> {
+            let d = definitions().into_iter().find(|d| d.manifest.id == id).unwrap();
+            d.manifest.settings.iter().map(|s| s.key.clone()).collect()
+        };
+        assert_eq!(
+            keys(PLANAR_BASE),
+            [
+                "length",
+                "width",
+                "holonomic",
+                "max-vx",
+                "max-vy",
+                "max-omega",
+                "max-accel",
+                "rate-hz",
+                "built-from"
+            ]
+        );
+        assert_eq!(keys(MOTOR), ["max-velocity", "kind", "rate-hz"]);
+        assert_eq!(keys(DISTANCE), ["min-m", "max-m", "fov-rad", "kind", "rate-hz"]);
+    }
+
+    #[test]
+    fn a_choice_lists_every_kind_the_capability_has() {
+        let choices = |id: &str| -> Vec<String> {
+            let d = definitions().into_iter().find(|d| d.manifest.id == id).unwrap();
+            let spec = d.manifest.settings.into_iter().find(|s| s.key == "kind").unwrap();
+            let faber_connector::SettingKind::Choice { choices, .. } = spec.kind else { panic!() };
+            choices.into_iter().map(|c| c.value).collect()
+        };
+        let motors: Vec<_> = motor::Kind::ALL.iter().map(|k| k.id().to_string()).collect();
+        let sensors: Vec<_> = distance::Kind::ALL.iter().map(|k| k.id().to_string()).collect();
+        assert_eq!(choices(MOTOR), motors);
+        assert_eq!(choices(DISTANCE), sensors);
+    }
+
+    /// An old parts.toml that leaves the settings out keeps meaning what it always meant.
+    #[test]
+    fn left_out_settings_keep_their_old_defaults() {
+        let Info::PlanarBase(b) = info_of(PLANAR_BASE, &Settings::new()).unwrap() else { panic!() };
+        assert_eq!((b.holonomic, b.max_velocity), (true, Twist2d::new(0.5, 0.5, 1.5)));
+        assert_eq!(b.max_acceleration.vx, 1.0);
+        assert_eq!(footprint(&Settings::new()), (0.5, 0.4));
+        let Info::Motor(m) = info_of(MOTOR, &Settings::new()).unwrap() else { panic!() };
+        assert_eq!((m.kind, m.max_velocity_rad_s), (motor::Kind::Dc, Some(10.0)));
+        let Info::Distance(d) = info_of(DISTANCE, &Settings::new()).unwrap() else { panic!() };
+        let old = distance::Info {
+            min_m: 0.02,
+            max_m: 4.0,
+            field_of_view_rad: 0.26,
+            kind: distance::Kind::Ultrasonic,
+        };
+        assert_eq!(d, old);
     }
 
     #[test]

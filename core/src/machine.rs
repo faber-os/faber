@@ -32,7 +32,7 @@ use crate::simparts::{self, WorldEngine};
 use crate::simulation::{self, Outlet, PartSpec};
 use crate::suggest::{Suggestion, suggestions};
 use crate::translations::Translations;
-use faber_capabilities::{Capability, Mount, Reading, estop};
+use faber_capabilities::{Capability, Info, Mount, Reading, estop};
 use faber_connector::{Definition, Health, Manifest, PortRequirement, Problem, Provide, Settings};
 use safety::Runner;
 use std::collections::BTreeMap;
@@ -72,6 +72,8 @@ pub struct MachineError {
     pub code: &'static str,
     pub message: String,
     pub hint: String,
+    /// Why the lease ended, on `lease-ended`, so a program needn't read the message.
+    pub lease_ended: Option<EndReason>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,27 +102,27 @@ impl From<FileError> for MachineError {
             "io-error" => ErrorKind::Internal,
             _ => ErrorKind::BadRequest,
         };
-        MachineError { kind, code: e.code, message: e.message, hint: e.hint }
+        MachineError { kind, code: e.code, message: e.message, hint: e.hint, lease_ended: None }
     }
 }
 
 impl From<SettingsError> for MachineError {
     fn from(e: SettingsError) -> Self {
         let kind = if e.code == "settings-not-saved" { ErrorKind::Internal } else { ErrorKind::BadRequest };
-        MachineError { kind, code: e.code, message: e.message, hint: e.hint }
+        MachineError { kind, code: e.code, message: e.message, hint: e.hint, lease_ended: None }
     }
 }
 
 impl From<BackupError> for MachineError {
     fn from(e: BackupError) -> Self {
         let kind = if e.code == "backup-invalid" { ErrorKind::Unprocessable } else { ErrorKind::Internal };
-        MachineError { kind, code: e.code, message: e.message, hint: e.hint }
+        MachineError { kind, code: e.code, message: e.message, hint: e.hint, lease_ended: None }
     }
 }
 
 impl MachineError {
     fn new(kind: ErrorKind, code: &'static str, message: impl Into<String>, hint: impl Into<String>) -> Self {
-        MachineError { kind, code, message: message.into(), hint: hint.into() }
+        MachineError { kind, code, message: message.into(), hint: hint.into(), lease_ended: None }
     }
 }
 
@@ -132,7 +134,16 @@ pub struct PartView {
     pub source: Source,
     pub mount: Mount,
     pub status: PartStatus,
-    pub signals: Vec<(SignalAddress, Capability)>,
+    pub signals: Vec<SignalView>,
+}
+
+/// One signal of a part, with its info (limits) as the part's own settings give it. `info` is
+/// `None` when the settings can't be read (the part is invalid) or the capability has none.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SignalView {
+    pub address: SignalAddress,
+    pub capability: Capability,
+    pub info: Option<Info>,
 }
 
 /// A port as the shell shows it.
@@ -367,13 +378,19 @@ impl Machine {
             .parts
             .iter()
             .map(|(name, cfg)| {
+                // What it provides with its own settings, resolved when it was (re)started.
+                let own = st.running.get(name).map(|r| r.provides.as_slice()).unwrap_or_default();
                 let signals = self
                     .definition(&cfg.connector)
                     .map(|d| {
                         d.manifest
                             .provides
                             .iter()
-                            .map(|p| (SignalAddress::new(name.clone(), p.name.clone()), p.capability))
+                            .map(|p| SignalView {
+                                address: SignalAddress::new(name.clone(), p.name.clone()),
+                                capability: p.capability,
+                                info: own.iter().find(|o| o.name == p.name).and_then(|o| o.info.clone()),
+                            })
                             .collect()
                     })
                     .unwrap_or_default();
@@ -1774,7 +1791,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let m = machine(dir.path(), no_ports());
         let view = m.add_part(demo("lidar")).unwrap();
-        assert_eq!(view.signals[0].0.to_string(), "lidar/laser-scan");
+        assert_eq!(view.signals[0].address.to_string(), "lidar/laser-scan");
         let text = std::fs::read_to_string(dir.path().join("config/parts.toml")).unwrap();
         assert!(text.contains("[parts.lidar]") && text.contains("replay:demo-ld19"), "{text}");
         assert!(text.starts_with("# The parts"), "the header survives");
@@ -2293,6 +2310,26 @@ connector =
     }
 
     #[test]
+    fn a_part_shows_the_limits_its_own_settings_give() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let added = sim(
+            &m,
+            "base",
+            "generic-planar-base",
+            Simulate::Manual,
+            "max-vx = 0.6
+",
+        );
+        let listed = m.parts().into_iter().find(|p| p.name.as_str() == "base").unwrap();
+        for view in [added, listed] {
+            let Some(Info::PlanarBase(info)) = &view.signals[0].info else { panic!("{view:?}") };
+            assert_eq!(info.max_velocity.vx, 0.6, "not the connector's default 0.5");
+        }
+        m.shutdown();
+    }
+
+    #[test]
     fn a_leased_command_is_clamped_applied_and_reported() {
         let dir = tempfile::tempdir().unwrap();
         let m = base_machine(dir.path());
@@ -2321,6 +2358,7 @@ connector =
         let e = m.command("base", &lease.id, drive(0.1, 0.0)).unwrap_err();
         assert_eq!((e.kind, e.code), (ErrorKind::Forbidden, "lease-ended"));
         assert!(e.message.contains("released"), "{e:?}");
+        assert_eq!(e.lease_ended, Some(EndReason::Released), "the reason comes typed too");
         assert_eq!(m.command("ghost", &lease.id, drive(0.1, 0.0)).unwrap_err().code, "unknown-part");
         m.shutdown();
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PATTERN_KINDS, isManualSensor, patternFor, patternValue, sensorMax } from './simulation';
-import type { ConnectorInfo, PartInfo } from './types';
+import type { PartInfo } from './types';
 
 describe('manual simulation patterns', () => {
   it('turns the slider value and the menu into a pattern', () => {
@@ -36,22 +36,19 @@ describe('manual sensors', () => {
     expect(isManualSensor(p('manual', 'planar-base@1'))).toBe(false);
   });
 
-  it("slide up to the sensor's range", () => {
-    const lidar: ConnectorInfo = {
-      id: 'c',
-      name: 'c',
-      version: '1',
-      kind: 'built-in',
-      port: { kind: 'bridge' },
-      provides: [
+  it("slide up to the sensor's own range", () => {
+    const lidar = {
+      connector: 'c',
+      simulate: 'manual',
+      signals: [
         {
-          name: 'laser-scan',
+          address: 'x/laser-scan',
           capability: 'laser-scan@1',
           info: { capability: 'laser-scan@1', info: { rangeMinM: 0.02, rangeMaxM: 12 } },
         },
       ],
-    };
-    expect(sensorMax(p('manual', 'laser-scan@1'), [lidar])).toBe(12);
-    expect(sensorMax(p('manual', 'distance@1'), [])).toBe(4);
+    } as PartInfo;
+    expect(sensorMax(lidar)).toBe(12);
+    expect(sensorMax(p('manual', 'distance@1'))).toBe(4);
   });
 });

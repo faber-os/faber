@@ -19,7 +19,35 @@ export const LD19: ConnectorInfo = {
   kind: 'built-in',
   port: { kind: 'serial', baud: 230400 },
   provides: [{ name: 'laser-scan', capability: 'laser-scan@1' }],
+  settings: [],
 };
+
+const RATE = {
+  key: 'rate-hz',
+  label: 'Rate',
+  description: 'How often a simulated part sends a new value.',
+  unit: 'Hz',
+  advanced: true,
+  kind: 'number',
+  min: 0,
+  minExclusive: true,
+} as const;
+
+/** A number setting above 0, as the core describes one. */
+function positive(key: string, label: string, unit: string, def: number, suggested?: number) {
+  return {
+    key,
+    label,
+    description: `About ${label}.`,
+    unit,
+    advanced: false,
+    kind: 'number' as const,
+    default: def,
+    min: 0,
+    minExclusive: true,
+    ...(suggested === undefined ? {} : { suggested }),
+  };
+}
 
 export const GENERIC_BASE: ConnectorInfo = {
   id: 'generic-planar-base',
@@ -42,6 +70,31 @@ export const GENERIC_BASE: ConnectorInfo = {
       },
     },
   ],
+  // As the core describes it (core/src/connectors/generic.rs).
+  settings: [
+    positive('length', 'Length', 'm', 0.5, 0.8),
+    positive('width', 'Width', 'm', 0.4, 0.65),
+    {
+      key: 'holonomic',
+      label: 'Can drive sideways (mecanum or omni wheels)',
+      description: 'Off for a tank.',
+      advanced: false,
+      kind: 'bool',
+      default: true,
+    },
+    positive('max-vx', 'Top speed forward', 'm/s', 0.5, 0.6),
+    positive('max-vy', 'Top speed sideways', 'm/s', 0.5, 0.6),
+    positive('max-omega', 'Top turning speed', 'rad/s', 1.5),
+    positive('max-accel', 'Acceleration', 'm/s²', 1),
+    { ...RATE, default: 20 },
+    {
+      key: 'built-from',
+      label: 'Built from motors',
+      description: 'The motor parts it drives with.',
+      advanced: true,
+      kind: 'part-list',
+    },
+  ],
 };
 
 export const GENERIC_DISTANCE: ConnectorInfo = {
@@ -60,6 +113,35 @@ export const GENERIC_DISTANCE: ConnectorInfo = {
       },
     },
   ],
+  settings: [
+    {
+      key: 'min-m',
+      label: 'Closest it can measure',
+      description: 'Anything nearer reads as too close.',
+      unit: 'm',
+      advanced: false,
+      kind: 'number',
+      default: 0.02,
+      min: 0,
+    },
+    positive('max-m', 'Farthest it can measure', 'm', 4),
+    positive('fov-rad', 'Field of view', 'rad', 0.26),
+    {
+      key: 'kind',
+      label: 'Kind of sensor',
+      description: 'How it measures.',
+      advanced: false,
+      kind: 'choice',
+      default: 'ultrasonic',
+      choices: [
+        { value: 'ultrasonic', label: 'Ultrasonic' },
+        { value: 'laser-tof', label: 'Laser time-of-flight' },
+        { value: 'infrared', label: 'Infrared' },
+        { value: 'radar', label: 'Radar' },
+      ],
+    },
+    { ...RATE, default: 10 },
+  ],
 };
 
 /** A simulated drive base, as the parts topic shows it. */
@@ -68,7 +150,13 @@ export function simBase(name = 'base', overrides: Partial<PartInfo> = {}): PartI
     connector: 'generic-planar-base',
     port: undefined,
     simulate: 'manual',
-    signals: [{ address: `${name}/planar-base`, capability: 'planar-base@1' }],
+    signals: [
+      {
+        address: `${name}/planar-base`,
+        capability: 'planar-base@1',
+        info: GENERIC_BASE.provides[0]!.info!,
+      },
+    ],
     ...overrides,
   });
 }
@@ -79,7 +167,13 @@ export function simDistance(name = 'front', overrides: Partial<PartInfo> = {}): 
     connector: 'generic-distance',
     port: undefined,
     simulate: 'manual',
-    signals: [{ address: `${name}/distance`, capability: 'distance@1' }],
+    signals: [
+      {
+        address: `${name}/distance`,
+        capability: 'distance@1',
+        info: GENERIC_DISTANCE.provides[0]!.info!,
+      },
+    ],
     ...overrides,
   });
 }

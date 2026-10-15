@@ -21,6 +21,8 @@ import type { LeaseGrant } from './generated/LeaseGrant';
 import type { LeaseInfo } from './generated/LeaseInfo';
 import type { Pattern } from './generated/Pattern';
 import type { Simulation } from './generated/Simulation';
+import type { WorldInfo } from './generated/WorldInfo';
+import type { WorldView } from './generated/WorldView';
 import { dropNullFields } from './wire';
 
 /** Something the core (or the way to it) said no to, with what to try next. */
@@ -99,6 +101,15 @@ export interface CoreHttp {
   /** A manual simulated sensor's value pattern. `409 not-manual`, `400 not-a-sensor` … */
   getSimulation(part: string): Promise<Simulation>;
   putSimulation(part: string, pattern: Pattern): Promise<Simulation>;
+
+  /** The prebuilt worlds, in menu order (docs/api.md, "The simulated world"). */
+  getWorlds(): Promise<WorldInfo[]>;
+  /** The current world: its geometry, start and the base's footprint. */
+  getWorld(): Promise<WorldView>;
+  /** Switches the world (written to parts.toml); the machine starts again at its start. */
+  putWorld(name: string): Promise<WorldView>;
+  /** Puts the machine back at its start, at rest. */
+  resetWorld(): Promise<void>;
 }
 
 export type WriteMode = 'replace' | 'create';
@@ -233,6 +244,10 @@ export function createHttp(
     releaseEstop: () => request('POST', '/estop/release', { source: 'shell' }),
     getSimulation: (part) => request('GET', `${partPath(part)}/simulation`),
     putSimulation: (part, pattern) => request('PUT', `${partPath(part)}/simulation`, { pattern }),
+    getWorlds: () => request('GET', '/worlds'),
+    getWorld: () => request('GET', '/world'),
+    putWorld: (name) => request('PUT', '/world', { name }),
+    resetWorld: () => request('POST', '/world/reset'),
   };
 }
 

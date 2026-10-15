@@ -89,6 +89,8 @@ what the checker calls translated is exactly what the shell shows.
 - **Messages from the core.** Errors and hints the core sends (e.g. "COM3 is used by the part
   "lidar".") are shown as the core wrote them, in English. Only texts the shell makes itself are
   translated.
+- **A connector's settings** in Add part: their labels, descriptions and choices come from the
+  connector itself (`GET /api/v0/connectors`), in English, until connectors can ship translations.
 - **Data:** file and folder names (including Desktop, Documents, Recordings, Trash and System,
   which are real folders), part names, port ids and labels, connector names, units like `cm`.
 - **"Copy diagnostics"** in Settings → About: it is a bug report for maintainers, so it stays in

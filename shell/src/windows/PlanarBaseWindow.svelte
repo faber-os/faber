@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../lib/i18n';
   import { useCore } from '../lib/state/context';
-  import { baseInfo } from '../lib/state/connectorSettings';
+  import { baseInfo } from '../lib/state/partLimits';
   import type { ErrorBody, PlanarBaseReading } from '../lib/state/types';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
@@ -22,7 +22,7 @@
   const address = $derived(win.params.address ?? '');
   const partName = $derived(win.params.part ?? address.split('/')[0] ?? '');
   const part = $derived(core.parts?.find((p) => p.name === partName) ?? null);
-  const info = $derived(part ? baseInfo(part, core.connectors) : null);
+  const info = $derived(part ? baseInfo(part) : null);
   const lease = $derived(core.leaseOn(partName));
   const unit = $derived(core.settings?.units.length ?? 'metric');
 

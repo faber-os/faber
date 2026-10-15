@@ -74,6 +74,9 @@
       'M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0M12 4v5.5M4.5 14.5l5.2-1.4M19.5 14.5l-5.2-1.4',
     distance: 'M4.5 7v10M4.5 12h12M13.5 9l3 3-3 3M19.5 6.5v11',
     base: 'M6.5 5.5h11v13h-11zM4 7.5v3M4 13.5v3M20 7.5v3M20 13.5v3M12 9.5V14M9.8 11.5L12 9.3l2.2 2.2',
+    world: 'M3.5 6.5l5.5-2 6 2 5.5-2v13l-5.5 2-6-2-5.5 2zM9 4.5v13M15 6.5v13',
+    follow:
+      'M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3',
   } as const;
 
   /** Solid shapes drawn on top of the outline, for the few icons that need one. */

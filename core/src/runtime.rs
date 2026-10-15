@@ -578,6 +578,7 @@ mod tests {
                 version: "0".into(),
                 port: PortRequirement::Serial { baud: 9600 },
                 provides: vec![Provide::default_for(Capability::LaserScan)],
+                settings: vec![],
                 usb_hints: vec![],
             },
             create: create_echo,

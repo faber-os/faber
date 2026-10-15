@@ -51,7 +51,10 @@ pub struct Failure(StatusCode, dto::ErrorBody);
 
 impl Failure {
     fn new(status: StatusCode, code: &str, message: impl Into<String>, hint: impl Into<String>) -> Failure {
-        Failure(status, dto::ErrorBody { code: code.into(), message: message.into(), hint: hint.into() })
+        Failure(
+            status,
+            dto::ErrorBody { code: code.into(), message: message.into(), hint: hint.into(), reason: None },
+        )
     }
 }
 
@@ -126,6 +129,7 @@ async fn system(State(s): State<AppState>) -> Json<dto::SystemInfo> {
                 None => format!("parts.toml has a problem: {}", e.message),
             },
             hint: e.hint,
+            reason: None,
         }),
     })
 }

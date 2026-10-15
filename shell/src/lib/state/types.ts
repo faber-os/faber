@@ -1,7 +1,9 @@
 // The core's data types, as the UI may use them. The UI imports types from here, never from the
 // API layer directly (docs/development.md, shell layering).
 export type { ConnectorInfo } from '../api/generated/ConnectorInfo';
+export type { SettingInfo } from '../api/generated/SettingInfo';
 export type { ErrorBody } from '../api/generated/ErrorBody';
+export type { LaserScanInfo } from '../api/generated/LaserScanInfo';
 export type { LaserScanReading } from '../api/generated/LaserScanReading';
 export type { LogEntry } from '../api/generated/LogEntry';
 export type { LogLevel } from '../api/generated/LogLevel';
@@ -57,3 +59,8 @@ export type { PlanarBaseReading } from '../api/generated/PlanarBaseReading';
 export type { Simulate } from '../api/generated/Simulate';
 export type { Simulation } from '../api/generated/Simulation';
 export type { Twist2d } from '../api/generated/Twist2d';
+export type { Mount } from '../api/generated/Mount';
+export type { Pose } from '../api/generated/Pose';
+export type { WorldInfo } from '../api/generated/WorldInfo';
+export type { WorldView } from '../api/generated/WorldView';
+export type { WorldMover } from '../api/generated/WorldMover';

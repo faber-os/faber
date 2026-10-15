@@ -12,6 +12,7 @@ import PlanarBaseWindow from './PlanarBaseWindow.svelte';
 import PropertiesWindow from './PropertiesWindow.svelte';
 import SerialMonitorWindow from './SerialMonitorWindow.svelte';
 import SettingsWindow from './SettingsWindow.svelte';
+import WorldWindow from './WorldWindow.svelte';
 
 /** Every kind of window the shell can open. Titles and descriptions are getters, so they follow the language. */
 export const WINDOW_DEFS: WindowDef[] = [
@@ -81,8 +82,6 @@ export const WINDOW_DEFS: WindowDef[] = [
     minSize: { w: 320, h: 280 },
     component: PlanarBaseWindow,
   },
-  // The World window (docs/simulation.md, section 9: top view, world picker, Reset position) goes
-  // next to Drive, as a tool with its own program key (`tool:world`), once the world API lands.
   {
     kind: 'drive',
     get title() {
@@ -100,6 +99,24 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 600, h: 540 },
     minSize: { w: 340, h: 360 },
     component: DriveWindow,
+  },
+  {
+    // The simulated world from above (docs/simulation.md, section 9).
+    kind: 'world',
+    get title() {
+      return t('programs.world.title');
+    },
+    get description() {
+      return t('programs.world.description');
+    },
+    icon: 'world',
+    menu: 'tools',
+    program: 'tool:world',
+    colour: 'world',
+    multiple: false,
+    defaultSize: { w: 720, h: 560 },
+    minSize: { w: 360, h: 340 },
+    component: WorldWindow,
   },
   {
     kind: 'serial-monitor',

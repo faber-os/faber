@@ -103,6 +103,12 @@ async fn add_fast_base(c: &TestCore) {
     assert_eq!(s, StatusCode::CREATED, "{body}");
     assert_eq!(body["simulate"], "manual");
     assert!(body.get("port").is_none());
+    // Its own limits, from its settings, not the connector's defaults.
+    let info = &body["signals"][0]["info"];
+    assert_eq!(info["capability"], "planar-base@1");
+    assert_eq!(info["info"]["maxVelocity"]["vx"], 5.0, "{body}");
+    let (_, parts) = call(&c.app, "GET", "/api/v0/parts", None).await;
+    assert_eq!(parts[0]["signals"][0]["info"], *info, "the parts list says the same");
 }
 
 /// The base's latest reading: what it was commanded, and when.
@@ -178,8 +184,10 @@ async fn a_program_drives_a_square_and_lets_go() {
     assert_eq!(base_state(&c).0, Twist2d::ZERO, "releasing the lease stops the base");
     let (s, e) = command(&c, &id, drive(0.1, 0.0)).await;
     assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::FORBIDDEN, Some("lease-ended")));
+    assert_eq!(e["error"]["reason"], "released", "why it ended, without reading the message");
     let (s, e) = command(&c, "made-up", drive(0.1, 0.0)).await;
     assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::FORBIDDEN, Some("lease-required")));
+    assert!(e["error"].get("reason").is_none(), "only lease-ended has a reason: {e}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

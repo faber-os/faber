@@ -30,3 +30,13 @@ const context2d = new Proxy(
 HTMLCanvasElement.prototype.getContext = function getContext() {
   return context2d as CanvasRenderingContext2D;
 } as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+/** Path2D, as far as the World view builds paths: records nothing, like the context above. */
+class NoPath2D {
+  moveTo() {}
+  lineTo() {}
+  closePath() {}
+  rect() {}
+  arc() {}
+}
+globalThis.Path2D ??= NoPath2D as unknown as typeof Path2D;

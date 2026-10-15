@@ -104,6 +104,7 @@ export const APP_COLOURS: Record<string, { light: Oklch; dark: Oklch }> = {
   logs: { light: { l: 0.5, c: 0.1, h: 296 }, dark: { l: 0.78, c: 0.09, h: 296 } },
   viewer: { light: { l: 0.48, c: 0.1, h: 160 }, dark: { l: 0.8, c: 0.1, h: 160 } },
   drive: { light: { l: 0.5, c: 0.13, h: 40 }, dark: { l: 0.78, c: 0.12, h: 45 } },
+  world: { light: { l: 0.5, c: 0.11, h: 128 }, dark: { l: 0.8, c: 0.11, h: 128 } },
   about: { light: { l: 0.45, c: 0.02, h: 250 }, dark: { l: 0.82, c: 0.02, h: 250 } },
 };
 

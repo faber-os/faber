@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import { t } from '../lib/i18n';
   import { useCore } from '../lib/state/context';
-  import { baseInfo, motorInfo } from '../lib/state/connectorSettings';
+  import { baseInfo, motorInfo } from '../lib/state/partLimits';
   import {
     DriveLoop,
     LeaseKeeper,
@@ -42,8 +42,8 @@
   const part = $derived(movable.find((p) => p.name === win.params.part) ?? movable[0] ?? null);
   const partName = $derived(part?.name ?? null);
   const isBase = $derived(part?.signals.some((s) => s.capability === 'planar-base@1') ?? false);
-  const base = $derived(part && isBase ? baseInfo(part, core.connectors) : null);
-  const motor = $derived(part && !isBase ? motorInfo(part, core.connectors) : null);
+  const base = $derived(part && isBase ? baseInfo(part) : null);
+  const motor = $derived(part && !isBase ? motorInfo(part) : null);
   const holonomic = $derived(base?.holonomic ?? false);
   const signal = $derived(
     part?.signals.find((s) => s.capability === 'planar-base@1' || s.capability === 'motor@1') ??

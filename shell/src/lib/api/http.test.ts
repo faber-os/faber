@@ -319,3 +319,26 @@ describe('driving', () => {
     expect(f.calls[1]!.body).toEqual(sim);
   });
 });
+
+describe('the simulated world', () => {
+  it('lists the worlds, reads and switches the current one, and resets the machine', async () => {
+    const view = { name: 'apartment', title: 'Apartment' };
+    const f = fakeFetch([
+      { path: '/api/v0/worlds', body: [{ name: 'empty' }] },
+      { path: '/api/v0/world', body: view },
+      { method: 'PUT', path: '/api/v0/world', body: view },
+      { method: 'POST', path: '/api/v0/world/reset', status: 204 },
+    ]);
+    const http = createHttp(f.fetch);
+    expect(await http.getWorlds()).toEqual([{ name: 'empty' }]);
+    expect(await http.getWorld()).toEqual(view);
+    expect(await http.putWorld('apartment')).toEqual(view);
+    await expect(http.resetWorld()).resolves.toBeUndefined();
+    expect(f.calls.map((c) => [c.method, c.body])).toEqual([
+      ['GET', undefined],
+      ['GET', undefined],
+      ['PUT', { name: 'apartment' }],
+      ['POST', undefined],
+    ]);
+  });
+});

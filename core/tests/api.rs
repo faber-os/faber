@@ -156,7 +156,12 @@ async fn rest_lists_the_machine_and_manages_parts() {
 
     let (s, part) = call(&c.app, "POST", "/api/v0/parts", Some(demo_part("lidar"))).await;
     assert_eq!(s, StatusCode::CREATED, "{part}");
-    assert_eq!(part["signals"][0], json!({"address": "lidar/laser-scan", "capability": "laser-scan@1"}));
+    let signal = &part["signals"][0];
+    assert_eq!(
+        (signal["address"].as_str(), signal["capability"].as_str()),
+        (Some("lidar/laser-scan"), Some("laser-scan@1"))
+    );
+    assert_eq!(signal["info"]["capability"], "laser-scan@1", "its range comes with it: {signal}");
 
     let (s, err) = call(&c.app, "POST", "/api/v0/parts", Some(demo_part("lidar"))).await;
     assert_eq!(s, StatusCode::CONFLICT);

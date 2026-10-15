@@ -36,6 +36,8 @@ pub fn manifest() -> Manifest {
             range_min_m: 0.02,
             range_max_m: 12.0,
         }))],
+        // The LD19 has nothing to set: it always spins at 10 Hz and sends 230400 baud.
+        settings: Vec::new(),
         usb_hints: vec![UsbHint {
             vid: 0x10c4,
             pid: 0xea60,
@@ -52,13 +54,7 @@ pub fn definition() -> Definition {
 }
 
 fn create(settings: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
-    if let Some(key) = settings.keys().next() {
-        return Err(SettingsError {
-            key: key.clone(),
-            message: format!("The LD19 connector has no setting called \"{key}\"."),
-            hint: "The LD19 needs no settings. Remove it from this part's settings.".into(),
-        });
-    }
+    faber_connector::settings::Reader::new(settings, &manifest().settings, "the LD19 connector")?;
     Ok(Box::new(Ld19::default()))
 }
 

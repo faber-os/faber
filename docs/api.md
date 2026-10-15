@@ -30,14 +30,17 @@ access, in Phase 6).
 |---|---|
 | `GET /api/v0/system` | `SystemInfo`. Its `api` is a fingerprint of the API types the core was built with (`core/build.rs`); the shell computes its own the same way and, when they differ, asks for the core to be restarted instead of failing request by request. `timeZone` is the machine's own IANA time zone (e.g. `Europe/Copenhagen`), read from its OS each time; `UTC` (with a log line) if the OS doesn't say. |
 | `GET /api/v0/about` | `AboutInfo`: `version`, `api` (the fingerprint), `dataFolder` (where config and files live on this computer), `uptimeS` (seconds since the core started), `os`, `timeZone` (the machine's own). |
-| `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run. Each `provides` entry carries its capability's `info` (limits, e.g. a distance sensor's range) with the default settings. `port` is `{"kind": "serial", "baud": …}` or `{"kind": "bridge"}` (needs a FaberLink bridge, Phase 4; until then only simulated). |
+| `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run. Each `provides` entry carries its capability's `info` (limits, e.g. a distance sensor's range) with the default settings; a part's own limits are in its `signals` (below). `port` is `{"kind": "serial", "baud": …}` or `{"kind": "bridge"}` (needs a FaberLink bridge, Phase 4; until then only simulated). `settings` describes every setting a part of this kind takes, in form order: `key`, `label`, `description` (both in English for now), `unit?`, `advanced` (shown behind "Advanced"), and `kind` with its values: `number` (`default`, `min?`, `minExclusive?`, `max?`, `suggested?`: where a new part's form starts), `bool` (`default`), `choice` (`default`, `choices`: `value`, `label`), `string` (`default`) or `part-list` (other parts' names, empty by default). `default` is what a part gets when parts.toml leaves the setting out. |
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
 | `GET /api/v0/parts` | `PartInfo[]` |
 | `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name` (including `world`, the simulated world's own name), `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: it needs a FaberLink bridge, Phase 4), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
 | `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`). |
 
-`PartInfo` has `port` for a real part and `simulate` for a simulated one, never both.
+`PartInfo` has `port` for a real part and `simulate` for a simulated one, never both. Each of its
+`signals` (`address`, `capability`, `info?`) carries the capability's `info` as **this part's own
+settings** give it (a base with `max-vx = 0.6` says 0.6, not the connector's default 0.5). `info` is
+absent when the capability has none or the part's settings can't be read (the part is `invalid`).
 
 Adding or removing a part **writes `parts.toml`** (keeping comments and formatting) and then
 reconciles. The file stays the source of truth (D13).
@@ -140,7 +143,8 @@ motor's `maxVelocityRadS`, duty −1..1) are **clamped**, not refused: `applied`
 got, and `clamped` says whether it differs from what was sent. A base that is not `holonomic` gets
 `vy` 0.
 
-`lease-ended` messages and `403 lease-ended` errors give the **reason**: `released`, `expired`,
+`lease-ended` messages and `403 lease-ended` errors give the **reason** (the error in its
+`reason` field, next to `code`, so a program doesn't have to read the message): `released`, `expired`,
 `estop`, `taken-over`, `part-removed`, `part-restarted` (its config changed), `part-failed`,
 `shutdown`. Expired leases are ended within 50 ms of their deadline.
 

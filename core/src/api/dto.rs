@@ -41,6 +41,10 @@ pub struct ErrorBody {
     pub message: String,
     /// The next thing to try.
     pub hint: String,
+    /// On `lease-ended`: why it ended, as the `leases` topic says it.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<LeaseEndReason>,
 }
 
 /// The body of every non-2xx REST response.
@@ -84,6 +88,76 @@ pub struct ConnectorInfo {
     pub kind: String,
     pub port: PortRequirementInfo,
     pub provides: Vec<ProvideInfo>,
+    /// Every setting a part of this kind takes, in the order a form shows them. Empty: none.
+    pub settings: Vec<SettingInfo>,
+}
+
+/// One setting a connector takes, as `[parts.<name>.settings]` holds it. Labels and descriptions
+/// are the connector's own words, in English for now.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SettingInfo {
+    /// The key in parts.toml, e.g. `max-vx`.
+    pub key: String,
+    /// A short name for people, e.g. "Top speed forward".
+    pub label: String,
+    /// One sentence on what it does.
+    pub description: String,
+    /// A number's unit, SI as in parts.toml (`m`, `m/s`, `rad/s`, `Hz`).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Rarely needed: shown behind "Advanced".
+    pub advanced: bool,
+    #[serde(flatten)]
+    pub kind: SettingKindInfo,
+}
+
+/// What a setting holds, and its default (what a part gets when parts.toml leaves it out).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+#[ts(export)]
+pub enum SettingKindInfo {
+    #[serde(rename_all = "camelCase")]
+    Number {
+        default: f64,
+        /// The smallest value allowed; with `minExclusive`, values must be above it.
+        #[ts(optional)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min: Option<f64>,
+        #[ts(as = "Option<bool>", optional)]
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        min_exclusive: bool,
+        #[ts(optional)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max: Option<f64>,
+        /// Where a new part's form starts, when that differs from `default`.
+        #[ts(optional)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        suggested: Option<f64>,
+    },
+    Bool {
+        default: bool,
+    },
+    Choice {
+        default: String,
+        choices: Vec<ChoiceInfo>,
+    },
+    String {
+        default: String,
+    },
+    /// A list of other parts' names; empty by default.
+    PartList,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ChoiceInfo {
+    /// What parts.toml holds, e.g. `laser-tof`.
+    pub value: String,
+    /// What people read, e.g. "Laser time-of-flight".
+    pub label: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -210,6 +284,11 @@ pub struct SignalInfo {
     /// `part/name`, e.g. `lidar/laser-scan`.
     pub address: String,
     pub capability: Capability,
+    /// Its limits (range, top speed, …) as this part's own settings give them. Absent when the
+    /// capability has none, or the part's settings can't be read.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub info: Option<Info>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -900,7 +979,12 @@ mod tests {
     #[test]
     fn errors_carry_a_hint() {
         let e = ApiError {
-            error: ErrorBody { code: "port-claimed".into(), message: "m".into(), hint: "h".into() },
+            error: ErrorBody {
+                code: "port-claimed".into(),
+                message: "m".into(),
+                hint: "h".into(),
+                reason: None,
+            },
         };
         assert_eq!(
             serde_json::to_value(&e).unwrap(),

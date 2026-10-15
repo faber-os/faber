@@ -256,6 +256,37 @@ describe('Adding a simulated part', () => {
     );
   });
 
+  it("builds the form from the core's description: help, choices and advanced settings", async () => {
+    const shell = setup([
+      { path: '/api/v0/connectors', body: [LD19, GENERIC_BASE, GENERIC_DISTANCE] },
+    ]);
+    shell.pushPorts([]);
+    shell.pushParts([simBase('left'), simBase('right')]);
+    await userEvent.click(await screen.findByRole('button', { name: /^Add part$/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /generic-distance/ }));
+    expect(screen.getByLabelText(/Farthest it can measure/)).toHaveAccessibleDescription(
+      'About Farthest it can measure.',
+    );
+    await userEvent.selectOptions(screen.getByLabelText(/Kind of sensor/), 'Laser time-of-flight');
+    expect(screen.getByLabelText(/Kind of sensor/)).toHaveValue('laser-tof');
+
+    await userEvent.click(screen.getByRole('radio', { name: /generic-planar-base/ }));
+    // Advanced settings wait behind their own heading.
+    expect(screen.getByLabelText(/Rate/)).not.toBeVisible();
+    await userEvent.click(screen.getByText('Advanced settings'));
+    await userEvent.clear(screen.getByLabelText(/Rate/));
+    await userEvent.type(screen.getByLabelText(/Rate/), '50');
+    const motors = screen.getByRole('group', { name: 'Built from motors' });
+    await userEvent.click(within(motors).getByRole('checkbox', { name: 'left' }));
+    await userEvent.type(screen.getByLabelText('Name'), 'base');
+    await userEvent.click(screen.getByRole('button', { name: 'Add part' }));
+    await waitFor(() =>
+      expect(shell.fetch.calls.find((c) => c.method === 'POST')?.body).toMatchObject({
+        settings: { 'rate-hz': 50, 'built-from': ['left'] },
+      }),
+    );
+  });
+
   it('explains a setting that is not a number before sending anything', async () => {
     const shell = await openForm();
     await userEvent.click(screen.getByRole('radio', { name: /generic-planar-base/ }));
@@ -411,6 +442,28 @@ describe('Parts menus and recordings', () => {
       expect(within(form).getByRole('radio', { name: /replay:ld19-sample/ })).toBeChecked(),
     );
     expect(within(form).getByRole('radio', { name: /ldrobot-ld19/ })).toBeChecked();
+  });
+});
+
+describe('Adding a part from another window', () => {
+  it('starts the form simulated in the world, on the drive base, when asked to', async () => {
+    const shell = fakeShell([{ path: '/api/v0/connectors', body: [LD19, GENERIC_BASE] }]);
+    const id = shell.desktop.open('parts');
+    shell.desktop.update(id, {
+      params: { addSimulate: 'world', addConnector: 'generic-planar-base' },
+    });
+    const win = shell.desktop.state.windows[0]!;
+    render(PartsWindow, { props: { win, visible: true }, context: shell.context });
+    shell.pushPorts([]);
+    shell.pushParts([]);
+    const form = await screen.findByRole('form', { name: 'Add part' });
+    expect(within(form).getByRole('switch', { name: /Simulated/ })).toBeChecked();
+    expect(within(form).getByRole('radio', { name: /In the world/ })).toBeChecked();
+    await waitFor(() =>
+      expect(within(form).getByRole('radio', { name: /generic-planar-base/ })).toBeChecked(),
+    );
+    expect(within(form).getByLabelText(/Length/)).toHaveValue(0.8);
+    expect(shell.desktop.state.windows[0]!.params).toEqual({});
   });
 });
 
