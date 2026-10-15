@@ -1,12 +1,4 @@
 import { t } from '../i18n';
-import type {
-  ConnectorInfo,
-  DistanceInfo,
-  Info,
-  MotorInfo,
-  PartInfo,
-  PlanarBaseInfo,
-} from './types';
 
 /**
  * The settings of the generic connectors (docs/simulation.md, section 3), for the Add part form.
@@ -208,56 +200,3 @@ export function readSettings(
   }
   return { ok: true, settings };
 }
-
-/**
- * A capability's info (limits) for a part. The API gives each connector's info with its default
- * settings, not each part's own, so a part with other settings has other real limits; the core
- * clamps every command to the real ones.
- */
-export function defaultInfo(part: PartInfo, connectors: readonly ConnectorInfo[] | null): Info[] {
-  const c = connectors?.find((x) => x.id === part.connector);
-  return (c?.provides ?? []).flatMap((p) => (p.info ? [p.info] : []));
-}
-
-export function baseInfo(
-  part: PartInfo,
-  connectors: readonly ConnectorInfo[] | null,
-): PlanarBaseInfo {
-  for (const i of defaultInfo(part, connectors))
-    if (i.capability === 'planar-base@1') return i.info;
-  return FALLBACK_BASE;
-}
-
-export function motorInfo(part: PartInfo, connectors: readonly ConnectorInfo[] | null): MotorInfo {
-  for (const i of defaultInfo(part, connectors)) if (i.capability === 'motor@1') return i.info;
-  return FALLBACK_MOTOR;
-}
-
-export function distanceInfo(
-  part: PartInfo,
-  connectors: readonly ConnectorInfo[] | null,
-): DistanceInfo {
-  for (const i of defaultInfo(part, connectors)) if (i.capability === 'distance@1') return i.info;
-  return FALLBACK_DISTANCE;
-}
-
-/** Limits to drive a base with when its connector doesn't say: the generic base's own. */
-export const FALLBACK_BASE: PlanarBaseInfo = {
-  holonomic: true,
-  maxVelocity: { vx: 0.5, vy: 0.5, omega: 1.5 },
-  maxAcceleration: { vx: 1, vy: 1, omega: 1.5 },
-  builtFrom: [],
-};
-
-export const FALLBACK_MOTOR: MotorInfo = {
-  kind: 'dc',
-  modes: { velocity: true, position: false, duty: true },
-  maxVelocityRadS: 10,
-};
-
-export const FALLBACK_DISTANCE: DistanceInfo = {
-  minM: 0.02,
-  maxM: 4,
-  fieldOfViewRad: 0.26,
-  kind: 'ultrasonic',
-};

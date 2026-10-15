@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../lib/i18n';
   import { useCore } from '../lib/state/context';
-  import { distanceInfo } from '../lib/state/connectorSettings';
+  import { distanceInfo } from '../lib/state/partLimits';
   import type { DistanceReading, DistanceStatus, ErrorBody } from '../lib/state/types';
   import { History, barFraction, plotRuns } from '../lib/viewers/signals';
   import { formatLength } from '../lib/viewers/units';
@@ -22,7 +22,7 @@
   const address = $derived(win.params.address ?? '');
   const partName = $derived(win.params.part ?? address.split('/')[0] ?? '');
   const part = $derived(core.parts?.find((p) => p.name === partName) ?? null);
-  const info = $derived(part ? distanceInfo(part, core.connectors) : null);
+  const info = $derived(part ? distanceInfo(part) : null);
   const maxM = $derived(info?.maxM ?? 4);
   const unit = $derived(core.settings?.units.length ?? 'metric');
 

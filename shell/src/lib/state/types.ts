@@ -2,6 +2,7 @@
 // API layer directly (docs/development.md, shell layering).
 export type { ConnectorInfo } from '../api/generated/ConnectorInfo';
 export type { ErrorBody } from '../api/generated/ErrorBody';
+export type { LaserScanInfo } from '../api/generated/LaserScanInfo';
 export type { LaserScanReading } from '../api/generated/LaserScanReading';
 export type { LogEntry } from '../api/generated/LogEntry';
 export type { LogLevel } from '../api/generated/LogLevel';

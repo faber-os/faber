@@ -85,7 +85,7 @@ describe('Drive window', () => {
     await fireEvent.keyDown(window, { key: 'w', code: 'KeyW' });
     await waitFor(() => expect(calls('POST', '/command').length).toBeGreaterThanOrEqual(3));
     expect(calls('POST', '/lease')[0]?.body).toEqual({ holder: 'Drive window' });
-    // The connector's limit (0.5 m/s) at the default speed limit of 50 %.
+    // The part's limit (0.5 m/s) at the default speed limit of 50 %.
     expect(commands(calls)[0]).toEqual({ kind: 'set-velocity', vx: 0.25, vy: 0, omega: 0 });
     expect(screen.getByTestId('drive-status')).toHaveTextContent("You're driving base");
 
@@ -112,6 +112,32 @@ describe('Drive window', () => {
     await waitFor(() =>
       expect(commands(calls).at(-1)).toEqual({ kind: 'set-velocity', vx: 0, vy: 0, omega: 0 }),
     );
+  });
+
+  it("drives with the part's own limits, not the connector's defaults", async () => {
+    const { shell, calls } = setup({ confirmed: true });
+    shell.pushParts([
+      simBase('base', {
+        signals: [
+          {
+            address: 'base/planar-base',
+            capability: 'planar-base@1',
+            info: {
+              capability: 'planar-base@1',
+              info: {
+                holonomic: true,
+                maxVelocity: { vx: 0.8, vy: 0.8, omega: 1.5 },
+                maxAcceleration: { vx: 1, vy: 1, omega: 1.5 },
+                builtFrom: [],
+              },
+            },
+          },
+        ],
+      }),
+    ]);
+    await screen.findByTestId('drive-pad');
+    await fireEvent.keyDown(window, { key: 'w', code: 'KeyW' });
+    await waitFor(() => expect(commands(calls)[0]?.vx).toBe(0.4));
   });
 
   it('scales with the speed limit', async () => {

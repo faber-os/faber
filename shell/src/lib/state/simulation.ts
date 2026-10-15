@@ -1,4 +1,4 @@
-import type { ConnectorInfo, PartInfo, Pattern } from './types';
+import type { PartInfo, Pattern } from './types';
 import { canMove } from './driving';
 
 /**
@@ -53,11 +53,10 @@ export function isManualSensor(p: PartInfo): boolean {
   );
 }
 
-/** The slider's top: the sensor's range, from its connector's info. */
-export function sensorMax(p: PartInfo, connectors: readonly ConnectorInfo[] | null): number {
-  const c = connectors?.find((x) => x.id === p.connector);
-  for (const provide of c?.provides ?? []) {
-    const i = provide.info;
+/** The slider's top: the sensor's range, from its own info (its settings). */
+export function sensorMax(p: PartInfo): number {
+  for (const s of p.signals) {
+    const i = s.info;
     if (i?.capability === 'distance@1') return i.info.maxM;
     if (i?.capability === 'laser-scan@1') return i.info.rangeMaxM;
   }

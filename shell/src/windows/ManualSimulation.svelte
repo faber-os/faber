@@ -18,7 +18,7 @@
 
   const core = useCore();
   const name = $derived(part.name);
-  const max = $derived(sensorMax(part, core.connectors));
+  const max = $derived(sensorMax(part));
   const unit = $derived(core.settings?.units.length ?? 'metric');
 
   let value = $state<number | null>(null);

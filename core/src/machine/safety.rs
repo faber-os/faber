@@ -394,12 +394,15 @@ impl Machine {
 
 fn lease_error(st: &State, part: &PartName, e: LeaseError) -> MachineError {
     match e {
-        LeaseError::Ended(reason) => err(
-            ErrorKind::Forbidden,
-            "lease-ended",
-            format!("Your lease on \"{part}\" has ended: {}.", reason_words(reason)),
-            "Request a new lease to keep going (POST …/lease).",
-        ),
+        LeaseError::Ended(reason) => MachineError {
+            lease_ended: Some(reason),
+            ..err(
+                ErrorKind::Forbidden,
+                "lease-ended",
+                format!("Your lease on \"{part}\" has ended: {}.", reason_words(reason)),
+                "Request a new lease to keep going (POST …/lease).",
+            )
+        },
         LeaseError::Required => {
             let message = match st.leases.covering(part) {
                 Some(l) if &l.part != part => {

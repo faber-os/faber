@@ -171,15 +171,35 @@ describe('LeaseKeeper', () => {
     expect(k.status.kind).toBe('held');
   });
 
-  it('ends when a command or renewal finds the lease gone', async () => {
+  it('ends with the core’s reason when a command finds the lease gone', async () => {
     const { k, c } = keeper();
     await k.acquire();
-    c.answers.command = fail('lease-ended', 'Your lease on "base" has ended: it expired.');
+    c.answers.command = {
+      ok: false,
+      error: {
+        code: 'lease-ended',
+        message: 'Your lease on "base" has ended: it expired.',
+        hint: '',
+        reason: 'expired',
+      },
+    };
+    await k.send(go);
+    expect(k.status).toMatchObject({
+      kind: 'ended',
+      reason: 'expired',
+      error: { code: 'lease-ended' },
+    });
+  });
+
+  it('ends without a reason when the lease is simply not there any more', async () => {
+    const { k, c } = keeper();
+    await k.acquire();
+    c.answers.command = fail('lease-required', 'Commanding "base" needs a lease.');
     await k.send(go);
     expect(k.status).toMatchObject({
       kind: 'ended',
       reason: null,
-      error: { code: 'lease-ended' },
+      error: { code: 'lease-required' },
     });
   });
 

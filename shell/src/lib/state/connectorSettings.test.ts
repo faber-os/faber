@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  FALLBACK_BASE,
-  baseInfo,
-  defaultValues,
-  distanceInfo,
-  readSettings,
-  settingFields,
-} from './connectorSettings';
-import type { ConnectorInfo, PartInfo } from './types';
+import { defaultValues, readSettings, settingFields } from './connectorSettings';
 
 const BASE = 'generic-planar-base';
 
@@ -62,37 +54,5 @@ describe('generic part settings', () => {
       message: "Closest it can measure can't be below 0.",
     });
     expect(readSettings(d, { ...defaultValues(d), 'min-m': '0' }).ok).toBe(true);
-  });
-});
-
-describe('part limits', () => {
-  const part = (connector: string) => ({ name: 'p', connector }) as PartInfo;
-  const connectors: ConnectorInfo[] = [
-    {
-      id: BASE,
-      name: 'Generic drive base',
-      version: '0.1.0',
-      kind: 'built-in',
-      port: { kind: 'bridge' },
-      provides: [
-        {
-          name: 'planar-base',
-          capability: 'planar-base@1',
-          info: {
-            capability: 'planar-base@1',
-            info: { ...FALLBACK_BASE, holonomic: false },
-          },
-        },
-      ],
-    },
-  ];
-
-  it("come from the connector's info", () => {
-    expect(baseInfo(part(BASE), connectors).holonomic).toBe(false);
-  });
-
-  it('fall back to the generic defaults when the connector says nothing', () => {
-    expect(baseInfo(part('other'), connectors)).toEqual(FALLBACK_BASE);
-    expect(distanceInfo(part('other'), null).maxM).toBe(4);
   });
 });

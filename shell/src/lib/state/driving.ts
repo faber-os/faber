@@ -68,8 +68,8 @@ export type LeaseStatus =
   | { kind: 'requesting' }
   | { kind: 'held'; grant: LeaseGrant }
   /**
-   * It ended without us letting go. `reason` comes from the leases topic, or is `null` when only
-   * a refused command said so (its `error` has the core's words).
+   * It ended without us letting go. `reason` comes from the leases topic or a refused command's
+   * `lease-ended`; it is `null` when the core only said the lease isn't there (`error` has its words).
    */
   | { kind: 'ended'; reason: LeaseEndReason | null; error?: ErrorBody }
   /** Asking for it failed: someone else drives (`lease-held`), the e-stop is engaged … */
@@ -184,8 +184,9 @@ export class LeaseKeeper {
   private refusedWith(lease: string, error: ErrorBody): void {
     if (this.status.kind !== 'held' || this.status.grant.lease !== lease) return;
     if (error.code === 'estop-engaged') this.end({ kind: 'ended', reason: 'estop', error });
+    // `lease-ended` says why in `reason`; the others mean the lease isn't there at all.
     else if (['lease-ended', 'lease-required', 'unknown-part'].includes(error.code))
-      this.end({ kind: 'ended', reason: null, error });
+      this.end({ kind: 'ended', reason: error.reason ?? null, error });
   }
 
   private end(status: LeaseStatus): void {

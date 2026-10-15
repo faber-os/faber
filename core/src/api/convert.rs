@@ -15,7 +15,12 @@ use crate::simulation::Pattern;
 use faber_connector::{Manifest, PortRequirement, Problem};
 
 pub fn error_body(e: &MachineError) -> dto::ErrorBody {
-    dto::ErrorBody { code: e.code.to_string(), message: e.message.clone(), hint: e.hint.clone() }
+    dto::ErrorBody {
+        code: e.code.to_string(),
+        message: e.message.clone(),
+        hint: e.hint.clone(),
+        reason: e.lease_ended.map(lease_end_reason),
+    }
 }
 
 fn state(kind: dto::PartStateKind, p: Option<&Problem>) -> dto::PartState {
@@ -45,7 +50,11 @@ pub fn part(p: &PartView) -> dto::PartInfo {
         signals: p
             .signals
             .iter()
-            .map(|(addr, cap)| dto::SignalInfo { address: addr.to_string(), capability: *cap })
+            .map(|s| dto::SignalInfo {
+                address: s.address.to_string(),
+                capability: s.capability,
+                info: s.info.clone(),
+            })
             .collect(),
         mount: p.mount,
     }

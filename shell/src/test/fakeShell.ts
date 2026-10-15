@@ -68,7 +68,13 @@ export function simBase(name = 'base', overrides: Partial<PartInfo> = {}): PartI
     connector: 'generic-planar-base',
     port: undefined,
     simulate: 'manual',
-    signals: [{ address: `${name}/planar-base`, capability: 'planar-base@1' }],
+    signals: [
+      {
+        address: `${name}/planar-base`,
+        capability: 'planar-base@1',
+        info: GENERIC_BASE.provides[0]!.info!,
+      },
+    ],
     ...overrides,
   });
 }
@@ -79,7 +85,13 @@ export function simDistance(name = 'front', overrides: Partial<PartInfo> = {}): 
     connector: 'generic-distance',
     port: undefined,
     simulate: 'manual',
-    signals: [{ address: `${name}/distance`, capability: 'distance@1' }],
+    signals: [
+      {
+        address: `${name}/distance`,
+        capability: 'distance@1',
+        info: GENERIC_DISTANCE.provides[0]!.info!,
+      },
+    ],
     ...overrides,
   });
 }

@@ -69,7 +69,7 @@ fn error(
 ) -> dto::ServerMessage {
     dto::ServerMessage::Error {
         id,
-        error: dto::ErrorBody { code: code.into(), message: message.into(), hint: hint.into() },
+        error: dto::ErrorBody { code: code.into(), message: message.into(), hint: hint.into(), reason: None },
     }
 }
 

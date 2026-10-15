@@ -37,7 +37,10 @@ access, in Phase 6).
 | `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name` (including `world`, the simulated world's own name), `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: it needs a FaberLink bridge, Phase 4), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
 | `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`). |
 
-`PartInfo` has `port` for a real part and `simulate` for a simulated one, never both.
+`PartInfo` has `port` for a real part and `simulate` for a simulated one, never both. Each of its
+`signals` (`address`, `capability`, `info?`) carries the capability's `info` as **this part's own
+settings** give it (a base with `max-vx = 0.6` says 0.6, not the connector's default 0.5). `info` is
+absent when the capability has none or the part's settings can't be read (the part is `invalid`).
 
 Adding or removing a part **writes `parts.toml`** (keeping comments and formatting) and then
 reconciles. The file stays the source of truth (D13).
@@ -140,7 +143,8 @@ motor's `maxVelocityRadS`, duty −1..1) are **clamped**, not refused: `applied`
 got, and `clamped` says whether it differs from what was sent. A base that is not `holonomic` gets
 `vy` 0.
 
-`lease-ended` messages and `403 lease-ended` errors give the **reason**: `released`, `expired`,
+`lease-ended` messages and `403 lease-ended` errors give the **reason** (the error in its
+`reason` field, next to `code`, so a program doesn't have to read the message): `released`, `expired`,
 `estop`, `taken-over`, `part-removed`, `part-restarted` (its config changed), `part-failed`,
 `shutdown`. Expired leases are ended within 50 ms of their deadline.
 

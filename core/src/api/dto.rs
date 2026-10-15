@@ -41,6 +41,10 @@ pub struct ErrorBody {
     pub message: String,
     /// The next thing to try.
     pub hint: String,
+    /// On `lease-ended`: why it ended, as the `leases` topic says it.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<LeaseEndReason>,
 }
 
 /// The body of every non-2xx REST response.
@@ -210,6 +214,11 @@ pub struct SignalInfo {
     /// `part/name`, e.g. `lidar/laser-scan`.
     pub address: String,
     pub capability: Capability,
+    /// Its limits (range, top speed, …) as this part's own settings give them. Absent when the
+    /// capability has none, or the part's settings can't be read.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub info: Option<Info>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -900,7 +909,12 @@ mod tests {
     #[test]
     fn errors_carry_a_hint() {
         let e = ApiError {
-            error: ErrorBody { code: "port-claimed".into(), message: "m".into(), hint: "h".into() },
+            error: ErrorBody {
+                code: "port-claimed".into(),
+                message: "m".into(),
+                hint: "h".into(),
+                reason: None,
+            },
         };
         assert_eq!(
             serde_json::to_value(&e).unwrap(),
