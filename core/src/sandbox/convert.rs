@@ -1,5 +1,6 @@
 //! The WIT types of `faber:connector` ↔ the Rust types, on the core's side of the sandbox. The
-//! mirror image of `faber_connector_wasm`'s conversions; the LD19 capture test proves they agree.
+//! mirror image of `faber_connector_wasm`'s and `faber_app_wasm`'s conversions; the LD19 capture
+//! test and the wall-follower test prove they agree.
 
 use super::bindings::faber::capabilities as cap;
 use super::bindings::faber::connector::types as wit;
@@ -101,6 +102,90 @@ pub fn reading_from_wit(r: wit::Reading) -> Reading {
     }
 }
 
+fn vec3(v: Vec3) -> cap::types::Vec3 {
+    cap::types::Vec3 { x: v.x, y: v.y, z: v.z }
+}
+
+fn quaternion(q: Quaternion) -> cap::types::Quaternion {
+    cap::types::Quaternion { x: q.x, y: q.y, z: q.z, w: q.w }
+}
+
+/// A reading as the guest receives it (an app reading its roles).
+pub fn reading_to_wit(r: Reading) -> wit::Reading {
+    match r {
+        Reading::LaserScan(r) => wit::Reading::LaserScan(cap::laser_scan::Reading {
+            t_us: r.t_us,
+            angle_min: r.angle_min,
+            angle_increment: r.angle_increment,
+            angles: r.angles,
+            time_increment: r.time_increment,
+            scan_time: r.scan_time,
+            ranges: r.ranges,
+            intensities: r.intensities,
+        }),
+        Reading::Distance(r) => wit::Reading::Distance(cap::distance::Reading {
+            t_us: r.t_us,
+            meters: r.meters,
+            status: match r.status {
+                distance::Status::Ok => cap::distance::Status::Ok,
+                distance::Status::TooClose => cap::distance::Status::TooClose,
+                distance::Status::TooFar => cap::distance::Status::TooFar,
+                distance::Status::NoTarget => cap::distance::Status::NoTarget,
+                distance::Status::Error => cap::distance::Status::Error,
+            },
+        }),
+        Reading::Motor(r) => wit::Reading::Motor(cap::motor::Reading {
+            t_us: r.t_us,
+            velocity_rad_s: r.velocity_rad_s,
+            position_rad: r.position_rad,
+            current_a: r.current_a,
+        }),
+        Reading::PlanarBase(r) => wit::Reading::PlanarBase(cap::planar_base::Reading {
+            t_us: r.t_us,
+            commanded: twist(r.commanded),
+            measured: r.measured.map(twist),
+            bumped: r.bumped,
+        }),
+        Reading::Estop(r) => wit::Reading::Estop(cap::estop::Reading {
+            t_us: r.t_us,
+            engaged: r.engaged,
+            source: match r.source {
+                estop::Source::Part => cap::estop::Source::Part,
+                estop::Source::App => cap::estop::Source::App,
+                estop::Source::Shell => cap::estop::Source::Shell,
+            },
+            reason: r.reason,
+        }),
+        Reading::Pose(r) => wit::Reading::Pose(cap::pose::Reading {
+            t_us: r.t_us,
+            frame: r.frame,
+            position: vec3(r.position),
+            orientation: quaternion(r.orientation),
+            position_variance: r.position_variance.map(vec3),
+            yaw_variance: r.yaw_variance,
+        }),
+        Reading::Position(r) => wit::Reading::Position(cap::position::Reading {
+            t_us: r.t_us,
+            latitude_deg: r.latitude_deg,
+            longitude_deg: r.longitude_deg,
+            altitude_m: r.altitude_m,
+            fix: match r.fix {
+                position::Fix::None => cap::position::Fix::None,
+                position::Fix::Fix2d => cap::position::Fix::Fix2d,
+                position::Fix::Fix3d => cap::position::Fix::Fix3d,
+                position::Fix::Dgps => cap::position::Fix::Dgps,
+                position::Fix::RtkFloat => cap::position::Fix::RtkFloat,
+                position::Fix::RtkFixed => cap::position::Fix::RtkFixed,
+            },
+            satellites: r.satellites,
+            horizontal_accuracy_m: r.horizontal_accuracy_m,
+            vertical_accuracy_m: r.vertical_accuracy_m,
+            speed_m_s: r.speed_m_s,
+            course_rad: r.course_rad,
+        }),
+    }
+}
+
 fn problem(p: wit::Problem) -> Problem {
     Problem { message: p.message, hint: p.hint }
 }
@@ -185,6 +270,24 @@ mod tests {
             Command::PlanarBase(planar_base::Command::SetVelocity(Twist2d::new(0.1, 0.2, 0.3))),
         ] {
             assert_eq!(command_from_wit(command_to_wit(c)), c);
+        }
+    }
+
+    #[test]
+    fn readings_round_trip() {
+        let readings = [
+            Reading::LaserScan(laser_scan::Reading::even_bins(1, -1.0, 0.5, 0.1, vec![1.0, f32::INFINITY])),
+            Reading::Distance(distance::Reading { t_us: 2, meters: 0.3, status: distance::Status::TooFar }),
+            Reading::Pose(pose::Reading::planar(3, "map", 1.0, 2.0, 0.5)),
+            Reading::Estop(estop::Reading {
+                t_us: 4,
+                engaged: true,
+                source: estop::Source::App,
+                reason: "x".into(),
+            }),
+        ];
+        for r in readings {
+            assert_eq!(reading_from_wit(reading_to_wit(r.clone())), r);
         }
     }
 

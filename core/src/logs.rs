@@ -23,7 +23,7 @@ pub enum Level {
 pub struct Entry {
     pub t_us: u64,
     pub level: Level,
-    /// `part:<name>` for part logs, otherwise the module, e.g. `core::ports`.
+    /// `part:<name>` for part logs, `app:<id>` for app logs, otherwise the module, e.g. `core::ports`.
     pub source: String,
     pub message: String,
 }
@@ -74,6 +74,7 @@ pub struct LogLayer(Arc<LogBook>);
 struct Fields {
     message: String,
     part: Option<String>,
+    app: Option<String>,
     extra: String,
 }
 
@@ -82,6 +83,7 @@ impl Visit for Fields {
         match field.name() {
             "message" => self.message = format!("{value:?}"),
             "part" => self.part = Some(format!("{value:?}")),
+            "app" => self.app = Some(format!("{value:?}")),
             name => {
                 let _ = write!(self.extra, " {name}={value:?}");
             }
@@ -92,6 +94,7 @@ impl Visit for Fields {
         match field.name() {
             "message" => self.message = value.to_string(),
             "part" => self.part = Some(value.to_string()),
+            "app" => self.app = Some(value.to_string()),
             name => {
                 let _ = write!(self.extra, " {name}={value}");
             }
@@ -110,9 +113,10 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for LogLayer {
         };
         let mut f = Fields::default();
         event.record(&mut f);
-        let source = match f.part {
-            Some(p) => format!("part:{p}"),
-            None => meta.target().replace("faber_core", "core"),
+        let source = match (f.part, f.app) {
+            (Some(p), _) => format!("part:{p}"),
+            (None, Some(a)) => format!("app:{a}"),
+            (None, None) => meta.target().replace("faber_core", "core"),
         };
         self.0.push(level, source, format!("{}{}", f.message, f.extra));
     }
@@ -131,9 +135,11 @@ mod tests {
         tracing::subscriber::with_default(subscriber, || {
             tracing::warn!(target: "core::ports", "could not list ports");
             tracing::error!(target: "core::runtime", part = "lidar", "connector crashed");
+            tracing::info!(target: "core::apps", app = "wall-follower", "found a wall");
         });
         let (recent, _) = book.follow();
-        assert_eq!(recent.len(), 2);
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent[2].source, "app:wall-follower");
         assert_eq!(
             recent[0],
             Entry {
