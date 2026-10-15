@@ -5,13 +5,15 @@
 
 use crate::clock::SharedClock;
 use crate::config::{self, ConfigError, PartConfig, PartsConfig};
+use crate::files::{self, Entry, FileError, Files, VPath};
 use crate::names::{PartName, SignalAddress};
 use crate::ports::{
     Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortReader, PortWriter, ReplayLibrary,
-    SerialDiscovery, catalog, spawn_reader,
+    SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME, SerialDiscovery, catalog, spawn_reader,
 };
 use crate::router::Router;
 use crate::runtime::{self, PartHandle, PartStatus, RunDeps, RunSpec, StatusBoard, Timing};
+use crate::settings::{DeveloperChange, Settings as MachineSettings, SettingsError, SettingsStore};
 use crate::suggest::{Suggestion, suggestions};
 use faber_capabilities::{Capability, Mount};
 use faber_connector::{Definition, Manifest, Problem, Settings};
@@ -22,7 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 
 const SERIAL_MONITOR: &str = "serial-monitor";
 const NEW_FILE_HEADER: &str = "# The parts on this Faber machine.\n# Add and remove parts in the shell, or edit this file by hand: Faber keeps your comments.\n";
@@ -55,6 +57,30 @@ pub enum ErrorKind {
     Conflict,
     /// Something on the machine itself is broken (e.g. the config can't be written).
     Internal,
+    /// Understood, but the content is wrong (e.g. a parts.toml with an error).
+    Unprocessable,
+    /// Not allowed with the current settings.
+    Forbidden,
+}
+
+impl From<FileError> for MachineError {
+    fn from(e: FileError) -> Self {
+        let kind = match e.code {
+            "not-found" => ErrorKind::NotFound,
+            "already-exists" | "protected" => ErrorKind::Conflict,
+            "machine-files-off" => ErrorKind::Forbidden,
+            "io-error" => ErrorKind::Internal,
+            _ => ErrorKind::BadRequest,
+        };
+        MachineError { kind, code: e.code, message: e.message, hint: e.hint }
+    }
+}
+
+impl From<SettingsError> for MachineError {
+    fn from(e: SettingsError) -> Self {
+        let kind = if e.code == "settings-not-saved" { ErrorKind::Internal } else { ErrorKind::BadRequest };
+        MachineError { kind, code: e.code, message: e.message, hint: e.hint }
+    }
 }
 
 impl MachineError {
@@ -117,8 +143,11 @@ pub struct Machine {
     connectors: Vec<Definition>,
     timing: Timing,
     config_path: PathBuf,
+    files: Files,
+    settings: SettingsStore,
     state: Mutex<State>,
     ports_changed: watch::Sender<u64>,
+    files_changed: broadcast::Sender<Vec<String>>,
     stop_scanning: Arc<AtomicBool>,
     scanner: Mutex<Option<JoinHandle<()>>>,
 }
@@ -140,6 +169,8 @@ impl Machine {
                 (PartsConfig::default(), Some(e))
             }
         };
+        let files = Files::open(opts.data_dir.join("files"), config_path.clone())?;
+        let settings = SettingsStore::load(&config_dir);
         let machine = Arc::new(Machine {
             clock: opts.clock,
             router: Arc::new(Router::new()),
@@ -150,6 +181,8 @@ impl Machine {
             connectors: opts.connectors,
             timing: opts.timing,
             config_path,
+            files,
+            settings,
             state: Mutex::new(State {
                 text,
                 config,
@@ -159,6 +192,7 @@ impl Machine {
                 running: BTreeMap::new(),
             }),
             ports_changed: watch::channel(0).0,
+            files_changed: broadcast::channel(64).0,
             stop_scanning: Arc::new(AtomicBool::new(false)),
             scanner: Mutex::new(None),
         });
@@ -253,7 +287,7 @@ impl Machine {
             .iter()
             .map(|entry| {
                 let recorded_with = match &entry.id {
-                    PortId::Replay(name) => self.replays.get(name).and_then(|r| r.recorded_with.clone()),
+                    PortId::Replay(name) => self.replays.get(name).and_then(|r| r.recorded_with),
                     _ => None,
                 };
                 PortView {
@@ -267,6 +301,7 @@ impl Machine {
 
     /// Looks for new or removed ports, and starts parts whose port just appeared.
     pub fn refresh_ports(&self) {
+        self.replays.sync_dir(&self.recordings_dir());
         let found = catalog(&self.discovery.list(), &self.replays.names());
         let mut st = self.state.lock().expect("machine lock");
         if st.ports != found {
@@ -366,6 +401,7 @@ impl Machine {
         })?;
         st.text = text;
         st.config = parsed;
+        self.notify_files(&[VPath::home(&["System", "parts.toml"])]);
         Ok(())
     }
 
@@ -500,6 +536,7 @@ impl Machine {
             writer: Mutex::new(writer),
             stop: Arc::new(AtomicBool::new(false)),
             thread: None,
+            recorder: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -508,6 +545,295 @@ impl Machine {
         st.claims.release(port, &Claimant::Tool(SERIAL_MONITOR));
         self.ports_changed.send_modify(|n| *n += 1);
         self.reconcile(&mut st); // a part waiting for this port can start now
+    }
+
+    // ---- settings -------------------------------------------------------------------------
+
+    pub fn settings(&self) -> MachineSettings {
+        self.settings.get()
+    }
+
+    pub fn settings_changed(&self) -> watch::Receiver<u64> {
+        self.settings.watch()
+    }
+
+    pub fn update_settings(&self, new: MachineSettings) -> Result<MachineSettings, MachineError> {
+        Ok(self.settings.update(new)?)
+    }
+
+    pub fn change_developer(&self, change: DeveloperChange) -> Result<MachineSettings, MachineError> {
+        let before = self.settings.get().developer.full_machine_files;
+        let after = self.settings.change_developer(change)?;
+        if before != after.developer.full_machine_files {
+            tracing::warn!(
+                target: "core::files",
+                "whole-machine file access turned {}",
+                if after.developer.full_machine_files { "ON" } else { "off" }
+            );
+        }
+        Ok(after)
+    }
+
+    // ---- files ----------------------------------------------------------------------------
+
+    fn machine_files(&self) -> bool {
+        self.settings.get().developer.full_machine_files
+    }
+
+    fn recordings_dir(&self) -> PathBuf {
+        self.files.home_dir().join(files::Special::Recordings.name())
+    }
+
+    /// Fires with the folders whose contents changed.
+    pub fn files_changed(&self) -> broadcast::Receiver<Vec<String>> {
+        self.files_changed.subscribe()
+    }
+
+    /// `changed` are the items that changed; their folders are announced.
+    fn notify_files(&self, changed: &[VPath]) {
+        let folders: Vec<VPath> = changed.iter().map(|p| p.parent().unwrap_or_else(|| p.clone())).collect();
+        self.notify_folders(&folders);
+    }
+
+    /// Announces that these folders' contents changed.
+    fn notify_folders(&self, folders: &[VPath]) {
+        let mut folders: Vec<String> = folders.iter().map(VPath::to_string).collect();
+        folders.sort();
+        folders.dedup();
+        let _ = self.files_changed.send(folders);
+    }
+
+    pub fn file_roots(&self) -> Vec<(VPath, &'static str, Option<&'static str>)> {
+        let mut roots = vec![(VPath::home(&[]), "Home", None)];
+        if self.machine_files() {
+            roots.push((
+                VPath { root: files::RootKey::Machine, parts: vec![] },
+                "This computer",
+                Some("You're browsing the whole computer. Deleting or changing system files can break it, and there's no Trash here."),
+            ));
+        }
+        roots
+    }
+
+    pub fn list_files(&self, path: &str) -> Result<Vec<Entry>, MachineError> {
+        Ok(self.files.list(&VPath::parse(path)?, self.machine_files())?)
+    }
+
+    pub fn read_file(&self, path: &str) -> Result<(VPath, Vec<u8>), MachineError> {
+        let p = VPath::parse(path)?;
+        let bytes = self.files.read(&p, self.machine_files())?;
+        Ok((p, bytes))
+    }
+
+    /// Writes a file. `home:/System/parts.toml` is the machine config: it is validated first,
+    /// then saved and applied, exactly like adding a part in the shell.
+    pub fn write_file(&self, path: &str, bytes: &[u8]) -> Result<(), MachineError> {
+        let p = VPath::parse(path)?;
+        if Files::is_config(&p) {
+            return self.write_config_text(bytes);
+        }
+        self.files.write(&p, bytes, self.machine_files())?;
+        self.notify_files(std::slice::from_ref(&p));
+        if p.parent().is_some_and(|d| d == VPath::home(&["Recordings"])) {
+            self.refresh_ports();
+        }
+        Ok(())
+    }
+
+    fn write_config_text(&self, bytes: &[u8]) -> Result<(), MachineError> {
+        let text = String::from_utf8(bytes.to_vec()).map_err(|_| {
+            MachineError::new(
+                ErrorKind::Unprocessable,
+                "config-invalid",
+                "parts.toml must be text (UTF-8).",
+                "Save it as plain text.",
+            )
+        })?;
+        if let Err(e) = config::parse(&text) {
+            let message = match e.line {
+                Some(l) => format!("parts.toml has a problem on line {l}: {}", e.message),
+                None => format!("parts.toml has a problem: {}", e.message),
+            };
+            return Err(MachineError::new(ErrorKind::Unprocessable, "config-invalid", message, e.hint));
+        }
+        let mut st = self.state.lock().expect("machine lock");
+        self.save(&mut st, text)?;
+        st.config_problem = None;
+        self.reconcile(&mut st);
+        Ok(())
+    }
+
+    pub fn create_folder(&self, path: &str) -> Result<(), MachineError> {
+        let p = VPath::parse(path)?;
+        self.files.create_folder(&p, self.machine_files())?;
+        self.notify_files(&[p]);
+        Ok(())
+    }
+
+    pub fn move_file(&self, from: &str, to: &str) -> Result<(), MachineError> {
+        let (from, to) = (VPath::parse(from)?, VPath::parse(to)?);
+        self.files.rename(&from, &to, self.machine_files())?;
+        self.notify_files(&[from, to]);
+        self.refresh_ports(); // a recording may have been renamed or moved
+        Ok(())
+    }
+
+    fn parse_all(paths: &[String]) -> Result<Vec<VPath>, MachineError> {
+        if paths.is_empty() {
+            return Err(MachineError::new(
+                ErrorKind::BadRequest,
+                "bad-path",
+                "No paths given.",
+                "Pick at least one file.",
+            ));
+        }
+        paths.iter().map(|p| VPath::parse(p).map_err(MachineError::from)).collect()
+    }
+
+    pub fn trash_files(&self, paths: &[String]) -> Result<(), MachineError> {
+        let ps = Self::parse_all(paths)?;
+        self.files.trash(&ps)?;
+        self.notify_files(&ps);
+        self.notify_folders(&[VPath::home(&["Trash"])]);
+        self.refresh_ports();
+        Ok(())
+    }
+
+    pub fn restore_files(&self, paths: &[String]) -> Result<(), MachineError> {
+        let ps = Self::parse_all(paths)?;
+        self.files.restore(&ps)?;
+        self.notify_folders(&[VPath::home(&["Trash"])]);
+        // Restored files go back where they came from, or to Documents.
+        self.notify_folders(&[VPath::home(&[])]);
+        self.refresh_ports();
+        Ok(())
+    }
+
+    pub fn delete_files(&self, paths: &[String]) -> Result<(), MachineError> {
+        let ps = Self::parse_all(paths)?;
+        self.files.delete(&ps, self.machine_files())?;
+        self.notify_files(&ps);
+        Ok(())
+    }
+
+    pub fn empty_trash(&self) -> Result<(), MachineError> {
+        self.files.empty_trash()?;
+        self.notify_folders(&[VPath::home(&["Trash"])]);
+        Ok(())
+    }
+
+    /// Copies the sample LD19 recording into Recordings (D32), where it becomes a replay port.
+    pub fn add_samples(&self) -> Result<String, MachineError> {
+        let p = VPath::home(&["Recordings", &format!("{SAMPLE_LD19_NAME}.fbcap")]);
+        if self.files.read(&p, false).is_ok() {
+            return Err(MachineError::new(
+                ErrorKind::Conflict,
+                "already-exists",
+                "The sample recording is already in Recordings.",
+                "Use the port replay:ld19-sample when you add a part.",
+            ));
+        }
+        self.files.write(&p, SAMPLE_LD19_BYTES, false)?;
+        self.notify_files(std::slice::from_ref(&p));
+        self.refresh_ports();
+        Ok(p.to_string())
+    }
+
+    /// Starts recording what `session` receives into `Recordings/<name>.fbcap`.
+    pub fn start_recording(&self, session: &SerialSession, name: &str) -> Result<String, MachineError> {
+        PartName::parse(name).map_err(|b| {
+            MachineError::new(
+                ErrorKind::BadRequest,
+                "invalid-name",
+                b.message.replace("part name", "recording name"),
+                b.hint,
+            )
+        })?;
+        let p = VPath::home(&["Recordings", &format!("{name}.fbcap")]);
+        let real = self.recordings_dir().join(format!("{name}.fbcap"));
+        if real.exists() {
+            return Err(MachineError::new(
+                ErrorKind::Conflict,
+                "already-exists",
+                format!("{p} already exists."),
+                "Pick another name.",
+            ));
+        }
+        let recorder = Recorder::create(&real).map_err(|e| {
+            MachineError::new(
+                ErrorKind::Internal,
+                "io-error",
+                format!("Couldn't create {p}: {e}"),
+                "Check the disk has space.",
+            )
+        })?;
+        let mut slot = session.recorder.lock().expect("recorder lock");
+        if slot.is_some() {
+            return Err(MachineError::new(
+                ErrorKind::Conflict,
+                "already-recording",
+                "This port is already being recorded.",
+                "Stop the current recording first.",
+            ));
+        }
+        *slot = Some((p.to_string(), recorder));
+        Ok(p.to_string())
+    }
+
+    /// Stops recording; returns the recording's path and how many bytes it holds.
+    pub fn stop_recording(&self, session: &SerialSession) -> Result<(String, u64), MachineError> {
+        let taken = session.recorder.lock().expect("recorder lock").take();
+        let (path, recorder) = taken.ok_or_else(|| {
+            MachineError::new(
+                ErrorKind::Conflict,
+                "not-recording",
+                "This port isn't being recorded.",
+                "Start a recording first.",
+            )
+        })?;
+        let bytes = recorder.finish().map_err(|e| {
+            MachineError::new(
+                ErrorKind::Internal,
+                "io-error",
+                format!("Couldn't finish {path}: {e}"),
+                "Check the disk has space.",
+            )
+        })?;
+        if let Ok(p) = VPath::parse(&path) {
+            self.notify_files(&[p]);
+        }
+        self.refresh_ports();
+        Ok((path, bytes))
+    }
+}
+
+/// Writes a recording as chunks arrive (`.fbcap`, docs/api.md).
+struct Recorder {
+    out: std::io::BufWriter<std::fs::File>,
+    bytes: u64,
+}
+
+impl Recorder {
+    fn create(path: &Path) -> io::Result<Recorder> {
+        use std::io::Write;
+        let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+        out.write_all(faber_connector::capture::MAGIC)?;
+        Ok(Recorder { out, bytes: 0 })
+    }
+
+    fn append(&mut self, t_us: u64, data: &[u8]) -> io::Result<()> {
+        use std::io::Write;
+        self.out.write_all(&t_us.to_le_bytes())?;
+        self.out.write_all(&(data.len() as u32).to_le_bytes())?;
+        self.out.write_all(data)?;
+        self.bytes += data.len() as u64;
+        Ok(())
+    }
+
+    fn finish(mut self) -> io::Result<u64> {
+        use std::io::Write;
+        self.out.flush()?;
+        Ok(self.bytes)
     }
 }
 
@@ -527,6 +853,8 @@ pub struct SerialSession {
     writer: Mutex<Box<dyn PortWriter>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    /// The recording in progress, if any: its path and writer.
+    recorder: Arc<Mutex<Option<(String, Recorder)>>>,
 }
 
 impl SerialSession {
@@ -536,9 +864,20 @@ impl SerialSession {
 
     /// Starts reading. Events go to `sink` until the session is dropped or `sink` returns false.
     /// Calling it twice does nothing the second time.
-    pub fn start(&mut self, sink: impl FnMut(PortEvent) -> bool + Send + 'static) {
+    pub fn start(&mut self, mut sink: impl FnMut(PortEvent) -> bool + Send + 'static) {
+        let recorder = Arc::clone(&self.recorder);
+        let recording_sink = move |event: PortEvent| {
+            if let PortEvent::Data { t_us, bytes } = &event
+                && let Some((path, rec)) = recorder.lock().expect("recorder lock").as_mut()
+                && let Err(e) = rec.append(*t_us, bytes)
+            {
+                tracing::error!(target: "core::files", "recording to {path} failed: {e}");
+            }
+            sink(event)
+        };
         if let Some(reader) = self.reader.get_mut().expect("reader lock").take() {
-            self.thread = Some(spawn_reader(reader, self.clock.clone(), sink, Arc::clone(&self.stop)));
+            self.thread =
+                Some(spawn_reader(reader, self.clock.clone(), recording_sink, Arc::clone(&self.stop)));
         }
     }
 
@@ -554,6 +893,9 @@ impl Drop for SerialSession {
             let _ = t.join();
         }
         if let Some(m) = self.machine.upgrade() {
+            if self.recorder.lock().expect("recorder lock").is_some() {
+                let _ = m.stop_recording(self); // closing the port also ends its recording
+            }
             m.close_serial(&self.port);
         }
     }
@@ -641,6 +983,7 @@ mod tests {
                 manufacturer: None,
                 product: Some("CP2102".into()),
             }),
+            bluetooth: false,
         }
     }
 
@@ -665,6 +1008,42 @@ mod tests {
 
     fn no_ports() -> Arc<FakeDiscovery> {
         Arc::new(FakeDiscovery(Mutex::new(vec![])))
+    }
+
+    #[test]
+    fn plugging_in_an_adapter_shows_up_without_being_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let discovery = no_ports();
+        let replays = ReplayLibrary::with_demo();
+        let m = Machine::start(MachineOptions {
+            data_dir: dir.path().to_path_buf(),
+            clock: Arc::new(MonotonicClock::new()),
+            discovery: Arc::clone(&discovery) as Arc<dyn SerialDiscovery>,
+            opener: Arc::new(SystemOpener::new(replays.clone())),
+            replays,
+            connectors: vec![ldrobot_ld19::definition()],
+            timing: Timing::default(),
+            port_scan: Some(Duration::from_millis(50)),
+        })
+        .unwrap();
+        let mut changes = m.ports_changed();
+        changes.borrow_and_update();
+        discovery.0.lock().unwrap().push(cp2102());
+        let start = Instant::now();
+        while !changes.has_changed().unwrap() {
+            assert!(start.elapsed() < Duration::from_secs(2), "the scanner never noticed the new port");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(m.ports().iter().any(|p| p.entry.id.to_string() == "usb:10c4:ea60"));
+        discovery.0.lock().unwrap().clear();
+        changes.borrow_and_update();
+        let start = Instant::now();
+        while !changes.has_changed().unwrap() {
+            assert!(start.elapsed() < Duration::from_secs(2), "the scanner never noticed the port leave");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(m.ports().iter().all(|p| p.entry.id.to_string() != "usb:10c4:ea60"));
+        m.shutdown();
     }
 
     fn demo(name: &str) -> NewPart {
@@ -812,6 +1191,98 @@ mod tests {
         assert_eq!(e.code, "config-broken");
         assert!(e.message.contains("line 2"));
         assert_eq!(std::fs::read_to_string(dir.path().join("config/parts.toml")).unwrap(), broken);
+        m.shutdown();
+    }
+
+    #[test]
+    fn editing_parts_toml_in_files_applies_it_or_explains_the_mistake() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let good = "# mine
+[parts.lidar]
+connector = \"ldrobot-ld19\"
+port = \"replay:demo-ld19\"
+";
+        m.write_file("home:/System/parts.toml", good.as_bytes()).unwrap();
+        wait_for_status(&m, "lidar", |s| *s == PartStatus::Running);
+        let bad = "[parts.lidar]
+connector = 
+";
+        let e = m.write_file("home:/System/parts.toml", bad.as_bytes()).unwrap_err();
+        assert_eq!((e.code, e.kind), ("config-invalid", ErrorKind::Unprocessable));
+        assert!(e.message.contains("line 2"), "{e:?}");
+        let (_, on_disk) = m.read_file("home:/System/parts.toml").unwrap();
+        assert_eq!(on_disk, good.as_bytes(), "a broken config is never saved");
+        m.shutdown();
+    }
+
+    #[test]
+    fn the_sample_recording_becomes_a_replay_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        assert!(m.ports().iter().all(|p| p.entry.id.to_string() != "replay:ld19-sample"));
+        assert_eq!(m.add_samples().unwrap(), "home:/Recordings/ld19-sample.fbcap");
+        let port = m.ports().into_iter().find(|p| p.entry.id.to_string() == "replay:ld19-sample").unwrap();
+        assert_eq!(port.suggestions[0].connector, "ldrobot-ld19");
+        assert_eq!(m.add_samples().unwrap_err().code, "already-exists");
+        m.trash_files(&["home:/Recordings/ld19-sample.fbcap".into()]).unwrap();
+        assert!(
+            m.ports().iter().all(|p| p.entry.id.to_string() != "replay:ld19-sample"),
+            "trashing removes the port"
+        );
+        m.shutdown();
+    }
+
+    #[test]
+    fn recording_a_port_creates_a_new_replay_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut session = m.open_serial("replay:demo-ld19", 230_400).unwrap();
+        assert_eq!(m.start_recording(&session, "bench").unwrap(), "home:/Recordings/bench.fbcap");
+        assert_eq!(m.start_recording(&session, "again").unwrap_err().code, "already-recording");
+        session.start(move |e| tx.send(e).is_ok());
+        for _ in 0..3 {
+            assert!(matches!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), PortEvent::Data { .. }));
+        }
+        let (path, bytes) = m.stop_recording(&session).unwrap();
+        assert_eq!(path, "home:/Recordings/bench.fbcap");
+        assert!(bytes > 0);
+        assert!(m.ports().iter().any(|p| p.entry.id.to_string() == "replay:bench"));
+        assert_eq!(m.start_recording(&session, "Bad Name").unwrap_err().code, "invalid-name");
+        drop(session);
+        m.shutdown();
+    }
+
+    #[test]
+    fn file_changes_are_announced_per_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let mut rx = m.files_changed();
+        m.create_folder("home:/Documents/projects").unwrap();
+        assert_eq!(rx.try_recv().unwrap(), ["home:/Documents"]);
+        m.write_file("home:/Desktop/todo.txt", b"solder").unwrap();
+        assert_eq!(rx.try_recv().unwrap(), ["home:/Desktop"]);
+        m.add_part(demo("lidar")).unwrap();
+        assert_eq!(rx.try_recv().unwrap(), ["home:/System"], "adding a part changes parts.toml");
+        m.shutdown();
+    }
+
+    #[test]
+    fn the_whole_machine_needs_the_developer_setting() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        assert_eq!(m.file_roots().len(), 1);
+        let e = m.list_files("machine:/").unwrap_err();
+        assert_eq!((e.code, e.kind), ("machine-files-off", ErrorKind::Forbidden));
+        m.change_developer(crate::settings::DeveloperChange {
+            full_machine_files: true,
+            acknowledged_risk: true,
+        })
+        .unwrap();
+        assert_eq!(m.file_roots().len(), 2);
+        assert!(m.file_roots()[1].2.is_some(), "the machine root carries a warning");
+        assert!(m.list_files("machine:/").is_ok());
         m.shutdown();
     }
 

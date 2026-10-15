@@ -55,6 +55,8 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `signal` | `address`, `maxHz?` | `signal` messages with readings of `part/name` |
 | `parts` | — | a `parts` message now and after every change |
 | `ports` | — | a `ports` message now and after every change |
+| `settings` | — | a `settings` message now and after every change |
+| `files` | — | `files-changed` with the folders whose contents changed (through the core). `home:/` means "a lot changed": refresh everything shown. |
 | `logs` | — | the recent log (up to 1000 entries) as `log` messages, then each new entry. Every new subscription gets the recent log again, so a client that reconnects should start its log view afresh. |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
@@ -89,6 +91,62 @@ the part's name.
 
 Every error carries `message` and `hint`, like REST errors.
 
+## Files
+
+Paths are `<root>:/<path>` with `/` separators, e.g. `home:/Desktop/notes.txt`. Roots:
+
+| Root | What | Available |
+|---|---|---|
+| `home` | Faber's home folder: `Desktop`, `Documents`, `Recordings`, `System`, `Trash` (fixed folders, `special` in listings) | always |
+| `machine` | The whole computer (`machine:/` lists drives on Windows, `/` on Linux) | only with the developer setting `fullMachineFiles` on |
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/files/roots` | `FileRoot[]` |
+| `GET /api/v0/files/list?path=…` | `FolderListing`. Folders first, then files, by name. |
+| `GET /api/v0/files/content?path=…` | The raw bytes. `&download=1` adds `Content-Disposition: attachment`. |
+| `PUT /api/v0/files/content?path=…` | Raw bytes as the body: creates or overwrites the file → `204`. Max 16 MB. |
+| `POST /api/v0/files/folder` | `PathRequest` → `201` |
+| `POST /api/v0/files/move` | `MoveRequest`: rename or move → `204` |
+| `POST /api/v0/files/trash` | `PathsRequest`: moves to `home:/Trash` → `204` |
+| `POST /api/v0/files/restore` | `PathsRequest` with Trash paths: back to where they came from → `204` |
+| `POST /api/v0/files/delete` | `PathsRequest`: deletes **for good**. Only for paths in the Trash, or in `machine:` → `204` |
+| `POST /api/v0/files/empty-trash` | → `204` |
+| `POST /api/v0/files/samples` | Copies the sample LD19 recording into `home:/Recordings` → `201` |
+
+Rules the core enforces (never the shell):
+- A path can never leave its root: `..`, absolute paths inside a path and symbolic links pointing
+  outside are refused (`bad-path`).
+- The fixed folders can't be renamed, moved, deleted or trashed (`protected`).
+- `home:/System` holds `parts.toml`, which is the machine config itself. Writing it is validated
+  first: a broken config is refused with `422 config-invalid`, its message saying the line. A valid
+  one is saved and applied at once. Nothing else can be created in System.
+- Files in `home:/Recordings` ending in `.fbcap` are replay ports (`replay:<file name>`).
+
+File error codes: `bad-path`, `not-found`, `already-exists`, `protected`, `not-a-folder`,
+`not-a-file`, `too-large`, `config-invalid`, `machine-files-off`, `io-error`.
+
+## Settings
+
+Stored in `config/settings.toml`. One `Settings` object, shared by every browser and the attached
+screen.
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/settings` | `Settings` |
+| `PUT /api/v0/settings` | `Settings` → `Settings`. `developer` must be unchanged (`use-developer-endpoint` otherwise). |
+| `POST /api/v0/settings/developer` | `DeveloperChange` → `Settings`. Turning `fullMachineFiles` on needs `acknowledgedRisk: true` (`risk-not-acknowledged` otherwise). |
+
+The WebSocket topic `settings` sends the settings now and after every change.
+
+## Recordings
+
+While a serial session is open, `serial-record-start {id, name}` starts saving everything it
+receives to `home:/Recordings/<name>.fbcap`. The core answers `serial-recording {id, path}`.
+`serial-record-stop {id}` (or closing the session) ends it with `serial-recording-stopped {id,
+path, bytes}`. The new recording becomes a replay port at once. Names follow the part-name rule
+(`invalid-name`) and must not exist yet (`already-exists`).
+
 ## Format details
 
 - **Readings** are tagged by capability: `{ "capability": "laser-scan@1", "reading": { … } }`.
@@ -104,8 +162,8 @@ Every error carries `message` and `hint`, like REST errors.
 | Id | What |
 |---|---|
 | `usb:<vid>:<pid>` | A USB serial adapter, e.g. `usb:10c4:ea60` (CP2102). If two identical adapters are plugged in, they become `usb:<vid>:<pid>:<serial number>`. |
-| `serial:<name>` | A serial port without USB information, e.g. `serial:COM3` or `serial:/dev/ttyAMA0` |
-| `replay:<name>` | A capture played back in a loop at real speed. `replay:demo-ld19` is built into the core, so Faber can be tried without hardware. |
+| `serial:<name>` | A serial port without USB information, e.g. `serial:COM3` or `serial:/dev/ttyAMA0`. Its `kind` is `bluetooth` for Bluetooth serial links. |
+| `replay:<name>` | A recording in `home:/Recordings` played back in a loop at real speed (D35). The LD19 sample is added with `POST /api/v0/files/samples` (D32). |
 
 ## Capture files (`.fbcap`)
 

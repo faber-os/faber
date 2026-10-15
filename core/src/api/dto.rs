@@ -79,6 +79,8 @@ pub enum PortKind {
     UsbSerial,
     /// A serial port without USB information (e.g. a Pi UART).
     Serial,
+    /// A serial link over Bluetooth (shown so it isn't mistaken for a cable).
+    Bluetooth,
     /// A recorded capture played back as if it were live.
     Replay,
 }
@@ -234,6 +236,10 @@ pub enum Topic {
     Ports,
     /// The recent log, then every new entry.
     Logs,
+    /// The settings now and after every change (so the browser and the attached screen agree).
+    Settings,
+    /// `files-changed` whenever files change through the core.
+    Files,
 }
 
 /// Messages from the shell to the core.
@@ -261,6 +267,14 @@ pub enum ClientMessage {
         data: Vec<u8>,
     },
     SerialClose {
+        id: u32,
+    },
+    /// Starts saving everything the open session receives to `Recordings/<name>.fbcap`.
+    SerialRecordStart {
+        id: u32,
+        name: String,
+    },
+    SerialRecordStop {
         id: u32,
     },
 }
@@ -308,6 +322,26 @@ pub enum ServerMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    Settings {
+        id: u32,
+        settings: Settings,
+    },
+    /// Files changed in these folders; listings of them are out of date.
+    FilesChanged {
+        id: u32,
+        folders: Vec<String>,
+    },
+    /// Recording started for serial session `id`, into `path`.
+    SerialRecording {
+        id: u32,
+        path: String,
+    },
+    SerialRecordingStopped {
+        id: u32,
+        path: String,
+        #[ts(type = "number")]
+        bytes: u64,
+    },
     /// Something the client asked for failed. `id` is absent when it isn't tied to one request.
     Error {
         #[ts(optional)]
@@ -316,6 +350,105 @@ pub enum ServerMessage {
         error: ErrorBody,
     },
 }
+
+// ---------------------------------------------------------------------------------------------
+// Files (docs/api.md, "Files"). Paths are `<root>:/<path>`, e.g. `home:/Desktop/notes.txt`.
+
+/// A place files can live: `home` always; `machine` only with the developer setting on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FileRoot {
+    pub id: String,
+    pub label: String,
+    /// The root folder's path, e.g. `home:/`.
+    pub path: String,
+    /// Shown wherever this root is browsed (the whole-machine root has one).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum FileKind {
+    File,
+    Folder,
+}
+
+/// The home folder's fixed folders. They can't be renamed or deleted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum SpecialFolder {
+    Desktop,
+    Documents,
+    Recordings,
+    /// Shows the machine config. Saving there is validated first.
+    System,
+    Trash,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: String,
+    pub kind: FileKind,
+    #[ts(type = "number")]
+    pub size: u64,
+    /// Last change, milliseconds since 1970 (UTC).
+    #[ts(optional, type = "number")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_ms: Option<u64>,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub special: Option<SpecialFolder>,
+    /// For files in the Trash: where they came from.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_path: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FolderListing {
+    pub path: String,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    pub entries: Vec<FileEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PathRequest {
+    pub path: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MoveRequest {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PathsRequest {
+    pub paths: Vec<String>,
+}
+
+// Settings types live in `crate::settings` (layer 2 owns its data); re-exported for the wire.
+pub use crate::settings::{
+    Appearance, DesktopLayout, DeveloperChange, DeveloperSettings, IconPosition, Settings, Theme,
+};
 
 #[cfg(test)]
 mod tests {

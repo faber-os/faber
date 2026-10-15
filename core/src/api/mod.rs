@@ -4,6 +4,7 @@
 
 mod convert;
 pub mod dto;
+mod files;
 mod shell;
 mod ws;
 
@@ -31,6 +32,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/parts", get(parts).post(add_part))
         .route("/api/v0/parts/{name}", delete(remove_part))
         .route("/api/v0/ws", get(ws::upgrade))
+        .merge(files::routes())
         .fallback(shell::serve)
         .with_state(state)
 }
@@ -51,6 +53,8 @@ impl From<MachineError> for Failure {
             ErrorKind::NotFound => StatusCode::NOT_FOUND,
             ErrorKind::Conflict => StatusCode::CONFLICT,
             ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorKind::Unprocessable => StatusCode::UNPROCESSABLE_ENTITY,
+            ErrorKind::Forbidden => StatusCode::FORBIDDEN,
         };
         Failure(status, convert::error_body(&e))
     }

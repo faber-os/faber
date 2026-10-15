@@ -3,4 +3,4 @@
 /**
  * What a WebSocket subscription is for.
  */
-export type Topic = { "kind": "signal", address: string, maxHz?: number, } | { "kind": "parts" } | { "kind": "ports" } | { "kind": "logs" };
+export type Topic = { "kind": "signal", address: string, maxHz?: number, } | { "kind": "parts" } | { "kind": "ports" } | { "kind": "logs" } | { "kind": "settings" } | { "kind": "files" };

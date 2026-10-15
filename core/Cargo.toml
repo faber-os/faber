@@ -43,3 +43,6 @@ futures-util = "0.3.34"
 tempfile = "3.27.0"
 tokio-tungstenite = "0.30.0"
 tower = "0.5.3"
+
+[target."cfg(windows)".dependencies]
+winreg = "0.56.0"

@@ -1,6 +1,7 @@
 //! Machine types → wire types (docs/api.md). The only place that knows both.
 
 use super::dto;
+use crate::files::{Entry, Kind, Root, Special, VPath};
 use crate::logs;
 use crate::machine::{MachineError, PartView, PortView};
 use crate::ports::PortKind;
@@ -49,6 +50,7 @@ pub fn port(p: &PortView) -> dto::PortInfo {
         kind: match p.entry.kind {
             PortKind::UsbSerial => dto::PortKind::UsbSerial,
             PortKind::Serial => dto::PortKind::Serial,
+            PortKind::Bluetooth => dto::PortKind::Bluetooth,
             PortKind::Replay => dto::PortKind::Replay,
         },
         label: p.entry.label.clone(),
@@ -82,6 +84,50 @@ pub fn connector(m: &Manifest) -> dto::ConnectorInfo {
             .iter()
             .map(|p| dto::ProvideInfo { name: p.name.clone(), capability: p.capability })
             .collect(),
+    }
+}
+
+pub fn file_root(p: &VPath, label: &str, warning: Option<&str>) -> dto::FileRoot {
+    let id = match p.root() {
+        Root::Home => "home",
+        Root::Machine => "machine",
+    };
+    dto::FileRoot {
+        id: id.into(),
+        label: label.into(),
+        path: p.to_string(),
+        warning: warning.map(str::to_string),
+    }
+}
+
+pub fn file_entry(e: &Entry) -> dto::FileEntry {
+    dto::FileEntry {
+        name: e.name.clone(),
+        path: e.path.to_string(),
+        kind: match e.kind {
+            Kind::File => dto::FileKind::File,
+            Kind::Folder => dto::FileKind::Folder,
+        },
+        size: e.size,
+        modified_ms: e.modified_ms,
+        special: e.special.map(|s| match s {
+            Special::Desktop => dto::SpecialFolder::Desktop,
+            Special::Documents => dto::SpecialFolder::Documents,
+            Special::Recordings => dto::SpecialFolder::Recordings,
+            Special::System => dto::SpecialFolder::System,
+            Special::Trash => dto::SpecialFolder::Trash,
+        }),
+        original_path: e.original_path.clone(),
+    }
+}
+
+/// `path` as given; parsing it again can't fail because listing it succeeded.
+pub fn folder_listing(path: &str, entries: &[Entry]) -> dto::FolderListing {
+    let parsed = VPath::parse(path).expect("listed paths parse");
+    dto::FolderListing {
+        path: parsed.to_string(),
+        parent: parsed.parent().map(|p| p.to_string()),
+        entries: entries.iter().map(file_entry).collect(),
     }
 }
 

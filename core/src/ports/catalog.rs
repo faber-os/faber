@@ -18,12 +18,15 @@ pub struct Discovered {
     /// OS name, e.g. `COM3` or `/dev/ttyUSB0`.
     pub path: String,
     pub usb: Option<Usb>,
+    /// A serial link over Bluetooth (e.g. Windows' "Standard Serial over Bluetooth link").
+    pub bluetooth: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PortKind {
     UsbSerial,
     Serial,
+    Bluetooth,
     Replay,
 }
 
@@ -62,11 +65,13 @@ pub fn catalog(discovered: &[Discovered], replays: &[String]) -> Vec<PortEntry> 
                     };
                     (id.unwrap_or_else(|| PortId::Serial(d.path.clone())), PortKind::UsbSerial)
                 }
+                None if d.bluetooth => (PortId::Serial(d.path.clone()), PortKind::Bluetooth),
                 None => (PortId::Serial(d.path.clone()), PortKind::Serial),
             };
             let name = d.usb.as_ref().and_then(|u| u.product.clone().or_else(|| u.manufacturer.clone()));
             let label = match name {
                 Some(name) => format!("{name} ({})", d.path),
+                None if d.bluetooth => format!("Bluetooth serial link ({})", d.path),
                 None => d.path.clone(),
             };
             PortEntry { id, kind, label, path: Some(d.path.clone()), usb: d.usb.clone() }
@@ -97,6 +102,7 @@ mod tests {
                 manufacturer: Some("Silicon Labs".into()),
                 product: Some("CP2102 USB to UART Bridge".into()),
             }),
+            bluetooth: false,
         }
     }
 
@@ -125,8 +131,19 @@ mod tests {
     }
 
     #[test]
+    fn bluetooth_links_say_so() {
+        let c = catalog(&[Discovered { path: "COM10".into(), usb: None, bluetooth: true }], &[]);
+        assert_eq!(c[0].kind, PortKind::Bluetooth);
+        assert_eq!(c[0].label, "Bluetooth serial link (COM10)");
+        assert_eq!(c[0].id.to_string(), "serial:COM10");
+    }
+
+    #[test]
     fn plain_uarts_and_replays() {
-        let c = catalog(&[Discovered { path: "/dev/ttyAMA0".into(), usb: None }], &["demo-ld19".into()]);
+        let c = catalog(
+            &[Discovered { path: "/dev/ttyAMA0".into(), usb: None, bluetooth: false }],
+            &["demo-ld19".into()],
+        );
         assert_eq!(c.len(), 2, "real ports are listed before recordings");
         assert_eq!(c[0].id.to_string(), "serial:/dev/ttyAMA0");
         assert_eq!(c[0].label, "/dev/ttyAMA0");

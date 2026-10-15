@@ -81,10 +81,7 @@ impl PortOpener for SystemOpener {
             let entry = self.replays.get(name).ok_or_else(|| {
                 io::Error::new(io::ErrorKind::NotFound, format!("no recording called {name}"))
             })?;
-            return Ok((
-                Box::new(Replay::new(Arc::clone(&entry.chunks), Pacing::RealTime)),
-                Box::new(NoWriter),
-            ));
+            return Ok((Box::new(Replay::new(entry.chunks, Pacing::RealTime)), Box::new(NoWriter)));
         }
         let path = port
             .path

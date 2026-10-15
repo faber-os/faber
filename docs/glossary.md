@@ -5,7 +5,7 @@ use exactly these words. If something new does not fit, add a term here first, t
 Home Assistant spent years untangling "component / integration / platform / add-on". This page
 exists so we never have to.
 
-## The four things you can have
+## The five things you can have
 
 | Term | One-line definition | Installable? | Example |
 |---|---|---|---|
@@ -13,9 +13,11 @@ exists so we never have to.
 | **Connector** | A package that knows how to talk to one kind of hardware and turns it into capabilities. | yes, from the store | `ldrobot-ld19`, `ti-tmp102`, `faber-bridge` |
 | **Tool** | A built-in utility in the shell for working with hardware directly. | no, ships with the core | serial monitor, I2C scanner, GPIO panel |
 | **App** | A package with logic and/or UI that *uses* capabilities to do a job, and may publish derived signals. | yes, from the store | `sennep`, `weather-station` |
+| **Accessory** | A built-in program in the shell for everyday work that isn't about hardware. | no, ships with the core | Files, Notes, Settings |
 
 Simple tests: does it talk to hardware? Then it's a **connector**. Does it use capabilities to do
-something? Then it's an **app**. Is it always there and generic? Then it's a **tool**. Nothing is
+something? Then it's an **app**. Is it built in and works with hardware directly? Then it's a
+**tool**. Is it built in and has nothing to do with hardware? Then it's an **accessory**. Nothing is
 ever two of these.
 
 ## All terms
@@ -53,6 +55,11 @@ ever two of these.
 | **Kiosk** | The shell running full-screen on a display attached to the machine. |
 | **Window** | Anything open in the shell: a tool, an app's UI, a part's viewer. |
 | **Viewer** | The default live view the core has for every capability (a plot for `distance`, a 2D scan for `laser-scan`, a 3D orientation for `imu`). Any part gets one for free. |
+| **Home folder** | Faber's own files, inside the data folder: Desktop, Documents, Recordings, System and Trash. Files and Notes work here. |
+| **System folder** | The folder in the home folder that shows the machine config (`parts.toml`). Saving a file there is checked first: a broken config is refused with its line number. |
+| **Trash** | Where deleted files go. Emptying it deletes them for good. |
+| **Recording** | A capture (`.fbcap`) of a port's bytes, made with the serial monitor's Record button and kept in Recordings. Any recording can be replayed as a port. |
+| **Developer settings** | Settings for people building Faber or connectors, behind a warning. Includes full-machine file access. |
 | **SDK** | The libraries, templates and WIT files for writing connectors and apps. |
 | **WIT** | The interface language used to define capabilities for WASM packages ([Component Model guide](https://component-model.bytecodealliance.org)). |
 

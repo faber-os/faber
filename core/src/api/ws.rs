@@ -220,11 +220,63 @@ async fn handle(
         },
         C::SerialClose { id } => {
             if let Some(s) = serial.remove(&id) {
-                let _ = tokio::task::spawn_blocking(move || drop(s)).await;
+                let machine = Arc::clone(&state.machine);
+                // A recording in progress ends with the session; tell the client what was saved.
+                let stopped = tokio::task::spawn_blocking(move || {
+                    let stopped = machine.stop_recording(&s).ok();
+                    drop(s);
+                    stopped
+                })
+                .await
+                .ok()
+                .flatten();
+                if let Some((path, bytes)) = stopped {
+                    let _ = out.send(dto::ServerMessage::SerialRecordingStopped { id, path, bytes }).await;
+                }
                 let _ = out.send(dto::ServerMessage::SerialClosed { id, reason: None }).await;
             }
         }
+        C::SerialRecordStart { id, name } => {
+            let Some(session) = serial.get(&id).cloned() else {
+                let _ = out.send(unknown_session(id)).await;
+                return;
+            };
+            let machine = Arc::clone(&state.machine);
+            let reply =
+                match tokio::task::spawn_blocking(move || machine.start_recording(&session, &name)).await {
+                    Ok(Ok(path)) => dto::ServerMessage::SerialRecording { id, path },
+                    Ok(Err(e)) => dto::ServerMessage::Error { id: Some(id), error: convert::error_body(&e) },
+                    Err(_) => internal(id),
+                };
+            let _ = out.send(reply).await;
+        }
+        C::SerialRecordStop { id } => {
+            let Some(session) = serial.get(&id).cloned() else {
+                let _ = out.send(unknown_session(id)).await;
+                return;
+            };
+            let machine = Arc::clone(&state.machine);
+            let reply = match tokio::task::spawn_blocking(move || machine.stop_recording(&session)).await {
+                Ok(Ok((path, bytes))) => dto::ServerMessage::SerialRecordingStopped { id, path, bytes },
+                Ok(Err(e)) => dto::ServerMessage::Error { id: Some(id), error: convert::error_body(&e) },
+                Err(_) => internal(id),
+            };
+            let _ = out.send(reply).await;
+        }
     }
+}
+
+fn unknown_session(id: u32) -> dto::ServerMessage {
+    error(Some(id), "unknown-session", format!("No serial session {id} is open."), "Open the port first.")
+}
+
+fn internal(id: u32) -> dto::ServerMessage {
+    error(
+        Some(id),
+        "internal",
+        "The core failed while handling this.",
+        "This is a bug in Faber; the log has details.",
+    )
 }
 
 fn subscribe(
@@ -294,6 +346,43 @@ fn subscribe(
                         || changes.changed().await.is_err()
                     {
                         return;
+                    }
+                }
+            }))
+        }
+        dto::Topic::Settings => {
+            let machine = Arc::clone(&state.machine);
+            let mut changes = machine.settings_changed();
+            Ok(tokio::spawn(async move {
+                loop {
+                    let settings = machine.settings();
+                    if out.send(dto::ServerMessage::Settings { id, settings }).await.is_err()
+                        || changes.changed().await.is_err()
+                    {
+                        return;
+                    }
+                }
+            }))
+        }
+        dto::Topic::Files => {
+            let mut rx = state.machine.files_changed();
+            Ok(tokio::spawn(async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(folders) => {
+                            if out.send(dto::ServerMessage::FilesChanged { id, folders }).await.is_err() {
+                                return;
+                            }
+                        }
+                        // Missed some: say everything changed, so the client refreshes what it shows.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            let all = vec!["home:/".to_string()];
+                            if out.send(dto::ServerMessage::FilesChanged { id, folders: all }).await.is_err()
+                            {
+                                return;
+                            }
+                        }
+                        Err(_) => return,
                     }
                 }
             }))

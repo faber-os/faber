@@ -4,4 +4,4 @@ import type { Topic } from "./Topic";
 /**
  * Messages from the shell to the core.
  */
-export type ClientMessage = { "type": "subscribe", id: number, topic: Topic, } | { "type": "unsubscribe", id: number, } | { "type": "serial-open", id: number, port: string, baud: number, } | { "type": "serial-send", id: number, data: Uint8Array, } | { "type": "serial-close", id: number, };
+export type ClientMessage = { "type": "subscribe", id: number, topic: Topic, } | { "type": "unsubscribe", id: number, } | { "type": "serial-open", id: number, port: string, baud: number, } | { "type": "serial-send", id: number, data: Uint8Array, } | { "type": "serial-close", id: number, } | { "type": "serial-record-start", id: number, name: string, } | { "type": "serial-record-stop", id: number, };

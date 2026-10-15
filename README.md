@@ -32,19 +32,25 @@ SD card survives a power cut. Faber does that plumbing once, for everyone:
 
 ## Try it (Phase 1, on a PC)
 
-You need [Rust](https://rustup.rs) and [Node.js](https://nodejs.org). No hardware needed:
-Faber has a built-in recording of a real LD19 LiDAR.
+You need [Rust](https://rustup.rs) and [Node.js](https://nodejs.org). From the repository folder:
 
 ```bash
 npm --prefix shell ci
+```
+
+```bash
 npm --prefix shell run build
+```
+
+```bash
 cargo run -p faber-core --features embed-shell
 ```
 
-Open <http://127.0.0.1:7878>, click **Add the first part**, pick the port `replay:demo-ld19` and the
-LD19 connector, and watch the scan. Have an LD19? Plug it in and pick its USB port instead.
+Open <http://127.0.0.1:7878>. Plug in your hardware and it appears under **Add part** by itself.
+No hardware? Open **Files → Recordings → Add sample recordings** to get a real LD19 LiDAR
+recording, then add a part on the port `replay:ld19-sample`.
 
-## The four building blocks
+## The building blocks
 
 | | What | Example |
 |---|---|---|
@@ -52,6 +58,7 @@ LD19 connector, and watch the scan. Have an LD19? Plug it in and pick its USB po
 | **Connector** | Makes one kind of hardware usable (from the store) | LD19 LiDAR, TMP102 sensor |
 | **Tool** | Built-in utility for working with hardware | serial monitor, I2C scanner |
 | **App** | Uses capabilities to do a job (from the store) | a robot, a weather station |
+| **Accessory** | Built-in everyday program, not about hardware | Files, Notes, Settings |
 
 ## First user: SENNEP V2
 

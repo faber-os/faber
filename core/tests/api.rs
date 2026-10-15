@@ -17,16 +17,19 @@ use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 use tower::ServiceExt;
 
-struct NoSerialPorts;
-impl SerialDiscovery for NoSerialPorts {
+/// Serial ports the test can plug in and out.
+#[derive(Default)]
+struct FakeSerialPorts(std::sync::Mutex<Vec<Discovered>>);
+impl SerialDiscovery for FakeSerialPorts {
     fn list(&self) -> Vec<Discovered> {
-        Vec::new()
+        self.0.lock().unwrap().clone()
     }
 }
 
 struct TestCore {
     app: axum::Router,
     machine: Arc<Machine>,
+    serial: Arc<FakeSerialPorts>,
     _dir: tempfile::TempDir,
 }
 
@@ -34,10 +37,11 @@ fn core() -> TestCore {
     let dir = tempfile::tempdir().unwrap();
     let clock = Arc::new(MonotonicClock::new());
     let replays = ReplayLibrary::with_demo();
+    let serial = Arc::new(FakeSerialPorts::default());
     let machine = Machine::start(MachineOptions {
         data_dir: dir.path().to_path_buf(),
         clock: clock.clone(),
-        discovery: Arc::new(NoSerialPorts),
+        discovery: Arc::clone(&serial) as Arc<dyn SerialDiscovery>,
         opener: Arc::new(SystemOpener::new(replays.clone())),
         replays,
         connectors: faber_core::connectors::built_in(),
@@ -46,7 +50,7 @@ fn core() -> TestCore {
     })
     .unwrap();
     let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
-    TestCore { app, machine, _dir: dir }
+    TestCore { app, machine, serial, _dir: dir }
 }
 
 impl Drop for TestCore {
@@ -276,4 +280,203 @@ async fn unknown_signals_and_reused_ids_get_actionable_errors() {
         unreachable!()
     };
     assert_eq!(error.code, "id-in-use");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_ports_topic_pushes_a_newly_plugged_adapter() {
+    let c = core();
+    let addr = serve(c.app.clone()).await;
+    let mut ws = connect(addr, "msgpack").await;
+    send(&mut ws, &dto::ClientMessage::Subscribe { id: 1, topic: dto::Topic::Ports }).await;
+    wait_for(&mut ws, |m| matches!(m, dto::ServerMessage::Ports { .. })).await;
+    c.serial.0.lock().unwrap().push(Discovered {
+        path: "COM5".into(),
+        bluetooth: false,
+        usb: Some(faber_core::ports::Usb {
+            vid: 0x10c4,
+            pid: 0xea60,
+            serial_number: Some("0001".into()),
+            manufacturer: Some("Silicon Labs".into()),
+            product: Some("CP2102 USB to UART Bridge".into()),
+        }),
+    });
+    let machine = Arc::clone(&c.machine);
+    tokio::task::spawn_blocking(move || machine.refresh_ports()).await.unwrap();
+    let dto::ServerMessage::Ports { ports, .. } = wait_for(&mut ws, |m| {
+        matches!(m, dto::ServerMessage::Ports { ports, .. } if ports.iter().any(|p| p.id == "usb:10c4:ea60"))
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    let cp2102 = ports.iter().find(|p| p.id == "usb:10c4:ea60").unwrap();
+    assert_eq!(cp2102.label, "CP2102 USB to UART Bridge (COM5)");
+    assert_eq!(cp2102.suggestions[0].connector, "ldrobot-ld19");
+}
+
+async fn put_bytes(app: &axum::Router, path: &str, bytes: &'static [u8]) -> (StatusCode, serde_json::Value) {
+    let req = Request::builder()
+        .method("PUT")
+        .uri(format!("/api/v0/files/content?path={path}"))
+        .body(Body::from(bytes))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    (status, if body.is_empty() { serde_json::Value::Null } else { serde_json::from_slice(&body).unwrap() })
+}
+
+async fn get_bytes(app: &axum::Router, path: &str) -> (StatusCode, Vec<u8>) {
+    let req =
+        Request::builder().uri(format!("/api/v0/files/content?path={path}")).body(Body::empty()).unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    (status, axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().to_vec())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn files_round_trip_through_the_api() {
+    let c = core();
+    let (s, roots) = call(&c.app, "GET", "/api/v0/files/roots", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(roots, json!([{"id": "home", "label": "Home", "path": "home:/"}]));
+
+    let (_, home) = call(&c.app, "GET", "/api/v0/files/list?path=home:/", None).await;
+    let names: Vec<_> =
+        home["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Desktop", "Documents", "Recordings", "System", "Trash"]);
+    assert_eq!(home["entries"][3]["special"], "system");
+
+    let (s, _) =
+        call(&c.app, "POST", "/api/v0/files/folder", Some(json!({"path": "home:/Documents/robot"}))).await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (s, _) = put_bytes(&c.app, "home:/Documents/robot/notes.txt", b"wheel torque").await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert_eq!(
+        get_bytes(&c.app, "home:/Documents/robot/notes.txt").await,
+        (StatusCode::OK, b"wheel torque".to_vec())
+    );
+
+    let (s, _) = call(
+        &c.app,
+        "POST",
+        "/api/v0/files/move",
+        Some(json!({"from": "home:/Documents/robot/notes.txt", "to": "home:/Desktop/notes.txt"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) =
+        call(&c.app, "POST", "/api/v0/files/trash", Some(json!({"paths": ["home:/Desktop/notes.txt"]})))
+            .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, trash) = call(&c.app, "GET", "/api/v0/files/list?path=home:/Trash", None).await;
+    assert_eq!(trash["entries"][0]["originalPath"], "home:/Desktop/notes.txt");
+    assert_eq!(trash["parent"], "home:/");
+
+    let (s, err) =
+        call(&c.app, "POST", "/api/v0/files/delete", Some(json!({"paths": ["home:/Documents/robot"]}))).await;
+    assert_eq!(s, StatusCode::CONFLICT, "deleting for good only works from the Trash");
+    assert_eq!(err["error"]["code"], "protected");
+
+    let (s, err) = call(&c.app, "GET", "/api/v0/files/list?path=home:/../secret", None).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(err["error"]["code"], "bad-path");
+    let (s, err) = call(&c.app, "GET", "/api/v0/files/list?path=machine:/", None).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    assert_eq!(err["error"]["code"], "machine-files-off");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn parts_toml_is_validated_when_saved_from_files() {
+    let c = core();
+    let (s, err) = put_bytes(&c.app, "home:/System/parts.toml", b"[parts.lidar]\nconnector = \n").await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(err["error"]["code"], "config-invalid");
+    assert!(err["error"]["message"].as_str().unwrap().contains("line 2"));
+    let (s, _) = put_bytes(
+        &c.app,
+        "home:/System/parts.toml",
+        b"[parts.lidar]\nconnector = \"ldrobot-ld19\"\nport = \"replay:demo-ld19\"\n",
+    )
+    .await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, parts) = call(&c.app, "GET", "/api/v0/parts", None).await;
+    assert_eq!(parts[0]["name"], "lidar", "the saved config is applied at once");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_and_the_developer_guard() {
+    let c = core();
+    let (_, mut settings) = call(&c.app, "GET", "/api/v0/settings", None).await;
+    assert_eq!(settings["appearance"], json!({"theme": "system", "wallpaper": "aluminium"}));
+    settings["appearance"]["theme"] = json!("dark");
+    settings["desktop"]["icons"] = json!([{"key": "accessory:files", "x": 16.0, "y": 16.0}]);
+    let (s, saved) = call(&c.app, "PUT", "/api/v0/settings", Some(settings.clone())).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(saved["appearance"]["theme"], "dark");
+
+    settings["developer"]["fullMachineFiles"] = json!(true);
+    let (s, err) = call(&c.app, "PUT", "/api/v0/settings", Some(settings)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(err["error"]["code"], "use-developer-endpoint");
+
+    let (s, err) =
+        call(&c.app, "POST", "/api/v0/settings/developer", Some(json!({"fullMachineFiles": true}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(err["error"]["code"], "risk-not-acknowledged");
+    let (s, on) = call(
+        &c.app,
+        "POST",
+        "/api/v0/settings/developer",
+        Some(json!({"fullMachineFiles": true, "acknowledgedRisk": true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(on["developer"]["fullMachineFiles"], true);
+    let (_, roots) = call(&c.app, "GET", "/api/v0/files/roots", None).await;
+    assert!(roots[1]["warning"].as_str().unwrap().contains("break"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recording_from_the_serial_monitor_makes_a_replay_port() {
+    let c = core();
+    let addr = serve(c.app.clone()).await;
+    let mut ws = connect(addr, "msgpack").await;
+    send(&mut ws, &dto::ClientMessage::Subscribe { id: 1, topic: dto::Topic::Files }).await;
+    send(&mut ws, &dto::ClientMessage::SerialOpen { id: 2, port: "replay:demo-ld19".into(), baud: 230_400 })
+        .await;
+    wait_for(&mut ws, |m| matches!(m, dto::ServerMessage::SerialOpened { .. })).await;
+    send(&mut ws, &dto::ClientMessage::SerialRecordStart { id: 2, name: "bench".into() }).await;
+    let rec = wait_for(&mut ws, |m| matches!(m, dto::ServerMessage::SerialRecording { .. })).await;
+    assert_eq!(
+        rec,
+        dto::ServerMessage::SerialRecording { id: 2, path: "home:/Recordings/bench.fbcap".into() }
+    );
+    for _ in 0..3 {
+        wait_for(&mut ws, |m| matches!(m, dto::ServerMessage::SerialData { .. })).await;
+    }
+    send(&mut ws, &dto::ClientMessage::SerialClose { id: 2 }).await;
+    // Both arrive, in either order: the stop report and the Recordings folder change.
+    let (mut stopped, mut announced) = (None, false);
+    while stopped.is_none() || !announced {
+        match wait_for(&mut ws, |m| {
+            matches!(
+                m,
+                dto::ServerMessage::SerialRecordingStopped { .. } | dto::ServerMessage::FilesChanged { .. }
+            )
+        })
+        .await
+        {
+            dto::ServerMessage::SerialRecordingStopped { path, bytes, .. } => stopped = Some((path, bytes)),
+            dto::ServerMessage::FilesChanged { folders, .. } => {
+                announced |= folders.contains(&"home:/Recordings".to_string())
+            }
+            _ => unreachable!(),
+        }
+    }
+    let (path, bytes) = stopped.unwrap();
+    assert_eq!(path, "home:/Recordings/bench.fbcap");
+    assert!(bytes > 0);
+    let (_, ports) = call(&c.app, "GET", "/api/v0/ports", None).await;
+    assert!(ports.as_array().unwrap().iter().any(|p| p["id"] == "replay:bench"));
 }

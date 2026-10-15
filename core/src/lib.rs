@@ -8,10 +8,12 @@ pub mod names;
 // Layer 2: one job each; none of them knows about HTTP.
 pub mod config;
 pub mod connectors;
+pub mod files;
 pub mod logs;
 pub mod ports;
 pub mod router;
 pub mod runtime;
+pub mod settings;
 pub mod suggest;
 
 // Layer 3: ties everything together.
@@ -33,15 +35,15 @@ pub struct Core {
 }
 
 impl Core {
-    /// Starts the machine on real hardware: OS serial ports, the demo recording and any
-    /// captures in `<data>/captures`.
+    /// Starts the machine on real hardware: OS serial ports, plus every recording in the home
+    /// folder's Recordings.
     pub fn start(
         data_dir: PathBuf,
         logs: Arc<logs::LogBook>,
         clock: clock::SharedClock,
     ) -> std::io::Result<Core> {
-        let mut replays = ports::ReplayLibrary::with_demo();
-        replays.load_dir(&data_dir.join("captures"));
+        // Replay ports come from home:/Recordings (D35); the machine keeps this in sync.
+        let replays = ports::ReplayLibrary::default();
         let machine = machine::Machine::start(machine::MachineOptions {
             data_dir,
             clock,

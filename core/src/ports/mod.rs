@@ -11,7 +11,9 @@ mod stream;
 pub use catalog::{Discovered, PortEntry, PortKind, Usb, catalog};
 pub use claims::{ClaimError, Claimant, Claims};
 pub use id::PortId;
-pub use replay::{DEMO_LD19, Pacing, Replay, ReplayEntry, ReplayLibrary};
+pub use replay::{
+    DEMO_LD19, Pacing, Replay, ReplayEntry, ReplayLibrary, SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME,
+};
 pub use stream::{PortEvent, PortOpener, PortReader, PortWriter, SystemOpener, spawn_reader};
 
 /// Lists the serial ports the OS knows about. A trait so tests can fake hardware.
@@ -31,9 +33,12 @@ impl SerialDiscovery for SystemDiscovery {
                 return Vec::new();
             }
         };
+        let os_bluetooth = os_bluetooth_ports();
         ports
             .into_iter()
             .map(|p| Discovered {
+                bluetooth: matches!(p.port_type, serialport::SerialPortType::BluetoothPort)
+                    || os_bluetooth.contains(&p.port_name),
                 path: p.port_name,
                 usb: match p.port_type {
                     serialport::SerialPortType::UsbPort(u) => Some(Usb {
@@ -47,5 +52,44 @@ impl SerialDiscovery for SystemDiscovery {
                 },
             })
             .collect()
+    }
+}
+
+/// Which of `(device, port)` pairs from the OS serial map are Bluetooth links. Windows maps
+/// `\Device\BthModem<n>` to the COM port of every Bluetooth serial link.
+fn bluetooth_from_device_map(map: impl IntoIterator<Item = (String, String)>) -> Vec<String> {
+    map.into_iter().filter(|(device, _)| device.contains("BthModem")).map(|(_, port)| port).collect()
+}
+
+/// The `serialport` crate reports Windows Bluetooth links as an unknown type, so the port map in
+/// the registry (`HKLM\HARDWARE\DEVICEMAP\SERIALCOMM`) tells them apart.
+#[cfg(windows)]
+fn os_bluetooth_ports() -> Vec<String> {
+    use winreg::RegKey;
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    let Ok(key) = RegKey::predef(HKEY_LOCAL_MACHINE).open_subkey(r"HARDWARE\DEVICEMAP\SERIALCOMM") else {
+        return Vec::new();
+    };
+    let pairs = key.enum_values().flatten().map(|(name, value)| (name, value.to_string()));
+    bluetooth_from_device_map(pairs)
+}
+
+#[cfg(not(windows))]
+fn os_bluetooth_ports() -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bthmodem_devices_are_bluetooth() {
+        let map = [
+            (r"\Device\BthModem1".to_string(), "COM10".to_string()),
+            (r"\Device\Silabser0".to_string(), "COM5".to_string()),
+            (r"\Device\BthModem0".to_string(), "COM12".to_string()),
+        ];
+        assert_eq!(bluetooth_from_device_map(map), ["COM10", "COM12"]);
     }
 }
