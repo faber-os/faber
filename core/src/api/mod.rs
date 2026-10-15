@@ -6,6 +6,7 @@ mod convert;
 mod driving;
 pub mod dto;
 mod files;
+mod packages;
 mod shell;
 mod translations;
 mod world;
@@ -40,6 +41,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/signals/{part}/{name}", get(signal_value))
         .route("/api/v0/ws", get(ws::upgrade))
         .merge(files::routes())
+        .merge(packages::routes())
         .merge(driving::routes())
         .merge(translations::routes())
         .merge(world::routes())
@@ -70,6 +72,7 @@ impl From<MachineError> for Failure {
             ErrorKind::Forbidden => StatusCode::FORBIDDEN,
             ErrorKind::Locked => StatusCode::LOCKED,
             ErrorKind::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
+            ErrorKind::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         };
         Failure(status, convert::error_body(&e))
     }

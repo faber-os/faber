@@ -1,0 +1,251 @@
+//! Connector packages through the API (docs/packages.md §5, docs/api.md "Packages"): preview,
+//! install while the core runs, parts on the connector restarting with a new version, and
+//! uninstall refused while a part uses it. Declarative packages here; the wasm path is proven
+//! end to end, from the template, in tools/faber-cli/tests/first_connector.rs.
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use faber_connector::capture::Chunk;
+use faber_core::api;
+use faber_core::clock::MonotonicClock;
+use faber_core::logs::LogBook;
+use faber_core::machine::{Machine, MachineOptions};
+use faber_core::packages;
+use faber_core::ports::{ReplayLibrary, SystemOpener};
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tower::ServiceExt;
+
+struct Nothing;
+impl faber_core::ports::SerialDiscovery for Nothing {
+    fn list(&self) -> Vec<faber_core::ports::Discovered> {
+        Vec::new()
+    }
+}
+impl faber_core::ports::UsbProblemDiscovery for Nothing {
+    fn list(&self) -> Vec<faber_core::ports::FailedUsb> {
+        Vec::new()
+    }
+}
+impl faber_core::disks::DiskDiscovery for Nothing {
+    fn list(&self) -> Vec<faber_core::disks::Disk> {
+        Vec::new()
+    }
+}
+
+struct TestCore {
+    app: axum::Router,
+    machine: Arc<Machine>,
+    dir: tempfile::TempDir,
+}
+
+impl Drop for TestCore {
+    fn drop(&mut self) {
+        self.machine.shutdown();
+    }
+}
+
+fn core() -> TestCore {
+    let dir = tempfile::tempdir().unwrap();
+    let library = ReplayLibrary::default();
+    let lines: Vec<Chunk> =
+        (0..50).map(|i| Chunk { t_us: i * 100_000, bytes: b"D:150\n".to_vec() }).collect();
+    library.insert("bench", lines, None);
+    let clock = Arc::new(MonotonicClock::new());
+    let machine = Machine::start(MachineOptions {
+        data_dir: dir.path().to_path_buf(),
+        clock: clock.clone(),
+        discovery: Arc::new(Nothing),
+        usb_problems: Arc::new(Nothing),
+        disks: Arc::new(Nothing),
+        opener: Arc::new(SystemOpener::new(library.clone())),
+        replays: library,
+        connectors: faber_core::connectors::built_in(),
+        timing: faber_core::runtime::Timing::default(),
+        port_scan: None,
+        world: Arc::new(faber_core::simparts::SimWorld::new()),
+    })
+    .unwrap();
+    machine.refresh_ports();
+    let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+    TestCore { app, machine, dir }
+}
+
+async fn call(app: &axum::Router, method: &str, path: &str, body: Option<Body>) -> (StatusCode, Value) {
+    let req = Request::builder().method(method).uri(path);
+    let req = match body {
+        Some(b) => req.header("content-type", "application/octet-stream").body(b).unwrap(),
+        None => req.body(Body::empty()).unwrap(),
+    };
+    let res = app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    (status, if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap() })
+}
+
+async fn json_call(app: &axum::Router, method: &str, path: &str, body: Value) -> (StatusCode, Value) {
+    let req = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+const SENSOR: &str = "faber-manifest = 1\n[package]\nid = \"my-sensor\"\ntype = \"connector\"\n\
+    kind = \"declarative\"\nversion = \"0.1.0\"\nname = \"My sensor\"\npublisher = \"Ada\"\n\
+    [ports]\nserial = { baud = 9600 }\n[[provides]]\ncapability = \"distance@1\"\n\
+    line = { pattern = \"D:{meters:f32}\", scale = 0.01 }\n";
+
+fn package(toml: &str) -> Vec<u8> {
+    let files: BTreeMap<String, Vec<u8>> = [
+        ("faber.toml", toml.as_bytes()),
+        ("README.md", b"# My sensor\n\nPrints D:<cm>.".as_slice()),
+        ("LICENSE", b"MIT".as_slice()),
+        ("captures/bench.fbcap", b"FABERCAP1\n".as_slice()),
+    ]
+    .into_iter()
+    .map(|(n, d)| (n.to_string(), d.to_vec()))
+    .collect();
+    packages::pack(&files).unwrap()
+}
+
+/// Polls a signal until `ok` accepts its reading (up to 5 s).
+async fn reading_where(app: &axum::Router, address: &str, ok: impl Fn(&Value) -> bool) -> Value {
+    let start = Instant::now();
+    loop {
+        let (status, v) = call(app, "GET", &format!("/api/v0/signals/{address}"), None).await;
+        if status == StatusCode::OK && !v["reading"].is_null() && ok(&v["reading"]) {
+            return v["reading"].clone();
+        }
+        assert!(start.elapsed() < Duration::from_secs(5), "{address}: {status} {v}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_preview_says_what_it_would_install_and_installs_nothing() {
+    let c = core();
+    let (s, p) =
+        call(&c.app, "POST", "/api/v0/packages?mode=preview", Some(Body::from(package(SENSOR)))).await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    assert_eq!(p["connector"]["id"], "my-sensor");
+    assert_eq!(p["connector"]["kind"], "declarative");
+    assert_eq!(p["connector"]["port"], json!({"kind": "serial", "baud": 9600}));
+    assert_eq!(p["publisher"], "Ada");
+    assert_eq!(p["readme"], "# My sensor\n\nPrints D:<cm>.");
+    assert_eq!(p["captures"], json!(["bench.fbcap"]));
+    assert_eq!(p["checked"], false);
+    assert!(p.get("replaces").is_none());
+    assert_eq!(call(&c.app, "GET", "/api/v0/packages", None).await.1, json!([]));
+    assert!(!c.dir.path().join("connectors/my-sensor").exists());
+    assert!(c.machine.connectors().iter().all(|m| m.id != "my-sensor"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn installing_offers_the_connector_at_once_and_an_update_restarts_its_parts() {
+    let c = core();
+    let (s, info) = call(
+        &c.app,
+        "POST",
+        "/api/v0/packages?name=my-sensor-0.1.0.faberpkg",
+        Some(Body::from(package(SENSOR))),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{info}");
+    assert_eq!(info["id"], "my-sensor");
+    assert_eq!(info["source"], "my-sensor-0.1.0.faberpkg");
+    assert_eq!(info["checked"], false);
+    assert_eq!(info["usedBy"], json!([]));
+    assert!(info["installedAt"].as_str().unwrap().ends_with('Z'), "{info}");
+    let listed = std::fs::read_to_string(c.dir.path().join("config/packages.toml")).unwrap();
+    assert!(listed.contains("[packages.my-sensor]") && listed.contains("checked = false"), "{listed}");
+
+    let (_, connectors) = call(&c.app, "GET", "/api/v0/connectors", None).await;
+    assert!(connectors.as_array().unwrap().iter().any(|c| c["id"] == "my-sensor"), "no restart needed");
+
+    let part = json!({"name": "front", "connector": "my-sensor", "port": "replay:bench"});
+    let (s, body) = json_call(&c.app, "POST", "/api/v0/parts", part).await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    reading_where(&c.app, "front/distance", |r| r["reading"]["meters"] == 1.5).await;
+
+    // Version 0.2.0 reads millimetres-as-centimetres differently: the part must pick it up.
+    let v2 = SENSOR.replace("0.1.0", "0.2.0").replace("scale = 0.01", "scale = 0.001");
+    let (_, preview) =
+        call(&c.app, "POST", "/api/v0/packages?mode=preview", Some(Body::from(package(&v2)))).await;
+    assert_eq!(preview["replaces"], "0.1.0");
+    let (s, info) = call(&c.app, "POST", "/api/v0/packages", Some(Body::from(package(&v2)))).await;
+    assert_eq!(s, StatusCode::CREATED, "{info}");
+    assert_eq!((info["version"].as_str(), info["usedBy"].clone()), (Some("0.2.0"), json!(["front"])));
+    assert_eq!(info["source"], "upload.faberpkg");
+    reading_where(&c.app, "front/distance", |r| r["reading"]["meters"] == 0.15).await;
+    let (_, parts) = call(&c.app, "GET", "/api/v0/parts", None).await;
+    assert_eq!(parts[0]["connector"], "my-sensor");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uninstall_is_refused_while_a_part_uses_it_and_names_the_part() {
+    let c = core();
+    call(&c.app, "POST", "/api/v0/packages", Some(Body::from(package(SENSOR)))).await;
+    let part = json!({"name": "front", "connector": "my-sensor", "port": "replay:bench"});
+    json_call(&c.app, "POST", "/api/v0/parts", part).await;
+
+    let (s, e) = call(&c.app, "DELETE", "/api/v0/packages/my-sensor", None).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{e}");
+    assert_eq!(e["error"]["code"], "package-in-use");
+    assert!(e["error"]["message"].as_str().unwrap().contains("the part \"front\""), "{e}");
+    assert!(e["error"]["hint"].as_str().unwrap().contains("Parts window"), "{e}");
+
+    let (s, _) = call(&c.app, "DELETE", "/api/v0/parts/front", None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _) = call(&c.app, "DELETE", "/api/v0/packages/my-sensor", None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert_eq!(call(&c.app, "GET", "/api/v0/packages", None).await.1, json!([]));
+    assert!(c.machine.connectors().iter().all(|m| m.id != "my-sensor"));
+    assert!(!c.dir.path().join("connectors/my-sensor").exists());
+
+    let (s, e) = call(&c.app, "DELETE", "/api/v0/packages/my-sensor", None).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("not-installed")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_package_that_would_not_load_is_refused_with_a_hint_and_changes_nothing() {
+    let c = core();
+    let cases = [
+        (b"not a zip".to_vec(), StatusCode::UNPROCESSABLE_ENTITY, "package-invalid", "isn't a zip"),
+        (
+            package(&SENSOR.replace("{meters:f32}", "{meters}")),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "package-not-loadable",
+            "faber.toml line 13",
+        ),
+        (
+            package(&SENSOR.replace("my-sensor", "ldrobot-ld19")),
+            StatusCode::CONFLICT,
+            "package-id-taken",
+            "built into Faber",
+        ),
+    ];
+    for (bytes, status, code, words) in cases {
+        let (s, e) = call(&c.app, "POST", "/api/v0/packages", Some(Body::from(bytes))).await;
+        assert_eq!((s, e["error"]["code"].as_str()), (status, Some(code)), "{e}");
+        assert!(e["error"]["message"].as_str().unwrap().contains(words), "{words}: {e}");
+        assert!(!e["error"]["hint"].as_str().unwrap().is_empty());
+    }
+    let (s, e) = call(&c.app, "POST", "/api/v0/packages?mode=later", Some(Body::from(package(SENSOR)))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "{e}");
+    let too_big = vec![0u8; packages::MAX_BYTES as usize + 2];
+    let (s, e) = call(&c.app, "POST", "/api/v0/packages", Some(Body::from(too_big))).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::PAYLOAD_TOO_LARGE, Some("package-too-big")));
+    assert_eq!(call(&c.app, "GET", "/api/v0/packages", None).await.1, json!([]));
+    assert!(
+        !c.dir.path().join("connectors").exists()
+            || std::fs::read_dir(c.dir.path().join("connectors")).unwrap().next().is_none()
+    );
+}

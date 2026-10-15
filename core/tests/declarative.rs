@@ -67,7 +67,7 @@ pub fn core(connectors: &[(&str, &str)], replays: Vec<(&str, Vec<Chunk>)>) -> Te
         disks: Arc::new(NoDisks),
         opener: Arc::new(SystemOpener::new(library.clone())),
         replays: library,
-        connectors: faber_core::all_connectors(dir.path()),
+        connectors: faber_core::connectors::built_in(),
         timing: faber_core::runtime::Timing::default(),
         port_scan: None,
         world: Arc::new(faber_core::simparts::SimWorld::new()),

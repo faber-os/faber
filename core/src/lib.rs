@@ -58,7 +58,6 @@ impl Core {
     ) -> std::io::Result<Core> {
         // Replay ports come from home:/Recordings (D35); the machine keeps this in sync.
         let replays = ports::ReplayLibrary::default();
-        let (connectors, connector_problems) = all_connectors_with_problems(&data_dir);
         let machine = machine::Machine::start(machine::MachineOptions {
             data_dir,
             clock,
@@ -67,12 +66,11 @@ impl Core {
             disks: Arc::new(disks::SystemDisks),
             opener: Arc::new(ports::SystemOpener::new(replays.clone())),
             replays,
-            connectors,
+            connectors: connectors::built_in(),
             timing: runtime::Timing::default(),
             port_scan: Some(Duration::from_secs(2)),
             world: Arc::new(simparts::SimWorld::new()),
         })?;
-        machine.report_connector_problems(connector_problems);
         Ok(Core { machine, logs })
     }
 
@@ -111,27 +109,5 @@ pub fn all_connectors(data_dir: &std::path::Path) -> Vec<faber_connector::Defini
 pub fn all_connectors_with_problems(
     data_dir: &std::path::Path,
 ) -> (Vec<faber_connector::Definition>, Vec<connectors::LoadProblem>) {
-    let mut defs = connectors::built_in();
-    let folder = data_dir.join("connectors");
-    // Each engine reads only the folders of its own kind, so no folder is reported twice.
-    let (mut installed, mut problems) = wasm::load_installed(&folder, wasm::Limits::default());
-    let (declarative, declarative_problems) = declarative::installed::load_installed(&folder);
-    installed.extend(declarative);
-    problems.extend(declarative_problems);
-    for d in installed {
-        if defs.iter().any(|b| b.manifest.id == d.manifest.id) {
-            let problem = faber_connector::Problem::new(
-                format!(
-                    "The installed connector {} has the id of a connector that is already there.",
-                    d.manifest.id
-                ),
-                "It is not loaded. Rename its id and its folder.",
-            );
-            tracing::error!(target: "core", "{} {}", problem.message, problem.hint);
-            problems.push(connectors::LoadProblem { folder: d.manifest.id.clone(), problem });
-            continue;
-        }
-        defs.push(d);
-    }
-    (defs, problems)
+    machine::installed_connectors(connectors::built_in(), &data_dir.join("connectors"))
 }

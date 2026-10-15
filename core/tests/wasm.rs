@@ -404,7 +404,6 @@ mod installed {
     fn start(data: &Path) -> (Arc<Machine>, axum::Router) {
         let clock = Arc::new(MonotonicClock::new());
         let replays = ReplayLibrary::with_demo();
-        let (connectors, problems) = faber_core::all_connectors_with_problems(data);
         let machine = Machine::start(MachineOptions {
             data_dir: data.to_path_buf(),
             clock: clock.clone(),
@@ -413,13 +412,12 @@ mod installed {
             disks: Arc::new(Nothing),
             opener: Arc::new(SystemOpener::new(replays.clone())),
             replays,
-            connectors,
+            connectors: faber_core::connectors::built_in(),
             timing: Timing::default(),
             port_scan: None,
             world: Arc::new(faber_core::simparts::SimWorld::new()),
         })
         .unwrap();
-        machine.report_connector_problems(problems);
         let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
         (machine, app)
     }
