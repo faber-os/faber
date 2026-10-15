@@ -120,29 +120,63 @@ pub fn board_part_name(raw: &str) -> Option<String> {
     check_segment(out, out).ok().map(|()| out.to_string())
 }
 
-/// `part/name`: where a part's signal is published.
+/// What derived signals' addresses start with: `app:<id>/<name>` (D24). A part's name can never
+/// contain `:`, so no part can be named to clash with an app's signals.
+pub const APP_PREFIX: &str = "app:";
+
+/// Who publishes a signal: a part, or an app (a derived signal, read-only).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Owner {
+    Part(PartName),
+    /// An app's id (lowercase words joined by -).
+    App(String),
+}
+
+/// `part/name` (where a part's signal is published) or `app:<id>/name` (an app's derived signal).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SignalAddress {
-    pub part: PartName,
+    pub owner: Owner,
     pub signal: String,
 }
 
 impl SignalAddress {
     pub fn new(part: PartName, signal: impl Into<String>) -> Self {
-        SignalAddress { part, signal: signal.into() }
+        SignalAddress { owner: Owner::Part(part), signal: signal.into() }
     }
 
-    /// `part/name`; the part may be a sub-part (`mega.left/motor`).
+    /// The derived signal `name` of the app `app`: `app:<app>/<name>`.
+    pub fn derived(app: &str, signal: impl Into<String>) -> Self {
+        debug_assert!(faber_connector::is_kebab_name(app), "app ids are checked by the manifest reader");
+        SignalAddress { owner: Owner::App(app.to_string()), signal: signal.into() }
+    }
+
+    /// `part/name`, where the part may be a sub-part (`mega.left/motor`), or `app:<id>/name`.
     pub fn parse(s: &str) -> Option<SignalAddress> {
-        let (part, signal) = s.split_once('/')?;
-        let part = PartName::parse_any(part).ok()?;
-        faber_connector::is_kebab_name(signal).then(|| SignalAddress::new(part, signal))
+        let (owner, signal) = s.split_once('/')?;
+        if !faber_connector::is_kebab_name(signal) {
+            return None;
+        }
+        match owner.strip_prefix(APP_PREFIX) {
+            Some(app) => faber_connector::is_kebab_name(app).then(|| SignalAddress::derived(app, signal)),
+            None => Some(SignalAddress::new(PartName::parse_any(owner).ok()?, signal)),
+        }
+    }
+
+    /// The part that publishes it; `None` for an app's derived signal.
+    pub fn part(&self) -> Option<&PartName> {
+        match &self.owner {
+            Owner::Part(p) => Some(p),
+            Owner::App(_) => None,
+        }
     }
 }
 
 impl fmt::Display for SignalAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.part, self.signal)
+        match &self.owner {
+            Owner::Part(p) => write!(f, "{p}/{}", self.signal),
+            Owner::App(a) => write!(f, "{APP_PREFIX}{a}/{}", self.signal),
+        }
     }
 }
 
@@ -180,7 +214,7 @@ mod tests {
     #[test]
     fn addresses_round_trip() {
         let a = SignalAddress::parse("front_lidar/laser-scan").unwrap();
-        assert_eq!(a.part.as_str(), "front_lidar");
+        assert_eq!(a.part().unwrap().as_str(), "front_lidar");
         assert_eq!(a.signal, "laser-scan");
         assert_eq!(a.to_string(), "front_lidar/laser-scan");
         for bad in ["lidar", "lidar/", "/laser-scan", "Lidar/laser-scan", "lidar/laser_scan"] {
@@ -215,11 +249,29 @@ mod tests {
     fn sub_part_addresses_are_never_ambiguous() {
         // The `left` signal of the part `mega`, and the `motor` signal of the sub-part `mega.left`.
         let of_bridge = SignalAddress::parse("mega/left").unwrap();
-        assert_eq!((of_bridge.part.as_str(), of_bridge.signal.as_str()), ("mega", "left"));
+        assert_eq!((of_bridge.part().unwrap().as_str(), of_bridge.signal.as_str()), ("mega", "left"));
         let of_sub = SignalAddress::parse("mega.left/motor").unwrap();
-        assert_eq!((of_sub.part.as_str(), of_sub.signal.as_str()), ("mega.left", "motor"));
+        assert_eq!((of_sub.part().unwrap().as_str(), of_sub.signal.as_str()), ("mega.left", "motor"));
         assert_eq!(of_sub.to_string(), "mega.left/motor");
         assert_eq!(SignalAddress::parse("mega/left/motor"), None, "a / never joins parts");
+    }
+
+    #[test]
+    fn derived_signals_are_addressed_by_app_and_never_clash_with_a_part() {
+        let a = SignalAddress::parse("app:wall-follower/wall-distance").unwrap();
+        assert_eq!(a, SignalAddress::derived("wall-follower", "wall-distance"));
+        assert_eq!((a.owner.clone(), a.part()), (Owner::App("wall-follower".into()), None));
+        assert_eq!(a.to_string(), "app:wall-follower/wall-distance");
+        for bad in ["app:/x", "app:Wall/x", "app:wall_follower/x", "app:w/x_y", "app:a:b/x"] {
+            assert_eq!(SignalAddress::parse(bad), None, "{bad}");
+        }
+        // No part can be named like an app's signals: a part name never holds a `:`.
+        assert!(PartName::parse("app:wall-follower").is_err());
+        assert!(PartName::parse_any("app:x").is_err());
+        // A part may be called `app`; its signals are `app/…`, never `app:…/…`.
+        let part = SignalAddress::parse("app/pose").unwrap();
+        assert_eq!(part.part().map(PartName::as_str), Some("app"));
+        assert_ne!(part, SignalAddress::derived("app", "pose"));
     }
 
     #[test]
