@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { uniqueName } from './filePaths';
 
 /**
@@ -31,9 +32,10 @@ export function uploadSummary(r: {
 }): string | null {
   const parts: string[] = [];
   if (r.renamed.length) {
-    parts.push(`Kept both: ${r.renamed.map((x) => `${x.from} → ${x.to}`).join(', ')}.`);
+    const names = r.renamed.map((x) => t('files.upload.renamedPair', x)).join(', ');
+    parts.push(t('files.upload.keptBoth', { names }));
   }
-  if (r.replaced.length) parts.push(`Replaced ${r.replaced.join(', ')}.`);
-  if (r.skipped.length) parts.push(`Skipped ${r.skipped.join(', ')}.`);
+  if (r.replaced.length) parts.push(t('files.upload.replaced', { names: r.replaced.join(', ') }));
+  if (r.skipped.length) parts.push(t('files.upload.skipped', { names: r.skipped.join(', ') }));
   return parts.length ? parts.join(' ') : null;
 }

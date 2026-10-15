@@ -10,4 +10,9 @@ style: string,
 /**
  * A built-in wallpaper id, e.g. `aluminium`.
  */
-wallpaper: string, };
+wallpaper: string, 
+/**
+ * The shell's language (D44): `en`, or the code of an installed translation, e.g. `da`.
+ * A language without a translation (removed since) shows English.
+ */
+language: string, };

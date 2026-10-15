@@ -7,6 +7,7 @@
   import { formatBytes } from '../../components/format';
   import { openFolder } from '../../components/fileOps';
   import { useDesktop } from '../../components/desktopController.svelte';
+  import { t } from '../../lib/i18n';
 
   let { winId }: { winId: string } = $props();
 
@@ -51,15 +52,35 @@
   const segments = $derived.by(() => {
     if (!storage) return [];
     const parts = [
-      { label: 'Recordings', bytes: storage.recordingsBytes, colour: 'var(--file-recording)' },
-      { label: 'Documents', bytes: storage.documentsBytes, colour: 'var(--app-files)' },
-      { label: 'Desktop', bytes: storage.desktopBytes, colour: 'var(--app-logs)' },
-      { label: 'Backups', bytes: storage.backupsBytes, colour: 'var(--app-serial)' },
+      {
+        label: t('settings.storage.segment.recordings'),
+        bytes: storage.recordingsBytes,
+        colour: 'var(--file-recording)',
+      },
+      {
+        label: t('settings.storage.segment.documents'),
+        bytes: storage.documentsBytes,
+        colour: 'var(--app-files)',
+      },
+      {
+        label: t('settings.storage.segment.desktop'),
+        bytes: storage.desktopBytes,
+        colour: 'var(--app-logs)',
+      },
+      {
+        label: t('settings.storage.segment.backups'),
+        bytes: storage.backupsBytes,
+        colour: 'var(--app-serial)',
+      },
     ];
     const faber = parts.reduce((n, p) => n + p.bytes, 0);
     return [
       ...parts,
-      { label: 'Everything else', bytes: Math.max(0, used - faber), colour: 'var(--neutral)' },
+      {
+        label: t('settings.storage.segment.other'),
+        bytes: Math.max(0, used - faber),
+        colour: 'var(--neutral)',
+      },
     ];
   });
 
@@ -90,20 +111,20 @@
 </script>
 
 <section id="{winId}-storage" aria-labelledby="{winId}-storage-h">
-  <h3 id="{winId}-storage-h">Storage and backups</h3>
+  <h3 id="{winId}-storage-h">{t('settings.storage.title')}</h3>
   {#if error}<ErrorNotice {error} />{/if}
 
   <div class="block">
-    <p class="name">Disk space</p>
+    <p class="name">{t('settings.storage.disk.name')}</p>
     {#if storage}
       <div
         class="bar"
         role="meter"
-        aria-label="Disk space used"
+        aria-label={t('settings.storage.disk.label')}
         aria-valuemin="0"
         aria-valuemax="100"
         aria-valuenow={percent}
-        aria-valuetext="{percent} % used"
+        aria-valuetext={t('settings.storage.disk.valueText', { percent })}
       >
         {#each segments as s (s.label)}
           <span
@@ -121,7 +142,7 @@
           </li>
         {/each}
         <li>
-          <span class="key free"></span>Free
+          <span class="key free"></span>{t('settings.storage.segment.free')}
           <span class="num">{formatBytes(storage.freeBytes)}</span>
         </li>
       </ul>
@@ -129,48 +150,56 @@
         <ErrorNotice
           tone="warn"
           error={{
-            message: `The disk is ${percent} % full.`,
-            hint: "Delete recordings or old backups you don't need, then empty the Trash. Faber never deletes anything by itself.",
+            message: t('settings.storage.full.message', { percent }),
+            hint: t('settings.storage.full.hint'),
           }}
         />
       {/if}
     {:else}
-      <p class="desc">Measuring…</p>
+      <p class="desc">{t('settings.storage.disk.measuring')}</p>
     {/if}
   </div>
 
   <div class="row">
     <div class="text">
-      <p class="name">Back up this machine</p>
-      <p class="desc">
-        Saves parts, settings, Desktop and Documents as one .zip in Backups. Download it to keep a
-        copy off this machine.
-      </p>
+      <p class="name">{t('settings.storage.backup.name')}</p>
+      <p class="desc">{t('settings.storage.backup.desc')}</p>
       <label class="tick">
         <input type="checkbox" bind:checked={includeRecordings} disabled={busy !== null} />
-        Include recordings{storage ? ` (${formatBytes(storage.recordingsBytes)})` : ''}
+        {storage
+          ? t('settings.storage.backup.recordingsSize', {
+              size: formatBytes(storage.recordingsBytes),
+            })
+          : t('settings.storage.backup.recordings')}
       </label>
     </div>
     <button class="btn primary" onclick={backUp} disabled={busy !== null}>
-      {busy === 'backup' ? 'Backing up…' : 'Back up now'}
+      {busy === 'backup' ? t('settings.storage.backup.busy') : t('settings.storage.backup.now')}
     </button>
   </div>
   {#if saved}
-    <p class="done" role="status">Saved {nameOf(saved.path)} ({formatBytes(saved.bytes)}).</p>
+    <p class="done" role="status">
+      {t('settings.storage.backup.saved', {
+        name: nameOf(saved.path),
+        size: formatBytes(saved.bytes),
+      })}
+    </p>
   {/if}
   {#if restored}
-    <p class="done" role="status">Restored {restored}. Any files it replaced are in the Trash.</p>
+    <p class="done" role="status">{t('settings.storage.restore.done', { name: restored })}</p>
   {/if}
 
   <div class="block">
     <div class="list-head">
-      <p class="name" id="{winId}-backups-label">Backups</p>
-      <button class="btn quiet" onclick={() => openFolder(desktop, BACKUPS)}>Open in Files</button>
+      <p class="name" id="{winId}-backups-label">{t('settings.storage.backups.name')}</p>
+      <button class="btn quiet" onclick={() => openFolder(desktop, BACKUPS)}
+        >{t('settings.storage.backups.open')}</button
+      >
     </div>
     {#if backups === null}
-      <p class="desc">Loading…</p>
+      <p class="desc">{t('settings.storage.backups.loading')}</p>
     {:else if backups.length === 0}
-      <p class="desc">No backups yet.</p>
+      <p class="desc">{t('settings.storage.backups.empty')}</p>
     {:else}
       <ul class="backups" aria-labelledby="{winId}-backups-label">
         {#each backups as b (b.path)}
@@ -181,13 +210,17 @@
                 ? ` · ${formatDateTime(b.modifiedMs, core.wallClock)}`
                 : ''}</span
             >
-            <a class="btn quiet" href={core.downloadUrl(b.path)} download={b.name}>Download</a>
+            <a class="btn quiet" href={core.downloadUrl(b.path)} download={b.name}
+              >{t('settings.storage.backups.download')}</a
+            >
             <button
               class="btn"
-              aria-label="Restore {b.name}"
+              aria-label={t('settings.storage.backups.restoreLabel', { name: b.name })}
               disabled={busy !== null}
               onclick={() => (confirming = b)}
-              >{busy === 'restore' ? 'Restoring…' : 'Restore…'}</button
+              >{busy === 'restore'
+                ? t('settings.storage.backups.restoring')
+                : t('settings.storage.backups.restore')}</button
             >
           </li>
         {/each}
@@ -198,16 +231,16 @@
 
 {#if confirming}
   {@const entry = confirming}
-  <Dialog title="Restore this backup?" oncancel={() => (confirming = null)}>
+  <Dialog title={t('settings.storage.restore.title')} oncancel={() => (confirming = null)}>
     <p><strong>{entry.name}</strong></p>
-    <p>
-      Parts and settings become the ones in the backup, and its files are put back. Files it
-      replaces go to the Trash, so nothing is lost; files that aren't in the backup stay.
-      Whole-machine file access isn't changed.
-    </p>
+    <p>{t('settings.storage.restore.body')}</p>
     {#snippet actions()}
-      <button class="btn" onclick={() => (confirming = null)}>Cancel</button>
-      <button class="btn primary" onclick={() => restore(entry)}>Restore</button>
+      <button class="btn" onclick={() => (confirming = null)}
+        >{t('settings.storage.restore.cancel')}</button
+      >
+      <button class="btn primary" onclick={() => restore(entry)}
+        >{t('settings.storage.restore.confirm')}</button
+      >
     {/snippet}
   </Dialog>
 {/if}

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { formatClockTime, wallParts, type WallClock, type WallParts } from './wallClock';
 
 /**
@@ -123,17 +124,20 @@ export interface PowerAction {
   disabledReason?: string;
 }
 
-export const POWER_UNAVAILABLE = 'Available on the Faber machine image (Phase 6)';
+/** Why the power actions are disabled for now. */
+export function powerUnavailable(): string {
+  return t('startMenu.power.unavailable');
+}
 
 /**
  * The power button's menu. The core has no power endpoint yet (it comes with the machine image),
  * so both are shown, disabled, with the reason, rather than hidden.
  */
 export function powerActions(canPower: boolean): PowerAction[] {
-  const reason = canPower ? undefined : POWER_UNAVAILABLE;
+  const reason = canPower ? undefined : powerUnavailable();
   const a = (id: PowerAction['id'], label: string): PowerAction =>
     reason ? { id, label, disabledReason: reason } : { id, label };
-  return [a('restart', 'Restart machine'), a('shutdown', 'Shut down machine')];
+  return [a('restart', t('startMenu.power.restart')), a('shutdown', t('startMenu.power.shutdown'))];
 }
 
 /** "10:02" today, "Yesterday", or a date: in the machine's time zone (D42). */
@@ -152,6 +156,6 @@ export function recentWhen(at: number, now: number, wc: WallClock): string {
     month: y.getUTCMonth() + 1,
     day: y.getUTCDate(),
   };
-  if (sameDay(d, yesterday)) return 'Yesterday';
-  return `${d.day}-${d.month}-${d.year}`;
+  if (sameDay(d, yesterday)) return t('startMenu.recent.yesterday');
+  return t('startMenu.recent.date', { day: d.day, month: d.month, year: d.year });
 }

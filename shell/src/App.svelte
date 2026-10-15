@@ -14,6 +14,7 @@
   import { WINDOW_DEFS, WINDOW_KINDS } from './windows/registry';
   import { taskbarHeight } from './lib/desktop/taskbar';
   import { pageTitle } from './lib/desktop/machineName';
+  import { locale } from './lib/i18n';
 
   const core = createCore();
   const storage = browserStorage();
@@ -52,6 +53,15 @@
 
   $effect(() => {
     document.title = pageTitle(core.settings?.machine.name);
+  });
+
+  // The shell's language (D44): a translation built in or on the machine, else English.
+  $effect(() => {
+    void core.useLanguage(core.settings?.appearance.language ?? 'en');
+  });
+
+  $effect(() => {
+    document.documentElement.lang = locale.language;
   });
 
   // Accessibility (D40): base.css turns animations off under data-motion="reduce", and every

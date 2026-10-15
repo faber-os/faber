@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
+  import { t } from '../lib/i18n';
   import { resolveWallpaper } from '../lib/desktop/wallpapers';
   import ContextMenu from './ContextMenu.svelte';
   import DesktopIcons from './DesktopIcons.svelte';
@@ -22,7 +23,11 @@
 
   <DesktopIcons {defs} />
 
-  <main class="windows" aria-label="Windows" style:height="{desktop.area.height}px">
+  <main
+    class="windows"
+    aria-label={t('desktop.windowsArea')}
+    style:height="{desktop.area.height}px"
+  >
     {#each desktop.state.windows as win (win.id)}
       {@const def = byKind.get(win.kind)}
       {#if def}
@@ -38,7 +43,9 @@
     <div class="toast">
       <ErrorNotice error={core.lastError}>
         {#snippet actions()}
-          <button class="btn quiet" onclick={() => (core.lastError = null)}>Dismiss</button>
+          <button class="btn quiet" onclick={() => (core.lastError = null)}
+            >{t('desktop.toast.dismiss')}</button
+          >
         {/snippet}
       </ErrorNotice>
     </div>

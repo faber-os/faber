@@ -3,6 +3,9 @@ import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { DEFAULT_SETTINGS, fakeShell, listing } from '../test/fakeShell';
 import SettingsWindow from './SettingsWindow.svelte';
+import xx from '../test/fixtures/xx.json';
+import { compareTranslation } from '../lib/i18n/check';
+import { en } from '../lib/i18n/en';
 
 function setup(routes: Parameters<typeof fakeShell>[0] = []) {
   const shell = fakeShell(routes);
@@ -44,7 +47,7 @@ describe('Settings', () => {
     const mode = await screen.findByRole('radiogroup', { name: 'Mode' });
     shell.pushSettings({
       ...DEFAULT_SETTINGS,
-      appearance: { theme: 'light', style: 'aluminium', wallpaper: 'graphite' },
+      appearance: { theme: 'light', style: 'aluminium', wallpaper: 'graphite', language: 'en' },
     });
     await waitFor(() => expect(within(mode).getByRole('radio', { name: 'Light' })).toBeChecked());
   });
@@ -372,5 +375,45 @@ describe('Settings: about and diagnostics', () => {
     await waitFor(() =>
       expect(shell.fetch.calls.some((c) => c.path === '/api/v0/settings/reset')).toBe(true),
     );
+  });
+
+  it('shows no language picker while English is the only language (D44)', async () => {
+    setup();
+    await screen.findByRole('radiogroup', { name: 'Mode' });
+    expect(screen.queryByRole('combobox', { name: 'Language' })).not.toBeInTheDocument();
+  });
+
+  it('offers a translation on the machine, with how complete it is', async () => {
+    const testish = {
+      ...DEFAULT_SETTINGS,
+      appearance: { ...DEFAULT_SETTINGS.appearance, language: 'xx' },
+    };
+    const shell = setup([
+      { path: '/api/v0/translations', body: [{ code: 'xx', name: 'Testish' }] },
+      { path: '/api/v0/translations/xx', body: xx },
+      { method: 'PUT', path: '/api/v0/settings', body: testish },
+    ]);
+    const picker = await screen.findByRole('combobox', { name: 'Language' });
+    const percent = compareTranslation(en, xx, 'xx').percent;
+    expect(within(picker).getByRole('option', { name: `Testish (${percent} %)` })).toBeVisible();
+    await userEvent.selectOptions(picker, 'xx');
+    await waitFor(() => expect(shell.core.settings?.appearance.language).toBe('xx'));
+  });
+
+  it('says which translation file is broken', async () => {
+    setup([
+      {
+        path: '/api/v0/translations',
+        body: [
+          { code: 'xx', name: 'xx', problem: 'xx.json has a problem on line 3: expected `,`' },
+        ],
+      },
+    ]);
+    expect(
+      await screen.findByText(
+        "A translation can't be used: xx.json has a problem on line 3: expected `,`",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole('combobox', { name: 'Language' })).not.toBeInTheDocument();
   });
 });

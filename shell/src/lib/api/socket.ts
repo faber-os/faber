@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { ErrorBody } from './generated/ErrorBody';
 import type { ClientMessage } from './generated/ClientMessage';
 import type { ServerMessage } from './generated/ServerMessage';
@@ -129,7 +130,7 @@ export class CoreSocket {
       ws.onclose = null;
       ws.close();
     }
-    this.endSerials('The shell closed its connection to the core.');
+    this.endSerials(t('errors.socket.closedByShell'));
     this.setStatus('closed');
   }
 
@@ -148,8 +149,8 @@ export class CoreSocket {
     if (!this.isOpen()) {
       handlers.onError({
         code: 'not-connected',
-        message: 'The shell is not connected to the core right now.',
-        hint: 'Wait until the taskbar says Connected, then open the port again.',
+        message: t('errors.socket.notConnected.message'),
+        hint: t('errors.socket.notConnected.hint'),
       });
       handlers.onClosed();
       return { send: () => {}, close: () => {}, startRecording: () => {}, stopRecording: () => {} };
@@ -200,7 +201,7 @@ export class CoreSocket {
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.ws = null;
-      this.endSerials('The connection to the core was lost.');
+      this.endSerials(t('errors.socket.lost'));
       if (!this.wanted) return;
       this.setStatus('reconnecting');
       const delay = backoffDelay(this.attempt++);

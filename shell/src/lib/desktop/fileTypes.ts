@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { extension } from './filePaths';
 
 /**
@@ -51,24 +52,24 @@ export function isTextType(t: FileType): boolean {
 
 /** A short name for the type, for the details panel ("Markdown text", "Recording"). */
 export function fileTypeLabel(entry: { kind: string; name: string }): string {
-  const t = fileType(entry);
+  const type = fileType(entry);
   const ext = extension(entry.name).toUpperCase();
-  switch (t) {
+  switch (type) {
     case 'folder':
-      return 'Folder';
+      return t('files.type.folder');
     case 'text':
-      return 'Text';
+      return t('files.type.text');
     case 'markdown':
-      return 'Markdown text';
+      return t('files.type.markdown');
     case 'config':
-      return `${ext} settings`;
+      return t('files.type.config', { ext });
     case 'code':
-      return `${ext} source code`;
+      return t('files.type.code', { ext });
     case 'recording':
-      return 'Recording';
+      return t('files.type.recording');
     case 'image':
-      return `${ext} image`;
+      return t('files.type.image', { ext });
     default:
-      return ext ? `${ext} file` : 'File';
+      return ext ? t('files.type.other', { ext }) : t('files.type.file');
   }
 }

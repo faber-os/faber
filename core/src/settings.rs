@@ -34,11 +34,19 @@ pub struct Appearance {
     pub style: String,
     /// A built-in wallpaper id, e.g. `aluminium`.
     pub wallpaper: String,
+    /// The shell's language (D44): `en`, or the code of an installed translation, e.g. `da`.
+    /// A language without a translation (removed since) shows English.
+    pub language: String,
 }
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: Theme::Light, style: "aluminium".into(), wallpaper: "aluminium".into() }
+        Appearance {
+            theme: Theme::Light,
+            style: "aluminium".into(),
+            wallpaper: "aluminium".into(),
+            language: DEFAULT_LANGUAGE.into(),
+        }
     }
 }
 
@@ -199,6 +207,9 @@ impl Default for MachineIdentity {
 
 pub const DEFAULT_MACHINE_NAME: &str = "faber";
 
+/// English: the catalogue built into the shell.
+pub const DEFAULT_LANGUAGE: &str = "en";
+
 /// A host name label: 1–63 of `a-z`, `0-9` and `-`, not starting or ending with `-`.
 pub fn valid_machine_name(name: &str) -> bool {
     (1..=63).contains(&name.len())
@@ -308,12 +319,16 @@ impl SettingsStore {
     pub fn restore(&self, mut restored: Settings) -> Result<Settings, SettingsError> {
         let mut cur = self.current.lock().expect("settings lock");
         restored.developer = cur.developer.clone();
+        // Anything this machine can't use falls back, one field at a time.
+        if !valid_machine_name(&restored.machine.name) {
+            restored.machine = cur.machine.clone();
+        }
+        if !crate::names::valid_language_code(&restored.appearance.language) {
+            restored.appearance.language = DEFAULT_LANGUAGE.into();
+        }
         if check(&restored).is_err() {
             // A zone this machine doesn't know (an older time-zone database): use its own.
             restored.time.time_zone.clear();
-            if !valid_machine_name(&restored.machine.name) {
-                restored.machine = cur.machine.clone();
-            }
         }
         self.save(&mut cur, restored)
     }
@@ -367,6 +382,14 @@ fn check(s: &Settings) -> Result<(), SettingsError> {
             "invalid-machine-name",
             format!("\"{}\" can't be a machine name.", s.machine.name),
             "Use lowercase letters, digits and dashes, like \"sennep\" or \"rover-2\" (at most 63).",
+        ));
+    }
+    let language = &s.appearance.language;
+    if !crate::names::valid_language_code(language) {
+        return Err(SettingsError::new(
+            "invalid-language",
+            format!("\"{language}\" isn't a language code."),
+            "Pick a language in Settings → Appearance, or use a code like en, da or pt-BR.",
         ));
     }
     let zone = &s.time.time_zone;
@@ -601,5 +624,49 @@ fullMachineFiles = true
         s.machine.name = "sennep".into();
         store.update(s).unwrap();
         assert_eq!(store.reset().unwrap().machine.name, "sennep", "reset keeps the name");
+    }
+
+    #[test]
+    fn the_language_defaults_to_english_and_old_files_still_load() {
+        assert_eq!(Settings::default().appearance.language, "en");
+        let dir = tempfile::tempdir().unwrap();
+        // A settings.toml from before the language setting existed.
+        std::fs::write(
+            dir.path().join(FILE_NAME),
+            "[appearance]
+theme = \"dark\"
+style = \"cobalt\"
+",
+        )
+        .unwrap();
+        let store = SettingsStore::load(dir.path());
+        let s = store.get();
+        assert_eq!(s.appearance.style, "cobalt");
+        assert_eq!(s.appearance.language, "en");
+        assert_eq!(serde_json::to_value(&s).unwrap()["appearance"]["language"], "en");
+    }
+
+    #[test]
+    fn the_language_must_be_a_language_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path());
+        let mut s = store.get();
+        s.appearance.language = "../da".into();
+        let e = store.update(s.clone()).unwrap_err();
+        assert_eq!(e.code, "invalid-language");
+        assert!(e.message.contains("../da"), "{e:?}");
+        // A code without an installed translation is fine: the shell shows English for it.
+        s.appearance.language = "pt-BR".into();
+        assert_eq!(store.update(s).unwrap().appearance.language, "pt-BR");
+        assert_eq!(SettingsStore::load(dir.path()).get().appearance.language, "pt-BR");
+        let backup = "[appearance]
+language = \"Dansk\"
+
+[time]
+timeZone = \"Europe/Copenhagen\"
+";
+        let restored = store.restore(parse(backup).unwrap()).unwrap();
+        assert_eq!(restored.appearance.language, "en", "a bad code in a backup becomes English");
+        assert_eq!(restored.time.time_zone, "Europe/Copenhagen", "and nothing else is lost");
     }
 }

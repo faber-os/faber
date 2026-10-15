@@ -100,7 +100,7 @@ describe('Desktop', () => {
     expect(wall.getAttribute('data-wallpaper')).toBe('aluminium');
     shell.pushSettings({
       ...DEFAULT_SETTINGS,
-      appearance: { theme: 'dark', style: 'aluminium', wallpaper: 'cutting-mat' },
+      appearance: { theme: 'dark', style: 'aluminium', wallpaper: 'cutting-mat', language: 'en' },
     });
     await expect.poll(() => wall.getAttribute('data-wallpaper')).toBe('cutting-mat');
   });

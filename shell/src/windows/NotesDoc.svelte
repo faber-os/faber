@@ -17,10 +17,12 @@
     stepMatch,
     type TextDoc,
   } from '../lib/desktop/textDoc';
+  import { t } from '../lib/i18n';
   import Dialog from '../components/Dialog.svelte';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import FilePicker from '../components/FilePicker.svelte';
   import Icon from '../components/Icon.svelte';
+  import RichText from '../components/RichText.svelte';
 
   /**
    * One document in a Notes window: a tab's editor, toolbar, find bar and save dialogs. The
@@ -232,59 +234,67 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions (window-wide shortcuts: Ctrl+S, Ctrl+F, F3) -->
 <div class="notes" hidden={!active} onkeydown={keys}>
-  <div class="toolbar" role="toolbar" aria-label="Notes">
-    <button class="btn quiet" title="New note in a new tab" onclick={onnew}>
-      <Icon name="plus" size={17} /> New
-    </button>
-    <button class="btn quiet" title="Open (Ctrl+O)" onclick={() => (picker = 'open')}>
-      <Icon name="open" size={17} /> Open…
+  <div class="toolbar" role="toolbar" aria-label={t('notes.toolbar.label')}>
+    <button class="btn quiet" title={t('notes.toolbar.new.title')} onclick={onnew}>
+      <Icon name="plus" size={17} />
+      {t('notes.toolbar.new')}
     </button>
     <button
       class="btn quiet"
-      title="Save (Ctrl+S)"
+      title={t('notes.toolbar.open.title')}
+      onclick={() => (picker = 'open')}
+    >
+      <Icon name="open" size={17} />
+      {t('notes.toolbar.open')}
+    </button>
+    <button
+      class="btn quiet"
+      title={t('notes.toolbar.save.title')}
       disabled={saving || loading || !!loadError}
       onclick={save}
     >
-      <Icon name="save" size={17} /> Save
+      <Icon name="save" size={17} />
+      {t('notes.toolbar.save')}
     </button>
     <button
       class="btn quiet"
-      title="Save as (Ctrl+Shift+S)"
+      title={t('notes.toolbar.saveAs.title')}
       disabled={loading || !!loadError}
-      onclick={() => (picker = 'save')}>Save as…</button
+      onclick={() => (picker = 'save')}>{t('notes.toolbar.saveAs')}</button
     >
     <span class="grow"></span>
     <button
       class="btn quiet icon"
-      aria-label="Find"
-      title="Find (Ctrl+F)"
+      aria-label={t('notes.toolbar.find')}
+      title={t('notes.toolbar.find.title')}
       aria-pressed={findOpen}
       onclick={() => (findOpen ? closeFind() : openFind())}><Icon name="search" /></button
     >
     <button
       class="btn quiet icon"
-      aria-label="Word wrap"
-      title="Word wrap"
+      aria-label={t('notes.toolbar.wrap')}
+      title={t('notes.toolbar.wrap')}
       aria-pressed={wrap}
       onclick={() => (wrap = !wrap)}><Icon name="wrap" /></button
     >
     <button
       class="btn quiet mono-toggle"
-      aria-label="Monospace"
-      title="Monospace font"
+      aria-label={t('notes.toolbar.mono')}
+      title={t('notes.toolbar.mono.title')}
       aria-pressed={mono}
-      onclick={() => (mono = !mono)}><span class="mono">Aa</span></button
+      onclick={() => (mono = !mono)}
+      ><span class="mono">{t('notes.toolbar.mono.sample')}</span></button
     >
   </div>
 
   {#if findOpen}
     <div class="find" role="search">
-      <label class="visually-hidden" for="{id}-find">Find</label>
+      <label class="visually-hidden" for="{id}-find">{t('notes.find.label')}</label>
       <input
         id="{id}-find"
         bind:this={findInput}
         class="input"
-        placeholder="Find"
+        placeholder={t('notes.find.placeholder')}
         bind:value={query}
         oninput={() => (current = -1)}
         onkeydown={(e) => {
@@ -301,8 +311,12 @@
         autocomplete="off"
       />
       <span class="count num" role="status">
-        {#if query === ''}{:else if matches.length === 0}No matches{:else if current >= 0}{current +
-            1} of {matches.length}{:else}{matches.length} found{/if}
+        {#if query === ''}{:else if matches.length === 0}{t(
+            'notes.find.none',
+          )}{:else if current >= 0}{t('notes.find.position', {
+            index: current + 1,
+            total: matches.length,
+          })}{:else}{t('notes.find.found', { count: matches.length })}{/if}
       </span>
       <label class="case"
         ><input
@@ -310,23 +324,24 @@
           class="check"
           bind:checked={matchCase}
           onchange={() => (current = -1)}
-        /> Match case</label
+        />
+        {t('notes.find.matchCase')}</label
       >
       <button
         class="btn quiet icon"
-        aria-label="Previous match"
-        title="Previous (Shift+Enter)"
+        aria-label={t('notes.find.previous')}
+        title={t('notes.find.previous.title')}
         disabled={matches.length === 0}
         onclick={() => step('prev')}><Icon name="up" /></button
       >
       <button
         class="btn quiet icon"
-        aria-label="Next match"
-        title="Next (Enter)"
+        aria-label={t('notes.find.next')}
+        title={t('notes.find.next.title')}
         disabled={matches.length === 0}
         onclick={() => step('next')}><Icon name="down" /></button
       >
-      <button class="btn quiet icon" aria-label="Close find" onclick={closeFind}
+      <button class="btn quiet icon" aria-label={t('notes.find.close')} onclick={closeFind}
         ><Icon name="close" /></button
       >
     </div>
@@ -336,22 +351,22 @@
     <div class="pad">
       <ErrorNotice error={saveError}>
         {#snippet actions()}
-          <button class="btn quiet" onclick={() => (saveError = null)}>Dismiss</button>
+          <button class="btn quiet" onclick={() => (saveError = null)}>{t('notes.dismiss')}</button>
         {/snippet}
       </ErrorNotice>
     </div>
   {/if}
 
   {#if loading}
-    <p class="state">Opening <code>{openedPath}</code>…</p>
+    <p class="state"><RichText text={t('notes.opening', { path: openedPath ?? '' })} /></p>
   {:else if loadError}
     <div class="pad">
       <ErrorNotice error={loadError}>
         {#snippet actions()}
           {#if loadError?.code !== 'binary' && loadError?.code !== 'too-large' && openedPath}
-            <button class="btn" onclick={() => load(openedPath)}>Try again</button>
+            <button class="btn" onclick={() => load(openedPath)}>{t('notes.tryAgain')}</button>
           {/if}
-          <button class="btn quiet" onclick={onclosed}>Close tab</button>
+          <button class="btn quiet" onclick={onclosed}>{t('notes.closeTab')}</button>
         {/snippet}
       </ErrorNotice>
     </div>
@@ -361,7 +376,7 @@
       class="editor"
       class:mono
       class:nowrap={!wrap}
-      aria-label="Text of {doc.name}"
+      aria-label={t('notes.editor.label', { name: doc.name })}
       value={doc.text}
       oninput={onInput}
       onselect={trackCursor}
@@ -373,12 +388,13 @@
   {/if}
 
   <p class="statusbar">
-    <span class="num">Ln {pos.line}, Col {pos.column}</span>
-    <span>{doc.eol === '\r\n' ? 'CRLF' : 'LF'}</span>
-    <span>UTF-8</span>
+    <span class="num">{t('notes.status.position', { line: pos.line, column: pos.column })}</span>
+    <span>{doc.eol === '\r\n' ? t('notes.status.eol.crlf') : t('notes.status.eol.lf')}</span>
+    <span>{t('notes.status.encoding')}</span>
     <span class="grow"></span>
-    {#if saving}<span>Saving…</span>{:else if dirty}<span class="dirty">Unsaved changes</span
-      >{:else if doc.path}<span>Saved</span>{/if}
+    {#if saving}<span>{t('notes.status.saving')}</span>{:else if dirty}<span class="dirty"
+        >{t('notes.status.unsaved')}</span
+      >{:else if doc.path}<span>{t('notes.status.saved')}</span>{/if}
   </p>
 
   {#if picker}
@@ -402,12 +418,13 @@
   {/if}
 
   {#if asking === 'close' && !picker}
-    <Dialog title="Save changes to {doc.name}?" oncancel={cancelClose}>
-      <p>If you don't save, your changes are lost.</p>
+    <Dialog title={t('notes.dialog.unsaved.title', { name: doc.name })} oncancel={cancelClose}>
+      <p>{t('notes.dialog.unsaved.message')}</p>
       {#snippet actions()}
-        <button class="btn danger" onclick={closeNow}>Don't save</button>
-        <button class="btn" onclick={cancelClose}>Cancel</button>
-        <button class="btn primary" onclick={saveThenClose}>Save</button>
+        <button class="btn danger" onclick={closeNow}>{t('notes.dialog.unsaved.dontSave')}</button>
+        <button class="btn" onclick={cancelClose}>{t('notes.dialog.unsaved.cancel')}</button>
+        <button class="btn primary" onclick={saveThenClose}>{t('notes.dialog.unsaved.save')}</button
+        >
       {/snippet}
     </Dialog>
   {/if}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
+  import { t } from '../lib/i18n';
   import { item, separator, type MenuEntry } from '../lib/desktop/contextMenu';
   import { taskClick, taskbarItems, type TaskItem } from '../lib/desktop/taskbar';
   import AppIcon from './AppIcon.svelte';
@@ -48,7 +49,10 @@
 
   function label(i: TaskItem): string {
     if (i.type === 'program') return def(i.kind)?.title ?? i.key;
-    return desktop.state.windows.find((w) => w.id === i.id)?.title ?? '';
+    return (() => {
+      const w = desktop.state.windows.find((x) => x.id === i.id);
+      return w ? desktop.titleOf(w) : '';
+    })();
   }
 
   function isMinimised(i: TaskItem): boolean {
@@ -66,18 +70,18 @@
     if (!w) return null;
     const program = def(w.kind)?.program;
     return {
-      label: w.title,
-      header: { title: w.title, icon: def(w.kind)?.icon ?? 'info' },
+      label: desktop.titleOf(w),
+      header: { title: desktop.titleOf(w), icon: def(w.kind)?.icon ?? 'info' },
       entries: [
         w.minimised
-          ? item('show', 'Show', { icon: 'maximise' })
-          : item('minimise', 'Minimise', { icon: 'minimise' }),
-        item('maximise', w.maximised ? 'Restore size' : 'Maximise', {
+          ? item('show', t('window.menu.show'), { icon: 'maximise' })
+          : item('minimise', t('window.menu.minimise'), { icon: 'minimise' }),
+        item('maximise', w.maximised ? t('window.menu.restore') : t('window.menu.maximise'), {
           icon: w.maximised ? 'restore' : 'maximise',
         }),
         program ? pinItem(core, program) : false,
         separator(),
-        item('close', 'Close', { icon: 'close' }),
+        item('close', t('window.menu.close'), { icon: 'close' }),
       ],
       onSelect: (choice: string) => {
         if (program && runPinItem(core, program, choice)) return;
@@ -96,15 +100,15 @@
       return w ? [w] : [];
     });
     const entries: (MenuEntry | false)[] = [
-      ...wins.map((w) => item(`win:${w.id}`, w.title, { icon: d?.icon ?? 'info' })),
+      ...wins.map((w) => item(`win:${w.id}`, desktop.titleOf(w), { icon: d?.icon ?? 'info' })),
       wins.length > 0 && separator(),
       wins.length === 0
-        ? item('new', 'Open', { icon: 'open' })
-        : !!d?.multiple && item('new', 'New window', { icon: 'newWindow' }),
+        ? item('new', t('menu.open'), { icon: 'open' })
+        : !!d?.multiple && item('new', t('taskbar.menu.newWindow'), { icon: 'newWindow' }),
       pinItem(core, i.key),
       wins.length > 0 && separator(),
-      wins.length === 1 && item('close', 'Close window', { icon: 'close' }),
-      wins.length > 1 && item('close', 'Close all windows', { icon: 'close' }),
+      wins.length === 1 && item('close', t('taskbar.menu.closeWindow'), { icon: 'close' }),
+      wins.length > 1 && item('close', t('taskbar.menu.closeAllWindows'), { icon: 'close' }),
     ];
     return {
       label: d?.title ?? i.key,
@@ -122,12 +126,12 @@
 
   function barMenu(): MenuRequest {
     return {
-      label: 'Taskbar',
+      label: t('taskbar.label'),
       entries: [
-        item('small', 'Small taskbar', { checked: !large }),
-        item('large', 'Large taskbar, with labels', { checked: large }),
+        item('small', t('taskbar.menu.small'), { checked: !large }),
+        item('large', t('taskbar.menu.large'), { checked: large }),
         separator(),
-        item('settings', 'Taskbar settings…', { icon: 'settings' }),
+        item('settings', t('taskbar.menu.settings'), { icon: 'settings' }),
       ],
       onSelect: (choice: string) => {
         if (choice === 'small' || choice === 'large') void setTaskbarSize(core, choice);
@@ -156,7 +160,12 @@
 <!-- The start menu sits beside the bar, not inside it: a blurred element inside another blurred
      element can only blur its parent, not the windows behind it. -->
 <div class="layer" bind:this={root}>
-  <nav class="taskbar" class:large aria-label="Taskbar" use:menuTrigger={{ menu, build }}>
+  <nav
+    class="taskbar"
+    class:large
+    aria-label={t('taskbar.label')}
+    use:menuTrigger={{ menu, build }}
+  >
     <div class="side left">
       <button
         bind:this={startButton}
@@ -165,7 +174,7 @@
         aria-haspopup="dialog"
         aria-expanded={menuOpen}
         aria-controls="start-menu"
-        aria-label="Start"
+        aria-label={t('startMenu.label')}
         onclick={() => (menuOpen = !menuOpen)}
       >
         <span class="nut"><Logo size={large ? 28 : 24} /></span>
@@ -173,7 +182,7 @@
       </button>
     </div>
 
-    <ul class="tasks" aria-label="Programs and windows">
+    <ul class="tasks" aria-label={t('taskbar.tasks')}>
       {#each items as i (itemKey(i))}
         {@const d = def(i.kind)}
         {@const open = i.type === 'window' || i.windows.length > 0}
@@ -187,7 +196,7 @@
             aria-pressed={i.active}
             aria-label={name}
             title={i.type === 'program' && i.windows.length > 1
-              ? `${name} (${i.windows.length} windows)`
+              ? t('taskbar.task.windows', { name, count: i.windows.length })
               : name}
             data-task={itemKey(i)}
             onclick={() => click(i)}

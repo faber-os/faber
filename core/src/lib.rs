@@ -19,8 +19,10 @@ pub mod ports;
 pub mod router;
 pub mod runtime;
 pub mod settings;
+pub mod sim;
 pub mod simulation;
 pub mod suggest;
+pub mod translations;
 
 // Layer 3: ties everything together.
 pub mod machine;

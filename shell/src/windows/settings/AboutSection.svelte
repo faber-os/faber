@@ -1,11 +1,12 @@
 <script lang="ts">
   import { useCore } from '../../lib/state/context';
-  import { diagnosticsText, formatUptime, logsText } from '../../lib/state/diagnostics';
+  import { diagnosticsText, logsText } from '../../lib/state/diagnostics';
   import type { AboutInfo, ErrorBody, LogEntry } from '../../lib/state/types';
   import { formatLogTime, wallParts } from '../../lib/desktop/wallClock';
   import Dialog from '../../components/Dialog.svelte';
   import ErrorNotice from '../../components/ErrorNotice.svelte';
   import { formatCoreTime } from '../../components/format';
+  import { t } from '../../lib/i18n';
 
   let { winId }: { winId: string } = $props();
 
@@ -25,6 +26,15 @@
       else error = r.error;
     });
   });
+
+  /** "1 h 2 min" or "4 min 5 s". */
+  function uptime(s: number): string {
+    const hours = Math.floor(s / 3600);
+    const minutes = Math.floor((s % 3600) / 60);
+    return hours > 0
+      ? t('settings.about.uptime.hours', { hours, minutes })
+      : t('settings.about.uptime.minutes', { minutes, seconds: s % 60 });
+  }
 
   function logTime(e: LogEntry): string {
     const ms = core.coreTimeToEpochMs(e.tUs);
@@ -79,79 +89,85 @@
 </script>
 
 <section id="{winId}-about" aria-labelledby="{winId}-about-h">
-  <h3 id="{winId}-about-h">About and diagnostics</h3>
+  <h3 id="{winId}-about-h">{t('settings.about.title')}</h3>
   {#if error}<ErrorNotice {error} />{/if}
   <dl class="facts">
     <div>
-      <dt>Version</dt>
+      <dt>{t('settings.about.version')}</dt>
       <dd class="num">{about?.version ?? '…'}</dd>
     </div>
     <div>
-      <dt>API</dt>
+      <dt>{t('settings.about.api')}</dt>
       <dd><code class="selectable">{about?.api ?? '…'}</code></dd>
     </div>
     <div>
-      <dt>Data folder</dt>
+      <dt>{t('settings.about.dataFolder')}</dt>
       <dd><code class="selectable path">{about?.dataFolder ?? '…'}</code></dd>
     </div>
     <div>
-      <dt>Running for</dt>
-      <dd>{about ? formatUptime(about.uptimeS) : '…'}</dd>
+      <dt>{t('settings.about.uptime')}</dt>
+      <dd>{about ? uptime(about.uptimeS) : '…'}</dd>
     </div>
     <div>
-      <dt>Operating system</dt>
+      <dt>{t('settings.about.os')}</dt>
       <dd>{about?.os ?? '…'}</dd>
     </div>
     <div>
-      <dt>Time zone</dt>
+      <dt>{t('settings.about.timeZone')}</dt>
       <dd>{about?.timeZone ?? '…'}</dd>
     </div>
   </dl>
 
   <div class="row">
     <div class="text">
-      <p class="name">Diagnostics</p>
-      <p class="desc">
-        For a bug report: version, operating system, ports, part states and the last 200 log lines.
-        No names, folders or personal data.
-      </p>
-      {#if copied}<p class="done" role="status">Copied.</p>{/if}
+      <p class="name">{t('settings.about.diagnostics.name')}</p>
+      <p class="desc">{t('settings.about.diagnostics.desc')}</p>
+      {#if copied}<p class="done" role="status">{t('settings.about.diagnostics.copied')}</p>{/if}
     </div>
     <div class="buttons">
-      <button class="btn" onclick={copy}>Copy diagnostics</button>
-      <button class="btn" onclick={download}>Download logs</button>
+      <button class="btn" onclick={copy}>{t('settings.about.diagnostics.copy')}</button>
+      <button class="btn" onclick={download}>{t('settings.about.diagnostics.download')}</button>
     </div>
   </div>
 
   <div class="row">
     <div class="text">
-      <p class="name">Reset settings to defaults</p>
-      <p class="desc">Every setting goes back to how a new machine has it. Parts and files stay.</p>
+      <p class="name">{t('settings.about.reset.name')}</p>
+      <p class="desc">{t('settings.about.reset.desc')}</p>
     </div>
-    <button class="btn danger" onclick={() => (confirmReset = true)}>Reset settings…</button>
+    <button class="btn danger" onclick={() => (confirmReset = true)}
+      >{t('settings.about.reset.open')}</button
+    >
   </div>
 </section>
 
 {#if manual !== null}
-  <Dialog title="Copy diagnostics" oncancel={() => (manual = null)} wide>
-    <p>This browser won't let Faber use the clipboard here. Select the text and copy it.</p>
+  <Dialog title={t('settings.about.diagnostics.manualTitle')} oncancel={() => (manual = null)} wide>
+    <p>{t('settings.about.diagnostics.manual')}</p>
     <textarea class="input manual" readonly rows="10" value={manual}></textarea>
     {#snippet actions()}
-      <button class="btn" onclick={() => (manual = null)}>Done</button>
+      <button class="btn" onclick={() => (manual = null)}
+        >{t('settings.about.diagnostics.done')}</button
+      >
     {/snippet}
   </Dialog>
 {/if}
 
 {#if confirmReset}
-  <Dialog title="Reset every setting?" tone="danger" oncancel={() => (confirmReset = false)}>
-    <p>
-      Appearance, accessibility, units, date and time, the taskbar and where desktop icons sit go
-      back to how a new machine has them, and whole-machine file access is turned off.
-    </p>
-    <p>Parts and files are not touched.</p>
+  <Dialog
+    title={t('settings.about.reset.title')}
+    tone="danger"
+    oncancel={() => (confirmReset = false)}
+  >
+    <p>{t('settings.about.reset.body')}</p>
+    <p>{t('settings.about.reset.untouched')}</p>
     {#snippet actions()}
-      <button class="btn" onclick={() => (confirmReset = false)}>Cancel</button>
-      <button class="btn danger solid" disabled={resetting} onclick={reset}>Reset settings</button>
+      <button class="btn" onclick={() => (confirmReset = false)}
+        >{t('settings.about.reset.cancel')}</button
+      >
+      <button class="btn danger solid" disabled={resetting} onclick={reset}
+        >{t('settings.about.reset.confirm')}</button
+      >
     {/snippet}
   </Dialog>
 {/if}

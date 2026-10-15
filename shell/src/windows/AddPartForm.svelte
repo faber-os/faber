@@ -1,11 +1,13 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
+  import { t } from '../lib/i18n';
   import { validatePartName } from '../lib/state/partName';
   import { portAvailability, portHints } from '../lib/state/portHints';
   import type { ErrorBody } from '../lib/state/types';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
   import PortProblems from '../components/PortProblems.svelte';
+  import RichText from '../components/RichText.svelte';
 
   let {
     onadded,
@@ -71,23 +73,24 @@
   }
 </script>
 
-<form class="add" onsubmit={submit} novalidate aria-label="Add part">
+<form class="add" onsubmit={submit} novalidate aria-label={t('addPart.form.label')}>
   <div class="toolbar">
     <button type="button" class="btn quiet" onclick={oncancel}>
-      <Icon name="back" size={17} /> Parts
+      <Icon name="back" size={17} />
+      {t('addPart.back')}
     </button>
-    <h3>Add part</h3>
+    <h3>{t('addPart.title')}</h3>
   </div>
 
   <div class="scroll">
     <fieldset class="step" class:flag={errorField === 'port'}>
-      <legend><span class="n">1</span> Pick the port it is plugged into</legend>
+      <legend><span class="n">1</span> {t('addPart.port.legend')}</legend>
       <div class="problems"><PortProblems /></div>
       {#if ports === null}
-        <p class="muted">Looking for ports…</p>
+        <p class="muted">{t('addPart.port.looking')}</p>
       {:else if ports.length === 0}
         <p class="muted">
-          No ports found. Plug in the USB adapter, then wait a moment: this list updates on its own.
+          {t('addPart.port.none')}
         </p>
       {:else}
         <div class="choices">
@@ -105,7 +108,8 @@
               />
               <span class="choice-body">
                 <span class="choice-title"
-                  >{#if p.kind === 'bluetooth'}<span class="kind">Bluetooth</span
+                  >{#if p.kind === 'bluetooth'}<span class="kind"
+                      >{t('addPart.port.bluetooth')}</span
                     >{/if}{p.label}</span
                 >
                 <span class="choice-meta">
@@ -123,17 +127,17 @@
     </fieldset>
 
     <fieldset class="step" class:flag={errorField === 'connector'}>
-      <legend><span class="n">2</span> Pick the connector that talks to it</legend>
+      <legend><span class="n">2</span> {t('addPart.connector.legend')}</legend>
       {#if core.connectorsError}
         <ErrorNotice error={core.connectorsError}>
           {#snippet actions()}
             <button type="button" class="btn" onclick={() => core.loadConnectors()}
-              >Try again</button
+              >{t('addPart.connector.retry')}</button
             >
           {/snippet}
         </ErrorNotice>
       {:else if connectors === null}
-        <p class="muted">Loading connectors…</p>
+        <p class="muted">{t('addPart.connector.loading')}</p>
       {:else}
         <div class="choices">
           {#each connectors as c (c.id)}
@@ -153,11 +157,13 @@
                 <span class="choice-title">{c.name}</span>
                 <span class="choice-meta">
                   <code>{c.id}</code>
-                  <span>v{c.version}</span>
-                  <span>serial, {c.port.baud} baud</span>
+                  <span>{t('addPart.connector.version', { version: c.version })}</span>
+                  <span>{t('addPart.connector.serial', { baud: c.port.baud })}</span>
                 </span>
                 <span class="provides">
-                  Provides {c.provides.map((p) => p.capability).join(', ')}
+                  {t('addPart.connector.provides', {
+                    capabilities: c.provides.map((p) => p.capability).join(', '),
+                  })}
                 </span>
               </span>
             </label>
@@ -167,9 +173,9 @@
     </fieldset>
 
     <fieldset class="step" class:flag={errorField === 'name'}>
-      <legend><span class="n">3</span> Give it a name</legend>
+      <legend><span class="n">3</span> {t('addPart.name.legend')}</legend>
       <div class="field">
-        <label class="label" for="part-name">Name</label>
+        <label class="label" for="part-name">{t('addPart.name.label')}</label>
         <input
           id="part-name"
           class="input mono"
@@ -183,13 +189,13 @@
           autocomplete="off"
           autocapitalize="off"
           spellcheck="false"
-          placeholder="front_lidar"
+          placeholder={t('addPart.name.placeholder')}
         />
         <p id="part-name-help" class="help" class:bad={showNameProblem}>
           {#if showNameProblem}
             {nameProblem?.message} {nameProblem?.hint}
           {:else}
-            Lowercase letters, digits and _, starting with a letter. Apps use it to find the part.
+            {t('addPart.name.help')}
           {/if}
         </p>
       </div>
@@ -203,12 +209,13 @@
 
   <div class="footer">
     <p class="muted small">
-      {#if !port}Pick a port to continue.{:else if !connector}Pick a connector to continue.{:else}Adds
-        the part to <code>parts.toml</code> and starts it.{/if}
+      {#if !port}{t('addPart.footer.pickPort')}{:else if !connector}{t(
+          'addPart.footer.pickConnector',
+        )}{:else}<RichText text={t('addPart.footer.ready')} />{/if}
     </p>
-    <button type="button" class="btn quiet" onclick={oncancel}>Cancel</button>
+    <button type="button" class="btn quiet" onclick={oncancel}>{t('addPart.footer.cancel')}</button>
     <button type="submit" class="btn primary" disabled={submitting || !port || !connector}>
-      {submitting ? 'Adding…' : 'Add part'}
+      {submitting ? t('addPart.footer.adding') : t('addPart.footer.submit')}
     </button>
   </div>
 </form>

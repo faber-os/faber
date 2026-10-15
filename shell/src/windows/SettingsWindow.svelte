@@ -16,40 +16,43 @@
   import TimeSection from './settings/TimeSection.svelte';
   import MachineSection from './settings/MachineSection.svelte';
   import UnitsSection from './settings/UnitsSection.svelte';
+  import LanguageRow from './settings/LanguageRow.svelte';
+  import RichText from '../components/RichText.svelte';
+  import { t } from '../lib/i18n';
 
   let { win }: WindowProps = $props();
 
   const core = useCore();
   const desktop = useDesktop();
-  const CONFIRM_WORD = 'machine';
+  const confirmWord = $derived(t('settings.developer.warning.word'));
 
   /**
    * The sidebar, in groups (D40); each item scrolls to its section. Only what is built is
-   * listed: no empty "coming later" sections.
+   * listed: no empty "coming later" sections. Group and item labels are catalogue keys.
    */
   const NAV = [
     {
-      group: 'You',
+      group: 'settings.nav.group.you',
       items: [
-        { id: 'appearance', label: 'Appearance', icon: 'sun' },
-        { id: 'accessibility', label: 'Accessibility', icon: 'access' },
-        { id: 'units', label: 'Units', icon: 'ruler' },
-        { id: 'desktop', label: 'Desktop and taskbar', icon: 'taskbar' },
+        { id: 'appearance', label: 'settings.nav.appearance', icon: 'sun' },
+        { id: 'accessibility', label: 'settings.nav.accessibility', icon: 'access' },
+        { id: 'units', label: 'settings.nav.units', icon: 'ruler' },
+        { id: 'desktop', label: 'settings.nav.desktop', icon: 'taskbar' },
       ],
     },
     {
-      group: 'This machine',
+      group: 'settings.nav.group.machine',
       items: [
-        { id: 'machine', label: 'Name', icon: 'nut' },
-        { id: 'time', label: 'Date and time', icon: 'clock' },
-        { id: 'storage', label: 'Storage and backups', icon: 'archive' },
+        { id: 'machine', label: 'settings.nav.machine', icon: 'nut' },
+        { id: 'time', label: 'settings.nav.time', icon: 'clock' },
+        { id: 'storage', label: 'settings.nav.storage', icon: 'archive' },
       ],
     },
     {
-      group: 'Advanced',
+      group: 'settings.nav.group.advanced',
       items: [
-        { id: 'about', label: 'About and diagnostics', icon: 'info' },
-        { id: 'developer', label: 'Developer', icon: 'warning' },
+        { id: 'about', label: 'settings.nav.about', icon: 'info' },
+        { id: 'developer', label: 'settings.nav.developer', icon: 'warning' },
       ],
     },
   ] as const;
@@ -71,7 +74,9 @@
   const style = $derived(resolveStyle(settings?.appearance.style).id);
   const pinned = $derived(settings?.taskbar.pinned ?? []);
   const fullMachine = $derived(settings?.developer.fullMachineFiles ?? false);
-  const confirmed = $derived(understood && typed.trim().toLowerCase() === CONFIRM_WORD);
+  const confirmed = $derived(
+    understood && typed.trim().toLowerCase() === confirmWord.toLowerCase(),
+  );
 
   async function change(patch: (s: Settings) => Settings) {
     if (!settings) return;
@@ -166,9 +171,9 @@
 </script>
 
 <div class="settings">
-  <nav class="side" aria-label="Settings sections">
+  <nav class="side" aria-label={t('settings.nav.label')}>
     {#each NAV as g (g.group)}
-      <p class="group">{g.group}</p>
+      <p class="group">{t(g.group)}</p>
       {#each g.items as it (it.id)}
         <button
           class="nav-item"
@@ -176,27 +181,27 @@
           aria-current={current === it.id ? 'true' : undefined}
           onclick={() => go(it.id)}
         >
-          <Icon name={it.icon} size={17} /><span>{it.label}</span>
+          <Icon name={it.icon} size={17} /><span>{t(it.label)}</span>
         </button>
       {/each}
     {/each}
   </nav>
 
   {#if !settings}
-    <p class="loading">Loading settings…</p>
+    <p class="loading">{t('settings.loading')}</p>
   {:else}
     <div class="scroll" bind:this={scroller} onscroll={onScroll}>
       {#if error}<ErrorNotice {error} />{/if}
 
       <section id="{win.id}-appearance" aria-labelledby="{win.id}-appearance-h">
-        <h3 id="{win.id}-appearance-h">Appearance</h3>
+        <h3 id="{win.id}-appearance-h">{t('settings.appearance.title')}</h3>
         <div class="row">
           <div class="text">
-            <p class="name" id="{win.id}-theme-label">Mode</p>
-            <p class="desc">Follow this screen or browser, or pick one. Applies to every screen.</p>
+            <p class="name" id="{win.id}-theme-label">{t('settings.appearance.mode.name')}</p>
+            <p class="desc">{t('settings.appearance.mode.desc')}</p>
           </div>
           <div class="segmented" role="radiogroup" aria-labelledby="{win.id}-theme-label">
-            {#each [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']] as const as [value, label] (value)}
+            {#each [['system', t('settings.appearance.mode.system')], ['light', t('settings.appearance.mode.light')], ['dark', t('settings.appearance.mode.dark')]] as const as [value, label] (value)}
               <label
                 ><input
                   type="radio"
@@ -212,10 +217,8 @@
         </div>
 
         <fieldset class="choices">
-          <legend class="name">Style</legend>
-          <p class="desc legend-desc">
-            Every style has a light and a dark version; the mode above picks which.
-          </p>
+          <legend class="name">{t('settings.appearance.style.name')}</legend>
+          <p class="desc legend-desc">{t('settings.appearance.style.desc')}</p>
           <div class="style-grid">
             {#each STYLES as st (st.id)}
               {@const sw = styleSwatch(st)}
@@ -247,7 +250,7 @@
         </fieldset>
 
         <fieldset class="choices">
-          <legend class="name">Wallpaper</legend>
+          <legend class="name">{t('settings.appearance.wallpaper.name')}</legend>
           <div class="wall-grid">
             {#each WALLPAPERS as w (w.id)}
               <label class="wall-choice">
@@ -266,20 +269,21 @@
             {/each}
           </div>
         </fieldset>
+        <LanguageRow winId={win.id} {settings} {saving} change={(p) => void change(p)} />
       </section>
 
       <AccessibilitySection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
       <UnitsSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
 
       <section id="{win.id}-desktop" aria-labelledby="{win.id}-desktop-h">
-        <h3 id="{win.id}-desktop-h">Desktop and taskbar</h3>
+        <h3 id="{win.id}-desktop-h">{t('settings.desktop.title')}</h3>
         <div class="row">
           <div class="text">
-            <p class="name" id="{win.id}-size-label">Taskbar size</p>
-            <p class="desc">Large has bigger buttons with names, for the 7" touch screen.</p>
+            <p class="name" id="{win.id}-size-label">{t('settings.desktop.size.name')}</p>
+            <p class="desc">{t('settings.desktop.size.desc')}</p>
           </div>
           <div class="segmented" role="radiogroup" aria-labelledby="{win.id}-size-label">
-            {#each [['small', 'Small'], ['large', 'Large']] as const as [value, label] (value)}
+            {#each [['small', t('settings.desktop.size.small')], ['large', t('settings.desktop.size.large')]] as const as [value, label] (value)}
               <label
                 ><input
                   type="radio"
@@ -294,11 +298,8 @@
           </div>
         </div>
         <fieldset class="choices">
-          <legend class="name">Pinned to the taskbar</legend>
-          <p class="desc legend-desc">
-            Pinned programs are always on the taskbar, in the order you pinned them. You can also
-            right-click a program anywhere to pin or unpin it.
-          </p>
+          <legend class="name">{t('settings.desktop.pinned.name')}</legend>
+          <p class="desc legend-desc">{t('settings.desktop.pinned.desc')}</p>
           <ul class="pins">
             {#each programs as d (d.kind)}
               <li>
@@ -309,7 +310,7 @@
                     class="switch"
                     type="checkbox"
                     role="switch"
-                    aria-label="Pin {d.title} to the taskbar"
+                    aria-label={t('settings.desktop.pinned.pin', { program: d.title })}
                     checked={isPinned(pinned, d.program!)}
                     disabled={saving}
                     onchange={(e) => setPin(d.program!, e.currentTarget.checked)}
@@ -327,23 +328,17 @@
       <AboutSection winId={win.id} />
 
       <section id="{win.id}-developer" aria-labelledby="{win.id}-developer-h">
-        <h3 id="{win.id}-developer-h">Developer</h3>
-        <p class="intro">
-          For people building Faber or connectors. Leave these off unless you know why you need
-          them.
-        </p>
+        <h3 id="{win.id}-developer-h">{t('settings.developer.title')}</h3>
+        <p class="intro">{t('settings.developer.intro')}</p>
         <div class="row danger-card">
           <div class="text">
             <label class="name" for="{win.id}-full-machine"
-              >Allow Files to see the whole machine</label
+              >{t('settings.developer.machine.name')}</label
             >
             <p class="desc" id="{win.id}-full-machine-desc">
-              {#if fullMachine}
-                On. Files shows “This computer” with every drive and system folder.
-              {:else}
-                Off. Files only shows Faber's home folder and disks. Deleting system files can break
-                this computer, and there is no Trash outside Faber's home folder.
-              {/if}
+              {fullMachine
+                ? t('settings.developer.machine.on')
+                : t('settings.developer.machine.off')}
             </p>
           </div>
           <input
@@ -362,35 +357,34 @@
   {/if}
 
   {#if warning}
-    <Dialog title="Let Files see the whole machine?" tone="danger" oncancel={closeWarning} wide>
-      <p>
-        Files will show every folder on this computer, not just Faber's home folder. Read this
-        first:
-      </p>
+    <Dialog
+      title={t('settings.developer.warning.title')}
+      tone="danger"
+      oncancel={closeWarning}
+      wide
+    >
+      <p>{t('settings.developer.warning.intro')}</p>
       <ul class="risks">
-        <li>
-          Deleting or changing system files can stop this computer from starting, and Faber with it.
-        </li>
-        <li>
-          There is <strong>no Trash outside the home folder</strong>: anything you delete there is
-          gone for good, at once.
-        </li>
-        <li>Anyone using this shell can then read and change those files too.</li>
+        <li>{t('settings.developer.warning.system')}</li>
+        <li><RichText text={t('settings.developer.warning.noTrash')} /></li>
+        <li>{t('settings.developer.warning.others')}</li>
       </ul>
       <label class="ack">
         <input type="checkbox" class="check" bind:checked={understood} />
-        I understand that I can break this computer and lose files for good.
+        {t('settings.developer.warning.understood')}
       </label>
       <label class="field">
-        <span class="label">Type <code>{CONFIRM_WORD}</code> to confirm</span>
+        <span class="label"
+          ><RichText text={t('settings.developer.warning.type', { word: confirmWord })} /></span
+        >
         <input class="input" bind:value={typed} autocomplete="off" spellcheck="false" />
       </label>
       {#snippet actions()}
-        <button class="btn" onclick={closeWarning}>Cancel</button>
+        <button class="btn" onclick={closeWarning}>{t('settings.developer.warning.cancel')}</button>
         <button
           class="btn danger solid"
           disabled={!confirmed || saving}
-          onclick={() => setMachine(true)}>Allow whole-machine access</button
+          onclick={() => setMachine(true)}>{t('settings.developer.warning.confirm')}</button
         >
       {/snippet}
     </Dialog>

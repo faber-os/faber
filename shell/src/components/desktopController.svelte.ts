@@ -97,6 +97,11 @@ export class DesktopController {
     saveRecent(this.storage, this.recent);
   }
 
+  /** What the title bar and taskbar show: the window's own title, or its kind's (translated). */
+  titleOf(win: WindowState): string {
+    return win.title ?? this.kind(win).title;
+  }
+
   kind(win: WindowState): WindowKind {
     const k = this.kinds[win.kind];
     if (!k) throw new Error(`Unknown window kind "${win.kind}"`);

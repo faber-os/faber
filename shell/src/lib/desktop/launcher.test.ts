@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  POWER_UNAVAILABLE,
+  powerUnavailable,
   RECENT_LIMIT,
   addRecent,
   loadRecent,
@@ -122,10 +122,10 @@ describe('recent files', () => {
 describe('powerActions', () => {
   it('offers restart and shut down, disabled with the reason until the core can do it', () => {
     expect(powerActions(false)).toEqual([
-      { id: 'restart', label: 'Restart machine', disabledReason: POWER_UNAVAILABLE },
-      { id: 'shutdown', label: 'Shut down machine', disabledReason: POWER_UNAVAILABLE },
+      { id: 'restart', label: 'Restart machine', disabledReason: powerUnavailable() },
+      { id: 'shutdown', label: 'Shut down machine', disabledReason: powerUnavailable() },
     ]);
-    expect(POWER_UNAVAILABLE).toBe('Available on the Faber machine image (Phase 6)');
+    expect(powerUnavailable()).toBe('Available on the Faber machine image (Phase 6)');
     expect(powerActions(true).every((a) => a.disabledReason === undefined)).toBe(true);
   });
 });

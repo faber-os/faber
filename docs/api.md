@@ -197,6 +197,7 @@ screen. Every field has a default, so a settings.toml from an older Faber still 
 | `machine.name` | `faber`, or any host name (`a-z`, `0-9`, `-`, 1–63, no dash at the ends) | browser tab, About, backup names (`<name>-backup-….zip`), and `<name>.local` on the Pi image. `400 invalid-machine-name` otherwise. Reset keeps it. |
 | `appearance.theme` | `light`, `dark`, `system` | |
 | `appearance.style`, `appearance.wallpaper` | `aluminium`, … | |
+| `appearance.language` | `en`, or a language code (`da`, `pt-BR`) | the shell's language (D44). `400 invalid-language` if it isn't a code. A code without a usable translation shows English. |
 | `accessibility.reduceMotion` | `system`, `on`, `off` | `system` follows `prefers-reduced-motion` |
 | `accessibility.higherContrast` | `system`, `on`, `off` | `system` follows `prefers-contrast: more` |
 | `accessibility.textSize` | `"100"`, `"115"`, `"130"`, `"150"` | percent of the normal text size |
@@ -211,6 +212,21 @@ place (the core), and because reset must also turn whole-machine files off, whic
 purpose.
 
 The WebSocket topic `settings` sends the settings now and after every change.
+
+## Translations
+
+Translations of the shell installed on this machine: `<code>.json` files in
+`<data>/config/translations/` (created on start). A file works as soon as it is there; no restart.
+English is built into the shell and is never listed. How to write one: [translations.md](translations.md).
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/translations` | `TranslationInfo[]`, sorted by code: `code` (from the file name), `name` (the file's `_language`, else the code), and `problem` when the file can't be used (e.g. `da.json has a problem on line 3: …`). Files whose name isn't `<code>.json` are ignored. |
+| `GET /api/v0/translations/{lang}` | The file, as one JSON object. Errors: `400 invalid-language` (not `[a-z]{2,3}(-[A-Z]{2})?`, so no path can reach outside the folder), `404 unknown-language`, `422 translation-invalid` (broken JSON, with the line; not one object; bigger than 1 MB). |
+
+The core doesn't check the texts inside a file: the shell does, key by key, and shows English for
+anything it can't use. How complete a translation is (the percentage in Settings) is worked out by
+the shell too, since only the shell has the English catalogue.
 
 ## Recordings
 

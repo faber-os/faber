@@ -1,0 +1,144 @@
+# A 70 m² flat, 10 × 7 m. West half: a 1.2 m hallway (y 3.0–4.2) with a bedroom and a bathroom
+# to the south and a kitchen and a study to the north. East half: the living room, through a
+# 0.9 m doorway at the hallway's end. Doorways are 0.8–0.9 m: SENNEP (0.65 m wide) gets through
+# with a few centimetres either side.
+name = "apartment"
+title = "Apartment"
+description = "A 70 m² flat: hallway, bedroom, bathroom, kitchen, study and living room, joined by 0.8–0.9 m doorways. A sofa, and a dining table and chairs whose thin legs are hard for a LiDAR to see."
+start = { x = 7.5, y = 2.5, yaw = 3.141592653589793 }
+bounds = { min = [0.0, 0.0], max = [10.0, 7.0] }
+
+[[outline]]
+points = [[0.0, 0.0], [10.0, 0.0], [10.0, 7.0], [0.0, 7.0]]
+
+# Hallway, south side: bedroom door at x 1.5–2.35, bathroom door at x 4.2–5.0.
+[[wall]]
+from = [0.0, 3.0]
+to = [6.0, 3.0]
+doors = [[1.5, 0.85], [4.2, 0.8]]
+
+# Hallway, north side: kitchen door at x 1.2–2.1, study door at x 4.4–5.2.
+[[wall]]
+from = [0.0, 4.2]
+to = [6.0, 4.2]
+doors = [[1.2, 0.9], [4.4, 0.8]]
+
+# Bedroom | bathroom.
+[[wall]]
+from = [3.5, 0.0]
+to = [3.5, 3.0]
+
+# Kitchen | study.
+[[wall]]
+from = [3.5, 4.2]
+to = [3.5, 7.0]
+
+# Living room's west wall, with the doorway from the hallway at y 3.15–4.05.
+[[wall]]
+from = [6.0, 0.0]
+to = [6.0, 7.0]
+doors = [[3.15, 0.9]]
+
+# --- Hallway
+[[box]]
+label = "shoe rack"
+at = [0.15, 3.6]
+size = [0.3, 0.8]
+
+# --- Bedroom (x 0–3.5, y 0–3)
+# Headboard against the west wall, leaving a 1 m strip inside the door.
+[[box]]
+label = "bed"
+at = [1.0, 1.2]
+size = [2.0, 1.6]
+
+[[box]]
+label = "wardrobe"
+at = [3.2, 1.5]
+size = [0.6, 1.5]
+
+# --- Bathroom (x 3.5–6, y 0–3)
+[[box]]
+label = "bathtub"
+at = [4.35, 0.4]
+size = [1.7, 0.75]
+
+[[box]]
+label = "toilet"
+at = [5.65, 1.8]
+size = [0.7, 0.4]
+
+[[box]]
+label = "sink"
+at = [3.75, 2.0]
+size = [0.5, 0.6]
+
+# --- Kitchen (x 0–3.5, y 4.2–7)
+[[box]]
+label = "counter"
+at = [1.75, 6.7]
+size = [3.5, 0.6]
+
+[[box]]
+label = "fridge"
+at = [0.3, 5.0]
+size = [0.6, 0.6]
+
+# --- Study (x 3.5–6, y 4.2–7)
+[[legs]]
+label = "desk"
+at = [4.75, 6.6]
+size = [1.4, 0.7]
+leg = 0.05
+
+[[legs]]
+label = "desk chair"
+at = [4.75, 5.9]
+size = [0.5, 0.5]
+leg = 0.04
+
+# --- Living room (x 6–10, y 0–7)
+[[box]]
+label = "sofa"
+at = [9.55, 3.5]
+size = [0.9, 2.2]
+
+[[box]]
+label = "coffee table"
+at = [8.5, 3.5]
+size = [0.5, 1.0]
+
+[[box]]
+label = "TV bench"
+at = [6.25, 1.0]
+size = [0.4, 1.6]
+
+[[legs]]
+label = "dining table"
+at = [7.6, 5.6]
+size = [1.4, 0.8]
+leg = 0.04
+
+[[legs]]
+label = "chair"
+at = [7.25, 6.25]
+size = [0.42, 0.42]
+leg = 0.03
+
+[[legs]]
+label = "chair"
+at = [7.95, 6.25]
+size = [0.42, 0.42]
+leg = 0.03
+
+[[legs]]
+label = "chair"
+at = [7.25, 4.95]
+size = [0.42, 0.42]
+leg = 0.03
+
+[[legs]]
+label = "chair"
+at = [7.95, 4.95]
+size = [0.42, 0.42]
+leg = 0.03

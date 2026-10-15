@@ -17,6 +17,8 @@
     updateTab,
     type TabsState,
   } from '../lib/desktop/tabs';
+  import { untitledName } from '../lib/desktop/textDoc';
+  import { t } from '../lib/i18n';
   import { useDesktop } from '../components/desktopController.svelte';
   import type { WindowProps } from '../components/windowDefs';
   import NotesDoc from './NotesDoc.svelte';
@@ -49,7 +51,7 @@
     }
     const n = path ? 0 : ++untitled;
     const r = addTab(tabs, {
-      title: path ? baseName(path) : n > 1 ? `Untitled ${n}` : 'Untitled',
+      title: path ? baseName(path) : untitledName(n),
       key: path ?? `new:${n}`,
     });
     tabs = r.state;
@@ -114,15 +116,18 @@
       activate: (id) => (tabs = activateTab(tabs, id)),
       close: requestCloseTab,
       add: () => addDoc(null),
-      addLabel: 'New note',
+      addLabel: t('notes.tabs.add'),
     });
   });
   $effect(() => () => desktop.setTabs(win.id, null));
 
   // The taskbar names the window after its front tab; a leading * marks unsaved changes.
   $effect(() => {
-    const t = activeTab(tabs);
-    if (t) desktop.update(win.id, { title: `${t.dirty ? '*' : ''}${t.title} · Notes` });
+    const tab = activeTab(tabs);
+    if (tab) {
+      const name = `${tab.dirty ? '*' : ''}${tab.title}`;
+      desktop.update(win.id, { title: t('notes.window.title', { name }) });
+    }
   });
 
   function keys(e: KeyboardEvent) {

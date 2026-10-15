@@ -7,6 +7,8 @@
   import { formatBytes } from '../components/format';
   import { formatDateTime } from '../lib/desktop/wallClock';
   import Icon from '../components/Icon.svelte';
+  import RichText from '../components/RichText.svelte';
+  import { t } from '../lib/i18n';
   import type { WindowProps } from '../components/windowDefs';
 
   let { win }: WindowProps = $props();
@@ -46,31 +48,35 @@
 
   {#if replay}
     <div class="replay">
-      <p>
-        <strong>This is a recording</strong>: bytes captured from a serial port, with the time each
-        arrived. Faber plays every recording in Recordings as a replay port, so you can add a part
-        on it exactly as if the hardware were plugged in.
-      </p>
-      <p>Its port is <code class="selectable">{replay}</code>.</p>
-      <button class="btn primary" onclick={addPart}>Add a part on this recording</button>
+      <p><RichText text={t('properties.recording.intro')} /></p>
+      <p><RichText text={t('properties.recording.port', { port: replay })} /></p>
+      <button class="btn primary" onclick={addPart}>{t('properties.recording.addPart')}</button>
     </div>
   {/if}
 
   <dl>
-    <dt>Kind</dt>
-    <dd>{p.special ? "Faber's fixed folder" : isFile ? 'File' : 'Folder'}</dd>
+    <dt>{t('properties.kind')}</dt>
+    <dd>
+      {p.special
+        ? t('properties.kind.fixedFolder')
+        : isFile
+          ? t('properties.kind.file')
+          : t('properties.kind.folder')}
+    </dd>
     {#if isFile}
-      <dt>Size</dt>
-      <dd class="num">{formatBytes(Number(p.size ?? 0))} (<span>{p.size}</span> bytes)</dd>
+      <dt>{t('properties.size')}</dt>
+      <dd class="num">
+        {t('properties.sizeValue', { size: formatBytes(Number(p.size ?? 0)), bytes: p.size ?? '' })}
+      </dd>
     {/if}
     {#if modified}
-      <dt>Modified</dt>
+      <dt>{t('properties.modified')}</dt>
       <dd class="num">{modified}</dd>
     {/if}
-    <dt>Path</dt>
+    <dt>{t('properties.path')}</dt>
     <dd><code class="selectable">{p.path}</code></dd>
     {#if p.originalPath}
-      <dt>Came from</dt>
+      <dt>{t('properties.cameFrom')}</dt>
       <dd><code class="selectable">{p.originalPath}</code></dd>
     {/if}
   </dl>
@@ -78,15 +84,19 @@
   <div class="actions">
     {#if where}
       <button class="btn" onclick={() => openFolder(desktop, where)}>
-        <Icon name="folder" size={17} /> Show in Files
+        <Icon name="folder" size={17} />
+        {t('properties.showInFiles')}
       </button>
     {/if}
     {#if isFile && !replay}
-      <button class="btn" onclick={() => openInNotes(desktop, p.path!)}>Open with Notes</button>
+      <button class="btn" onclick={() => openInNotes(desktop, p.path!)}
+        >{t('properties.openWithNotes')}</button
+      >
     {/if}
     {#if isFile}
       <button class="btn" onclick={() => download(core, p.path!)}>
-        <Icon name="download" size={17} /> Download
+        <Icon name="download" size={17} />
+        {t('properties.download')}
       </button>
     {/if}
   </div>

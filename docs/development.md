@@ -14,7 +14,8 @@ agents alike.
    (`cargo run -p faber-arch-check`, and dependency rules in the shell). Breaking a boundary means
    changing this document first, as a deliberate decision.
 4. **Everything must pass before a commit:** `cargo fmt --check`, `cargo clippy -- -D warnings`,
-   `cargo test`, `npm run check` and `npm test` in `shell/`, and the WIT validation.
+   `cargo test`, `npm run check`, `npm test` and `npm run i18n:check` in `shell/`, and the WIT
+   validation.
 5. **Glossary terms only** ([glossary.md](glossary.md)) in code, UI text and errors.
 
 ## Repository layout
@@ -53,7 +54,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | 5 | `api` | HTTP + WebSocket. Translates between the wire and the machine. No logic of its own. |
 | 4 | `machine` | Ties everything together. The only place that changes what runs: it writes `parts.toml` first, then reconciles. |
 | 3 | `runtime`, `suggest` | Supervising parts, and detect-then-suggest. Built on layer 2. |
-| 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `ports`, `router`, `settings`, `simulation` | One job each. They don't know about HTTP or each other. |
+| 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `ports`, `router`, `settings`, `sim`, `simulation`, `translations` | One job each. They don't know about HTTP or each other. |
 | 1 | `clock`, `names` | Small pure building blocks. |
 
 This is enforced by `core/tests/layers.rs`, which fails with the file and line of any import that
@@ -64,11 +65,16 @@ points up or sideways. Every module that does I/O does it behind a trait, so its
 
 | Folder | Job | May import |
 |---|---|---|
-| `src/lib/api/` | The only code that talks to the core (REST + WebSocket, MessagePack). Generated types live in `generated/`. | nothing from the UI |
-| `src/lib/state/` | App state as Svelte 5 runes (parts, ports, windows) | `api` |
-| `src/lib/desktop/` | Plain TypeScript logic for the desktop and its accessories (windows, icons, menus, file paths, the Notes document), no Svelte | nothing |
-| `src/lib/viewers/` | Canvas drawing for capability viewers, and the display units (`units.ts`), as pure functions | nothing |
-| `src/components/`, `src/windows/` | Svelte UI | `state`, `desktop`, `viewers`, never `api` directly |
+| `src/lib/i18n/` | Every text the shell shows: the English catalogue (`en.ts`), `t()`, translations and their checks ([translations.md](translations.md)) | nothing |
+| `src/lib/api/` | The only code that talks to the core (REST + WebSocket, MessagePack). Generated types live in `generated/`. | `i18n`, nothing from the UI |
+| `src/lib/state/` | App state as Svelte 5 runes (parts, ports, windows) | `api`, `i18n` |
+| `src/lib/desktop/` | Plain TypeScript logic for the desktop and its accessories (windows, icons, menus, file paths, the Notes document), no Svelte | `i18n` |
+| `src/lib/viewers/` | Canvas drawing for capability viewers, and the display units (`units.ts`), as pure functions | `i18n` |
+| `src/components/`, `src/windows/` | Svelte UI | `state`, `desktop`, `viewers`, `i18n`, never `api` directly |
+
+**Texts** (D44): no visible text is written straight into a component or module. It goes into
+`src/lib/i18n/en.ts` and is shown with `t('key')`; `src/lib/i18n/noRawText.test.ts` fails on any
+that isn't. How translations work, and `npm run i18n:check`: [translations.md](translations.md).
 
 ## Testing
 

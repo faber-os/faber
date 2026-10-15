@@ -6,6 +6,7 @@ mod convert;
 pub mod dto;
 mod files;
 mod shell;
+mod translations;
 mod ws;
 
 use crate::logs::LogBook;
@@ -35,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/parts/{name}", delete(remove_part))
         .route("/api/v0/ws", get(ws::upgrade))
         .merge(files::routes())
+        .merge(translations::routes())
         .fallback(shell::serve)
         .with_state(state)
 }

@@ -28,6 +28,7 @@ use crate::settings::{
 };
 use crate::simulation::{self, Outlet, PartSpec, WorldEngine};
 use crate::suggest::{Suggestion, suggestions};
+use crate::translations::Translations;
 use faber_capabilities::{Capability, Mount, Reading, estop};
 use faber_connector::{Definition, Health, Manifest, PortRequirement, Problem, Provide, Settings};
 use safety::Runner;
@@ -210,6 +211,7 @@ pub struct Machine {
     config_path: PathBuf,
     files: Files,
     settings: SettingsStore,
+    translations: Translations,
     state: Mutex<State>,
     ports_changed: watch::Sender<u64>,
     files_changed: broadcast::Sender<Vec<String>>,
@@ -241,6 +243,7 @@ impl Machine {
         };
         let files = Files::open(opts.data_dir.join("files"), config_path.clone())?;
         let settings = SettingsStore::load(&config_dir);
+        let translations = Translations::open(&config_dir);
         let machine = Arc::new(Machine {
             clock: opts.clock,
             router: Arc::new(Router::new()),
@@ -256,6 +259,7 @@ impl Machine {
             config_path,
             files,
             settings,
+            translations,
             state: Mutex::new(State {
                 text,
                 config,
@@ -821,6 +825,11 @@ impl Machine {
 
     pub fn settings_changed(&self) -> watch::Receiver<u64> {
         self.settings.watch()
+    }
+
+    /// The shell translations installed in `config/translations` (D44).
+    pub fn translations(&self) -> &Translations {
+        &self.translations
     }
 
     pub fn update_settings(&self, new: MachineSettings) -> Result<MachineSettings, MachineError> {
@@ -1554,10 +1563,19 @@ mod tests {
         discovery: Arc<FakeDiscovery>,
         usb_problems: Arc<FakeUsbProblems>,
     ) -> Arc<Machine> {
+        machine_on(dir, discovery, usb_problems, Arc::new(MonotonicClock::new()))
+    }
+
+    fn machine_on(
+        dir: &Path,
+        discovery: Arc<FakeDiscovery>,
+        usb_problems: Arc<FakeUsbProblems>,
+        clock: SharedClock,
+    ) -> Arc<Machine> {
         let replays = ReplayLibrary::with_demo();
         Machine::start(MachineOptions {
             data_dir: dir.to_path_buf(),
-            clock: Arc::new(MonotonicClock::new()),
+            clock,
             discovery,
             usb_problems,
             disks: Arc::new(FakeDisks::default()),
@@ -2294,11 +2312,10 @@ connector =
         let lease = m.request_lease("base", "test", false).unwrap();
         m.command("base", &lease.id, drive(0.3, 0.0)).unwrap();
         let sent = Instant::now();
+        // The exact bound (deadline + one sweep) is checked on a hand-moved clock below; here
+        // the real sweeper thread does it, so allow for a busy test machine.
         while commanded(&m) != Twist2d::ZERO {
-            assert!(
-                sent.elapsed() < Duration::from_millis(250 + 50 + 50),
-                "stopped within the lease time and a sweep"
-            );
+            assert!(sent.elapsed() < Duration::from_secs(2), "the sweeper stops the base");
             std::thread::sleep(Duration::from_millis(2));
         }
         assert!(sent.elapsed() >= Duration::from_millis(240), "not before the lease ran out");
@@ -2307,6 +2324,24 @@ connector =
         assert!(matches!(events.try_recv(), Ok(LeaseEvent::Granted(_))));
         let Ok(LeaseEvent::Ended(ended)) = events.try_recv() else { panic!("lease-ended is announced") };
         assert_eq!(ended.reason, EndReason::Expired);
+        m.shutdown();
+    }
+
+    #[test]
+    fn the_sweeper_ends_a_lease_within_50_ms_of_its_deadline() {
+        assert!(safety::SWEEP_EVERY <= Duration::from_millis(25), "a sweep at least twice per 50 ms");
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(crate::clock::ManualClock::new(1_000_000));
+        let m = machine_on(dir.path(), no_ports(), Arc::new(FakeUsbProblems::default()), clock.clone());
+        sim(&m, "base", "generic-planar-base", Simulate::Manual, "");
+        let lease = m.request_lease("base", "test", false).unwrap();
+        m.command("base", &lease.id, drive(0.3, 0.0)).unwrap();
+        clock.set(lease.deadline_us - 1);
+        m.sweep();
+        assert_ne!(commanded(&m), Twist2d::ZERO, "still leased just before the deadline");
+        clock.set(lease.deadline_us);
+        m.sweep();
+        assert_eq!(commanded(&m), Twist2d::ZERO, "the first sweep after the deadline stops it");
         m.shutdown();
     }
 

@@ -3,6 +3,8 @@
  * the editor now, and finding text in it.
  */
 
+import { t } from '../i18n';
+
 /** The core refuses bigger files, and a browser text box gets unusable well before that. */
 export const MAX_TEXT_BYTES = 16 * 1024 * 1024;
 
@@ -29,8 +31,8 @@ export function decodeTextFile(bytes: Uint8Array): Decoded {
     return {
       ok: false,
       reason: 'too-large',
-      message: 'This file is bigger than 16 MB, too big for Notes.',
-      hint: 'Download it from Files and open it on your computer instead.',
+      message: t('notes.error.tooBig.message'),
+      hint: t('notes.error.tooBig.hint'),
     };
   }
   let text: string;
@@ -41,8 +43,8 @@ export function decodeTextFile(bytes: Uint8Array): Decoded {
     return {
       ok: false,
       reason: 'binary',
-      message: "This file isn't text, so Notes can't open it.",
-      hint: 'Download it from Files to open it with a program that understands it.',
+      message: t('notes.error.notText.message'),
+      hint: t('notes.error.notText.hint'),
     };
   }
   const eol: Eol = text.includes('\r\n') ? '\r\n' : '\n';
@@ -53,10 +55,15 @@ export function encodeText(text: string, eol: Eol): Uint8Array {
   return new TextEncoder().encode(eol === '\n' ? text : text.replace(/\n/g, eol));
 }
 
+/** The name of new note number `n`: "Untitled", then "Untitled 2", "Untitled 3"… */
+export function untitledName(n: number): string {
+  return n > 1 ? t('notes.untitledNumbered', { n }) : t('notes.untitled');
+}
+
 export function newDoc(n: number): TextDoc {
   return {
     path: null,
-    name: n > 1 ? `Untitled ${n}` : 'Untitled',
+    name: untitledName(n),
     savedText: '',
     text: '',
     eol: '\n',

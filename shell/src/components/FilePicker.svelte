@@ -7,6 +7,7 @@
   import { SPECIALS, entryIcon } from './fileLook';
   import { FolderView } from './folderView.svelte';
   import Icon from './Icon.svelte';
+  import { t } from '../lib/i18n';
 
   /**
    * Pick a file to open, or a folder and name to save as. The same browsing as the Files window
@@ -63,9 +64,13 @@
   }
 </script>
 
-<Dialog title={mode === 'open' ? 'Open a file' : 'Save as'} {oncancel} wide>
+<Dialog
+  title={mode === 'open' ? t('filePicker.title.open') : t('filePicker.title.save')}
+  {oncancel}
+  wide
+>
   <div class="picker">
-    <div class="places" role="group" aria-label="Places">
+    <div class="places" role="group" aria-label={t('filePicker.places')}>
       {#each SPECIALS.filter((s) => s.id !== 'trash') as s (s.id)}
         <button
           class="place"
@@ -78,14 +83,14 @@
     <div class="where">
       <button
         class="btn quiet icon"
-        aria-label="Up one folder"
+        aria-label={t('filePicker.up')}
         disabled={!view.canUp}
         onclick={() => view.up()}><Icon name="up" /></button
       >
       <code class="path">{view.path}</code>
     </div>
     {#if view.error}<ErrorNotice error={view.error} />{/if}
-    <ul class="entries" aria-label="Files and folders in {view.path}">
+    <ul class="entries" aria-label={t('filePicker.list', { path: view.path })}>
       {#each entries as e (e.path)}
         <li>
           <button
@@ -98,12 +103,12 @@
           </button>
         </li>
       {:else}
-        <li class="none">{view.loading ? 'Loading…' : 'Nothing here.'}</li>
+        <li class="none">{view.loading ? t('filePicker.loading') : t('filePicker.nothingHere')}</li>
       {/each}
     </ul>
     {#if mode === 'save'}
       <label class="field">
-        <span class="label">File name</span>
+        <span class="label">{t('filePicker.fileName')}</span>
         <input
           class="input"
           bind:value={name}
@@ -120,15 +125,19 @@
       </label>
       {#if taken}
         <p class="warn" role="status">
-          There is already a file called “{taken.name}” here. Saving replaces it.
+          {t('filePicker.taken', { name: taken.name })}
         </p>
       {/if}
     {/if}
   </div>
   {#snippet actions()}
-    <button class="btn" onclick={oncancel}>Cancel</button>
+    <button class="btn" onclick={oncancel}>{t('filePicker.cancel')}</button>
     <button class="btn primary" disabled={!target} onclick={pick}>
-      {mode === 'open' ? 'Open' : taken ? 'Replace' : 'Save'}
+      {mode === 'open'
+        ? t('filePicker.open')
+        : taken
+          ? t('filePicker.replace')
+          : t('filePicker.save')}
     </button>
   {/snippet}
 </Dialog>

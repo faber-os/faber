@@ -133,3 +133,23 @@ describe('DesktopController', () => {
     expect(d.tabs[id]).toBeUndefined();
   });
 });
+
+describe('DesktopController titles', () => {
+  it('shows a window in the language of the moment, unless it named itself', async () => {
+    const { WINDOW_KINDS } = await import('../windows/registry');
+    const { locale } = await import('../lib/i18n/locale.svelte');
+    const d = new DesktopController(WINDOW_KINDS, memory(), { width: 1440, height: 900 });
+    const parts = d.open('parts');
+    const doc = d.open('notes');
+    d.update(doc, { title: 'todo.txt' });
+    const win = (id: string) => d.state.windows.find((w) => w.id === id)!;
+    expect(d.titleOf(win(parts))).toBe('Parts');
+    try {
+      locale.use('xx', { 'programs.parts.title': 'Partz' });
+      expect(d.titleOf(win(parts))).toBe('Partz');
+      expect(d.titleOf(win(doc))).toBe('todo.txt');
+    } finally {
+      locale.use('en', null);
+    }
+  });
+});

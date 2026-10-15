@@ -51,7 +51,7 @@ export function part(name: string, overrides: Partial<PartInfo> = {}): PartInfo 
 
 export const DEFAULT_SETTINGS: Settings = {
   machine: { name: 'faber' },
-  appearance: { theme: 'system', style: 'aluminium', wallpaper: 'aluminium' },
+  appearance: { theme: 'system', style: 'aluminium', wallpaper: 'aluminium', language: 'en' },
   accessibility: { reduceMotion: 'system', higherContrast: 'system', textSize: '100' },
   units: { length: 'metric' },
   time: { timeZone: '', clock: '24h' },
@@ -119,6 +119,7 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
       },
     },
     listing('home:/Backups', []),
+    { path: '/api/v0/translations', body: [] },
     ...routes,
   ]);
   const socket = new CoreSocket({

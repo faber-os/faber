@@ -131,7 +131,7 @@ describe('openWindow', () => {
     expect(w.id).toBe(id);
     expect(w.rect.w).toBe(600);
     expect(w.rect.h).toBe(400);
-    expect(w.title).toBe('Parts');
+    expect(w.title).toBeUndefined(); // shown as the kind's title, in the current language
     expect(state.focusedId).toBe(id);
     expect(w.maximised).toBe(false);
   });

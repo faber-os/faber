@@ -1,6 +1,9 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
+  import { t, type MessageKey } from '../lib/i18n';
+  import type { ConnectionStatus } from '../lib/state/types';
   import ErrorNotice from '../components/ErrorNotice.svelte';
+  import RichText from '../components/RichText.svelte';
   import type { WindowProps } from '../components/windowDefs';
   import Wordmark from '../components/Wordmark.svelte';
 
@@ -9,39 +12,52 @@
 
   const core = useCore();
   const host = typeof location === 'undefined' ? '' : location.host;
+
+  const STATUS: Record<ConnectionStatus, Extract<MessageKey, `about.status.${string}`>> = {
+    connected: 'about.status.connected',
+    connecting: 'about.status.connecting',
+    reconnecting: 'about.status.reconnecting',
+    closed: 'about.status.closed',
+  };
 </script>
 
 <div class="about">
   <div class="hero">
     <Wordmark size={40} os />
-    <p class="tagline">
-      Latin for <em>maker</em>. An open-source operating system for the machines you build.
-    </p>
+    <p class="tagline"><RichText text={t('about.tagline')} /></p>
   </div>
 
   {#if core.systemError}
     <ErrorNotice error={core.systemError}>
       {#snippet actions()}
-        <button class="btn" onclick={() => core.loadSystem()}>Try again</button>
+        <button class="btn" onclick={() => core.loadSystem()}>{t('about.tryAgain')}</button>
       {/snippet}
     </ErrorNotice>
   {/if}
 
   <dl class="facts">
-    <dt>Core</dt>
+    <dt>{t('about.core')}</dt>
     <dd>
-      {#if core.system}{core.system.name} <span class="num">{core.system.version}</span>{:else}Not
-        known yet{/if}
+      {#if core.system}{core.system.name} <span class="num">{core.system.version}</span>{:else}{t(
+          'about.core.unknown',
+        )}{/if}
     </dd>
-    <dt>Shell</dt>
+    <dt>{t('about.shell')}</dt>
     <dd class="num">{SHELL_VERSION}</dd>
-    <dt>Address</dt>
+    <dt>{t('about.address')}</dt>
     <dd><code>{host}</code></dd>
-    <dt>Connection</dt>
-    <dd>{core.connection}, WebSocket as <code>{core.format}</code></dd>
+    <dt>{t('about.connection')}</dt>
+    <dd>
+      <RichText
+        text={t('about.connection.detail', {
+          status: t(STATUS[core.connection]),
+          format: core.format,
+        })}
+      />
+    </dd>
   </dl>
 
-  <p class="licence">Apache-2.0. Faber is in early development: this is shell v0.</p>
+  <p class="licence">{t('about.licence')}</p>
 </div>
 
 <style>
@@ -63,7 +79,7 @@
     max-width: 40ch;
     color: var(--text-muted);
   }
-  .tagline em {
+  .tagline :global(strong) {
     font-style: normal;
     font-weight: 650;
     color: var(--text);
