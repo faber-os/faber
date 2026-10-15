@@ -70,6 +70,10 @@
     newWindow: 'M4.5 5.5h15v13h-15zM4.5 9h15M12 11.5v5M9.5 14h5',
     taskbar: 'M3.5 5.5h17v13h-17zM3.5 15h17M7 17h.01M11 17h2',
     home: 'M4.5 11l7.5-6.5 7.5 6.5M6.5 9.5v10h11v-10',
+    drive:
+      'M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0M12 12m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0M12 4v5.5M4.5 14.5l5.2-1.4M19.5 14.5l-5.2-1.4',
+    distance: 'M4.5 7v10M4.5 12h12M13.5 9l3 3-3 3M19.5 6.5v11',
+    base: 'M6.5 5.5h11v13h-11zM4 7.5v3M4 13.5v3M20 7.5v3M20 13.5v3M12 9.5V14M9.8 11.5L12 9.3l2.2 2.2',
   } as const;
 
   /** Solid shapes drawn on top of the outline, for the few icons that need one. */

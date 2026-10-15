@@ -56,3 +56,14 @@ function trim(v: number, decimals: number): string {
 function roundNice(v: number): number {
   return Number(v.toPrecision(12));
 }
+
+/** "0.3 m/s"; "1 ft/s". */
+export function formatSpeed(mps: number, unit: LengthUnit): string {
+  if (unit === 'imperial') return `${trim(mps / METRES_PER_FOOT, 2)} ft/s`;
+  return `${trim(mps, 2)} m/s`;
+}
+
+/** "1.5 rad/s". The units setting has no angle choice yet, so turn rates stay SI. */
+export function formatTurnRate(radS: number): string {
+  return `${trim(radS, 2)} rad/s`;
+}

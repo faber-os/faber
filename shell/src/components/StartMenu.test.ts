@@ -28,7 +28,16 @@ describe('Start menu', () => {
       within(programs)
         .getAllByRole('menuitem')
         .map((m) => m.textContent?.trim()),
-    ).toEqual(['Parts', 'Serial monitor', 'Logs', 'Files', 'Notes', 'Settings', 'About Faber']);
+    ).toEqual([
+      'Parts',
+      'Drive',
+      'Serial monitor',
+      'Logs',
+      'Files',
+      'Notes',
+      'Settings',
+      'About Faber',
+    ]);
   });
 
   it('searches programs and opens the first result with Enter', async () => {

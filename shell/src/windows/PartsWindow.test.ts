@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { GENERIC_BASE, LD19, SAMPLE_PORT, USB_PORT, fakeShell, part } from '../test/fakeShell';
+import {
+  GENERIC_BASE,
+  GENERIC_DISTANCE,
+  LD19,
+  SAMPLE_PORT,
+  USB_PORT,
+  fakeShell,
+  part,
+  simBase,
+  simDistance,
+} from '../test/fakeShell';
 import PartsWindow from './PartsWindow.svelte';
 
 function setup(routes: Parameters<typeof fakeShell>[0] = []) {
@@ -289,6 +299,83 @@ describe('Adding a simulated part', () => {
         port: 'replay:ld19-sample',
       }),
     );
+  });
+});
+
+describe('Simulated parts in the list', () => {
+  function withSim() {
+    const shell = setup([
+      { path: '/api/v0/connectors', body: [LD19, GENERIC_BASE, GENERIC_DISTANCE] },
+      {
+        path: '/api/v0/parts/front/simulation',
+        body: { pattern: { kind: 'steady', value: 1 } },
+      },
+      {
+        method: 'PUT',
+        path: '/api/v0/parts/front/simulation',
+        body: { pattern: { kind: 'steady', value: 1 } },
+      },
+    ]);
+    shell.pushParts([simBase('base'), simDistance('front'), part('lidar')]);
+    return shell;
+  }
+  const row = async (name: string) => (await screen.findByText(name)).closest('li')!;
+
+  it('marks simulated parts', async () => {
+    withSim();
+    expect(within(await row('base')).getByText('Simulated')).toBeInTheDocument();
+    expect(within(await row('front')).getByText('Simulated')).toBeInTheDocument();
+    expect(within(await row('lidar')).queryByText('Simulated')).not.toBeInTheDocument();
+  });
+
+  it('sets a manual sensor by hand with a slider and a pattern', async () => {
+    const shell = withSim();
+    const slider = await within(await row('front')).findByRole('slider', {
+      name: 'Value of front',
+    });
+    await waitFor(() => expect(slider).toHaveValue('1'));
+    await fireEvent.input(slider, { target: { value: '2.5' } });
+    await waitFor(() =>
+      expect(shell.fetch.calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({
+        pattern: { kind: 'steady', value: 2.5 },
+      }),
+    );
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Pattern of front' }),
+      'Wave',
+    );
+    await waitFor(() =>
+      expect(shell.fetch.calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({
+        pattern: { kind: 'sine', center: 2.5, amplitude: 0.4, periodS: 4 },
+      }),
+    );
+    // Only manual sensors have one: not the base (it is driven) nor the real LiDAR.
+    expect(within(await row('base')).queryByRole('slider')).not.toBeInTheDocument();
+    expect(within(await row('lidar')).queryByRole('slider')).not.toBeInTheDocument();
+  });
+
+  it('says who drives an actuator, and opens the Drive window for it', async () => {
+    const shell = withSim();
+    expect(within(await row('base')).getByText('Nobody is driving it')).toBeInTheDocument();
+    shell.pushLeases([{ part: 'base', holder: 'drive-square.py' }]);
+    expect(await within(await row('base')).findByText('Driven by drive-square.py')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Drive base' }));
+    expect(shell.desktop.state.windows.find((w) => w.kind === 'drive')?.params).toEqual({
+      part: 'base',
+    });
+  });
+
+  it('opens the distance and drive base viewers', async () => {
+    const shell = withSim();
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Open the viewer for front/distance' }),
+    );
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Open the viewer for base/planar-base' }),
+    );
+    const kinds = shell.desktop.state.windows.map((w) => [w.kind, w.title]);
+    expect(kinds).toContainEqual(['distance', 'front · distance']);
+    expect(kinds).toContainEqual(['planar-base', 'base · base']);
   });
 });
 

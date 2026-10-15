@@ -134,6 +134,12 @@ export const en = {
   'programs.parts.description': 'Add, watch and remove the hardware on this machine',
   'programs.laserScan.title': 'Scan viewer',
   'programs.laserScan.description': 'Live top view of a laser-scan signal',
+  'programs.distance.title': 'Distance viewer',
+  'programs.distance.description': 'Live distance of a sensor, with a bar and a plot',
+  'programs.planarBase.title': 'Drive base viewer',
+  'programs.planarBase.description': 'Live velocity of a drive base, commanded and measured',
+  'programs.drive.title': 'Drive',
+  'programs.drive.description': 'Drive a base or a motor with the pad or the keys',
   'programs.serialMonitor.title': 'Serial monitor',
   'programs.serialMonitor.description': 'Read, write and record a serial port directly',
   'programs.logs.title': 'Logs',
@@ -216,9 +222,25 @@ export const en = {
   'parts.menu.simulatedNoPort': 'A simulated part has no port.',
   'parts.list.simulated.manual': 'Simulated, values set by hand',
   'parts.list.simulated.world': 'Simulated in the world',
+  'parts.list.simulatedBadge': 'Simulated',
+  'parts.list.drivenBy': 'Driven by {holder}',
+  'parts.list.notDriven': 'Nobody is driving it',
+  'parts.list.drive': 'Drive',
+  'parts.list.driveNamed': 'Drive {name}',
+  'parts.menu.drive': 'Drive',
+
+  // Parts window: a manual simulated sensor's value (docs/api.md, "Manual simulated sensors")
+  'parts.manual.value': 'Value of {name}',
+  'parts.manual.pattern': 'Pattern of {name}',
+  'parts.manual.pattern.steady': 'Steady',
+  'parts.manual.pattern.sine': 'Wave',
+  'parts.manual.pattern.noise': 'Noise',
+  'parts.manual.pattern.step': 'Steps',
 
   // Window titles opened from the Parts window
   'parts.title.viewer': '{name} · scan',
+  'parts.title.distance': '{name} · distance',
+  'parts.title.base': '{name} · base',
   'parts.title.recordings': 'Recordings · Files',
 
   // What kind of link a port is
@@ -361,6 +383,80 @@ export const en = {
   'drive.ended.partFailed': '{part} stopped working. Parts says what went wrong.',
   'drive.ended.shutdown': 'The Faber core is shutting down, so everything stopped.',
   'drive.ended.unknown': 'Driving {part} ended.',
+
+  // Drive window
+  'drive.holder': 'Drive window',
+  'drive.pick.label': 'Part to drive',
+  'drive.pick.none.title': 'Nothing to drive yet',
+  'drive.pick.none.body':
+    'Add a drive base or a motor in Parts. Tick Simulated to drive one without any hardware.',
+  'drive.pick.openParts': 'Open Parts',
+  'drive.confirm.title': 'Start driving {machine}?',
+  'drive.confirm.body':
+    '{part} moves while you use the pad or the keys. Space stops it; the red Stop button or the Pause/Break key stops everything. Faber asks once until this page is reloaded.',
+  'drive.confirm.start': 'Start',
+  'drive.confirm.cancel': 'Cancel',
+  'drive.notStarted': 'Not driving.',
+  'drive.start': 'Start driving',
+  'drive.status.ready': 'Ready: use the pad or the keys to drive {part}.',
+  'drive.status.driving': "You're driving {part}",
+  'drive.status.requesting': 'Asking to drive {part}…',
+  'drive.status.drivenBy': 'Driven by {holder}',
+  'drive.status.estopHint': 'Release the e-stop on the taskbar when it is safe.',
+  'drive.takeOver': 'Take over',
+  'drive.pad.label': 'Drive pad',
+  'drive.pad.help': 'Drag to drive. Let go to stop.',
+  'drive.turn.label': 'Turn',
+  'drive.speed.label': 'Speed limit',
+  'drive.speed.value': '{percent} %',
+  'drive.stop': 'Stop',
+  'drive.stop.title': 'Engage the e-stop: everything that moves stops',
+  'drive.keys': '<b>W A S D</b> or the arrows drive, <b>Q E</b> turn, <b>Space</b> stops.',
+  'drive.keys.noSlide':
+    '<b>W S</b> or up and down drive, <b>A D</b> or <b>Q E</b> turn, <b>Space</b> stops.',
+  'drive.keys.motor': '<b>W S</b> or up and down drive the motor, <b>Space</b> stops.',
+
+  // Velocity gauges (Drive window and the drive base viewer)
+  'twist.label': 'Velocity',
+  'twist.forward': 'Forward',
+  'twist.sideways': 'Sideways',
+  'twist.turn': 'Turn',
+  'twist.motor': 'Speed',
+  'twist.commanded': 'Commanded',
+  'twist.measured': 'Measured',
+  'twist.bumped': 'Bumped into something',
+
+  // Drive base viewer
+  'base.waiting': 'Waiting for the first reading from <code>{address}</code>…',
+  'base.drivenBy': 'Driven by {holder}',
+  'base.free': 'Nobody is driving it.',
+  'base.drive': 'Drive',
+
+  // Distance viewer
+  'distance.waiting': 'Waiting for the first reading from <code>{address}</code>…',
+  'distance.status.ok': 'Measuring',
+  'distance.status.tooClose': 'Too close: nearer than it can measure',
+  'distance.status.tooFar': 'Too far: nothing within its range',
+  'distance.status.noTarget': 'No target',
+  'distance.status.error': 'The sensor reports an error',
+  'distance.bar.label': 'Distance',
+  'distance.plot.label': 'The last {seconds} seconds',
+  'distance.range': 'Range {min} to {max}',
+
+  // E-stop (taskbar)
+  'estop.stop': 'Stop',
+  'estop.stop.title': 'Stop everything that moves (Pause/Break)',
+  'estop.engaged': 'Stopped',
+  'estop.engaged.detail': 'The e-stop is engaged: {reason}',
+  'estop.release': 'Release',
+  'estop.release.title': 'Release the e-stop?',
+  'estop.release.body':
+    'Parts can move again once it is released. Check that nothing and nobody is in the way.',
+  'estop.release.confirm': 'Release',
+  'estop.release.cancel': 'Keep stopped',
+  'estop.reason.taskbar': 'Stop button on the taskbar',
+  'estop.reason.key': 'Pause/Break key',
+  'estop.reason.drive': 'Stop button in the Drive window',
 
   // ---- Files, the file picker, Properties -------------------------------------------------------
 

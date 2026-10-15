@@ -1,11 +1,14 @@
 import type { WindowDef } from '../components/windowDefs';
 import { t } from '../lib/i18n';
 import AboutWindow from './AboutWindow.svelte';
+import DistanceWindow from './DistanceWindow.svelte';
+import DriveWindow from './DriveWindow.svelte';
 import FilesWindow from './FilesWindow.svelte';
 import LaserScanWindow from './LaserScanWindow.svelte';
 import LogsWindow from './LogsWindow.svelte';
 import NotesWindow from './NotesWindow.svelte';
 import PartsWindow from './PartsWindow.svelte';
+import PlanarBaseWindow from './PlanarBaseWindow.svelte';
 import PropertiesWindow from './PropertiesWindow.svelte';
 import SerialMonitorWindow from './SerialMonitorWindow.svelte';
 import SettingsWindow from './SettingsWindow.svelte';
@@ -45,6 +48,56 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 560, h: 560 },
     minSize: { w: 300, h: 300 },
     component: LaserScanWindow,
+  },
+  {
+    kind: 'distance',
+    get title() {
+      return t('programs.distance.title');
+    },
+    get description() {
+      return t('programs.distance.description');
+    },
+    icon: 'distance',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 440, h: 360 },
+    minSize: { w: 300, h: 280 },
+    component: DistanceWindow,
+  },
+  {
+    kind: 'planar-base',
+    get title() {
+      return t('programs.planarBase.title');
+    },
+    get description() {
+      return t('programs.planarBase.description');
+    },
+    icon: 'base',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 480, h: 340 },
+    minSize: { w: 320, h: 280 },
+    component: PlanarBaseWindow,
+  },
+  {
+    kind: 'drive',
+    get title() {
+      return t('programs.drive.title');
+    },
+    get description() {
+      return t('programs.drive.description');
+    },
+    icon: 'drive',
+    menu: 'tools',
+    program: 'tool:drive',
+    onDesktop: true,
+    colour: 'drive',
+    multiple: false,
+    defaultSize: { w: 600, h: 540 },
+    minSize: { w: 340, h: 360 },
+    component: DriveWindow,
   },
   {
     kind: 'serial-monitor',
