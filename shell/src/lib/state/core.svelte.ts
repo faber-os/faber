@@ -28,12 +28,22 @@ import type {
   BackupInfo,
   ClockFormat,
   StorageInfo,
+  Command,
+  CommandResult,
+  EstopStatus,
+  LeaseEndReason,
+  LeaseGrant,
+  LeaseInfo,
+  Pattern,
+  Simulation,
 } from './types';
+import { canMove } from './driving';
+import type { Result } from './result';
 
 export const LOG_CAPACITY = 1000;
 const LOG_FLUSH_MS = 50;
 
-export type Result<T> = { ok: true; value: T } | { ok: false; error: ErrorBody };
+export type { Result } from './result';
 
 export interface CoreDeps {
   http: CoreHttp;
@@ -89,6 +99,17 @@ export class CoreState {
   translationProblems = $derived(this.machineTranslations.filter((m) => m.problem));
   /** The newest error that belonged to no window. */
   lastError = $state.raw<ErrorBody | null>(null);
+  /** Who drives what, live from the `leases` topic (docs/api.md, "Driving"). */
+  leases = $state.raw<LeaseInfo[]>([]);
+  /** The e-stop, live from its topic; `null` until the core has said. */
+  estop = $state.raw<EstopStatus | null>(null);
+  /** Parts with something that moves (a `planar-base@1` or `motor@1`). */
+  movableParts = $derived((this.parts ?? []).filter(canMove));
+  /**
+   * D46: Faber asks once per session (this page) before anything moves the motors. It is not a
+   * setting yet; a switch to turn it off comes later.
+   */
+  drivingConfirmed = $state(false);
 
   readonly format: WireFormat;
 
@@ -102,6 +123,7 @@ export class CoreState {
   private stops: (() => void)[] = [];
   private wantedLanguage = 'en';
   private readonly fileWatchers = new Set<(folders: string[]) => void>();
+  private readonly leaseEndWatchers = new Set<(l: LeaseInfo, reason: LeaseEndReason) => void>();
 
   constructor(deps: CoreDeps) {
     this.http = deps.http;
@@ -162,6 +184,28 @@ export class CoreState {
           onMessage: (m) => {
             if (m.type !== 'files-changed') return;
             for (const w of [...this.fileWatchers]) w(m.folders);
+          },
+        },
+      ),
+      s.subscribe(
+        { kind: 'leases' },
+        {
+          onMessage: (m) => {
+            if (m.type === 'leases') this.leases = m.leases;
+            else if (m.type === 'lease-granted')
+              this.leases = [...this.leases.filter((l) => l.part !== m.lease.part), m.lease];
+            else if (m.type === 'lease-ended') {
+              this.leases = this.leases.filter((l) => l.part !== m.lease.part);
+              for (const w of [...this.leaseEndWatchers]) w(m.lease, m.reason);
+            }
+          },
+        },
+      ),
+      s.subscribe(
+        { kind: 'estop' },
+        {
+          onMessage: (m) => {
+            if (m.type === 'estop') this.estop = m.status;
           },
         },
       ),
@@ -331,6 +375,63 @@ export class CoreState {
         onError: handlers.onError,
       },
     );
+  }
+
+  /** The lease that covers `part`: on the part itself, or on a base built from it. */
+  leaseOn(part: string): LeaseInfo | null {
+    return this.leases.find((l) => l.part === part || l.locks.includes(part)) ?? null;
+  }
+
+  /** Called with every lease that ends, anyone's, and why. Returns a stop function. */
+  watchLeaseEnds(onEnd: (lease: LeaseInfo, reason: LeaseEndReason) => void): () => void {
+    this.leaseEndWatchers.add(onEnd);
+    return () => this.leaseEndWatchers.delete(onEnd);
+  }
+
+  requestLease(part: string, holder: string, takeOver = false): Promise<Result<LeaseGrant>> {
+    return this.call(() => this.http.requestLease(part, holder, takeOver));
+  }
+  renewLease(part: string, lease: string): Promise<Result<LeaseGrant>> {
+    return this.call(() => this.http.renewLease(part, lease));
+  }
+  releaseLease(part: string, lease: string): Promise<Result<void>> {
+    return this.call(() => this.http.releaseLease(part, lease));
+  }
+  command(part: string, lease: string, command: Command): Promise<Result<CommandResult>> {
+    return this.call(() => this.http.command(part, lease, command));
+  }
+
+  /**
+   * Engages the e-stop. The shell shows it engaged at once; the core never refuses it, so only a
+   * core that can't be reached undoes that (and says so).
+   */
+  async engageEstop(reason: string): Promise<Result<EstopStatus>> {
+    const before = this.estop;
+    this.estop = { ...(before ?? {}), engaged: true };
+    const r = await this.call(() => this.http.engageEstop(reason));
+    if (r.ok) this.estop = r.value;
+    else {
+      this.estop = before;
+      this.lastError = r.error;
+    }
+    return r;
+  }
+
+  async releaseEstop(): Promise<Result<EstopStatus>> {
+    const r = await this.call(() => this.http.releaseEstop());
+    if (r.ok) this.estop = r.value;
+    return r;
+  }
+
+  confirmDriving(): void {
+    this.drivingConfirmed = true;
+  }
+
+  getSimulation(part: string): Promise<Result<Simulation>> {
+    return this.call(() => this.http.getSimulation(part));
+  }
+  putSimulation(part: string, pattern: Pattern): Promise<Result<Simulation>> {
+    return this.call(() => this.http.putSimulation(part, pattern));
   }
 
   openSerial(port: string, baud: number, handlers: SerialHandlers): SerialSession {

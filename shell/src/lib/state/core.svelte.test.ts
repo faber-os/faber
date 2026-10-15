@@ -174,7 +174,7 @@ describe('CoreState', () => {
     expect(core.connection).toBe('reconnecting');
   });
 
-  it('subscribes to parts, ports, logs, settings and files on start', () => {
+  it('subscribes to parts, ports, logs, settings, files, leases and the e-stop on start', () => {
     const { ws } = setup();
     expect(sentTopics(ws).map((m) => m.topic?.kind)).toEqual([
       'parts',
@@ -182,6 +182,8 @@ describe('CoreState', () => {
       'logs',
       'settings',
       'files',
+      'leases',
+      'estop',
     ]);
   });
 
@@ -407,5 +409,109 @@ describe('the language (D44)', () => {
     await core.useLanguage('en');
     await slow;
     expect(locale.language).toBe('en');
+  });
+});
+
+describe('CoreState driving', () => {
+  const lease = (part: string, holder: string, deadlineUs = 1) => ({
+    part,
+    holder,
+    deadlineUs,
+    locks: [],
+  });
+
+  function topic(ws: FakeWebSocket, kind: string) {
+    return sentTopics(ws).find((m) => m.topic?.kind === kind)!.id;
+  }
+
+  it('keeps who drives what from the leases topic', () => {
+    const { core, ws } = setup();
+    const id = topic(ws, 'leases');
+    expect(core.leases).toEqual([]);
+    ws.receive(bin({ type: 'leases', id, leases: [lease('base', 'drive-square.py')] }));
+    expect(core.leases.map((l) => l.holder)).toEqual(['drive-square.py']);
+    ws.receive(bin({ type: 'lease-granted', id, lease: lease('arm', 'Drive window') }));
+    expect(core.leases.map((l) => l.part)).toEqual(['base', 'arm']);
+    ws.receive(bin({ type: 'lease-ended', id, lease: lease('base', 'x'), reason: 'released' }));
+    expect(core.leases.map((l) => l.part)).toEqual(['arm']);
+  });
+
+  it('tells lease watchers every lease that ends, with the reason', () => {
+    const { core, ws } = setup();
+    const ended: string[] = [];
+    const stop = core.watchLeaseEnds((l, reason) => ended.push(`${l.part}:${reason}`));
+    const id = topic(ws, 'leases');
+    ws.receive(bin({ type: 'lease-ended', id, lease: lease('base', 'x'), reason: 'estop' }));
+    stop();
+    ws.receive(bin({ type: 'lease-ended', id, lease: lease('base', 'x'), reason: 'expired' }));
+    expect(ended).toEqual(['base:estop']);
+  });
+
+  it('finds the lease that covers a part, also through a base built from it', () => {
+    const { core, ws } = setup();
+    const id = topic(ws, 'leases');
+    ws.receive(
+      bin({
+        type: 'leases',
+        id,
+        leases: [{ part: 'base', holder: 'p.py', deadlineUs: 1, locks: ['left'] }],
+      }),
+    );
+    expect(core.leaseOn('base')?.holder).toBe('p.py');
+    expect(core.leaseOn('left')?.holder).toBe('p.py');
+    expect(core.leaseOn('front')).toBeNull();
+  });
+
+  it('keeps the e-stop state from its topic', () => {
+    const { core, ws } = setup();
+    expect(core.estop).toBeNull();
+    const id = topic(ws, 'estop');
+    const engagedBy = { tUs: 1, engaged: true, source: 'shell', reason: 'Stop button' };
+    ws.receive(bin({ type: 'estop', id, status: { engaged: true, engagedBy } }));
+    expect(core.estop).toEqual({ engaged: true, engagedBy });
+    ws.receive(bin({ type: 'estop', id, status: { engaged: false } }));
+    expect(core.estop?.engaged).toBe(false);
+  });
+
+  it('engages the e-stop at once, before the core answers', async () => {
+    const { core } = setup();
+    f.route({ method: 'POST', path: '/api/v0/estop', body: { engaged: true } });
+    const done = core.engageEstop('Stop button');
+    expect(core.estop?.engaged).toBe(true);
+    expect((await done).ok).toBe(true);
+    expect(f.calls.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/api/v0/estop',
+      body: { reason: 'Stop button', source: 'shell' },
+    });
+  });
+
+  it('releases the e-stop and keeps what the core answered', async () => {
+    const { core } = setup();
+    f.route({ method: 'POST', path: '/api/v0/estop/release', body: { engaged: false } });
+    const r = await core.releaseEstop();
+    expect(r.ok).toBe(true);
+    expect(core.estop).toEqual({ engaged: false });
+  });
+
+  it('knows which parts can move', () => {
+    const { core, ws } = setup();
+    const base: PartInfo = {
+      ...demo,
+      name: 'base',
+      connector: 'generic-planar-base',
+      signals: [{ address: 'base/planar-base', capability: 'planar-base@1' }],
+    };
+    ws.receive(bin({ type: 'parts', id: topic(ws, 'parts'), parts: [demo] }));
+    expect(core.movableParts).toEqual([]);
+    ws.receive(bin({ type: 'parts', id: topic(ws, 'parts'), parts: [demo, base] }));
+    expect(core.movableParts.map((p) => p.name)).toEqual(['base']);
+  });
+
+  it('asks before driving once per session', () => {
+    const { core } = setup();
+    expect(core.drivingConfirmed).toBe(false);
+    core.confirmDriving();
+    expect(core.drivingConfirmed).toBe(true);
   });
 });

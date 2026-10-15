@@ -238,3 +238,84 @@ describe('settings', () => {
     expect(f.calls[0]!.body).toEqual({ fullMachineFiles: true, acknowledgedRisk: true });
   });
 });
+
+describe('driving', () => {
+  const grant = {
+    lease: 'L1',
+    part: 'base',
+    holder: 'Drive window',
+    deadlineUs: 9,
+    durationMs: 250,
+    locks: [],
+  };
+  const stopped = { engaged: false };
+
+  it('requests, renews and releases a lease, escaping the part and the id', async () => {
+    const f = fakeFetch([
+      { method: 'POST', path: '/api/v0/parts/my%20base/lease', status: 201, body: grant },
+      { method: 'POST', path: '/api/v0/parts/my%20base/lease/renew', body: grant },
+      { method: 'DELETE', path: '/api/v0/parts/my%20base/lease?lease=L%2B1', status: 204 },
+    ]);
+    const http = createHttp(f.fetch);
+    expect(await http.requestLease('my base', 'Drive window')).toEqual(grant);
+    expect(await http.requestLease('my base', 'Drive window', true)).toEqual(grant);
+    expect(await http.renewLease('my base', 'L1')).toEqual(grant);
+    await expect(http.releaseLease('my base', 'L+1')).resolves.toBeUndefined();
+    expect(f.calls.map((c) => c.body)).toEqual([
+      { holder: 'Drive window' },
+      { holder: 'Drive window', takeOver: true },
+      { lease: 'L1' },
+      undefined,
+    ]);
+  });
+
+  it('lists the leases', async () => {
+    const leases = [{ part: 'base', holder: 'x', deadlineUs: 1, locks: [] }];
+    const f = fakeFetch([{ path: '/api/v0/leases', body: leases }]);
+    expect(await createHttp(f.fetch).getLeases()).toEqual(leases);
+  });
+
+  it('sends a command with its lease and returns what was applied', async () => {
+    const command = {
+      capability: 'planar-base@1',
+      command: { kind: 'set-velocity', vx: 0.2, vy: 0, omega: 0 },
+    } as const;
+    const result = { applied: command, clamped: false, deadlineUs: 10 };
+    const f = fakeFetch([{ method: 'POST', path: '/api/v0/parts/base/command', body: result }]);
+    expect(await createHttp(f.fetch).command('base', 'L1', command)).toEqual(result);
+    expect(f.calls[0]!.body).toEqual({ lease: 'L1', command });
+  });
+
+  it('engages, reads and releases the e-stop, saying the shell did it', async () => {
+    const engaged = {
+      engaged: true,
+      engagedBy: { tUs: 1, engaged: true, source: 'shell', reason: 'Stop button' },
+    };
+    const f = fakeFetch([
+      { method: 'POST', path: '/api/v0/estop', body: engaged },
+      { path: '/api/v0/estop', body: engaged },
+      { method: 'POST', path: '/api/v0/estop/release', body: stopped },
+    ]);
+    const http = createHttp(f.fetch);
+    expect(await http.engageEstop('Stop button')).toEqual(engaged);
+    expect(await http.getEstop()).toEqual(engaged);
+    expect(await http.releaseEstop()).toEqual(stopped);
+    expect(f.calls.map((c) => c.body)).toEqual([
+      { reason: 'Stop button', source: 'shell' },
+      undefined,
+      { source: 'shell' },
+    ]);
+  });
+
+  it('gets and puts a manual part simulation', async () => {
+    const sim = { pattern: { kind: 'steady', value: 1.5 } } as const;
+    const f = fakeFetch([
+      { path: '/api/v0/parts/front/simulation', body: sim },
+      { method: 'PUT', path: '/api/v0/parts/front/simulation', body: sim },
+    ]);
+    const http = createHttp(f.fetch);
+    expect(await http.getSimulation('front')).toEqual(sim);
+    expect(await http.putSimulation('front', sim.pattern)).toEqual(sim);
+    expect(f.calls[1]!.body).toEqual(sim);
+  });
+});

@@ -305,6 +305,21 @@ export const en = {
   'partState.invalid': 'Invalid',
   'partState.stopped': 'Stopped',
 
+  // ---- Driving: the Drive window, the e-stop, simulated parts ----------------------------------
+
+  // Why a lease ended (lib/state/driving.ts)
+  'drive.ended.released': 'You stopped driving {part}.',
+  'drive.ended.expired':
+    'The connection was too slow, so {part} stopped to be safe. Drive again to carry on.',
+  'drive.ended.estop': 'Stopped by the e-stop.',
+  'drive.ended.takenOver': 'Someone else took over {part}.',
+  'drive.ended.partRemoved': '{part} was removed.',
+  'drive.ended.partRestarted':
+    '{part} restarted because its settings changed. Drive again once it is running.',
+  'drive.ended.partFailed': '{part} stopped working. Parts says what went wrong.',
+  'drive.ended.shutdown': 'The Faber core is shutting down, so everything stopped.',
+  'drive.ended.unknown': 'Driving {part} ended.',
+
   // ---- Files, the file picker, Properties -------------------------------------------------------
 
   // Window and tab titles
