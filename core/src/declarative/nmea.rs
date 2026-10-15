@@ -130,13 +130,14 @@ fn degrees(s: &str, deg_digits: usize, what: &str) -> Result<f64, String> {
 
 /// Puts GGA, RMC and GSA together. GPS modules send RMC before GGA for the same second, so a GGA
 /// takes the speed and course of the RMC with the same time. A module that sends no GGA at all
-/// gets a reading from each RMC instead.
+/// (two RMCs in a row) gets a reading from each RMC instead.
 #[derive(Default)]
 pub struct Assembler {
     last_rmc: Option<Rmc>,
     /// From the latest GSA: whether the fix is 2D or 3D.
     mode: Option<u8>,
-    seen_gga: bool,
+    /// RMCs since the last GGA.
+    rmc_without_gga: u32,
 }
 
 impl Assembler {
@@ -149,12 +150,13 @@ impl Assembler {
             }
             Sentence::Other => None,
             Sentence::Rmc(rmc) => {
-                let reading = (!self.seen_gga).then(|| self.rmc_reading(t_us, &rmc));
+                self.rmc_without_gga = self.rmc_without_gga.saturating_add(1);
+                let reading = (self.rmc_without_gga >= 2).then(|| self.rmc_reading(t_us, &rmc));
                 self.last_rmc = Some(rmc);
                 reading
             }
             Sentence::Gga(gga) => {
-                self.seen_gga = true;
+                self.rmc_without_gga = 0;
                 Some(self.gga_reading(t_us, &gga))
             }
         }
@@ -292,15 +294,8 @@ mod tests {
         let mut a = Assembler::default();
         assert_eq!(
             push(&mut a, 1, "GPRMC,120000,A,5540.566,N,01234.100,E,1.0,90.0,151026,,"),
-            Some(Reading {
-                latitude_deg: 55.0 + 40.566 / 60.0,
-                longitude_deg: 12.0 + 34.1 / 60.0,
-                fix: Fix::Fix2d,
-                speed_m_s: Some(KNOT_M_S as f32),
-                course_rad: Some(90f32.to_radians()),
-                ..Reading::no_fix(1, 0)
-            }),
-            "before any GGA, an RMC is all there is"
+            None,
+            "the GGA of the same second follows"
         );
         assert_eq!(push(&mut a, 2, "GPGSA,A,3,,,,,,,,,,,,,2.0,1.0,1.7"), None);
         let r = push(&mut a, 3, "GPGGA,120000,5540.566,N,01234.100,E,1,07,1.0,12.5,M,41.0,M,,").unwrap();
@@ -316,6 +311,27 @@ mod tests {
     }
 
     #[test]
+    fn a_module_without_gga_gets_readings_from_rmc() {
+        let mut a = Assembler::default();
+        let rmc = |t: &str| format!("GPRMC,{t},A,5540.566,N,01234.100,E,1.0,90.0,151026,,");
+        assert_eq!(push(&mut a, 1, &rmc("120000")), None);
+        assert_eq!(
+            push(&mut a, 2, &rmc("120001")),
+            Some(Reading {
+                latitude_deg: 55.0 + 40.566 / 60.0,
+                longitude_deg: 12.0 + 34.1 / 60.0,
+                fix: Fix::Fix2d,
+                speed_m_s: Some(KNOT_M_S as f32),
+                course_rad: Some(90f32.to_radians()),
+                ..Reading::no_fix(2, 0)
+            }),
+            "two RMCs without a GGA: RMC is all there is, and without GSA 2D is the honest guess"
+        );
+        push(&mut a, 3, "GPGSA,A,3,,,,,,,,,,,,,2.0,1.0,1.7");
+        assert_eq!(push(&mut a, 4, &rmc("120002")).unwrap().fix, Fix::Fix3d);
+    }
+
+    #[test]
     fn no_fix_is_published_as_none() {
         let mut a = Assembler::default();
         let r = push(&mut a, 9, "GPGGA,120000,,,,,0,03,,,M,,M,,").unwrap();
@@ -323,6 +339,7 @@ mod tests {
         let r = push(&mut a, 10, "GPGGA,120000,5540.566,N,01234.100,E,6,03,,,M,,M,,").unwrap();
         assert_eq!(r.fix, Fix::None, "dead reckoning is not a measured position");
         let mut a = Assembler::default();
-        assert_eq!(push(&mut a, 1, "GPRMC,120000,V,,,,,,,151026,,").unwrap().fix, Fix::None);
+        push(&mut a, 1, "GPRMC,120000,V,,,,,,,151026,,");
+        assert_eq!(push(&mut a, 2, "GPRMC,120001,V,,,,,,,151026,,").unwrap().fix, Fix::None);
     }
 }
