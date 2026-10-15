@@ -238,3 +238,14 @@ fn a_scan_in_the_apartment_sees_the_rooms_walls() {
     let hits = r.ranges.iter().filter(|x| x.is_finite()).count();
     assert!(hits > 400, "a closed apartment returns nearly every ray: {hits} of 450");
 }
+
+#[test]
+fn the_example_in_the_docs_is_a_valid_world() {
+    let doc = include_str!("../../../../docs/simulation.md");
+    let start =
+        doc.find("```toml\nname = \"garage\"").expect("docs/simulation.md has the garage example") + 8;
+    let end = start + doc[start..].find("```").unwrap();
+    let w = parse(&doc[start..end]).unwrap();
+    assert!(!w.world().collides(w.start, Footprint::SENNEP, 0.0));
+    assert!(search(&w, |_, d| d > 3.0), "SENNEP can drive more than 3 m in the garage");
+}
