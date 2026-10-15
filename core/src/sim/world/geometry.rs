@@ -9,14 +9,28 @@
 use faber_capabilities::Mount;
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, Mul, Neg, Sub};
+use ts_rs::TS;
 
 /// A point or a vector in the plane. Serialised as `[x, y]`, which keeps world files and the
 /// geometry the shell receives short.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(from = "[f64; 2]", into = "[f64; 2]")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, TS)]
+#[ts(as = "[f64; 2]")]
 pub struct Vec2 {
     pub x: f64,
     pub y: f64,
+}
+
+// By hand rather than `#[serde(from, into)]`, which ts-rs can't read.
+impl Serialize for Vec2 {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        [self.x, self.y].serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for Vec2 {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Vec2, D::Error> {
+        <[f64; 2]>::deserialize(d).map(Vec2::from)
+    }
 }
 
 impl From<[f64; 2]> for Vec2 {
@@ -92,7 +106,7 @@ impl Neg for Vec2 {
 
 /// A frame in the plane: where its origin is and which way its x axis points, relative to a
 /// parent frame. The machine's pose is a `Pose` in the world; a mount is a `Pose` in the machine.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct Pose {
     pub x: f64,
@@ -146,7 +160,7 @@ pub fn wrap_angle(angle: f64) -> f64 {
 }
 
 /// A straight piece of wall or of an obstacle's outline.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
 pub struct Segment {
     pub a: Vec2,
     pub b: Vec2,
@@ -193,7 +207,7 @@ pub fn ray_circle(origin: Vec2, dir: Vec2, centre: Vec2, radius: f64) -> Option<
 }
 
 /// An axis-aligned rectangle.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 pub struct Bounds {
     pub min: Vec2,
     pub max: Vec2,
@@ -238,7 +252,7 @@ impl Bounds {
 
 /// The machine's outline: a rectangle centred on the machine frame's origin, `length` along x
 /// (forward) and `width` along y.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
 pub struct Footprint {
     pub length: f64,
     pub width: f64,

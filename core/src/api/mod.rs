@@ -8,6 +8,7 @@ pub mod dto;
 mod files;
 mod shell;
 mod translations;
+mod world;
 mod ws;
 
 use crate::logs::LogBook;
@@ -39,6 +40,7 @@ pub fn router(state: AppState) -> Router {
         .merge(files::routes())
         .merge(driving::routes())
         .merge(translations::routes())
+        .merge(world::routes())
         .fallback(shell::serve)
         .with_state(state)
 }

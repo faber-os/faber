@@ -40,6 +40,8 @@ const SERVER_TYPE_LIST: Record<ServerMessage['type'], true> = {
   'lease-granted': true,
   'lease-ended': true,
   estop: true,
+  world: true,
+  'world-changed': true,
   error: true,
 };
 const SERVER_TYPES = new Set<string>(Object.keys(SERVER_TYPE_LIST));

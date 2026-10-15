@@ -34,7 +34,7 @@ access, in Phase 6).
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
 | `GET /api/v0/parts` | `PartInfo[]` |
-| `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name`, `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: it needs a FaberLink bridge, Phase 4), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
+| `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name` (including `world`, the simulated world's own name), `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: it needs a FaberLink bridge, Phase 4), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
 | `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`). |
 
 `PartInfo` has `port` for a real part and `simulate` for a simulated one, never both.
@@ -69,10 +69,11 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `logs` | — | the recent log (up to 1000 entries) as `log` messages, then each new entry. Every new subscription gets the recent log again, so a client that reconnects should start its log view afresh. |
 | `leases` | — | a `leases` message with every live lease now, then `lease-granted` (`lease`) and `lease-ended` (`lease`, `reason`) as they happen. Lease ids are never sent here. If the client falls behind, it gets a fresh `leases` list. |
 | `estop` | — | an `estop` message (`status`: `engaged`, `engagedBy?`) now and on every engage and release. Every-message: none is lost. |
+| `world` | — | a `world` message 20 times a second for as long as the subscription lasts, and `world-changed` (`name`) whenever the world is switched. See [The simulated world](#the-simulated-world). |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
 `serial-opened`, `serial-data`, `serial-closed`, `leases`, `lease-granted`, `lease-ended`, `estop`,
-`error`. Each carries the `id` of the subscription
+`world`, `world-changed`, `error`. Each carries the `id` of the subscription
 or serial session it belongs to. `error` may come without an `id`.
 
 **Serial sessions**, step by step:
@@ -121,7 +122,7 @@ alive. When a lease ends for any reason, the part gets its **safe state** (stopp
 | `POST /api/v0/parts/{name}/lease/renew` | `{"lease": …}` → `200 LeaseGrant` with the new deadline. Errors: `403 lease-required`, `403 lease-ended`, `404 unknown-part` |
 | `DELETE /api/v0/parts/{name}/lease?lease=…` | `204`; the part gets its safe state. Errors: `403 lease-required`, `403 lease-ended`, `404 unknown-part` |
 | `GET /api/v0/leases` | `LeaseInfo[]`: who drives what (`part`, `holder`, `deadlineUs`, `locks`), without ids |
-| `POST /api/v0/parts/{name}/command` | `{"lease": …, "command": Command}` → `200 CommandResult` (`applied`, `clamped`, `deadlineUs`). Errors: `400 bad-command` (a capability or kind this part doesn't take, or a value that is not a number), `403 lease-required`, `403 lease-ended`, `404 unknown-part`, `409 part-not-ready` (not running now, or a world part waiting for the world), `423 estop-engaged` |
+| `POST /api/v0/parts/{name}/command` | `{"lease": …, "command": Command}` → `200 CommandResult` (`applied`, `clamped`, `deadlineUs`). Errors: `400 bad-command` (a capability or kind this part doesn't take, or a value that is not a number), `403 lease-required`, `403 lease-ended`, `404 unknown-part`, `409 part-not-ready` (not running now, or a second world base the world refused), `423 estop-engaged` |
 
 A `Command` is tagged like a reading:
 `{"capability": "planar-base@1", "command": {"kind": "set-velocity", "vx": 0.2, "vy": 0, "omega": 0}}`
@@ -155,7 +156,43 @@ its acceleration limit).
 
 A distance reading outside the sensor's range is reported as `too-close` / `too-far` at the edge
 of the range; a manual `laser-scan` is a ring of points at the value. `simulate = "world"` parts
-are `degraded` ("Waiting for the world") until this core has a world engine.
+get their values from [the simulated world](#the-simulated-world).
+
+## The simulated world
+
+The design is [simulation.md](simulation.md), section 7. Every `simulate = "world"` part lives in
+one 2D world, which moves on 50 times a second on the core's clock while any world part runs:
+
+- The **world base** (the one `planar-base` with `simulate = "world"`) is the machine. Its
+  footprint is its `length` × `width` settings. It drives with its latest command (lease-checked
+  and clamped like any command), changing speed no faster than its `max-accel`, and publishes
+  `commanded`, `measured` (the velocity it really has) and `bumped` (it stopped short because the
+  next step would have hit something; it never passes through). Its safe state, after a lease
+  ends or the e-stop, is a zero command, so it **ramps** to a stop within its acceleration limit.
+- World **`laser-scan`** parts raycast one revolution from their `mount` at the connector's rate
+  and range (the LD19: 450 points, 10 Hz, 0.02–12 m, about 1 cm of noise). World **`distance`**
+  parts cast their cone (`min-m`, `max-m`, `fov-rad`) and report the nearest hit, at `rate-hz`
+  (10 by default). Without a world base the machine stands at the start, so sensors alone still
+  see the room. A world part with another capability (a motor) is `degraded` and says so.
+- The machine's **ground truth** is the signal `world/pose` (`pose@1`, frame `world`), for as
+  long as any world part runs. A part can't be called `world` for that reason.
+
+The world comes from `[world]` in parts.toml: `name` (one of `GET /api/v0/worlds`) and an
+optional `start = { x, y, yaw }` (m and rad, world frame: x east, y north); without `start` the
+world's own start is used. Without `[world]`, world parts are in the `empty` world (the log says
+so once). An unknown `name` is a config error with its line, like any other. Changing `[world]`,
+by hand or with `PUT /api/v0/world`, rebuilds the world with the machine at rest at its start.
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/worlds` | `WorldInfo[]`: `name`, `title`, `description`, `size` (`[east–west, north–south]` in m), in menu order |
+| `GET /api/v0/world` | `WorldView`: the current world's `name`, `title`, `description`, `start` (`Pose`: `x`, `y`, `yaw`), `geometry` and `footprint?` (`length`, `width`; absent until a world base exists). `geometry`: `bounds` (`min`, `max`), `open` (rays may escape), `walls` (`Segment[]`: `a`, `b`), `shapes` (solid polygons: `label?`, `points`), `overhead` (drawn only: table tops), `movers` (`label?`, `radius`, `speed`, `path`, `offset`: they loop their path). Points are `[x, y]` in m. |
+| `PUT /api/v0/world` | `{"name": …, "start"?: {"x", "y", "yaw"}}` → `200 WorldView`. Writes `[world]` in parts.toml, keeping its comments; without `start`, any old one goes. Errors: `400 unknown-world` (the hint lists them), `400 start-outside-world`, `400 bad-request`, `409 config-broken` (parts.toml has a problem to fix first) |
+| `POST /api/v0/world/reset` | `204`: the machine is back at its start, at rest. A lease keeps driving it from there. |
+
+A `world` message: `pose` (`x`, `y`, `yaw`: world frame), `velocity` (`vx`, `vy`, `omega`:
+machine frame), `bumped`, `movers` (`[{x, y, radius}]`, where each moving obstacle is now) and
+`tUs` (when the world last moved on, core clock).
 
 ## Files
 

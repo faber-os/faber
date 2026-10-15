@@ -41,6 +41,9 @@ pub async fn upgrade(
 /// How many messages may wait for a slow client before subscriptions pause.
 const OUTBOX: usize = 64;
 
+/// The `world` topic's rate: 20 times a second (docs/simulation.md, section 7).
+const WORLD_EVERY: Duration = Duration::from_millis(50);
+
 fn encode(msg: &dto::ServerMessage, format: Format) -> Message {
     match format {
         Format::Msgpack => {
@@ -446,6 +449,34 @@ fn subscribe(
                         Err(_) => return,
                     };
                     if out.send(dto::ServerMessage::Estop { id, status }).await.is_err() {
+                        return;
+                    }
+                }
+            }))
+        }
+        dto::Topic::World => {
+            let machine = Arc::clone(&state.machine);
+            let mut changes = machine.world_events();
+            Ok(tokio::spawn(async move {
+                let mut every = tokio::time::interval(WORLD_EVERY);
+                every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    let msg = tokio::select! {
+                        _ = every.tick() => convert::world_message(id, machine.world_state()),
+                        changed = changes.recv() => match changed {
+                            Ok(c) => dto::ServerMessage::WorldChanged { id, name: c.name },
+                            // Missed some switches: say which world it is now.
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                let m = Arc::clone(&machine);
+                                let Ok(view) = tokio::task::spawn_blocking(move || m.world()).await else {
+                                    return;
+                                };
+                                dto::ServerMessage::WorldChanged { id, name: view.world.name }
+                            }
+                            Err(_) => return,
+                        },
+                    };
+                    if out.send(msg).await.is_err() {
                         return;
                     }
                 }

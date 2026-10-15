@@ -8,6 +8,7 @@
 
 use crate::sim::world::{Bounds, Geometry, Mover, Pose, Segment, Shape, Vec2, World};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Every prebuilt world: its name and its file.
 pub const FILES: &[(&str, &str)] = &[
@@ -48,7 +49,8 @@ impl Prebuilt {
 }
 
 /// One entry of `GET /api/v0/worlds`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct WorldInfo {
     pub name: String,
     pub title: String,
