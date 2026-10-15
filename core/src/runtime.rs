@@ -12,12 +12,14 @@ use crate::clock::SharedClock;
 use crate::names::{PartName, SignalAddress};
 use crate::ports::{PortEntry, PortEvent, PortOpener, spawn_reader};
 use crate::router::{PublishError, Router};
-use faber_capabilities::Reading;
-use faber_connector::{Connector, Context, Definition, Health, Manifest, Problem, Settings};
+use faber_capabilities::{Command, Reading};
+use faber_connector::{
+    Applied, CommandError, Connector, Context, Definition, Health, Manifest, Problem, Settings,
+};
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -129,15 +131,37 @@ pub struct RunDeps {
     pub timing: Timing,
 }
 
+/// How long a command may wait for the part's thread (it is busy at most one connector call).
+const COMMAND_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// What the part's thread waits for: bytes from its port, or a command.
+enum Event {
+    /// From the port reader of run number `.0`; older runs' events are stale and ignored.
+    Port(u64, PortEvent),
+    Command(Command, mpsc::SyncSender<Result<Applied, CommandError>>),
+}
+
 /// A running part. Stopping it (or dropping it) ends its thread and removes its signals.
 pub struct PartHandle {
+    name: PartName,
     stop: Arc<AtomicBool>,
+    events: Sender<Event>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl PartHandle {
     pub fn stop(mut self) {
         self.shutdown();
+    }
+
+    /// Hands a command (already lease-checked and clamped) to the connector, on the part's own
+    /// thread, and waits for its answer. A part that isn't running answers `NotReady`.
+    pub fn command(&self, command: Command) -> Result<Applied, CommandError> {
+        let (reply, answer) = mpsc::sync_channel(1);
+        if self.events.send(Event::Command(command, reply)).is_err() {
+            return Err(not_running(&self.name));
+        }
+        answer.recv_timeout(COMMAND_TIMEOUT).unwrap_or_else(|_| Err(not_running(&self.name)))
     }
 
     fn shutdown(&mut self) {
@@ -158,11 +182,21 @@ impl Drop for PartHandle {
 pub fn start(spec: RunSpec, deps: RunDeps) -> PartHandle {
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
+    let (events, inbox) = mpsc::channel();
+    let thread_events = events.clone();
+    let name = spec.name.clone();
     let thread = std::thread::Builder::new()
         .name(format!("part:{}", spec.name))
-        .spawn(move || supervise(spec, deps, thread_stop))
+        .spawn(move || supervise(spec, deps, thread_stop, thread_events, inbox))
         .expect("spawn part thread");
-    PartHandle { stop, thread: Some(thread) }
+    PartHandle { name, stop, events, thread: Some(thread) }
+}
+
+fn not_running(name: &PartName) -> CommandError {
+    CommandError::NotReady(Problem::new(
+        format!("\"{name}\" isn't running right now, so it can't take commands."),
+        "Check its state in Parts; it takes commands again as soon as it runs.",
+    ))
 }
 
 /// The connector's view of the core while it runs.
@@ -223,14 +257,18 @@ fn connector_bug(what: &str) -> Problem {
     )
 }
 
-/// Sleeps for `d`, waking early if `stop` is set. Returns false if stopped.
-fn wait(d: Duration, stop: &AtomicBool) -> bool {
+/// Waits for `d`, waking early if `stop` is set. Commands that arrive meanwhile are answered
+/// "not running" at once, so none is applied late. Returns false if stopped.
+fn wait(d: Duration, stop: &AtomicBool, inbox: &Receiver<Event>, name: &PartName) -> bool {
     let until = Instant::now() + d;
     while Instant::now() < until {
         if stop.load(Ordering::Relaxed) {
             return false;
         }
-        std::thread::sleep((until - Instant::now()).min(Duration::from_millis(20)));
+        let left = (until - Instant::now()).min(Duration::from_millis(20));
+        if let Ok(Event::Command(_, reply)) = inbox.recv_timeout(left) {
+            let _ = reply.send(Err(not_running(name)));
+        }
     }
     !stop.load(Ordering::Relaxed)
 }
@@ -241,7 +279,13 @@ enum RunEnd {
     Crashed(Problem),
 }
 
-fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>) {
+fn supervise(
+    spec: RunSpec,
+    deps: RunDeps,
+    stop: Arc<AtomicBool>,
+    events: Sender<Event>,
+    inbox: Receiver<Event>,
+) {
     let addresses: Vec<SignalAddress> = spec
         .manifest
         .provides
@@ -260,7 +304,9 @@ fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>) {
     }
     let mut crashes = 0u32;
     let mut port_backoff = deps.timing.backoff_start;
+    let mut run = 0u64;
     while !stop.load(Ordering::Relaxed) {
+        run += 1;
         deps.status.set(&spec.name, PartStatus::Starting);
         let connector = match (spec.create)(&spec.settings) {
             Ok(c) => c,
@@ -276,7 +322,7 @@ fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>) {
             }
         };
         let started = Instant::now();
-        let end = run_once(&spec, &deps, connector, &stop);
+        let end = run_once(&spec, &deps, connector, &stop, (run, &events, &inbox));
         if started.elapsed() >= deps.timing.healthy_after {
             crashes = 0;
         }
@@ -306,7 +352,7 @@ fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>) {
                 deps.timing.backoff_start * 2u32.pow(crashes - 1)
             }
         };
-        if !wait(pause, &stop) {
+        if !wait(pause, &stop, &inbox, &spec.name) {
             break;
         }
     }
@@ -320,6 +366,7 @@ fn run_once(
     deps: &RunDeps,
     mut connector: Box<dyn Connector>,
     stop: &Arc<AtomicBool>,
+    (run, events, inbox): (u64, &Sender<Event>, &Receiver<Event>),
 ) -> RunEnd {
     let baud = match spec.manifest.port {
         faber_connector::PortRequirement::Serial { baud } => baud,
@@ -334,10 +381,14 @@ fn run_once(
             ));
         }
     };
-    let (tx, rx) = mpsc::channel();
+    let tx = events.clone();
     let reader_stop = Arc::new(AtomicBool::new(false));
-    let reader_thread =
-        spawn_reader(reader, Arc::clone(&deps.clock), move |e| tx.send(e).is_ok(), Arc::clone(&reader_stop));
+    let reader_thread = spawn_reader(
+        reader,
+        Arc::clone(&deps.clock),
+        move |e| tx.send(Event::Port(run, e)).is_ok(),
+        Arc::clone(&reader_stop),
+    );
     let mut ctx = PartContext {
         part: &spec.name,
         manifest: &spec.manifest,
@@ -350,24 +401,32 @@ fn run_once(
         if stop.load(Ordering::Relaxed) {
             break RunEnd::Stopped;
         }
-        let event = rx.recv_timeout(next_tick.saturating_duration_since(Instant::now()));
+        let event = inbox.recv_timeout(next_tick.saturating_duration_since(Instant::now()));
         let call = match event {
-            Ok(PortEvent::Data { t_us, bytes }) => {
+            Ok(Event::Port(r, PortEvent::Data { t_us, bytes })) if r == run => {
                 catch_unwind(AssertUnwindSafe(|| connector.on_bytes(&mut ctx, t_us, &bytes)))
             }
-            Ok(PortEvent::Closed { reason }) => {
+            Ok(Event::Port(r, PortEvent::Closed { reason })) if r == run => {
                 break RunEnd::PortFailed(Problem::new(
                     format!("{} stopped working: {reason}", spec.port.label),
                     "Check the cable and the power. Faber reconnects as soon as the port is back.",
                 ));
             }
-            Err(RecvTimeoutError::Timeout) => Ok(()),
-            Err(RecvTimeoutError::Disconnected) => {
+            Ok(Event::Port(..)) => Ok(()), // from an earlier run
+            Ok(Event::Command(command, reply)) => {
+                let result = catch_unwind(AssertUnwindSafe(|| connector.command(&mut ctx, command)));
+                let answer = result.as_ref().map_err(|_| not_running(&spec.name)).and_then(|r| r.clone());
+                let _ = reply.send(answer);
+                result.map(|_| ())
+            }
+            Err(RecvTimeoutError::Timeout) if reader_thread.is_finished() => {
                 break RunEnd::PortFailed(Problem::new(
                     format!("{} stopped working.", spec.port.label),
                     "Check the cable and the power. Faber reconnects as soon as the port is back.",
                 ));
             }
+            Err(RecvTimeoutError::Timeout) => Ok(()),
+            Err(RecvTimeoutError::Disconnected) => unreachable!("the part's thread holds a sender itself"),
         };
         if Instant::now() >= next_tick && call.is_ok() {
             let now = deps.clock.now_us();
@@ -384,7 +443,6 @@ fn run_once(
         }
     };
     reader_stop.store(true, Ordering::Relaxed);
-    drop(rx);
     let _ = reader_thread.join();
     end
 }
@@ -403,7 +461,7 @@ mod tests {
     use super::*;
     use crate::clock::MonotonicClock;
     use crate::ports::{PortId, PortKind, PortReader, PortWriter};
-    use faber_capabilities::{Capability, laser_scan};
+    use faber_capabilities::{Capability, laser_scan, motor};
     use faber_connector::{PortRequirement, Provide, SettingsError};
     use std::io;
     use std::sync::atomic::AtomicU32;
@@ -479,6 +537,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Takes commands: `set-duty` 0.5 is applied as 0.25, `set-duty` 1.0 panics.
+    struct Driver;
+    impl Connector for Driver {
+        fn on_bytes(&mut self, ctx: &mut dyn Context, _: u64, _: &[u8]) {
+            ctx.set_health(Health::Running);
+        }
+        fn command(&mut self, _: &mut dyn Context, command: Command) -> Result<Applied, CommandError> {
+            match command {
+                Command::Motor(motor::Command::SetDuty { duty }) if duty >= 1.0 => panic!("bad duty"),
+                Command::Motor(motor::Command::SetDuty { duty }) => {
+                    Ok(Applied { command: Command::Motor(motor::Command::SetDuty { duty: duty / 2.0 }) })
+                }
+                _ => Err(CommandError::Unsupported),
+            }
+        }
+    }
+
+    fn create_driver(_: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
+        Ok(Box::new(Driver))
     }
 
     fn create_echo(s: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
@@ -593,6 +672,58 @@ mod tests {
         assert!(p.hint.contains("Simulated"), "{p:?}");
         assert_eq!(opener.opens.load(Ordering::SeqCst), 0);
         assert!(d.router.subscribe(&SignalAddress::new(name(), "laser-scan")).is_none());
+    }
+
+    fn duty(d: f32) -> Command {
+        Command::Motor(motor::Command::SetDuty { duty: d })
+    }
+
+    #[test]
+    fn commands_reach_the_connector_on_its_own_thread() {
+        let d = deps(Arc::new(FakeOpener::new(vec![vec![1]])));
+        let mut sp = spec(Settings::new());
+        sp.create = create_driver;
+        let h = start(sp, d.clone());
+        wait_for(&d.status, |s| *s == PartStatus::Running);
+        assert_eq!(
+            h.command(duty(0.5)),
+            Ok(Applied { command: duty(0.25) }),
+            "the connector says what it applied"
+        );
+        let stop = Command::Motor(motor::Command::STOP);
+        assert_eq!(h.command(stop), Err(CommandError::Unsupported));
+        h.stop();
+    }
+
+    #[test]
+    fn a_command_that_crashes_the_connector_is_answered_and_the_part_restarts() {
+        let opener = Arc::new(FakeOpener::new(vec![vec![1]]));
+        let d = deps(Arc::clone(&opener));
+        let mut sp = spec(Settings::new());
+        sp.create = create_driver;
+        let h = start(sp, d.clone());
+        wait_for(&d.status, |s| *s == PartStatus::Running);
+        assert!(matches!(h.command(duty(1.0)), Err(CommandError::NotReady(_))));
+        let start_wait = Instant::now();
+        while opener.opens.load(Ordering::SeqCst) < 2 {
+            assert!(start_wait.elapsed() < Duration::from_secs(2), "restarted after the crash");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_part_that_is_not_running_answers_commands_at_once() {
+        let mut o = FakeOpener::new(vec![]);
+        o.fail_to_open = true;
+        let d = deps(Arc::new(o));
+        let mut sp = spec(Settings::new());
+        sp.create = create_driver;
+        let h = start(sp, d.clone());
+        wait_for(&d.status, |s| matches!(s, PartStatus::Failed(_)));
+        let t = Instant::now();
+        let Err(CommandError::NotReady(p)) = h.command(duty(0.1)) else { panic!("refused") };
+        assert!(p.message.contains("isn't running"), "{p:?}");
+        assert!(t.elapsed() < COMMAND_TIMEOUT, "answered while waiting to retry, not timed out");
     }
 
     #[test]
