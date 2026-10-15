@@ -4,7 +4,8 @@
   import { useDesktop } from '../components/desktopController.svelte';
   import { download, openFolder, openInNotes } from '../components/fileOps';
   import { entryIcon } from '../components/fileLook';
-  import { formatBytes, formatModified } from '../components/format';
+  import { formatBytes } from '../components/format';
+  import { formatDateTime } from '../lib/desktop/wallClock';
   import Icon from '../components/Icon.svelte';
   import type { WindowProps } from '../components/windowDefs';
 
@@ -16,7 +17,9 @@
   const p = $derived(win.params);
   const isFile = $derived(p.kind === 'file');
   const replay = $derived(isFile ? replayPortFor(p.path ?? '') : null);
-  const modified = $derived(p.modifiedMs ? formatModified(Number(p.modifiedMs)) : '');
+  const modified = $derived(
+    p.modifiedMs ? formatDateTime(Number(p.modifiedMs), core.wallClock) : '',
+  );
   const where = $derived(p.path ? parentPath(p.path) : null);
 
   function addPart() {

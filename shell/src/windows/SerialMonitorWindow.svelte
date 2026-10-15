@@ -2,6 +2,7 @@
   import { useCore } from '../lib/state/context';
   import { portAvailability } from '../lib/state/portHints';
   import { defaultRecordingName, validateRecordingName } from '../lib/state/recordingName';
+  import { wallParts } from '../lib/desktop/wallClock';
   import {
     ByteLog,
     bytesToText,
@@ -114,7 +115,7 @@
   }
 
   function startNaming() {
-    recName = defaultRecordingName(new Date());
+    recName = defaultRecordingName(wallParts(Date.now(), core.wallClock));
     recTouched = false;
     rec = 'naming';
   }

@@ -20,6 +20,9 @@ pub struct SystemInfo {
     /// The core's monotonic clock right now (µs). Readings use the same clock.
     #[ts(type = "number")]
     pub time_us: u64,
+    /// The machine's own IANA time zone, e.g. `Europe/Copenhagen` (`UTC` if the OS doesn't say).
+    /// Wall-clock times are shown in it unless the settings pick another (D42).
+    pub time_zone: String,
     /// Set when parts.toml can't be read. Then no parts run and the shell must show this.
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -408,6 +411,8 @@ pub enum SpecialFolder {
     Desktop,
     Documents,
     Recordings,
+    /// Where backups are made (`POST /api/v0/backups`).
+    Backups,
     /// Shows the machine config. Saving there is validated first.
     System,
     Trash,
@@ -468,10 +473,71 @@ pub struct PathsRequest {
     pub paths: Vec<String>,
 }
 
+/// `GET /api/v0/about`: what a helper asks first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AboutInfo {
+    pub version: String,
+    /// The API fingerprint, as in `SystemInfo`.
+    pub api: String,
+    /// Where Faber keeps its config and files on this computer.
+    pub data_folder: String,
+    /// Seconds since the core started.
+    #[ts(type = "number")]
+    pub uptime_s: u64,
+    /// The operating system, e.g. `Debian GNU/Linux 13 (trixie) (aarch64)`.
+    pub os: String,
+    /// The machine's own IANA time zone.
+    pub time_zone: String,
+}
+
+/// `GET /api/v0/storage`: what the home folder's big folders use, and the data folder's disk.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct StorageInfo {
+    #[ts(type = "number")]
+    pub recordings_bytes: u64,
+    #[ts(type = "number")]
+    pub documents_bytes: u64,
+    #[ts(type = "number")]
+    pub desktop_bytes: u64,
+    #[ts(type = "number")]
+    pub backups_bytes: u64,
+    /// Space Faber can still use on the data folder's disk.
+    #[ts(type = "number")]
+    pub free_bytes: u64,
+    /// The size of that disk.
+    #[ts(type = "number")]
+    pub total_bytes: u64,
+}
+
+/// Body of `POST /api/v0/backups`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BackupRequest {
+    /// Also back up `home:/Recordings` (they can be big).
+    #[serde(default)]
+    pub include_recordings: bool,
+}
+
+/// Answer of `POST /api/v0/backups`: the new backup.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BackupInfo {
+    /// e.g. `home:/Backups/faber-backup-2026-10-15-1430.zip`
+    pub path: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+}
+
 // Settings types live in `crate::settings` (layer 2 owns its data); re-exported for the wire.
 pub use crate::settings::{
-    Appearance, DesktopLayout, DeveloperChange, DeveloperSettings, IconPosition, Settings, Taskbar,
-    TaskbarSize, Theme,
+    Accessibility, Appearance, ClockFormat, DesktopLayout, DeveloperChange, DeveloperSettings, IconPosition,
+    LengthUnit, Preference, Settings, Taskbar, TaskbarSize, TextSize, Theme, TimeSettings, Units,
 };
 
 #[cfg(test)]

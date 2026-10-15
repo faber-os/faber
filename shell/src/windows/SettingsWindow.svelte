@@ -10,6 +10,11 @@
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
   import type { WindowDef, WindowProps } from '../components/windowDefs';
+  import AboutSection from './settings/AboutSection.svelte';
+  import AccessibilitySection from './settings/AccessibilitySection.svelte';
+  import StorageSection from './settings/StorageSection.svelte';
+  import TimeSection from './settings/TimeSection.svelte';
+  import UnitsSection from './settings/UnitsSection.svelte';
 
   let { win }: WindowProps = $props();
 
@@ -17,16 +22,34 @@
   const desktop = useDesktop();
   const CONFIRM_WORD = 'machine';
 
-  /** The sidebar, in groups; each item scrolls to its section. */
+  /**
+   * The sidebar, in groups (D40); each item scrolls to its section. Only what is built is
+   * listed: no empty "coming later" sections.
+   */
   const NAV = [
     {
       group: 'You',
       items: [
         { id: 'appearance', label: 'Appearance', icon: 'sun' },
+        { id: 'accessibility', label: 'Accessibility', icon: 'access' },
+        { id: 'units', label: 'Units', icon: 'ruler' },
         { id: 'desktop', label: 'Desktop and taskbar', icon: 'taskbar' },
       ],
     },
-    { group: 'Advanced', items: [{ id: 'developer', label: 'Developer', icon: 'warning' }] },
+    {
+      group: 'This machine',
+      items: [
+        { id: 'time', label: 'Date and time', icon: 'clock' },
+        { id: 'storage', label: 'Storage and backups', icon: 'archive' },
+      ],
+    },
+    {
+      group: 'Advanced',
+      items: [
+        { id: 'about', label: 'About and diagnostics', icon: 'info' },
+        { id: 'developer', label: 'Developer', icon: 'warning' },
+      ],
+    },
   ] as const;
   type SectionId = (typeof NAV)[number]['items'][number]['id'];
 
@@ -85,7 +108,8 @@
     current = id;
     const el = scroller?.querySelector(`#${win.id}-${id}`);
     // Not every browser engine has it (the test DOM doesn't); the sidebar still marks the section.
-    el?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    const reduce = document.documentElement.dataset.motion === 'reduce';
+    el?.scrollIntoView?.({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
   }
 
   // Opened at one section (the taskbar's "Taskbar settings…"): go there once the page is drawn.
@@ -242,6 +266,9 @@
         </fieldset>
       </section>
 
+      <AccessibilitySection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
+      <UnitsSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
+
       <section id="{win.id}-desktop" aria-labelledby="{win.id}-desktop-h">
         <h3 id="{win.id}-desktop-h">Desktop and taskbar</h3>
         <div class="row">
@@ -291,6 +318,10 @@
           </ul>
         </fieldset>
       </section>
+
+      <TimeSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
+      <StorageSection winId={win.id} />
+      <AboutSection winId={win.id} />
 
       <section id="{win.id}-developer" aria-labelledby="{win.id}-developer-h">
         <h3 id="{win.id}-developer-h">Developer</h3>
@@ -374,7 +405,8 @@
   }
   .side {
     flex: none;
-    width: 190px;
+    /* In rem, so it grows with Settings → Accessibility → Text size. */
+    width: 12.5rem;
     padding: var(--space-4) var(--space-2);
     border-right: 1px solid var(--line);
     background: var(--surface-2);
@@ -451,36 +483,40 @@
     gap: var(--space-6);
     padding: var(--space-5);
   }
-  section {
+  /* Shared with the section components in ./settings/, hence :global inside the scroller. */
+  .scroll :global(section) {
     display: grid;
     gap: var(--space-4);
     scroll-margin-top: var(--space-4);
+    min-width: 0;
   }
-  h3 {
+  .scroll :global(section > h3) {
     font-size: var(--text-xl);
     font-weight: 700;
     letter-spacing: -0.01em;
   }
-  .intro {
+  .scroll :global(.intro) {
     margin-top: calc(var(--space-2) * -1);
     font-size: var(--text-sm);
     color: var(--text-muted);
   }
-  .row {
+  .scroll :global(.row) {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-4);
+    gap: var(--space-3) var(--space-4);
     padding-bottom: var(--space-4);
     border-bottom: 1px solid var(--line);
   }
-  .text {
+  .scroll :global(.row > .text) {
+    flex: 1 1 16rem;
     min-width: 0;
   }
-  .name {
+  .scroll :global(.name) {
     font-weight: 650;
   }
-  .desc {
+  .scroll :global(.desc) {
     font-size: var(--text-sm);
     color: var(--text-muted);
   }

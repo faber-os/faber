@@ -40,7 +40,8 @@
   } from '../components/fileOps';
   import { SPECIALS, fileLook } from '../components/fileLook';
   import { FolderView } from '../components/folderView.svelte';
-  import { formatBytes, formatModified } from '../components/format';
+  import { formatBytes } from '../components/format';
+  import { formatDateTime } from '../lib/desktop/wallClock';
   import Icon, { type IconName } from '../components/Icon.svelte';
   import { menuTrigger, useMenu } from '../components/menuController.svelte';
 
@@ -809,7 +810,7 @@
                           e.size,
                         )}{/if}
                     </span>
-                    <span class="meta num">{formatModified(e.modifiedMs)}</span>
+                    <span class="meta num">{formatDateTime(e.modifiedMs, core.wallClock)}</span>
                   {/if}
                 </li>
               {/each}
@@ -841,7 +842,7 @@
                 {/if}
                 {#if current.modifiedMs !== undefined}
                   <dt>Modified</dt>
-                  <dd class="num">{formatModified(current.modifiedMs)}</dd>
+                  <dd class="num">{formatDateTime(current.modifiedMs, core.wallClock)}</dd>
                 {/if}
                 {#if replay}
                   <dt>Port</dt>

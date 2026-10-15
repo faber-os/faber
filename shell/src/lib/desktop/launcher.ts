@@ -1,3 +1,5 @@
+import { formatClockTime, wallParts, type WallClock, type WallParts } from './wallClock';
+
 /**
  * The start menu's logic: searching programs, parts and recent files, the recent-files list,
  * and the power menu.
@@ -134,19 +136,22 @@ export function powerActions(canPower: boolean): PowerAction[] {
   return [a('restart', 'Restart machine'), a('shutdown', 'Shut down machine')];
 }
 
-/** "10:02" today, "Yesterday", or a date. */
-export function recentWhen(at: number, now: number): string {
-  const d = new Date(at);
-  const today = new Date(now);
-  const sameDay = (x: Date, y: Date) =>
-    x.getFullYear() === y.getFullYear() &&
-    x.getMonth() === y.getMonth() &&
-    x.getDate() === y.getDate();
-  if (sameDay(d, today)) {
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  }
-  const y = new Date(now);
-  y.setDate(y.getDate() - 1);
-  if (sameDay(d, y)) return 'Yesterday';
-  return `${d.getDate()}-${d.getMonth() + 1}-${d.getFullYear()}`;
+/** "10:02" today, "Yesterday", or a date: in the machine's time zone (D42). */
+export function recentWhen(at: number, now: number, wc: WallClock): string {
+  const d = wallParts(at, wc);
+  const today = wallParts(now, wc);
+  const sameDay = (x: WallParts, y: WallParts) =>
+    x.year === y.year && x.month === y.month && x.day === y.day;
+  if (sameDay(d, today)) return formatClockTime(at, wc);
+  // The calendar day before today, counted from noon so a daylight-saving change can't skip it.
+  const noonToday = Date.UTC(today.year, today.month - 1, today.day, 12);
+  const y = new Date(noonToday - 24 * 3600 * 1000);
+  const yesterday = {
+    ...today,
+    year: y.getUTCFullYear(),
+    month: y.getUTCMonth() + 1,
+    day: y.getUTCDate(),
+  };
+  if (sameDay(d, yesterday)) return 'Yesterday';
+  return `${d.day}-${d.month}-${d.year}`;
 }

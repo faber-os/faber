@@ -273,7 +273,7 @@
           <button class="row compact" role="menuitem" onclick={() => openRecent(f)}>
             <FileIcon type={fileType({ kind: 'file', name: f.name })} size={26} />
             <span class="text"><span class="name">{f.name}</span></span>
-            <span class="when">{recentWhen(f.at, Date.now())}</span>
+            <span class="when">{recentWhen(f.at, Date.now(), core.wallClock)}</span>
           </button>
         {:else}
           <p class="nothing">Files you open show up here.</p>

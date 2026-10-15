@@ -2,6 +2,7 @@ import { getContext, setContext } from 'svelte';
 import type { StorageLike } from '../lib/desktop/geometryStore';
 import { parseThemePreference, resolveTheme, type ThemePreference } from '../lib/desktop/theme';
 import { resolveStyle, styleTokens } from '../lib/desktop/styles';
+import { prefers, type Preference } from '../lib/desktop/accessibility';
 
 const STORAGE_KEY = 'faber.theme';
 /** The last style's colours, both themes, for index.html to paint with before the shell runs. */
@@ -17,13 +18,24 @@ export class ThemeController {
   systemDark = $state(false);
   /** '' until the settings have said; the colours are Aluminium's meanwhile. */
   style = $state('');
+  /** Settings → Accessibility → Higher contrast. */
+  contrast = $state<Preference>('system');
+  /** The screen asks for more contrast (`prefers-contrast: more`). */
+  systemMoreContrast = $state(false);
   resolved = $derived(resolveTheme(this.preference, this.systemDark));
+  boosted = $derived(prefers(this.contrast, this.systemMoreContrast));
   /** Every colour token of the current style and theme, as CSS custom properties. */
-  tokens = $derived(styleTokens(resolveStyle(this.style), this.resolved));
+  tokens = $derived(
+    styleTokens(resolveStyle(this.style), this.resolved, this.boosted ? 'more' : 'normal'),
+  );
 
   private readonly storage: StorageLike | null;
 
-  constructor(storage: StorageLike | null, media: MediaQueryList | null) {
+  constructor(
+    storage: StorageLike | null,
+    media: MediaQueryList | null,
+    contrastMedia: MediaQueryList | null = null,
+  ) {
     this.storage = storage;
     try {
       this.preference = parseThemePreference(storage?.getItem(STORAGE_KEY) ?? null);
@@ -33,6 +45,13 @@ export class ThemeController {
     if (media) {
       this.systemDark = media.matches;
       media.addEventListener('change', (e) => (this.systemDark = e.matches));
+    }
+    if (contrastMedia) {
+      this.systemMoreContrast = contrastMedia.matches;
+      contrastMedia.addEventListener('change', (e) => {
+        this.systemMoreContrast = e.matches;
+        this.rememberTokens();
+      });
     }
   }
 
@@ -47,9 +66,25 @@ export class ThemeController {
     const style = resolveStyle(id);
     if (style.id === this.style) return;
     this.style = style.id;
+    this.rememberTokens();
+  }
+
+  setContrast(pref: Preference): void {
+    if (pref === this.contrast) return;
+    this.contrast = pref;
+    this.rememberTokens();
+  }
+
+  /** Both versions of the style, as they look now, for index.html's first paint. */
+  private rememberTokens(): void {
+    const style = resolveStyle(this.style);
+    const level = prefers(this.contrast, this.systemMoreContrast) ? 'more' : 'normal';
     this.remember(
       TOKENS_KEY,
-      JSON.stringify({ light: styleTokens(style, 'light'), dark: styleTokens(style, 'dark') }),
+      JSON.stringify({
+        light: styleTokens(style, 'light', level),
+        dark: styleTokens(style, 'dark', level),
+      }),
     );
   }
 

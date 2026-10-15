@@ -10,16 +10,20 @@
   } from './components/desktopController.svelte';
   import { MenuController, provideMenu } from './components/menuController.svelte';
   import { provideTheme, ThemeController } from './components/theme.svelte';
+  import { DisplayPrefs } from './components/display.svelte';
   import { WINDOW_DEFS, WINDOW_KINDS } from './windows/registry';
   import { taskbarHeight } from './lib/desktop/taskbar';
 
   const core = createCore();
   const storage = browserStorage();
   const desktop = new DesktopController(WINDOW_KINDS, storage, viewport());
+  const media = (query: string) => window.matchMedia?.(query) ?? null;
   const theme = new ThemeController(
     storage,
-    window.matchMedia?.('(prefers-color-scheme: dark)') ?? null,
+    media('(prefers-color-scheme: dark)'),
+    media('(prefers-contrast: more)'),
   );
+  const display = new DisplayPrefs(media('(prefers-reduced-motion: reduce)'));
   provideCore(core);
   provideDesktop(desktop);
   provideTheme(theme);
@@ -36,11 +40,21 @@
     if (!core.settings) return;
     theme.setPreference(core.settings.appearance.theme);
     theme.setStyle(core.settings.appearance.style);
+    theme.setContrast(core.settings.accessibility.higherContrast);
+    display.set(core.settings.accessibility);
     desktop.setTaskbarHeight(taskbarHeight(core.settings.taskbar.size));
   });
 
   $effect(() => {
     document.documentElement.dataset.theme = theme.resolved;
+  });
+
+  // Accessibility (D40): base.css turns animations off under data-motion="reduce", and every
+  // size is in rem, so the root font size scales all text.
+  $effect(() => {
+    const root = document.documentElement;
+    root.dataset.motion = display.reduceMotion ? 'reduce' : 'full';
+    root.style.fontSize = display.fontSize;
   });
 
   // The style's colours, set on the page root. Until the settings arrive, index.html's copy of

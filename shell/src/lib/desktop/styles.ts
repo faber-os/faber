@@ -113,11 +113,22 @@ function ok({ l, c, h }: Oklch, alpha?: number): string {
     : `oklch(${n(l)} ${n(c)} ${n(h)} / ${n(alpha)})`;
 }
 
+/** `more`: Settings → Accessibility → Higher contrast. */
+export type ContrastLevel = 'normal' | 'more';
+
 /**
  * Every colour token of one style in one theme, as CSS custom properties (`--surface` …).
  * Status colours (ok, warn, danger, info) are not part of a style: they mean the same everywhere.
+ *
+ * With `more` contrast, text, lines, the focus ring and accent text move further from the
+ * backgrounds (styles.test.ts holds them to a stricter bar); the backgrounds stay, so every style
+ * still looks like itself.
  */
-export function styleTokens(style: StyleSpec, theme: ThemeName): Record<string, string> {
+export function styleTokens(
+  style: StyleSpec,
+  theme: ThemeName,
+  level: ContrastLevel = 'normal',
+): Record<string, string> {
   const h = style.greyHue;
   // Backgrounds take the full tint; text only a little of it, so it stays crisp.
   const bg = (l: number, c: number, a?: number) => ok({ l, c: c * style.greyTint, h }, a);
@@ -194,6 +205,33 @@ export function styleTokens(style: StyleSpec, theme: ThemeName): Record<string, 
           '--focus-ring': at(0.02, 0.005),
           '--scan-origin': at(0),
         };
+
+  if (level === 'more') {
+    const clampL = (l: number) => Math.min(0.96, Math.max(0.2, l));
+    const ink = (dl: number) => ok({ l: clampL(A.l + dl), c: A.c, h: A.h });
+    Object.assign(
+      tokens,
+      theme === 'light'
+        ? {
+            '--text': fg(0.15, 0.006),
+            '--text-muted': fg(0.3, 0.01),
+            '--text-faint': fg(0.42, 0.01),
+            '--line': bg(0.72, 0.006),
+            '--line-strong': bg(0.52, 0.008),
+            '--accent-ink': ink(-0.13),
+            '--focus-ring': ink(-0.07),
+          }
+        : {
+            '--text': fg(0.985, 0.002),
+            '--text-muted': fg(0.88, 0.005),
+            '--text-faint': fg(0.78, 0.005),
+            '--line': bg(0.5, 0.005),
+            '--line-strong': bg(0.64, 0.006),
+            '--accent-ink': ink(0.14),
+            '--focus-ring': ink(0.1),
+          },
+    );
+  }
 
   tokens['--plate'] = PLATE[theme];
   for (const [name, colours] of Object.entries(APP_COLOURS)) {

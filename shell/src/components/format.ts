@@ -1,9 +1,5 @@
-/** 14:05:09.123 in local time, for log lines. */
-export function formatLogTime(epochMs: number): string {
-  const d = new Date(epochMs);
-  const p = (n: number, w = 2) => String(n).padStart(w, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
-}
+// Wall-clock times (log times, file dates, the clock) live in lib/desktop/wallClock.ts, so they
+// can follow the machine's time zone.
 
 /** Core-clock seconds, used before the core's clock is known: "t+12.345 s". */
 export function formatCoreTime(tUs: number): string {
@@ -17,17 +13,7 @@ export function formatRate(hz: number | null): string {
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MiB`;
-}
-
-/** "15 Oct 2026, 10:30" in the browser's language; '' when the core didn't say. */
-export function formatModified(ms: number | undefined, locale?: string): string {
-  if (ms === undefined) return '';
-  return new Intl.DateTimeFormat(locale, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(ms));
+  if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(1)} MiB`;
+  if (n < 1024 ** 4) return `${(n / 1024 ** 3).toFixed(1)} GiB`;
+  return `${(n / 1024 ** 4).toFixed(1)} TiB`;
 }

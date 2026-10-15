@@ -19,6 +19,11 @@ clap = { version = "4.6.7", features = ["derive"] }
 faber-capabilities = { version = "0.1.0", path = "../sdk/rust/capabilities", features = ["typescript"] }
 faber-connector = { version = "0.1.0", path = "../sdk/rust/connector" }
 futures-util = "0.3.34"
+# Free and total space on the data folder's disk (GET /api/v0/storage). Only its statvfs is used.
+fs4 = { version = "1.1.0", default-features = false }
+# The machine's IANA time zone (GET /api/v0/system).
+# Wall-clock time in an IANA zone: backup names and checking the time-zone setting.
+jiff = "0.2.38"
 ldrobot-ld19 = { version = "0.1.0", path = "../connectors/ldrobot-ld19" }
 rmp-serde = "1.3.1"
 rust-embed = { version = "8.13.0", optional = true, features = ["debug-embed"] }
@@ -27,12 +32,14 @@ serde_bytes = "0.11.19"
 serde_json = "1.0.154"
 serialport = "4.10.1"
 thiserror = "2.0.21"
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal", "fs", "io-util"] }
 toml = "1.1.8"
 toml_edit = "0.25.17"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ts-rs = { version = "12.0.1", features = ["serde-json-impl"] }
+# Backups (POST /api/v0/backups). Deflate only, in pure Rust.
+zip = { version = "9.0.3", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [features]
 # Compiles the built shell (shell/dist) into the binary, debug builds too (`debug-embed`): a

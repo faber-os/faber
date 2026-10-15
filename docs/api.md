@@ -12,6 +12,11 @@ access, in Phase 6).
 
 - Field names are **camelCase**. Enum values are **kebab-case** (`usb-serial`, `port-claimed`).
 - Times are µs on the core's monotonic clock (`tUs`). `GET /api/v0/system` gives the current value.
+- **Units are SI, always** (D06, D43): metres, radians, seconds (µs for timestamps). The shell's
+  units setting (metric/imperial, degrees/radians) only changes what the shell *shows*; it converts
+  in one place (`shell/src/lib/viewers/units.ts`). The API, recordings and apps never change units,
+  so capabilities stay comparable. Wall-clock times are milliseconds since 1970 (UTC); the shell
+  shows them in the machine's time zone (D42).
 - **Errors** (any non-2xx status) always have this body, so the shell can show *what happened* and
   *what to try* (docs/principles.md):
 
@@ -23,7 +28,8 @@ access, in Phase 6).
 
 | Method and path | Body / result |
 |---|---|
-| `GET /api/v0/system` | `SystemInfo`. Its `api` is a fingerprint of the API types the core was built with (`core/build.rs`); the shell computes its own the same way and, when they differ, asks for the core to be restarted instead of failing request by request. |
+| `GET /api/v0/system` | `SystemInfo`. Its `api` is a fingerprint of the API types the core was built with (`core/build.rs`); the shell computes its own the same way and, when they differ, asks for the core to be restarted instead of failing request by request. `timeZone` is the machine's own IANA time zone (e.g. `Europe/Copenhagen`), read from its OS each time; `UTC` (with a log line) if the OS doesn't say. |
+| `GET /api/v0/about` | `AboutInfo`: `version`, `api` (the fingerprint), `dataFolder` (where config and files live on this computer), `uptimeS` (seconds since the core started), `os`, `timeZone` (the machine's own). |
 | `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run |
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
@@ -98,7 +104,7 @@ Paths are `<root>:/<path>` with `/` separators, e.g. `home:/Desktop/notes.txt`. 
 
 | Root | What | Available |
 |---|---|---|
-| `home` | Faber's home folder: `Desktop`, `Documents`, `Recordings`, `System`, `Trash` (fixed folders, `special` in listings) | always |
+| `home` | Faber's home folder: `Desktop`, `Documents`, `Recordings`, `Backups`, `System`, `Trash` (fixed folders, `special` in listings) | always |
 | `disk-<name>` | A connected USB stick or SD card, e.g. `disk-e:/` (Windows drive E:) or `disk-sennep-sd:/` (Linux `/media/<user>/SENNEP SD`). `<name>` is lowercase letters, digits and single dashes. | while it is plugged in; the core looks every port scan (2 s) |
 | `machine` | The whole computer (`machine:/` lists drives on Windows, `/` on Linux) | only with the developer setting `fullMachineFiles` on |
 
@@ -106,7 +112,7 @@ Paths are `<root>:/<path>` with `/` separators, e.g. `home:/Desktop/notes.txt`. 
 |---|---|
 | `GET /api/v0/files/roots` | `FileRoot[]`: home, then connected disks (their `label`, e.g. "SENNEP SD (E:)"), then `machine` if on |
 | `GET /api/v0/files/list?path=…` | `FolderListing`. Folders first, then files, by name. |
-| `GET /api/v0/files/content?path=…` | The raw bytes. `&download=1` adds `Content-Disposition: attachment`. |
+| `GET /api/v0/files/content?path=…` | The raw bytes, up to 16 MB (for Notes and previews; bigger files answer `too-large`). With `&download=1` it streams the file of any size as an attachment, keeping non-ASCII names (`filename*`). |
 | `PUT /api/v0/files/content?path=…` | Raw bytes as the body: creates or overwrites the file → `204`. Max 16 MB. `&mode=create` refuses with `409 already-exists` instead of overwriting (uploads). |
 | `POST /api/v0/files/folder` | `PathRequest` → `201` |
 | `POST /api/v0/files/move` | `MoveRequest`: rename or move → `204` |
@@ -136,16 +142,72 @@ Rules the core enforces (never the shell):
 File error codes: `bad-path`, `not-found`, `already-exists`, `protected`, `not-a-folder`,
 `not-a-file`, `too-large`, `config-invalid`, `machine-files-off`, `no-trash`, `io-error`.
 
+## Storage and backups
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/storage` | `StorageInfo`: bytes used by `home:/Recordings`, `Documents`, `Desktop` and `Backups` (`recordingsBytes` …), and `freeBytes` / `totalBytes` of the disk that holds the data folder. |
+| `POST /api/v0/backups` | `BackupRequest` `{includeRecordings}` → `201 BackupInfo` `{path, bytes}`. Errors: `507 disk-full` (checked before anything is written), `500 io-error`. |
+| `POST /api/v0/backups/restore` | `PathRequest` with a `.zip` in the home folder → `204`. Errors: `400 bad-path` (not in home), `404 not-found`, `422 backup-invalid`, `422 config-invalid` (with the line), `507 disk-full`. |
+
+A backup (D41) is `home:/Backups/faber-backup-YYYY-MM-DD-HHMM.zip`, named after the minute it was
+made in the shown time zone (`time.timeZone`, else the machine's); a second one in the same minute
+gets ` (2)`. Inside, it is laid out like the data folder:
+
+```
+config/parts.toml
+config/settings.toml        (if the settings were ever changed)
+files/Desktop/…
+files/Documents/…
+files/Recordings/…          only with includeRecordings
+```
+
+**Restore checks everything before anything changes:** the zip must be a Faber backup
+(`config/parts.toml`, and nothing outside the folders above: `backup-invalid`), `parts.toml` must
+be valid (`config-invalid`, its message saying the line, exactly like saving it in Files),
+`settings.toml` must be readable, every name must be a safe path, and the files must fit on the
+disk. Then:
+
+- `parts.toml` is saved and applied at once (parts start or stop).
+- The settings are replaced, **except the developer settings**: a backup never turns
+  whole-machine files on. A time zone this machine doesn't know falls back to its own.
+- Files are put back where they were. A file that is already there with other contents is first
+  moved to the **Trash** (so nothing is lost); one with the same contents is left alone. Files that
+  aren't in the backup stay.
+- `settings` and `files-changed` (`home:/`) are announced, and restored recordings become replay
+  ports.
+
+Backups of any size can be downloaded with `GET /api/v0/files/content?path=…&download=1`, which
+streams from disk.
+
 ## Settings
 
 Stored in `config/settings.toml`. One `Settings` object, shared by every browser and the attached
-screen.
+screen. Every field has a default, so a settings.toml from an older Faber still loads.
 
 | Method and path | Body / result |
 |---|---|
 | `GET /api/v0/settings` | `Settings` |
-| `PUT /api/v0/settings` | `Settings` → `Settings`. `developer` must be unchanged (`use-developer-endpoint` otherwise). |
+| `PUT /api/v0/settings` | `Settings` → `Settings`. `developer` must be unchanged (`use-developer-endpoint` otherwise). `time.timeZone` must be empty or a zone the core knows (`invalid-time-zone`). |
 | `POST /api/v0/settings/developer` | `DeveloperChange` → `Settings`. Turning `fullMachineFiles` on needs `acknowledgedRisk: true` (`risk-not-acknowledged` otherwise). |
+| `POST /api/v0/settings/reset` | → `Settings`: every setting back to its default, **including** `developer` (whole-machine files off). Parts and files are not settings and stay. |
+
+| Field | Values (default first) | Notes |
+|---|---|---|
+| `appearance.theme` | `light`, `dark`, `system` | |
+| `appearance.style`, `appearance.wallpaper` | `aluminium`, … | |
+| `accessibility.reduceMotion` | `system`, `on`, `off` | `system` follows `prefers-reduced-motion` |
+| `accessibility.higherContrast` | `system`, `on`, `off` | `system` follows `prefers-contrast: more` |
+| `accessibility.textSize` | `"100"`, `"115"`, `"130"`, `"150"` | percent of the normal text size |
+| `units.length` | `metric`, `imperial` | display only (D43) |
+| `time.timeZone` | `""`, or an IANA zone | `""` = the machine's own (`SystemInfo.timeZone`) |
+| `time.clock` | `24h`, `12h` | |
+| `taskbar.size`, `taskbar.pinned`, `desktop.icons` | | |
+| `developer.fullMachineFiles` | `false`, `true` | only through `/settings/developer` |
+
+Reset is its own endpoint rather than a `PUT` of the defaults because the defaults live in one
+place (the core), and because reset must also turn whole-machine files off, which `PUT` refuses on
+purpose.
 
 The WebSocket topic `settings` sends the settings now and after every change.
 

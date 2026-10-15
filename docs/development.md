@@ -53,7 +53,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | 5 | `api` | HTTP + WebSocket. Translates between the wire and the machine. No logic of its own. |
 | 4 | `machine` | Ties everything together. The only place that changes what runs: it writes `parts.toml` first, then reconciles. |
 | 3 | `runtime`, `suggest` | Supervising parts, and detect-then-suggest. Built on layer 2. |
-| 2 | `config`, `connectors`, `logs`, `ports`, `router` | One job each. They don't know about HTTP or each other. |
+| 2 | `backup`, `config`, `connectors`, `disks`, `files`, `host`, `logs`, `ports`, `router`, `settings` | One job each. They don't know about HTTP or each other. |
 | 1 | `clock`, `names` | Small pure building blocks. |
 
 This is enforced by `core/tests/layers.rs`, which fails with the file and line of any import that
@@ -67,7 +67,7 @@ points up or sideways. Every module that does I/O does it behind a trait, so its
 | `src/lib/api/` | The only code that talks to the core (REST + WebSocket, MessagePack). Generated types live in `generated/`. | nothing from the UI |
 | `src/lib/state/` | App state as Svelte 5 runes (parts, ports, windows) | `api` |
 | `src/lib/desktop/` | Plain TypeScript logic for the desktop and its accessories (windows, icons, menus, file paths, the Notes document), no Svelte | nothing |
-| `src/lib/viewers/` | Canvas drawing for capability viewers, as pure functions | nothing |
+| `src/lib/viewers/` | Canvas drawing for capability viewers, and the display units (`units.ts`), as pure functions | nothing |
 | `src/components/`, `src/windows/` | Svelte UI | `state`, `desktop`, `viewers`, never `api` directly |
 
 ## Testing

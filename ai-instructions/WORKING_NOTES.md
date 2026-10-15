@@ -12,6 +12,8 @@
 - **The name:** only `Faber` / `faber` / `FABER` (CLAUDE.md rule 10). The GitHub org and npm scope are `faber-os`, because the bare names are taken.
 - **Light is the default theme** (Mikkel, 2026-10-15), as D31 said. An explicit `theme = "system"` in settings.toml still follows the screen.
 - **Shell/core mismatch:** a debug core used to read `shell/dist` from disk live, so an old running core served a new shell → 404s everywhere. Now `embed-shell` always embeds (`debug-embed`), and an API fingerprint makes any remaining mismatch (Vite dev + old core) show "Restart the Faber core".
+- **Settings batch 1 notes:** wall-clock text is always `en-GB` (English UI, D44), so 12-hour shows "2:30 pm". Restore checks everything first, then applies config, then files; a failing file write midway leaves config restored (not all-or-nothing). Larger text scales text and rem spacing, not px chrome (taskbar, icons, window min sizes). Diagnostics strip paths and Bluetooth names, but USB serial numbers can still show in port ids. The time-zone list comes from the browser (some legacy names). Angles setting removed until something shows an angle.
+- **Downloads** stream from disk with no size cap (`download=1`); inline reads stay capped at 16 MB for Notes. Download names keep non-ASCII letters (`filename*`).
 - **Settings proposal:** a separate session is researching what Settings should offer → `private/settings-proposal.md`.
 - **Signal style's red accent** sits close to the danger red used for delete. Kept for now; move it to orange if it confuses.
 - **Start menu shows all programs** (not its own pins): one pin system, the taskbar's (principle "one obvious way").

@@ -126,3 +126,50 @@ describe('styles', () => {
     expect(contrast(s.light, s.dark)).toBeGreaterThan(4);
   });
 });
+
+describe('higher contrast', () => {
+  const PAIRS: [string, string][] = [
+    ['--text', '--surface'],
+    ['--text', '--chrome'],
+    ['--text-muted', '--surface'],
+    ['--text-muted', '--surface-2'],
+    ['--text-muted', '--chrome-tabs'],
+    ['--text-faint', '--surface'],
+    ['--accent-ink', '--surface'],
+    ['--focus-ring', '--surface'],
+    ['--line-strong', '--surface'],
+  ];
+
+  describe.each(STYLES.flatMap((s) => THEMES.map((t) => [s.id, t] as const)))(
+    '%s, %s, with higher contrast',
+    (id, theme) => {
+      const normal = styleTokens(resolveStyle(id), theme);
+      const boosted = styleTokens(resolveStyle(id), theme, 'more');
+      const b = (name: string) => boosted[name]!;
+
+      it('has the same tokens as the normal version', () => {
+        expect(Object.keys(boosted).sort()).toEqual(Object.keys(normal).sort());
+      });
+
+      it('is never weaker than the normal version', () => {
+        for (const [fg, bg] of PAIRS) {
+          expect(contrast(b(fg), b(bg)), `${fg} on ${bg}`).toBeGreaterThanOrEqual(
+            contrast(normal[fg]!, normal[bg]!) - 1e-9,
+          );
+        }
+      });
+
+      it('meets the stricter bar: muted text 7:1, faint text and focus 4.5:1, lines 3:1', () => {
+        for (const bg of ['--surface', '--surface-2', '--surface-3', '--chrome', '--taskbar']) {
+          expect(contrast(b('--text'), b(bg)), bg).toBeGreaterThanOrEqual(12);
+          expect(contrast(b('--text-muted'), b(bg)), bg).toBeGreaterThanOrEqual(7);
+          expect(contrast(b('--text-faint'), b(bg)), bg).toBeGreaterThanOrEqual(4.5);
+        }
+        expect(contrast(b('--focus-ring'), b('--surface'))).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(b('--accent-ink'), b('--surface'))).toBeGreaterThanOrEqual(7);
+        expect(contrast(b('--line-strong'), b('--surface'))).toBeGreaterThanOrEqual(3);
+        expect(contrast(b('--accent-text'), b('--accent'))).toBeGreaterThanOrEqual(4.5);
+      });
+    },
+  );
+});

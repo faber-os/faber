@@ -23,6 +23,9 @@ function bin(msg: unknown): ArrayBuffer {
 
 const SETTINGS: Settings = {
   appearance: { theme: 'system', style: 'aluminium', wallpaper: 'aluminium' },
+  accessibility: { reduceMotion: 'system', higherContrast: 'system', textSize: '100' },
+  units: { length: 'metric' },
+  time: { timeZone: '', clock: '24h' },
   desktop: { icons: [] },
   taskbar: { pinned: ['tool:parts'], size: 'small' },
   developer: { fullMachineFiles: false },
@@ -30,7 +33,13 @@ const SETTINGS: Settings = {
 
 let f: FakeFetch;
 
-const SYSTEM = { name: 'Faber', version: '0.1.0', api: FABER_API, timeUs: 5_000_000 };
+const SYSTEM = {
+  name: 'Faber',
+  version: '0.1.0',
+  api: FABER_API,
+  timeUs: 5_000_000,
+  timeZone: 'Europe/Copenhagen',
+};
 
 function setup(system: object = SYSTEM) {
   f = fakeFetch([
@@ -95,6 +104,65 @@ describe('CoreState', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("shows wall-clock times in the machine's zone unless the settings pick one", async () => {
+    const { core, ws } = setup();
+    expect(core.wallClock).toEqual({ timeZone: undefined, clock: '24h' });
+    await vi.waitFor(() => expect(core.wallClock.timeZone).toBe('Europe/Copenhagen'));
+    const id = sentTopics(ws).find((m) => m.topic?.kind === 'settings')!.id;
+    const push = (time: Settings['time']) =>
+      ws.receive(bin({ type: 'settings', id, settings: { ...SETTINGS, time } }));
+    push({ timeZone: 'America/New_York', clock: '12h' });
+    expect(core.wallClock).toEqual({ timeZone: 'America/New_York', clock: '12h' });
+    push({ timeZone: '', clock: '24h' });
+    expect(core.wallClock).toEqual({ timeZone: 'Europe/Copenhagen', clock: '24h' });
+  });
+
+  it('loads about and storage, and makes and restores backups', async () => {
+    const { core } = setup();
+    const about = {
+      version: '0.1.0',
+      api: 'x',
+      dataFolder: '/data',
+      uptimeS: 5,
+      os: 'linux',
+      timeZone: 'UTC',
+    };
+    const storage = {
+      recordingsBytes: 1,
+      documentsBytes: 2,
+      desktopBytes: 3,
+      backupsBytes: 4,
+      freeBytes: 5,
+      totalBytes: 20,
+    };
+    f.route({ path: '/api/v0/about', body: about });
+    f.route({ path: '/api/v0/storage', body: storage });
+    f.route({
+      method: 'POST',
+      path: '/api/v0/backups',
+      status: 201,
+      body: { path: 'home:/Backups/b.zip', bytes: 9 },
+    });
+    f.route({ method: 'POST', path: '/api/v0/backups/restore', status: 204 });
+    expect(await core.loadAbout()).toEqual({ ok: true, value: about });
+    expect(await core.loadStorage()).toEqual({ ok: true, value: storage });
+    expect(await core.createBackup(true)).toEqual({
+      ok: true,
+      value: { path: 'home:/Backups/b.zip', bytes: 9 },
+    });
+    expect(f.calls.at(-1)?.body).toEqual({ includeRecordings: true });
+    expect((await core.restoreBackup('home:/Backups/b.zip')).ok).toBe(true);
+    expect(f.calls.at(-1)?.body).toEqual({ path: 'home:/Backups/b.zip' });
+  });
+
+  it('resets the settings and keeps what the core answered', async () => {
+    const { core } = setup();
+    f.route({ method: 'POST', path: '/api/v0/settings/reset', body: SETTINGS });
+    const r = await core.resetSettings();
+    expect(r.ok).toBe(true);
+    expect(core.settings).toEqual(SETTINGS);
   });
 
   it('tracks the connection status', () => {

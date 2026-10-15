@@ -51,6 +51,9 @@ export function part(name: string, overrides: Partial<PartInfo> = {}): PartInfo 
 
 export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: 'system', style: 'aluminium', wallpaper: 'aluminium' },
+  accessibility: { reduceMotion: 'system', higherContrast: 'system', textSize: '100' },
+  units: { length: 'metric' },
+  time: { timeZone: '', clock: '24h' },
   desktop: { icons: [] },
   taskbar: {
     pinned: ['tool:parts', 'accessory:files', 'accessory:notes', 'tool:serial-monitor'],
@@ -87,8 +90,34 @@ function bin(msg: unknown): ArrayBuffer {
 export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, height: 1000 }) {
   FakeWebSocket.reset();
   const fetch = fakeFetch([
-    { path: '/api/v0/system', body: { name: 'Faber', version: '0.1.0', timeUs: 1_000_000 } },
+    {
+      path: '/api/v0/system',
+      body: { name: 'Faber', version: '0.1.0', timeUs: 1_000_000, timeZone: 'Europe/Copenhagen' },
+    },
     { path: '/api/v0/connectors', body: [LD19] },
+    {
+      path: '/api/v0/about',
+      body: {
+        version: '0.1.0',
+        api: 'test',
+        dataFolder: '/data',
+        uptimeS: 1,
+        os: 'test',
+        timeZone: 'Europe/Copenhagen',
+      },
+    },
+    {
+      path: '/api/v0/storage',
+      body: {
+        recordingsBytes: 0,
+        documentsBytes: 0,
+        desktopBytes: 0,
+        backupsBytes: 0,
+        freeBytes: 1,
+        totalBytes: 2,
+      },
+    },
+    listing('home:/Backups', []),
     ...routes,
   ]);
   const socket = new CoreSocket({

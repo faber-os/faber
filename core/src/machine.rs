@@ -3,10 +3,12 @@
 //! the source of truth**. Changes are written to the file first, then `reconcile` makes the
 //! running parts match it.
 
+use crate::backup::{self, Archive, BackupError, Item};
 use crate::clock::SharedClock;
 use crate::config::{self, ConfigError, PartConfig, PartsConfig};
 use crate::disks::{Disk, DiskDiscovery};
-use crate::files::{self, Entry, FileError, Files, VPath, WriteMode};
+use crate::files::{self, Entry, FileError, Files, Special, VPath, WriteMode};
+use crate::host;
 use crate::names::{PartName, SignalAddress};
 use crate::ports::{
     Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortProblem, PortReader, PortWriter,
@@ -15,7 +17,9 @@ use crate::ports::{
 };
 use crate::router::Router;
 use crate::runtime::{self, PartHandle, PartStatus, RunDeps, RunSpec, StatusBoard, Timing};
-use crate::settings::{DeveloperChange, Settings as MachineSettings, SettingsError, SettingsStore};
+use crate::settings::{
+    self as settings_file, DeveloperChange, Settings as MachineSettings, SettingsError, SettingsStore,
+};
 use crate::suggest::{Suggestion, suggestions};
 use faber_capabilities::{Capability, Mount};
 use faber_connector::{Definition, Manifest, Problem, Settings};
@@ -67,6 +71,8 @@ pub enum ErrorKind {
     Unprocessable,
     /// Not allowed with the current settings.
     Forbidden,
+    /// The disk is too full for it.
+    InsufficientStorage,
 }
 
 impl From<FileError> for MachineError {
@@ -85,6 +91,13 @@ impl From<FileError> for MachineError {
 impl From<SettingsError> for MachineError {
     fn from(e: SettingsError) -> Self {
         let kind = if e.code == "settings-not-saved" { ErrorKind::Internal } else { ErrorKind::BadRequest };
+        MachineError { kind, code: e.code, message: e.message, hint: e.hint }
+    }
+}
+
+impl From<BackupError> for MachineError {
+    fn from(e: BackupError) -> Self {
+        let kind = if e.code == "backup-invalid" { ErrorKind::Unprocessable } else { ErrorKind::Internal };
         MachineError { kind, code: e.code, message: e.message, hint: e.hint }
     }
 }
@@ -112,6 +125,28 @@ pub struct PortView {
     pub entry: PortEntry,
     pub claimed_by: Option<String>,
     pub suggestions: Vec<Suggestion>,
+}
+
+/// What the data folder's disk holds (`GET /api/v0/storage`), in bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Storage {
+    pub recordings: u64,
+    pub documents: u64,
+    pub desktop: u64,
+    pub backups: u64,
+    pub free: u64,
+    pub total: u64,
+}
+
+/// Facts for Settings → About (`GET /api/v0/about`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct About {
+    pub data_dir: PathBuf,
+    /// Since the core started.
+    pub uptime_us: u64,
+    pub os: String,
+    /// The machine's own IANA time zone.
+    pub time_zone: String,
 }
 
 /// A request to add a part.
@@ -152,6 +187,7 @@ pub struct Machine {
     replays: ReplayLibrary,
     connectors: Vec<Definition>,
     timing: Timing,
+    data_dir: PathBuf,
     config_path: PathBuf,
     files: Files,
     settings: SettingsStore,
@@ -192,6 +228,7 @@ impl Machine {
             replays: opts.replays,
             connectors: opts.connectors,
             timing: opts.timing,
+            data_dir: opts.data_dir.clone(),
             config_path,
             files,
             settings,
@@ -610,6 +647,16 @@ impl Machine {
         Ok(self.settings.update(new)?)
     }
 
+    /// Every setting back to its default (whole-machine files off too). Parts and files stay.
+    pub fn reset_settings(&self) -> Result<MachineSettings, MachineError> {
+        let before = self.settings.get().developer.full_machine_files;
+        let after = self.settings.reset()?;
+        if before {
+            tracing::warn!(target: "core::files", "whole-machine file access turned off (settings reset)");
+        }
+        Ok(after)
+    }
+
     pub fn change_developer(&self, change: DeveloperChange) -> Result<MachineSettings, MachineError> {
         let before = self.settings.get().developer.full_machine_files;
         let after = self.settings.change_developer(change)?;
@@ -621,6 +668,178 @@ impl Machine {
             );
         }
         Ok(after)
+    }
+
+    // ---- this computer, storage and backups ----------------------------------------------
+
+    /// The machine's own time zone (D42).
+    pub fn time_zone(&self) -> String {
+        host::time_zone()
+    }
+
+    /// The zone wall-clock times are shown in: the setting, or the machine's own.
+    fn display_zone(&self) -> String {
+        let zone = self.settings.get().time.time_zone;
+        if zone.is_empty() { host::time_zone() } else { zone }
+    }
+
+    pub fn about(&self) -> About {
+        About {
+            // `--data ./data` is shown as the whole path, which is what a helper needs.
+            data_dir: std::path::absolute(&self.data_dir).unwrap_or_else(|_| self.data_dir.clone()),
+            uptime_us: self.clock.now_us(),
+            os: host::os(),
+            time_zone: host::time_zone(),
+        }
+    }
+
+    pub fn storage(&self) -> Result<Storage, MachineError> {
+        let space = host::disk_space(&self.data_dir).map_err(|e| {
+            MachineError::new(
+                ErrorKind::Internal,
+                "io-error",
+                format!("Couldn't measure the free space on the data folder's disk: {e}"),
+                "Check that the data folder's disk is still connected.",
+            )
+        })?;
+        Ok(Storage {
+            recordings: self.files.folder_size(Special::Recordings),
+            documents: self.files.folder_size(Special::Documents),
+            desktop: self.files.folder_size(Special::Desktop),
+            backups: self.files.folder_size(Special::Backups),
+            free: space.free,
+            total: space.total,
+        })
+    }
+
+    /// Refuses before writing anything when `needed` bytes won't fit on the data folder's disk.
+    fn check_room(&self, needed: u64, what: &str, hint: &str) -> Result<(), MachineError> {
+        let free = host::disk_space(&self.data_dir).map(|s| s.free).unwrap_or(u64::MAX);
+        if needed <= free {
+            return Ok(());
+        }
+        let mb = |b: u64| b.div_ceil(1024 * 1024);
+        Err(MachineError::new(
+            ErrorKind::InsufficientStorage,
+            "disk-full",
+            format!("{what} needs about {} MB, but only {} MB is free.", mb(needed), mb(free)),
+            hint,
+        ))
+    }
+
+    /// Saves a backup in `home:/Backups` (D41). Returns its path and size.
+    pub fn create_backup(&self, include_recordings: bool) -> Result<(String, u64), MachineError> {
+        let home = self.files.home_dir().to_path_buf();
+        let settings_path = self.config_path.with_file_name(settings_file::FILE_NAME);
+        let src = backup::Sources {
+            parts_toml: &self.config_path,
+            settings_toml: &settings_path,
+            home: &home,
+            include_recordings,
+        };
+        self.check_room(
+            backup::source_bytes(&src),
+            "The backup",
+            "Delete old backups or recordings and empty the Trash, or leave the recordings out.",
+        )?;
+        let folder = home.join(Special::Backups.name());
+        let name =
+            files::unique_name(&folder, &backup::file_name(jiff::Timestamp::now(), &self.display_zone()));
+        let bytes = backup::create(&src, &folder.join(&name))?;
+        let p = VPath::home(&["Backups", &name]);
+        tracing::info!(target: "core::backup", "saved the backup {p} ({bytes} bytes)");
+        self.notify_files(std::slice::from_ref(&p));
+        Ok((p.to_string(), bytes))
+    }
+
+    /// Restores a backup from the home folder. Everything in it is checked before anything
+    /// changes, so a broken parts.toml is refused with its line and nothing is touched. Files
+    /// that the backup replaces go to the Trash; files it doesn't have stay.
+    pub fn restore_backup(&self, path: &str) -> Result<(), MachineError> {
+        let p = VPath::parse(path)?;
+        let real = self.files.local_path(&p)?;
+        if !real.is_file() {
+            return Err(FileError::new_public(
+                "not-found",
+                format!("{p} doesn't exist."),
+                "Refresh the folder; it may have been moved or deleted.",
+            )
+            .into());
+        }
+        let mut archive = Archive::open(&real)?;
+
+        // 1. Check everything first.
+        config::parse(archive.parts_toml()).map_err(|e| config_invalid(&e))?;
+        let restored_settings = match archive.settings_toml() {
+            None => None,
+            Some(text) => Some(settings_file::parse(text).map_err(|e| {
+                MachineError::new(ErrorKind::Unprocessable, "backup-invalid", e.message, e.hint)
+            })?),
+        };
+        let items = archive
+            .items()
+            .iter()
+            .map(|i| {
+                VPath::parse(&format!("home:/{}", i.path)).map(|vp| (vp, i.clone())).map_err(|_| {
+                    MachineError::new(
+                        ErrorKind::Unprocessable,
+                        "backup-invalid",
+                        format!("The backup holds \"{}\", which isn't a name Faber can use.", i.path),
+                        "Pick a backup Faber made (home:/Backups/faber-backup-….zip).",
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.check_room(
+            archive.unpacked_bytes(),
+            "Restoring this backup",
+            "Delete old backups or recordings and empty the Trash, then try again.",
+        )?;
+
+        // 2. Then change things: the config and settings first, as they matter most.
+        self.write_config_text(archive.parts_toml().as_bytes())?;
+        if let Some(s) = restored_settings {
+            self.settings.restore(s)?;
+        }
+        let result = items.iter().try_for_each(|(vp, item)| self.restore_item(&mut archive, vp, item));
+        self.notify_folders(&[VPath::home(&[])]);
+        self.refresh_ports(); // restored recordings become replay ports
+        result?;
+        tracing::info!(target: "core::backup", "restored the backup {p}");
+        Ok(())
+    }
+
+    fn restore_item(&self, archive: &mut Archive, vp: &VPath, item: &Item) -> Result<(), MachineError> {
+        let real = self.files.local_path(vp)?;
+        let io = |e: io::Error| {
+            MachineError::new(
+                ErrorKind::Internal,
+                "io-error",
+                format!("Couldn't restore {vp}: {e}"),
+                "Check that the disk has space and the file isn't open elsewhere.",
+            )
+        };
+        if item.folder {
+            if real.is_file() {
+                self.files.trash(std::slice::from_ref(vp))?;
+            }
+            return std::fs::create_dir_all(&real).map_err(io);
+        }
+        if let Some(parent) = real.parent() {
+            std::fs::create_dir_all(parent).map_err(io)?;
+        }
+        let tmp = real.with_file_name(format!(".{}.faber-tmp", vp.name().unwrap_or("file")));
+        if let Err(e) = archive.extract(item, &tmp) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(io(e));
+        }
+        if real.is_file() && same_contents(&tmp, &real).map_err(io)? {
+            return std::fs::remove_file(&tmp).map_err(io);
+        }
+        if real.exists() {
+            self.files.trash(std::slice::from_ref(vp))?;
+        }
+        std::fs::rename(&tmp, &real).map_err(io)
     }
 
     // ---- files ----------------------------------------------------------------------------
@@ -675,6 +894,13 @@ impl Machine {
         Ok(self.files.list(&VPath::parse(path)?, self.machine_files())?)
     }
 
+    /// A file to stream out as a download: its path on disk and size. No size limit.
+    pub fn download_file(&self, path: &str) -> Result<(VPath, PathBuf, u64), MachineError> {
+        let p = VPath::parse(path)?;
+        let (real, len) = self.files.locate_file(&p, self.machine_files())?;
+        Ok((p, real, len))
+    }
+
     pub fn read_file(&self, path: &str) -> Result<(VPath, Vec<u8>), MachineError> {
         let p = VPath::parse(path)?;
         let bytes = self.files.read(&p, self.machine_files())?;
@@ -713,13 +939,7 @@ impl Machine {
                 "Save it as plain text.",
             )
         })?;
-        if let Err(e) = config::parse(&text) {
-            let message = match e.line {
-                Some(l) => format!("parts.toml has a problem on line {l}: {}", e.message),
-                None => format!("parts.toml has a problem: {}", e.message),
-            };
-            return Err(MachineError::new(ErrorKind::Unprocessable, "config-invalid", message, e.hint));
-        }
+        config::parse(&text).map_err(|e| config_invalid(&e))?;
         let mut st = self.state.lock().expect("machine lock");
         self.save(&mut st, text)?;
         st.config_problem = None;
@@ -1008,6 +1228,35 @@ fn refuse_if_config_broken(st: &State) -> Result<(), MachineError> {
             },
             "Fix parts.toml and restart Faber. Faber won't change the file until then, so nothing of yours is lost.",
         )),
+    }
+}
+
+/// A parts.toml that can't be used, refused with the line it goes wrong on.
+fn config_invalid(e: &ConfigError) -> MachineError {
+    let message = match e.line {
+        Some(l) => format!("parts.toml has a problem on line {l}: {}", e.message),
+        None => format!("parts.toml has a problem: {}", e.message),
+    };
+    MachineError::new(ErrorKind::Unprocessable, "config-invalid", message, e.hint.clone())
+}
+
+/// True if both files hold the same bytes.
+fn same_contents(a: &Path, b: &Path) -> io::Result<bool> {
+    use std::io::Read;
+    if std::fs::metadata(a)?.len() != std::fs::metadata(b)?.len() {
+        return Ok(false);
+    }
+    let (mut fa, mut fb) = (std::fs::File::open(a)?, std::fs::File::open(b)?);
+    let (mut ba, mut bb) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    loop {
+        let n = fa.read(&mut ba)?;
+        if n == 0 {
+            return Ok(true);
+        }
+        fb.read_exact(&mut bb[..n])?;
+        if ba[..n] != bb[..n] {
+            return Ok(false);
+        }
     }
 }
 
@@ -1434,6 +1683,166 @@ connector =
         assert_eq!(rx.try_recv().unwrap(), ["home:/Desktop"]);
         m.add_part(demo("lidar")).unwrap();
         assert_eq!(rx.try_recv().unwrap(), ["home:/System"], "adding a part changes parts.toml");
+        m.shutdown();
+    }
+
+    fn read_text(m: &Machine, path: &str) -> String {
+        String::from_utf8(m.read_file(path).unwrap().1).unwrap()
+    }
+
+    fn trash_names(m: &Machine) -> Vec<String> {
+        m.list_files("home:/Trash").unwrap().into_iter().map(|e| e.name).collect()
+    }
+
+    #[test]
+    fn a_backup_brings_back_parts_settings_and_files_and_keeps_what_it_replaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        m.add_part(demo("lidar")).unwrap();
+        m.write_file("home:/Documents/notes.txt", b"v1", WriteMode::Replace).unwrap();
+        let mut s = m.settings();
+        s.appearance.theme = crate::settings::Theme::Dark;
+        m.update_settings(s).unwrap();
+
+        let (path, bytes) = m.create_backup(false).unwrap();
+        assert!(path.starts_with("home:/Backups/faber-backup-") && path.ends_with(".zip"), "{path}");
+        assert!(bytes > 0);
+        let listed = m.list_files("home:/Backups").unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path.to_string(), path);
+
+        m.remove_part("lidar").unwrap();
+        m.write_file("home:/Documents/notes.txt", b"v2", WriteMode::Replace).unwrap();
+        m.write_file("home:/Documents/new.txt", b"keep me", WriteMode::Replace).unwrap();
+        m.reset_settings().unwrap();
+        let mut files = m.files_changed();
+
+        m.restore_backup(&path).unwrap();
+        assert_eq!(m.parts().len(), 1, "parts.toml is back and applied");
+        assert_eq!(m.settings().appearance.theme, crate::settings::Theme::Dark);
+        assert_eq!(read_text(&m, "home:/Documents/notes.txt"), "v1");
+        assert_eq!(read_text(&m, "home:/Documents/new.txt"), "keep me", "files not in the backup stay");
+        assert_eq!(trash_names(&m), ["notes.txt"], "the replaced version is in the Trash");
+        let mut announced = Vec::new();
+        while let Ok(f) = files.try_recv() {
+            announced.extend(f);
+        }
+        assert!(announced.contains(&"home:/".to_string()), "{announced:?}");
+
+        m.restore_backup(&path).unwrap();
+        assert_eq!(trash_names(&m), ["notes.txt"], "files that are the same aren't moved again");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_backup_with_a_broken_parts_toml_changes_nothing() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let zip_path = dir.path().join("files/Backups/broken.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+        let o = zip::write::SimpleFileOptions::default();
+        w.start_file("config/parts.toml", o).unwrap();
+        w.write_all(b"[parts.lidar]\nconnector = \n").unwrap();
+        w.start_file("files/Documents/x.txt", o).unwrap();
+        w.write_all(b"x").unwrap();
+        w.finish().unwrap();
+        let before = std::fs::read_to_string(dir.path().join("config/parts.toml")).unwrap();
+
+        let e = m.restore_backup("home:/Backups/broken.zip").unwrap_err();
+        assert_eq!((e.code, e.kind), ("config-invalid", ErrorKind::Unprocessable));
+        assert!(e.message.contains("line 2"), "{e:?}");
+        assert!(m.read_file("home:/Documents/x.txt").is_err(), "no file was unpacked");
+        assert_eq!(std::fs::read_to_string(dir.path().join("config/parts.toml")).unwrap(), before);
+        m.shutdown();
+    }
+
+    #[test]
+    fn restore_needs_a_backup_in_the_home_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        assert_eq!(m.restore_backup("machine:/C:/x.zip").unwrap_err().code, "bad-path");
+        assert_eq!(m.restore_backup("home:/Backups/missing.zip").unwrap_err().code, "not-found");
+        m.write_file("home:/Documents/a.zip", b"not a zip", WriteMode::Replace).unwrap();
+        let e = m.restore_backup("home:/Documents/a.zip").unwrap_err();
+        assert_eq!((e.code, e.kind), ("backup-invalid", ErrorKind::Unprocessable));
+        m.shutdown();
+    }
+
+    #[test]
+    fn recordings_go_into_a_backup_only_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        m.add_samples().unwrap();
+        let (without, _) = m.create_backup(false).unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        let (with, _) = m.create_backup(true).unwrap();
+        assert_ne!(without, with, "two backups in one minute get different names");
+        m.trash_files(&["home:/Recordings/ld19-sample.fbcap".into()]).unwrap();
+        m.empty_trash().unwrap();
+        m.restore_backup(&without).unwrap();
+        assert!(m.read_file("home:/Recordings/ld19-sample.fbcap").is_err());
+        m.restore_backup(&with).unwrap();
+        assert!(m.read_file("home:/Recordings/ld19-sample.fbcap").is_ok());
+        assert!(
+            m.ports().iter().any(|p| p.entry.id.to_string() == "replay:ld19-sample"),
+            "a restored recording is a replay port at once"
+        );
+        m.shutdown();
+    }
+
+    #[test]
+    fn storage_counts_each_folder_and_the_free_space() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        m.write_file("home:/Documents/a.txt", b"12345", WriteMode::Replace).unwrap();
+        m.write_file("home:/Desktop/b.txt", b"123", WriteMode::Replace).unwrap();
+        m.add_samples().unwrap();
+        let s = m.storage().unwrap();
+        assert_eq!((s.documents, s.desktop, s.backups), (5, 3, 0));
+        assert_eq!(s.recordings, SAMPLE_LD19_BYTES.len() as u64);
+        assert!(s.total > 0 && s.free <= s.total);
+        m.shutdown();
+    }
+
+    #[test]
+    fn about_says_where_the_data_is_and_which_time_zone() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let a = m.about();
+        assert_eq!(a.data_dir, dir.path());
+        assert!(!a.os.is_empty());
+        assert_eq!(a.time_zone, m.time_zone());
+        assert!(!a.time_zone.is_empty());
+        m.shutdown();
+    }
+
+    #[test]
+    fn about_shows_a_relative_data_folder_as_a_whole_path() {
+        let relative = Path::new("target").join("about-relative-test");
+        let m = machine(&relative, no_ports());
+        let shown = m.about().data_dir;
+        m.shutdown();
+        let _ = std::fs::remove_dir_all(&relative);
+        assert!(shown.is_absolute(), "{}", shown.display());
+        assert!(shown.ends_with(&relative));
+    }
+
+    #[test]
+    fn resetting_settings_leaves_parts_and_files_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        m.add_part(demo("lidar")).unwrap();
+        m.write_file("home:/Documents/a.txt", b"mine", WriteMode::Replace).unwrap();
+        m.change_developer(crate::settings::DeveloperChange {
+            full_machine_files: true,
+            acknowledged_risk: true,
+        })
+        .unwrap();
+        assert_eq!(m.reset_settings().unwrap(), MachineSettings::default());
+        assert!(!m.settings().developer.full_machine_files);
+        assert_eq!(m.parts().len(), 1);
+        assert_eq!(read_text(&m, "home:/Documents/a.txt"), "mine");
         m.shutdown();
     }
 

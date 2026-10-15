@@ -104,11 +104,18 @@ describe('recent files', () => {
     expect(loadRecent(null)).toEqual([]);
   });
 
-  it('says when, as a time today, Yesterday or a date', () => {
-    const now = new Date(2026, 9, 15, 11, 42).getTime();
-    expect(recentWhen(new Date(2026, 9, 15, 10, 2).getTime(), now)).toBe('10:02');
-    expect(recentWhen(new Date(2026, 9, 14, 23, 0).getTime(), now)).toBe('Yesterday');
-    expect(recentWhen(new Date(2026, 8, 1).getTime(), now)).toBe('1-9-2026');
+  it("says when, as a time today, Yesterday or a date, in the machine's time zone", () => {
+    const cph = { timeZone: 'Europe/Copenhagen', clock: '24h' } as const;
+    // 11:42 in Copenhagen (UTC+2 in October).
+    const now = Date.UTC(2026, 9, 15, 9, 42);
+    expect(recentWhen(Date.UTC(2026, 9, 15, 8, 2), now, cph)).toBe('10:02');
+    // 23:30 UTC on the 14th is already the 15th in Copenhagen.
+    expect(recentWhen(Date.UTC(2026, 9, 14, 23, 30), now, cph)).toBe('01:30');
+    expect(recentWhen(Date.UTC(2026, 9, 14, 20, 0), now, cph)).toBe('Yesterday');
+    expect(recentWhen(Date.UTC(2026, 8, 1, 12), now, cph)).toBe('1-9-2026');
+    expect(recentWhen(Date.UTC(2026, 9, 15, 13, 2), now, { ...cph, clock: '12h' })).toMatch(
+      /^3:02\sPM$/i,
+    );
   });
 });
 

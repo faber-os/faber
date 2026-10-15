@@ -9,6 +9,9 @@ import type { DeveloperChange } from './generated/DeveloperChange';
 import type { FileRoot } from './generated/FileRoot';
 import type { FolderListing } from './generated/FolderListing';
 import type { Settings } from './generated/Settings';
+import type { AboutInfo } from './generated/AboutInfo';
+import type { BackupInfo } from './generated/BackupInfo';
+import type { StorageInfo } from './generated/StorageInfo';
 import { dropNullFields } from './wire';
 
 /** Something the core (or the way to it) said no to, with what to try next. */
@@ -26,6 +29,7 @@ export class CoreError extends Error {
 
 export interface CoreHttp {
   getSystem(): Promise<SystemInfo>;
+  getAbout(): Promise<AboutInfo>;
   getConnectors(): Promise<ConnectorInfo[]>;
   getPorts(): Promise<PortInfo[]>;
   getParts(): Promise<PartInfo[]>;
@@ -55,6 +59,14 @@ export interface CoreHttp {
   getSettings(): Promise<Settings>;
   putSettings(settings: Settings): Promise<Settings>;
   setDeveloper(change: DeveloperChange): Promise<Settings>;
+  /** Every setting back to its default (whole-machine files off too). Parts and files stay. */
+  resetSettings(): Promise<Settings>;
+
+  getStorage(): Promise<StorageInfo>;
+  /** Saves a backup in `home:/Backups`. `507 disk-full` if it won't fit. */
+  createBackup(includeRecordings: boolean): Promise<BackupInfo>;
+  /** Restores a backup from the home folder; checked first (`422 config-invalid` …). */
+  restoreBackup(path: string): Promise<void>;
 }
 
 export type WriteMode = 'replace' | 'create';
@@ -137,6 +149,7 @@ export function createHttp(
 
   return {
     getSystem: () => request('GET', '/system'),
+    getAbout: () => request('GET', '/about'),
     getConnectors: () => request('GET', '/connectors'),
     getPorts: () => request('GET', '/ports'),
     getParts: () => request('GET', '/parts'),
@@ -162,6 +175,11 @@ export function createHttp(
     getSettings: () => request('GET', '/settings'),
     putSettings: (settings) => request('PUT', '/settings', settings),
     setDeveloper: (change) => request('POST', '/settings/developer', change),
+    resetSettings: () => request('POST', '/settings/reset'),
+
+    getStorage: () => request('GET', '/storage'),
+    createBackup: (includeRecordings) => request('POST', '/backups', { includeRecordings }),
+    restoreBackup: (path) => request('POST', '/backups/restore', { path }),
   };
 }
 

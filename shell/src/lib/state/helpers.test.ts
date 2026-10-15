@@ -129,7 +129,7 @@ describe('portKindLabel', () => {
 
 describe('recording names', () => {
   it('defaults to the date and time, valid under the part-name rule', () => {
-    const name = defaultRecordingName(new Date(2026, 9, 15, 10, 30));
+    const name = defaultRecordingName({ year: 2026, month: 10, day: 15, hour: 10, minute: 30 });
     expect(name).toBe('recording_2026_10_15_1030');
     expect(validateRecordingName(name)).toBeNull();
   });

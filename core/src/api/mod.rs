@@ -27,6 +27,7 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v0/system", get(system))
+        .route("/api/v0/about", get(about))
         .route("/api/v0/connectors", get(connectors))
         .route("/api/v0/ports", get(ports))
         .route("/api/v0/ports/problems", get(port_problems))
@@ -56,6 +57,7 @@ impl From<MachineError> for Failure {
             ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             ErrorKind::Unprocessable => StatusCode::UNPROCESSABLE_ENTITY,
             ErrorKind::Forbidden => StatusCode::FORBIDDEN,
+            ErrorKind::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
         };
         Failure(status, convert::error_body(&e))
     }
@@ -108,6 +110,7 @@ async fn system(State(s): State<AppState>) -> Json<dto::SystemInfo> {
         version: env!("CARGO_PKG_VERSION").into(),
         api: env!("FABER_API").into(),
         time_us: s.machine.clock().now_us(),
+        time_zone: s.machine.time_zone(),
         config_problem: s.machine.config_problem().map(|e| dto::ErrorBody {
             code: "config-broken".into(),
             message: match e.line {
@@ -117,6 +120,18 @@ async fn system(State(s): State<AppState>) -> Json<dto::SystemInfo> {
             hint: e.hint,
         }),
     })
+}
+
+async fn about(State(s): State<AppState>) -> Result<Json<dto::AboutInfo>, Failure> {
+    let about = blocking(move || s.machine.about()).await?;
+    Ok(Json(dto::AboutInfo {
+        version: env!("CARGO_PKG_VERSION").into(),
+        api: env!("FABER_API").into(),
+        data_folder: about.data_dir.display().to_string(),
+        uptime_s: about.uptime_us / 1_000_000,
+        os: about.os,
+        time_zone: about.time_zone,
+    }))
 }
 
 async fn connectors(State(s): State<AppState>) -> Json<Vec<dto::ConnectorInfo>> {

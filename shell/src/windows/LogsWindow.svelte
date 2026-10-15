@@ -2,7 +2,8 @@
   import { useCore } from '../lib/state/context';
   import { filterLogs, LOG_LEVELS } from '../lib/state/logFilter';
   import type { LogEntry, LogLevel } from '../lib/state/types';
-  import { formatCoreTime, formatLogTime } from '../components/format';
+  import { formatCoreTime } from '../components/format';
+  import { formatLogTime } from '../lib/desktop/wallClock';
   import type { WindowProps } from '../components/windowDefs';
 
   let { visible }: WindowProps = $props();
@@ -24,7 +25,7 @@
 
   function time(e: LogEntry): string {
     const ms = core.coreTimeToEpochMs(e.tUs);
-    return ms === null ? formatCoreTime(e.tUs) : formatLogTime(ms);
+    return ms === null ? formatCoreTime(e.tUs) : formatLogTime(ms, core.wallClock);
   }
 
   $effect(() => {

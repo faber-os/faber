@@ -99,11 +99,95 @@ pub struct DeveloperSettings {
     pub full_machine_files: bool,
 }
 
+/// A display preference that can follow the browser or screen, like the theme (D40).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum Preference {
+    /// Follow the browser or screen (`prefers-reduced-motion`, `prefers-contrast`).
+    #[default]
+    System,
+    On,
+    Off,
+}
+
+/// Text size in percent of the normal size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum TextSize {
+    #[default]
+    #[serde(rename = "100")]
+    Normal,
+    #[serde(rename = "115")]
+    Larger115,
+    #[serde(rename = "130")]
+    Larger130,
+    #[serde(rename = "150")]
+    Larger150,
+}
+
+/// Accessibility (D40): machine-wide, so the attached screen can be set up from a laptop.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct Accessibility {
+    /// No window animations or smooth movement.
+    pub reduce_motion: Preference,
+    /// Stronger text, lines and focus colours in the current style.
+    pub higher_contrast: Preference,
+    pub text_size: TextSize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum LengthUnit {
+    /// Metres and centimetres.
+    #[default]
+    Metric,
+    /// Feet and inches.
+    Imperial,
+}
+
+/// The units the shell shows (D43). Display only: the API, recordings and apps stay SI.
+/// Angles get a setting once the shell shows an angle (no setting that does nothing).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct Units {
+    pub length: LengthUnit,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub enum ClockFormat {
+    /// 14:30
+    #[default]
+    #[serde(rename = "24h")]
+    H24,
+    /// 2:30 PM
+    #[serde(rename = "12h")]
+    H12,
+}
+
+/// Date and time (D42): clocks, file dates and log times show the machine's time.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct TimeSettings {
+    /// An IANA time zone, e.g. `Europe/Copenhagen`. Empty: the machine's own (`GET /api/v0/system`).
+    pub time_zone: String,
+    pub clock: ClockFormat,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct Settings {
     pub appearance: Appearance,
+    pub accessibility: Accessibility,
+    pub units: Units,
+    pub time: TimeSettings,
     pub desktop: DesktopLayout,
     pub taskbar: Taskbar,
     pub developer: DeveloperSettings,
@@ -149,8 +233,8 @@ impl SettingsStore {
     pub fn load(config_dir: &Path) -> SettingsStore {
         let path = config_dir.join(FILE_NAME);
         let current = match std::fs::read_to_string(&path) {
-            Ok(text) => toml::from_str(&text).unwrap_or_else(|e: toml::de::Error| {
-                tracing::warn!(target: "core::settings", "settings.toml can't be read ({}), using defaults", e.message());
+            Ok(text) => parse(&text).unwrap_or_else(|e| {
+                tracing::warn!(target: "core::settings", "{} Using the defaults.", e.message);
                 Settings::default()
             }),
             Err(_) => Settings::default(),
@@ -167,7 +251,7 @@ impl SettingsStore {
         self.changed.subscribe()
     }
 
-    /// Replaces appearance and desktop. The developer settings must stay as they are.
+    /// Replaces every setting except the developer settings, which must stay as they are.
     pub fn update(&self, new: Settings) -> Result<Settings, SettingsError> {
         let mut cur = self.current.lock().expect("settings lock");
         if new.developer != cur.developer {
@@ -177,7 +261,27 @@ impl SettingsStore {
                 "Change them in Settings → Developer.",
             ));
         }
+        check(&new)?;
         self.save(&mut cur, new)
+    }
+
+    /// Back to the defaults: every setting, including the developer settings (so whole-machine
+    /// files are off again). Parts and files are not settings and stay as they are.
+    pub fn reset(&self) -> Result<Settings, SettingsError> {
+        let mut cur = self.current.lock().expect("settings lock");
+        self.save(&mut cur, Settings::default())
+    }
+
+    /// Takes settings from a backup. This machine's developer settings stay as they are: a
+    /// backup never turns whole-machine access on behind the user's back.
+    pub fn restore(&self, mut restored: Settings) -> Result<Settings, SettingsError> {
+        let mut cur = self.current.lock().expect("settings lock");
+        restored.developer = cur.developer.clone();
+        if check(&restored).is_err() {
+            // A zone this machine doesn't know (an older time-zone database): use its own.
+            restored.time.time_zone.clear();
+        }
+        self.save(&mut cur, restored)
     }
 
     pub fn change_developer(&self, change: DeveloperChange) -> Result<Settings, SettingsError> {
@@ -209,6 +313,30 @@ impl SettingsStore {
         }
         Ok(cur.clone())
     }
+}
+
+/// Reads the text of a settings.toml. Missing fields get their defaults, so older files load.
+pub fn parse(text: &str) -> Result<Settings, SettingsError> {
+    toml::from_str(text).map_err(|e: toml::de::Error| {
+        SettingsError::new(
+            "settings-invalid",
+            format!("settings.toml can't be read: {}", e.message()),
+            "Fix the file by hand, or reset the settings to their defaults.",
+        )
+    })
+}
+
+/// What `update` refuses: values the shell could never show.
+fn check(s: &Settings) -> Result<(), SettingsError> {
+    let zone = &s.time.time_zone;
+    if !zone.is_empty() && jiff::tz::TimeZone::get(zone).is_err() {
+        return Err(SettingsError::new(
+            "invalid-time-zone",
+            format!("\"{zone}\" isn't a time zone Faber knows."),
+            "Pick one from the list in Settings → Date and time, or the machine's own.",
+        ));
+    }
+    Ok(())
 }
 
 fn write_atomically(path: &Path, text: &str) -> io::Result<()> {
@@ -307,6 +435,105 @@ wallpaper = \"graphite\"
         s.appearance.style = "cobalt".into();
         store.update(s.clone()).unwrap();
         assert_eq!(SettingsStore::load(dir.path()).get(), s);
+    }
+
+    #[test]
+    fn accessibility_units_and_time_default_and_old_files_still_load() {
+        let d = Settings::default();
+        assert_eq!(d.accessibility.reduce_motion, Preference::System);
+        assert_eq!(d.accessibility.higher_contrast, Preference::System);
+        assert_eq!(d.accessibility.text_size, TextSize::Normal);
+        assert_eq!(d.units.length, LengthUnit::Metric);
+        assert_eq!(d.time.time_zone, "", "empty = the machine's own zone");
+        assert_eq!(d.time.clock, ClockFormat::H24);
+
+        // A settings.toml from before accessibility, units and time existed.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(FILE_NAME),
+            "[appearance]
+theme = \"dark\"
+
+[taskbar]
+size = \"large\"
+",
+        )
+        .unwrap();
+        let s = SettingsStore::load(dir.path()).get();
+        assert_eq!(s.appearance.theme, Theme::Dark);
+        assert_eq!(s.taskbar.size, TaskbarSize::Large);
+        assert_eq!(s.accessibility, Accessibility::default());
+        assert_eq!(s.units, Units::default());
+        assert_eq!(s.time, TimeSettings::default());
+    }
+
+    #[test]
+    fn new_settings_are_written_in_their_documented_shape() {
+        let mut s = Settings::default();
+        s.accessibility.text_size = TextSize::Larger130;
+        s.accessibility.reduce_motion = Preference::On;
+        s.time.clock = ClockFormat::H12;
+        s.time.time_zone = "Europe/Copenhagen".into();
+        s.units.length = LengthUnit::Imperial;
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            json["accessibility"],
+            serde_json::json!({"reduceMotion": "on", "higherContrast": "system", "textSize": "130"})
+        );
+        assert_eq!(json["units"], serde_json::json!({"length": "imperial"}));
+        assert_eq!(json["time"], serde_json::json!({"timeZone": "Europe/Copenhagen", "clock": "12h"}));
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path());
+        store.update(s.clone()).unwrap();
+        assert_eq!(SettingsStore::load(dir.path()).get(), s);
+    }
+
+    #[test]
+    fn a_time_zone_must_be_one_faber_knows() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path());
+        let mut s = store.get();
+        s.time.time_zone = "Mars/Olympus_Mons".into();
+        let e = store.update(s.clone()).unwrap_err();
+        assert_eq!(e.code, "invalid-time-zone");
+        assert!(e.message.contains("Mars/Olympus_Mons"), "{e:?}");
+        s.time.time_zone = "America/New_York".into();
+        assert_eq!(store.update(s).unwrap().time.time_zone, "America/New_York");
+    }
+
+    #[test]
+    fn reset_restores_every_default_and_turns_whole_machine_files_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path());
+        let mut s = store.get();
+        s.appearance.theme = Theme::Dark;
+        s.units.length = LengthUnit::Imperial;
+        store.update(s).unwrap();
+        store
+            .change_developer(DeveloperChange { full_machine_files: true, acknowledged_risk: true })
+            .unwrap();
+        let rx = store.watch();
+        assert_eq!(store.reset().unwrap(), Settings::default());
+        assert!(rx.has_changed().unwrap());
+        assert_eq!(SettingsStore::load(dir.path()).get(), Settings::default());
+    }
+
+    #[test]
+    fn restoring_settings_text_keeps_this_machines_developer_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path());
+        let restored = "[appearance]
+theme = \"dark\"
+
+[developer]
+fullMachineFiles = true
+";
+        let parsed = parse(restored).unwrap();
+        assert!(parsed.developer.full_machine_files);
+        let s = store.restore(parsed).unwrap();
+        assert_eq!(s.appearance.theme, Theme::Dark);
+        assert!(!s.developer.full_machine_files, "a backup never turns whole-machine files on");
+        assert_eq!(parse("appearance = 5").unwrap_err().code, "settings-invalid");
     }
 
     #[test]

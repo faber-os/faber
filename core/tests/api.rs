@@ -476,8 +476,8 @@ async fn files_round_trip_through_the_api() {
     let (_, home) = call(&c.app, "GET", "/api/v0/files/list?path=home:/", None).await;
     let names: Vec<_> =
         home["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["Desktop", "Documents", "Recordings", "System", "Trash"]);
-    assert_eq!(home["entries"][3]["special"], "system");
+    assert_eq!(names, ["Desktop", "Documents", "Recordings", "Backups", "System", "Trash"]);
+    assert_eq!(home["entries"][4]["special"], "system");
 
     let (s, _) =
         call(&c.app, "POST", "/api/v0/files/folder", Some(json!({"path": "home:/Documents/robot"}))).await;
@@ -657,4 +657,105 @@ async fn a_usb_stick_shows_up_as_its_own_place() {
     c.machine.refresh_ports();
     let (s, body) = call(&c.app, "GET", "/api/v0/files/list?path=disk-e:/", None).await;
     assert_eq!((s, body["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("not-found")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_system_about_and_storage_describe_this_machine() {
+    let c = core();
+    let (_, system) = call(&c.app, "GET", "/api/v0/system", None).await;
+    assert!(system["timeZone"].as_str().is_some_and(|z| !z.is_empty()), "{system}");
+
+    let (s, about) = call(&c.app, "GET", "/api/v0/about", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(about["version"], system["version"]);
+    assert_eq!(about["api"], system["api"]);
+    assert_eq!(about["timeZone"], system["timeZone"]);
+    assert_eq!(about["dataFolder"], c._dir.path().display().to_string());
+    assert!(about["uptimeS"].is_u64());
+    assert!(about["os"].as_str().is_some_and(|o| !o.is_empty()));
+
+    put_bytes(&c.app, "home:/Documents/a.txt", b"12345").await;
+    let (s, storage) = call(&c.app, "GET", "/api/v0/storage", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(storage["documentsBytes"], 5);
+    assert_eq!(storage["recordingsBytes"], 0);
+    assert_eq!(storage["desktopBytes"], 0);
+    assert_eq!(storage["backupsBytes"], 0);
+    assert!(storage["freeBytes"].as_u64().unwrap() <= storage["totalBytes"].as_u64().unwrap());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn backups_are_made_and_restored_through_the_api() {
+    let c = core();
+    let (s, _) = call(&c.app, "POST", "/api/v0/parts", Some(demo_part("lidar"))).await;
+    assert_eq!(s, StatusCode::CREATED);
+    put_bytes(&c.app, "home:/Documents/notes.txt", b"v1").await;
+    let (s, made) = call(&c.app, "POST", "/api/v0/backups", Some(json!({"includeRecordings": false}))).await;
+    assert_eq!(s, StatusCode::CREATED);
+    let path = made["path"].as_str().unwrap().to_string();
+    assert!(path.starts_with("home:/Backups/faber-backup-"), "{made}");
+    assert!(made["bytes"].as_u64().unwrap() > 0);
+    let (_, backups) = call(&c.app, "GET", "/api/v0/files/list?path=home:/Backups", None).await;
+    assert_eq!(backups["entries"][0]["path"], path.as_str());
+    let (_, home) = call(&c.app, "GET", "/api/v0/files/list?path=home:/", None).await;
+    assert_eq!(home["entries"][3]["special"], "backups");
+
+    call(&c.app, "DELETE", "/api/v0/parts/lidar", None).await;
+    put_bytes(&c.app, "home:/Documents/notes.txt", b"v2").await;
+    let (s, _) = call(&c.app, "POST", "/api/v0/backups/restore", Some(json!({"path": path}))).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (_, parts) = call(&c.app, "GET", "/api/v0/parts", None).await;
+    assert_eq!(parts[0]["name"], "lidar");
+    assert_eq!(get_bytes(&c.app, "home:/Documents/notes.txt").await.1, b"v1");
+
+    let (s, err) =
+        call(&c.app, "POST", "/api/v0/backups/restore", Some(json!({"path": "home:/Documents/notes.txt"})))
+            .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(err["error"]["code"], "backup-invalid");
+    assert!(err["error"]["hint"].as_str().is_some_and(|h| !h.is_empty()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_can_be_reset_to_their_defaults() {
+    let c = core();
+    let (_, mut settings) = call(&c.app, "GET", "/api/v0/settings", None).await;
+    assert_eq!(
+        settings["accessibility"],
+        json!({"reduceMotion": "system", "higherContrast": "system", "textSize": "100"})
+    );
+    assert_eq!(settings["units"], json!({"length": "metric"}));
+    assert_eq!(settings["time"], json!({"timeZone": "", "clock": "24h"}));
+    settings["units"]["length"] = json!("imperial");
+    settings["time"]["timeZone"] = json!("Nowhere/Special");
+    let (s, err) = call(&c.app, "PUT", "/api/v0/settings", Some(settings.clone())).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(err["error"]["code"], "invalid-time-zone");
+    settings["time"]["timeZone"] = json!("Europe/Copenhagen");
+    let (s, _) = call(&c.app, "PUT", "/api/v0/settings", Some(settings)).await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (s, reset) = call(&c.app, "POST", "/api/v0/settings/reset", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(reset["units"]["length"], "metric");
+    assert_eq!(reset["time"]["timeZone"], "");
+    let (_, now) = call(&c.app, "GET", "/api/v0/settings", None).await;
+    assert_eq!(now, reset);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn big_files_can_be_downloaded_but_not_opened_inline() {
+    let c = core();
+    // A backup with recordings is easily bigger than the 16 MB that Notes may load.
+    let size = 17 * 1024 * 1024 + 3;
+    let real = c._dir.path().join("files").join("Documents").join("big.bin");
+    std::fs::write(&real, vec![7u8; size]).unwrap();
+
+    let (s, _) = get_bytes(&c.app, "home:/Documents/big.bin").await;
+    assert_ne!(s, StatusCode::OK, "inline reads stay capped");
+
+    let (s, body) = get_bytes(&c.app, "home:/Documents/big.bin&download=1").await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body.len(), size);
+    assert!(body.iter().all(|&b| b == 7));
 }

@@ -1,5 +1,5 @@
 //! Layer 2: Faber's files (docs/api.md, "Files"). The home folder (Desktop, Documents,
-//! Recordings, System, Trash) and, when the developer setting allows it, the whole machine.
+//! Recordings, Backups, System, Trash) and, when the developer setting allows it, the whole machine.
 //!
 //! The one job that matters most here: **a path can never leave its root.** Every path is
 //! parsed into plain name segments (no `..`, no separators, no drive tricks), then joined onto
@@ -25,19 +25,27 @@ pub enum Special {
     Desktop,
     Documents,
     Recordings,
+    Backups,
     System,
     Trash,
 }
 
 impl Special {
-    pub const ALL: [Special; 5] =
-        [Special::Desktop, Special::Documents, Special::Recordings, Special::System, Special::Trash];
+    pub const ALL: [Special; 6] = [
+        Special::Desktop,
+        Special::Documents,
+        Special::Recordings,
+        Special::Backups,
+        Special::System,
+        Special::Trash,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
             Special::Desktop => "Desktop",
             Special::Documents => "Documents",
             Special::Recordings => "Recordings",
+            Special::Backups => "Backups",
             Special::System => "System",
             Special::Trash => "Trash",
         }
@@ -241,7 +249,7 @@ impl FileError {
         FileError::new(
             "protected",
             format!("{p} is one of Faber's fixed folders."),
-            "Desktop, Documents, Recordings, System and Trash can't be renamed, moved or deleted.",
+            "Desktop, Documents, Recordings, Backups, System and Trash can't be renamed, moved or deleted.",
         )
     }
 
@@ -287,6 +295,39 @@ impl Files {
         let changed = *cur != new;
         *cur = new;
         changed
+    }
+
+    /// Where `p` really is on this computer, for work that can't go through `read` and `write`
+    /// (backups are bigger than 16 MB). Only for the home folder, never System.
+    pub fn local_path(&self, p: &VPath) -> Result<PathBuf, FileError> {
+        if p.root != RootKey::Home || p.within(Special::System) {
+            return Err(FileError::new(
+                "bad-path",
+                format!("{p} isn't in Faber's home folder."),
+                "Pick a file in Desktop, Documents, Recordings or Backups.",
+            ));
+        }
+        self.resolve(p, false)
+    }
+
+    /// Bytes used by everything inside a fixed folder. Symbolic links are not followed.
+    pub fn folder_size(&self, special: Special) -> u64 {
+        fn size(dir: &Path) -> u64 {
+            let Ok(read) = fs::read_dir(dir) else { return 0 };
+            read.flatten()
+                .filter_map(|e| Some((e.path(), e.file_type().ok()?, e.metadata().ok()?)))
+                .map(|(path, kind, meta)| {
+                    if kind.is_dir() {
+                        size(&path)
+                    } else if kind.is_file() {
+                        meta.len()
+                    } else {
+                        0
+                    }
+                })
+                .sum()
+        }
+        size(&self.home.join(special.name()))
     }
 
     /// True if `p` is the machine config shown in the System folder.
@@ -427,6 +468,16 @@ impl Files {
     }
 
     pub fn read(&self, p: &VPath, machine_allowed: bool) -> Result<Vec<u8>, FileError> {
+        let (real, len) = self.locate_file(p, machine_allowed)?;
+        if len > MAX_FILE_BYTES {
+            return Err(too_large(p));
+        }
+        fs::read(&real).map_err(|e| FileError::io(p, &e))
+    }
+
+    /// Where a file is on disk, and its size, for streaming it out (downloads of any size).
+    /// Same checks as `read`, without the in-memory size limit.
+    pub fn locate_file(&self, p: &VPath, machine_allowed: bool) -> Result<(PathBuf, u64), FileError> {
         let real = self.resolve(p, machine_allowed)?;
         let meta = fs::metadata(&real).map_err(|_| FileError::not_found(p))?;
         if meta.is_dir() {
@@ -436,10 +487,7 @@ impl Files {
                 "Open it in Files instead.",
             ));
         }
-        if meta.len() > MAX_FILE_BYTES {
-            return Err(too_large(p));
-        }
-        fs::read(&real).map_err(|e| FileError::io(p, &e))
+        Ok((real, meta.len()))
     }
 
     /// Creates or overwrites a file. Refuses the System folder: the machine handles the config.
@@ -708,7 +756,7 @@ fn modified_ms(meta: &fs::Metadata) -> Option<u64> {
 }
 
 /// `name`, or `name (2)`, `name (3)`… — the first that doesn't exist in `dir`.
-fn unique_name(dir: &Path, name: &str) -> String {
+pub fn unique_name(dir: &Path, name: &str) -> String {
     if !dir.join(name).exists() {
         return name.to_string();
     }
@@ -800,7 +848,38 @@ mod tests {
     fn home_lists_the_fixed_folders_in_order() {
         let (_d, f) = setup();
         let names: Vec<_> = f.list(&p("home:/"), false).unwrap().into_iter().map(|e| e.name).collect();
-        assert_eq!(names, ["Desktop", "Documents", "Recordings", "System", "Trash"]);
+        assert_eq!(names, ["Desktop", "Documents", "Recordings", "Backups", "System", "Trash"]);
+    }
+
+    #[test]
+    fn backups_is_a_fixed_folder() {
+        let (_d, f) = setup();
+        assert_eq!(f.trash(&[p("home:/Backups")]).unwrap_err().code, "protected");
+        assert_eq!(
+            f.rename(&p("home:/Backups"), &p("home:/Documents/old"), false).unwrap_err().code,
+            "protected"
+        );
+        f.write(&p("home:/Backups/a.zip"), b"zip", WriteMode::Replace, false).unwrap();
+        assert_eq!(f.list(&p("home:/Backups"), false).unwrap()[0].name, "a.zip");
+    }
+
+    #[test]
+    fn folder_sizes_count_everything_inside() {
+        let (_d, f) = setup();
+        assert_eq!(f.folder_size(Special::Documents), 0);
+        f.write(&p("home:/Documents/a.txt"), b"12345", WriteMode::Replace, false).unwrap();
+        f.create_folder(&p("home:/Documents/deep"), false).unwrap();
+        f.write(&p("home:/Documents/deep/b.txt"), b"123", WriteMode::Replace, false).unwrap();
+        assert_eq!(f.folder_size(Special::Documents), 8);
+    }
+
+    #[test]
+    fn local_paths_are_only_given_inside_home() {
+        let (d, f) = setup();
+        let real = f.local_path(&p("home:/Backups/b.zip")).unwrap();
+        assert_eq!(real, d.path().join("files").join("Backups").join("b.zip"));
+        assert_eq!(f.local_path(&p("machine:/C:/x")).unwrap_err().code, "bad-path");
+        assert_eq!(f.local_path(&p("home:/System/parts.toml")).unwrap_err().code, "bad-path");
     }
 
     #[test]

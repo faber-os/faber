@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDistance, ringRadii, ringStep } from './rings';
+import { ringRadii, ringStep } from './rings';
 
 describe('ringStep', () => {
   it('picks the smallest 1-2-5 step that is at least the minimum spacing apart', () => {
@@ -8,6 +8,11 @@ describe('ringStep', () => {
     expect(ringStep(20, 60)).toBe(5); // 5 m = 100 px
     expect(ringStep(1000, 60)).toBe(0.1); // 10 cm = 100 px
     expect(ringStep(500, 60)).toBe(0.2);
+  });
+
+  it('uses round feet and inches when the units are imperial', () => {
+    expect(ringStep(100, 60, 'imperial')).toBeCloseTo(0.6096, 6); // 2 ft = 61 px
+    expect(ringStep(1000, 60, 'imperial')).toBeCloseTo(0.0762, 6); // 3 in = 76 px
   });
 });
 
@@ -28,15 +33,5 @@ describe('ringRadii', () => {
     expect(
       ringRadii({ scale: 1, panX: 0, panY: 0 }, { width: 4000, height: 4000 }, 0.001).length,
     ).toBeLessThanOrEqual(100);
-  });
-});
-
-describe('formatDistance', () => {
-  it('uses cm below one metre and m above', () => {
-    expect(formatDistance(0.5)).toBe('50 cm');
-    expect(formatDistance(0.05)).toBe('5 cm');
-    expect(formatDistance(1)).toBe('1 m');
-    expect(formatDistance(2.5)).toBe('2.5 m');
-    expect(formatDistance(0.30000000000000004)).toBe('30 cm');
   });
 });

@@ -1,6 +1,10 @@
 <script lang="ts">
+  import { useCore } from '../lib/state/context';
+  import { formatClockTime, formatLongDate, formatShortDate } from '../lib/desktop/wallClock';
+
   /** `withDate`: the date under the time (the large taskbar). */
   let { withDate = false }: { withDate?: boolean } = $props();
+  const core = useCore();
   let now = $state(new Date());
 
   $effect(() => {
@@ -16,20 +20,13 @@
     return () => clearTimeout(timer);
   });
 
-  const time = $derived(now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
-  const date = $derived(
-    now.toLocaleDateString(undefined, {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    }),
-  );
+  // The machine's time, in every browser (D42).
+  const time = $derived(formatClockTime(now.getTime(), core.wallClock));
+  const date = $derived(formatLongDate(now.getTime(), core.wallClock));
 </script>
 
 <time class="clock num" class:stacked={withDate} datetime={now.toISOString()} title={date}
-  >{time}{#if withDate}<span class="date"
-      >{now.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span
+  >{time}{#if withDate}<span class="date">{formatShortDate(now.getTime(), core.wallClock)}</span
     >{/if}</time
 >
 

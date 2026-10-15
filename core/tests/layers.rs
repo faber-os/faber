@@ -7,10 +7,12 @@ use std::path::{Path, PathBuf};
 const LAYERS: &[(&str, u8)] = &[
     ("clock", 1),
     ("names", 1),
+    ("backup", 2),
     ("config", 2),
     ("connectors", 2),
     ("disks", 2),
     ("files", 2),
+    ("host", 2),
     ("settings", 2),
     ("logs", 2),
     ("ports", 2),

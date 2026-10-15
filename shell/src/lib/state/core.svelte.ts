@@ -17,6 +17,10 @@ import type {
   DeveloperChange,
   FileRoot,
   FolderListing,
+  AboutInfo,
+  BackupInfo,
+  ClockFormat,
+  StorageInfo,
 } from './types';
 
 export const LOG_CAPACITY = 1000;
@@ -61,6 +65,14 @@ export class CoreState {
   logs = $state.raw<LogEntry[]>([]);
   /** Shared by every browser and the attached screen; `null` until the core has sent them. */
   settings = $state.raw<Settings | null>(null);
+  /**
+   * How wall-clock times are shown (D42): in the zone the settings pick, else the machine's own
+   * (from the system info), else (before either is known) the browser's.
+   */
+  wallClock = $derived<{ timeZone: string | undefined; clock: ClockFormat }>({
+    timeZone: this.settings?.time.timeZone || this.system?.timeZone || undefined,
+    clock: this.settings?.time.clock ?? '24h',
+  });
   /** The newest error that belonged to no window. */
   lastError = $state.raw<ErrorBody | null>(null);
 
@@ -178,6 +190,29 @@ export class CoreState {
     const r = await this.call(() => this.http.putSettings(settings));
     if (r.ok) this.settings = r.value;
     return r;
+  }
+
+  /** Every setting back to its default. Parts and files are not touched. */
+  async resetSettings(): Promise<Result<Settings>> {
+    const r = await this.call(() => this.http.resetSettings());
+    if (r.ok) this.settings = r.value;
+    return r;
+  }
+
+  loadAbout(): Promise<Result<AboutInfo>> {
+    return this.call(() => this.http.getAbout());
+  }
+
+  loadStorage(): Promise<Result<StorageInfo>> {
+    return this.call(() => this.http.getStorage());
+  }
+
+  createBackup(includeRecordings: boolean): Promise<Result<BackupInfo>> {
+    return this.call(() => this.http.createBackup(includeRecordings));
+  }
+
+  restoreBackup(path: string): Promise<Result<void>> {
+    return this.call(() => this.http.restoreBackup(path));
   }
 
   async setDeveloper(change: DeveloperChange): Promise<Result<Settings>> {

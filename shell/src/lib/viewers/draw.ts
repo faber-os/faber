@@ -1,6 +1,7 @@
 import { intensityBucket } from './colour';
 import type { ScanPoints } from './laserScan';
-import { formatDistance, ringRadii, ringStep } from './rings';
+import { ringRadii, ringStep } from './rings';
+import { formatLength, type LengthUnit } from './units';
 import { worldToScreen, type CanvasSize, type View } from './view';
 
 export interface ScanPalette {
@@ -27,12 +28,13 @@ export function drawLaserScan(
   size: CanvasSize,
   dpr: number,
   palette: ScanPalette,
+  length: LengthUnit = 'metric',
 ): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = palette.background;
   ctx.fillRect(0, 0, size.width, size.height);
 
-  drawRings(ctx, view, size, palette);
+  drawRings(ctx, view, size, palette, length);
   if (points) drawPoints(ctx, points, view, size, palette.points);
   drawOrigin(ctx, view, size, palette.origin);
 }
@@ -42,9 +44,10 @@ function drawRings(
   view: View,
   size: CanvasSize,
   palette: ScanPalette,
+  length: LengthUnit,
 ) {
   const [ox, oy] = worldToScreen(0, 0, view, size);
-  const step = ringStep(view.scale, RING_MIN_PX);
+  const step = ringStep(view.scale, RING_MIN_PX, length);
 
   ctx.strokeStyle = palette.axis;
   ctx.lineWidth = 1;
@@ -67,7 +70,7 @@ function drawRings(
     ctx.stroke();
     // Label each ring where it crosses the forward axis, just right of it.
     const ly = oy - px;
-    if (ly > 12 && ly < size.height) ctx.fillText(formatDistance(r), ox + 4, ly - 2);
+    if (ly > 12 && ly < size.height) ctx.fillText(formatLength(r, length), ox + 4, ly - 2);
   }
 }
 

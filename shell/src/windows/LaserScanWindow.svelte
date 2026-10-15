@@ -92,6 +92,8 @@
       return;
     }
     const resolvedTheme = theme.resolved;
+    // Ring labels in the chosen units (D43); the scan itself stays in metres.
+    const length = core.settings?.units.length ?? 'metric';
     dirty = true;
     let raf = requestAnimationFrame(function frame() {
       raf = requestAnimationFrame(frame);
@@ -111,7 +113,7 @@
       if (!dirty || size.width === 0 || !palette) return;
       dirty = false;
       view ??= fitView(DEFAULT_RANGE_M, size);
-      drawLaserScan(ctx, points, view, size, dpr, palette);
+      drawLaserScan(ctx, points, view, size, dpr, palette, length);
     });
     return () => cancelAnimationFrame(raf);
   });

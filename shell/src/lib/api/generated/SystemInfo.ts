@@ -12,6 +12,11 @@ api: string,
  */
 timeUs: number, 
 /**
+ * The machine's own IANA time zone, e.g. `Europe/Copenhagen` (`UTC` if the OS doesn't say).
+ * Wall-clock times are shown in it unless the settings pick another (D42).
+ */
+timeZone: string, 
+/**
  * Set when parts.toml can't be read. Then no parts run and the shell must show this.
  */
 configProblem?: ErrorBody, };

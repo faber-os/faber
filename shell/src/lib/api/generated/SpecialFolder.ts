@@ -3,4 +3,4 @@
 /**
  * The home folder's fixed folders. They can't be renamed or deleted.
  */
-export type SpecialFolder = "desktop" | "documents" | "recordings" | "system" | "trash";
+export type SpecialFolder = "desktop" | "documents" | "recordings" | "backups" | "system" | "trash";

@@ -1,9 +1,10 @@
-//! Files and settings routes (docs/api.md, "Files" and "Settings").
+//! Files, storage, backups and settings routes (docs/api.md, "Files", "Storage and backups" and
+//! "Settings").
 
 use super::{ApiJson, AppState, Failure, blocking, convert, dto};
 use crate::files::{MAX_FILE_BYTES, WriteMode};
 use axum::Json;
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -25,7 +26,11 @@ pub fn routes() -> axum::Router<AppState> {
         .route("/api/v0/files/delete", post(delete))
         .route("/api/v0/files/empty-trash", post(empty_trash))
         .route("/api/v0/files/samples", post(samples))
+        .route("/api/v0/storage", get(storage))
+        .route("/api/v0/backups", post(create_backup))
+        .route("/api/v0/backups/restore", post(restore_backup))
         .route("/api/v0/settings", get(settings).put(update_settings))
+        .route("/api/v0/settings/reset", post(reset_settings))
         .route("/api/v0/settings/developer", post(change_developer))
 }
 
@@ -58,17 +63,67 @@ async fn list(
     Ok(Json(convert::folder_listing(&q.path, &entries)))
 }
 
+/// Inline reads (Notes, previews) load the file and are capped at 16 MB. Downloads stream from
+/// disk in chunks, so a backup with recordings of any size can be saved.
 async fn read(State(s): State<AppState>, Query(q): Query<PathQuery>) -> Result<Response, Failure> {
     let path = q.path.clone();
-    let (p, bytes) = blocking(move || s.machine.read_file(&path)).await??;
-    let name = p.name().unwrap_or("file").to_string();
-    let mut res = ([(header::CONTENT_TYPE, content_type(&name))], bytes).into_response();
-    if q.download == Some(1) {
-        let disposition = format!("attachment; filename=\"{}\"", name.replace('"', ""));
-        res.headers_mut()
-            .insert(header::CONTENT_DISPOSITION, disposition.parse().expect("ascii-safe header"));
+    if q.download != Some(1) {
+        let (p, bytes) = blocking(move || s.machine.read_file(&path)).await??;
+        let name = p.name().unwrap_or("file").to_string();
+        return Ok(([(header::CONTENT_TYPE, content_type(&name))], bytes).into_response());
     }
-    Ok(res)
+    let (p, real, len) = blocking(move || s.machine.download_file(&path)).await??;
+    let file = tokio::fs::File::open(&real).await.map_err(|e| {
+        Failure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "io-error",
+            format!("{p} can't be opened: {e}"),
+            "Try again. If it keeps happening, look in the Logs tool.",
+        )
+    })?;
+    let name = p.name().unwrap_or("file").to_string();
+    let disposition = attachment(&name);
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type(&name).to_string()),
+            (header::CONTENT_LENGTH, len.to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        Body::from_stream(chunks(file)),
+    )
+        .into_response())
+}
+
+/// `Content-Disposition` for a download that keeps any file name, e.g. `kørsel.fbcap`: an ASCII
+/// fallback plus the exact UTF-8 name (RFC 6266 / RFC 5987). Header values must be ASCII.
+fn attachment(name: &str) -> String {
+    let safe = |c: char| (c.is_ascii_graphic() || c == ' ') && !matches!(c, '"' | '\\');
+    let fallback: String = name.chars().map(|c| if safe(c) { c } else { '_' }).collect();
+    let mut exact = String::new();
+    for b in name.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+            exact.push(b as char);
+        } else {
+            exact.push_str(&format!("%{b:02X}"));
+        }
+    }
+    format!("attachment; filename=\"{fallback}\"; filename*=UTF-8''{exact}")
+}
+
+/// The file as a stream of 64 KiB chunks.
+fn chunks(
+    file: tokio::fs::File,
+) -> impl futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static {
+    futures_util::stream::try_unfold(file, |mut file| async move {
+        use tokio::io::AsyncReadExt;
+        let mut buf = vec![0u8; 64 * 1024];
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            return Ok(None);
+        }
+        buf.truncate(n);
+        Ok(Some((Bytes::from(buf), file)))
+    })
 }
 
 async fn write(
@@ -142,6 +197,38 @@ async fn samples(State(s): State<AppState>) -> Result<(StatusCode, Json<dto::Pat
     Ok((StatusCode::CREATED, Json(dto::PathRequest { path })))
 }
 
+async fn storage(State(s): State<AppState>) -> Result<Json<dto::StorageInfo>, Failure> {
+    let st = blocking(move || s.machine.storage()).await??;
+    Ok(Json(dto::StorageInfo {
+        recordings_bytes: st.recordings,
+        documents_bytes: st.documents,
+        desktop_bytes: st.desktop,
+        backups_bytes: st.backups,
+        free_bytes: st.free,
+        total_bytes: st.total,
+    }))
+}
+
+async fn create_backup(
+    State(s): State<AppState>,
+    ApiJson(body): ApiJson<dto::BackupRequest>,
+) -> Result<(StatusCode, Json<dto::BackupInfo>), Failure> {
+    let (path, bytes) = blocking(move || s.machine.create_backup(body.include_recordings)).await??;
+    Ok((StatusCode::CREATED, Json(dto::BackupInfo { path, bytes })))
+}
+
+async fn restore_backup(
+    State(s): State<AppState>,
+    ApiJson(body): ApiJson<dto::PathRequest>,
+) -> Result<StatusCode, Failure> {
+    blocking(move || s.machine.restore_backup(&body.path)).await??;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn reset_settings(State(s): State<AppState>) -> Result<Json<dto::Settings>, Failure> {
+    Ok(Json(blocking(move || s.machine.reset_settings()).await??))
+}
+
 async fn settings(State(s): State<AppState>) -> Json<dto::Settings> {
     Json(s.machine.settings())
 }
@@ -174,5 +261,20 @@ fn content_type(name: &str) -> &'static str {
         Some("svg") => "text/plain; charset=utf-8", // SVG can carry scripts; show as text
         Some("pdf") => "application/pdf",
         _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::attachment;
+
+    #[test]
+    fn download_names_keep_any_letters_and_stay_valid_headers() {
+        let h = attachment("kørsel \"1\".fbcap");
+        assert_eq!(
+            h,
+            "attachment; filename=\"k_rsel _1_.fbcap\"; filename*=UTF-8''k%C3%B8rsel%20%221%22.fbcap"
+        );
+        assert!(axum::http::HeaderValue::from_str(&h).is_ok());
     }
 }

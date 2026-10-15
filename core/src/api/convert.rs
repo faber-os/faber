@@ -119,6 +119,7 @@ pub fn file_entry(e: &Entry) -> dto::FileEntry {
             Special::Desktop => dto::SpecialFolder::Desktop,
             Special::Documents => dto::SpecialFolder::Documents,
             Special::Recordings => dto::SpecialFolder::Recordings,
+            Special::Backups => dto::SpecialFolder::Backups,
             Special::System => dto::SpecialFolder::System,
             Special::Trash => dto::SpecialFolder::Trash,
         }),

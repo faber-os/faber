@@ -6,10 +6,12 @@ pub mod clock;
 pub mod names;
 
 // Layer 2: one job each; none of them knows about HTTP.
+pub mod backup;
 pub mod config;
 pub mod connectors;
 pub mod disks;
 pub mod files;
+pub mod host;
 pub mod logs;
 pub mod ports;
 pub mod router;
