@@ -141,9 +141,11 @@ poll = { default-hz = 1 }
 read = { register = 0x00, bytes = 2, format = "i16be", shift = 4, scale = 0.0625, unit = "celsius" }
 ```
 
-**Wasm example manifest** (LD19 LiDAR):
+**Wasm example manifest** (LD19 LiDAR; the real one is `connectors/ldrobot-ld19/faber.toml`):
 
 ```toml
+faber-manifest = 1                  # the faber.toml format version; every manifest starts with it
+
 [package]
 id = "ldrobot-ld19"
 type = "connector"
@@ -157,6 +159,12 @@ serial = { baud = 230400 }          # any UART or USB-serial port the user picks
 
 [[provides]]
 capability = "laser-scan@1"
+info = { range-min-m = 0.02, range-max-m = 12.0 }   # optional: its limits, kebab-case
+
+[[usb-hints]]                       # optional: adapters it often comes with (detect-then-suggest)
+vid = 0x10c4
+pid = 0xea60
+reason = "The LD19 kit comes with this CP2102 adapter."
 ```
 
 **Settings** are declared in the manifest too, one `[[settings]]` table each: its key, a label and

@@ -101,7 +101,9 @@ fn replay(c: &mut dyn Connector, chunks: &[faber_connector::capture::Chunk]) -> 
 fn the_wasm_ld19_gives_exactly_the_readings_of_the_built_in_one() {
     let Some(wasm) = component("ldrobot-ld19") else { return };
     let chunks = capture();
+    let started = Instant::now();
     let def = wasm::definition(ldrobot_ld19::manifest(), &wasm, Limits::default()).expect("loads");
+    let compile_time = started.elapsed();
     assert_eq!(def.kind, ConnectorKind::Wasm);
 
     let started = Instant::now();
@@ -120,7 +122,7 @@ fn the_wasm_ld19_gives_exactly_the_readings_of_the_built_in_one() {
 
     let per_s = |d: Duration| built_in.published.len() as f64 / d.as_secs_f64();
     eprintln!(
-        "{} readings: built-in {:.0}/s ({built_in_time:?}), wasm {:.0}/s ({wasm_time:?})",
+        "{} readings: built-in {:.0}/s ({built_in_time:?}), wasm {:.0}/s ({wasm_time:?}); compiling the component took {compile_time:?}",
         built_in.published.len(),
         per_s(built_in_time),
         per_s(wasm_time)
