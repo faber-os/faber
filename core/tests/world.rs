@@ -256,6 +256,14 @@ async fn sennep_in_the_apartment() -> TestCore {
     for p in c.machine.parts() {
         assert_eq!(p.status, PartStatus::Running, "{}", p.name);
     }
+    // Running parts haven't necessarily ticked yet (a busy machine runs the world thread late):
+    // wait for the first pose and base reading, so every test starts from a published state.
+    wait_for("the first world tick", 5.0, || {
+        let pose = matches!(latest(&c, "world/pose"), Some(Reading::Pose(_)));
+        let base = matches!(latest(&c, "base/planar-base"), Some(Reading::PlanarBase(_)));
+        (pose && base).then_some(())
+    })
+    .await;
     c
 }
 
