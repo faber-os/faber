@@ -376,6 +376,86 @@ pub struct PartInfo {
     pub state: PartState,
     pub signals: Vec<SignalInfo>,
     pub mount: Mount,
+    /// For a part on a FaberLink board (a sub-part, `mega.left`): the bridge it is on. In
+    /// `GET /api/v0/parts` sub-parts follow their bridge.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge: Option<String>,
+    /// For a bridge (`faber-bridge`): its board and the link to it.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<BoardLink>,
+}
+
+/// A FaberLink board as its bridge part sees it (docs/faberlink.md).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BoardLink {
+    pub link: LinkState,
+    /// What the board says about itself, once it has answered: its name, e.g. `sennep-mega`.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<String>,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware: Option<String>,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firmware_version: Option<String>,
+    /// The FaberLink version both sides speak.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<u8>,
+    /// The board stops every actuator when Faber's heartbeat is missing this long.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_timeout_ms: Option<u16>,
+    /// The board's own stop button is latched: reset it on the board, then release the e-stop.
+    pub hardware_estop: bool,
+    /// The board stopped its actuators because Faber's heartbeat didn't reach it in time.
+    pub failsafe: bool,
+}
+
+/// Where the link to a FaberLink board stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum LinkState {
+    /// Saying hello; the board hasn't answered yet.
+    Connecting,
+    /// The board answered; Faber is collecting its parts.
+    Describing,
+    Ready,
+    /// No answer to hello for a while (not a FaberLink board, the wrong baud, or still starting).
+    NoAnswer,
+    /// The port closed or the board went quiet; Faber keeps trying.
+    Lost,
+    /// The board speaks another FaberLink version.
+    Incompatible,
+}
+
+/// Body of `POST /api/v0/ports/check-board`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BoardCheckRequest {
+    /// The port's id, e.g. `usb:2341:0042`.
+    pub port: String,
+}
+
+/// What checking a port for a FaberLink board found.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "result", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum BoardCheck {
+    /// A FaberLink board answered. It is suggested for the port from now on.
+    #[serde(rename_all = "camelCase")]
+    Found { board: String, firmware: String, firmware_version: String, parts: u8 },
+    /// A FaberLink board answered, but it speaks another protocol version: what to update.
+    OtherVersion { message: String },
+    /// Nothing answered.
+    Nothing,
 }
 
 /// How a simulated part gets its values (docs/simulation.md, section 4).

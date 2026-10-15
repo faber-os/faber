@@ -14,7 +14,7 @@ mod ffi {
 
     unsafe extern "C" {
         pub fn flh_new(heartbeat_timeout_ms: u16) -> *mut c_void;
-        pub fn flh_new_mega(heartbeat_timeout_ms: u16) -> *mut c_void;
+        pub fn flh_new_mega(heartbeat_timeout_ms: u16, motor_lease_ms: u16) -> *mut c_void;
         pub fn flh_motor_output_at(h: *mut c_void, i: i32) -> f32;
         pub fn flh_set_distance_at(h: *mut c_void, i: i32, meters: f32);
         pub fn flh_free(h: *mut c_void);
@@ -47,9 +47,9 @@ mod ffi {
             Handle(unsafe { flh_new(heartbeat_timeout_ms) })
         }
 
-        pub fn new_mega(heartbeat_timeout_ms: u16) -> Handle {
+        pub fn new_mega(heartbeat_timeout_ms: u16, motor_lease_ms: u16) -> Handle {
             // SAFETY: flh_new_mega allocates a harness and returns a valid pointer to it.
-            Handle(unsafe { flh_new_mega(heartbeat_timeout_ms) })
+            Handle(unsafe { flh_new_mega(heartbeat_timeout_ms, motor_lease_ms) })
         }
 
         pub fn motor_output_at(&self, i: i32) -> f32 {
@@ -166,9 +166,15 @@ impl FakeBoard {
     }
 
     /// A board called `sim-mega` with motors `left` and `right` and distance sensors `front` and
-    /// `rear`.
+    /// `rear`. Its motors stop by themselves after 250 ms without a command, as every motor does.
     pub fn mega(heartbeat_timeout_ms: u16) -> FakeBoard {
-        FakeBoard { handle: ffi::Handle::new_mega(heartbeat_timeout_ms) }
+        FakeBoard::mega_with_motor_lease(heartbeat_timeout_ms, 250)
+    }
+
+    /// [`FakeBoard::mega`] with another lease time for its motors, so a test can tell the core's
+    /// SAFE from the board's own lease running out.
+    pub fn mega_with_motor_lease(heartbeat_timeout_ms: u16, motor_lease_ms: u16) -> FakeBoard {
+        FakeBoard { handle: ffi::Handle::new_mega(heartbeat_timeout_ms, motor_lease_ms) }
     }
 
     /// What one motor of a [`FakeBoard::mega`] is driven at now: [`Motor::Left`] or

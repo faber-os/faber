@@ -28,7 +28,8 @@ class BufferOutput : public faberlink::Output {
 // A motor whose "hardware" is a variable, reporting its open-loop velocity as a reading.
 class SimMotor : public faberlink::Motor {
  public:
-  explicit SimMotor(const char* name) : faberlink::Motor(name, 10.0f), driven(0), driveCalls(0) {
+  SimMotor(const char* name, uint16_t leaseMs)
+      : faberlink::Motor(name, 10.0f, faberlink::MOTOR_DC, leaseMs), driven(0), driveCalls(0) {
     setReadingPeriod(50);
   }
   uint8_t writeReading(uint8_t* out, uint32_t) override {
@@ -61,8 +62,12 @@ class SimDistance : public faberlink::Distance {
 // The small board hosts `left` (part 0) and `front` (part 1). The Mega also hosts `right` (part 1)
 // and `rear` (part 3): motors left, right, then distances front, rear.
 struct Harness {
-  Harness(uint16_t heartbeatTimeoutMs, bool mega)
-      : board(out), motor("left"), motor2("right"), distance("front"), distance2("rear") {
+  Harness(uint16_t heartbeatTimeoutMs, bool mega, uint16_t motorLeaseMs)
+      : board(out),
+        motor("left", motorLeaseMs),
+        motor2("right", motorLeaseMs),
+        distance("front"),
+        distance2("rear") {
     board.setIdentity(mega ? "sim-mega" : "sim-board", "faberlink-harness", "0.1.0");
     board.setHeartbeatTimeout(heartbeatTimeoutMs);
     board.add(motor);
@@ -85,9 +90,14 @@ struct Harness {
 
 extern "C" {
 
-void* flh_new(uint16_t heartbeat_timeout_ms) { return new Harness(heartbeat_timeout_ms, false); }
+void* flh_new(uint16_t heartbeat_timeout_ms) {
+  return new Harness(heartbeat_timeout_ms, false, faberlink::DEFAULT_LEASE_MS);
+}
 
-void* flh_new_mega(uint16_t heartbeat_timeout_ms) { return new Harness(heartbeat_timeout_ms, true); }
+// The Mega; its motors stop by themselves after motor_lease_ms without a command.
+void* flh_new_mega(uint16_t heartbeat_timeout_ms, uint16_t motor_lease_ms) {
+  return new Harness(heartbeat_timeout_ms, true, motor_lease_ms);
+}
 
 // Motor `i` (0 left, 1 right) and distance sensor `i` (0 front, 1 rear).
 float flh_motor_output_at(void* h, int i) { return static_cast<Harness*>(h)->motorAt(i).driven; }
