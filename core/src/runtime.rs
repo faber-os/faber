@@ -205,6 +205,17 @@ impl Context for PartContext<'_> {
     }
 }
 
+/// A part that needs a FaberLink bridge, which arrives in Phase 4 (docs/simulation.md, section 3).
+pub fn needs_bridge(manifest: &Manifest) -> Problem {
+    Problem::new(
+        format!(
+            "{} needs a bridge (a microcontroller board), which Faber can't use yet (Phase 4).",
+            manifest.name
+        ),
+        "Tick Simulated for now: set simulate = \"manual\" or \"world\" instead of port in parts.toml.",
+    )
+}
+
 fn connector_bug(what: &str) -> Problem {
     Problem::new(
         format!("The connector stopped because of a bug: {what}."),
@@ -239,6 +250,13 @@ fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>) {
         .collect();
     for (addr, provide) in addresses.iter().zip(&spec.manifest.provides) {
         deps.router.declare(addr.clone(), provide.capability);
+    }
+    if spec.manifest.port == faber_connector::PortRequirement::Bridge {
+        deps.status.set(&spec.name, PartStatus::Invalid(needs_bridge(&spec.manifest)));
+        for addr in &addresses {
+            deps.router.remove(addr);
+        }
+        return;
     }
     let mut crashes = 0u32;
     let mut port_backoff = deps.timing.backoff_start;
@@ -305,6 +323,7 @@ fn run_once(
 ) -> RunEnd {
     let baud = match spec.manifest.port {
         faber_connector::PortRequirement::Serial { baud } => baud,
+        faber_connector::PortRequirement::Bridge => unreachable!("`supervise` never runs a bridge part"),
     };
     let (reader, _writer) = match deps.opener.open(&spec.port, baud) {
         Ok(rw) => rw,
@@ -558,6 +577,22 @@ mod tests {
         assert!(p.message.contains("\"x\""));
         assert_eq!(p.hint, "remove it");
         assert_eq!(opener.opens.load(Ordering::SeqCst), 0, "the port is never opened");
+    }
+
+    #[test]
+    fn a_part_that_needs_a_bridge_is_invalid_and_its_port_never_opened() {
+        let opener = Arc::new(FakeOpener::new(vec![]));
+        let d = deps(Arc::clone(&opener));
+        let mut sp = spec(Settings::new());
+        sp.manifest.port = PortRequirement::Bridge;
+        let _h = start(sp, d.clone());
+        let PartStatus::Invalid(p) = wait_for(&d.status, |s| matches!(s, PartStatus::Invalid(_))) else {
+            unreachable!()
+        };
+        assert!(p.message.contains("needs a bridge"), "{p:?}");
+        assert!(p.hint.contains("Simulated"), "{p:?}");
+        assert_eq!(opener.opens.load(Ordering::SeqCst), 0);
+        assert!(d.router.subscribe(&SignalAddress::new(name(), "laser-scan")).is_none());
     }
 
     #[test]

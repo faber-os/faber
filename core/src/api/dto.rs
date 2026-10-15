@@ -4,7 +4,7 @@
 //! `shell/src/lib/api/generated/` by `cargo test` (ts-rs), and CI fails if they are out of date.
 //! Field names are camelCase on the wire.
 
-use faber_capabilities::{Capability, Mount, Reading};
+use faber_capabilities::{Capability, Info, Mount, Reading};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -53,7 +53,11 @@ pub struct ApiError {
 #[serde(rename_all = "camelCase", tag = "kind")]
 #[ts(export)]
 pub enum PortRequirementInfo {
-    Serial { baud: u32 },
+    Serial {
+        baud: u32,
+    },
+    /// Needs a FaberLink bridge (Phase 4). Until then the part can only be simulated.
+    Bridge,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -62,6 +66,10 @@ pub enum PortRequirementInfo {
 pub struct ProvideInfo {
     pub name: String,
     pub capability: Capability,
+    /// Its limits with the default settings (range, top speed, …).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub info: Option<Info>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]

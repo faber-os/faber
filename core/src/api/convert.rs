@@ -87,11 +87,16 @@ pub fn connector(m: &Manifest) -> dto::ConnectorInfo {
         kind: "built-in".into(),
         port: match m.port {
             PortRequirement::Serial { baud } => dto::PortRequirementInfo::Serial { baud },
+            PortRequirement::Bridge => dto::PortRequirementInfo::Bridge,
         },
         provides: m
             .provides
             .iter()
-            .map(|p| dto::ProvideInfo { name: p.name.clone(), capability: p.capability })
+            .map(|p| dto::ProvideInfo {
+                name: p.name.clone(),
+                capability: p.capability,
+                info: p.info.clone(),
+            })
             .collect(),
     }
 }
@@ -170,5 +175,9 @@ mod tests {
         assert_eq!(c.id, "ldrobot-ld19");
         assert_eq!(c.port, dto::PortRequirementInfo::Serial { baud: 230_400 });
         assert_eq!(c.provides[0].name, "laser-scan");
+        assert!(
+            matches!(c.provides[0].info, Some(faber_capabilities::Info::LaserScan(_))),
+            "the range is shown"
+        );
     }
 }
