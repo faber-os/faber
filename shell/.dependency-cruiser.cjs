@@ -11,6 +11,10 @@
  *                                                   never api
  *
  * `src/test/` holds shared test fakes and is only imported by *.test.ts files.
+ *
+ *   ../sdk/js/shell/src/protocol.ts   the app protocol (docs/apps.md §9), shared with the
+ *                                     `@faber-os/shell` SDK: types only, imported only by the app
+ *                                     window's host in src/lib/state, and importing nothing.
  */
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
@@ -67,6 +71,28 @@ module.exports = {
       severity: 'error',
       from: { path: '^src/', pathNot: '(\.test\.ts$|^src/test/)' },
       to: { path: '^src/test/' },
+    },
+    {
+      name: 'sdk-only-through-the-app-host',
+      comment:
+        'The SDK is the app side. The shell shares only its protocol types, through the app window host (src/lib/state/appHost.ts).',
+      severity: 'error',
+      from: { pathNot: '^(src/lib/state/appHost(\\.test)?\\.ts|\\.\\./sdk/)' },
+      to: { path: '^\\.\\./sdk/' },
+    },
+    {
+      name: 'sdk-host-uses-only-the-protocol',
+      comment: 'The host may use the protocol, never the SDK itself (that runs in the app).',
+      severity: 'error',
+      from: { path: '^src/' },
+      to: { path: '^\\.\\./sdk/', pathNot: '^\\.\\./sdk/js/shell/src/protocol\\.ts$' },
+    },
+    {
+      name: 'sdk-protocol-imports-nothing',
+      comment: 'The protocol is plain types, shared by both sides: it may import nothing.',
+      severity: 'error',
+      from: { path: '^\\.\\./sdk/js/shell/src/protocol\\.ts$' },
+      to: {},
     },
     {
       name: 'no-circular',

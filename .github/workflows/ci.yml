@@ -59,6 +59,25 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  sdk:
+    name: App SDK (@faber-os/shell)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/js/shell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sdk/js/shell/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+
   e2e:
     name: End to end (real core + browser)
     runs-on: ubuntu-latest

@@ -1,8 +1,8 @@
 # Phase 5 design: apps
 
-Status: **design v1; Phase 5a (apps in the core) built** (2026-10-15). Builds on D03, D04, D24,
-D29 and architecture.md §7. §8 says what was built and how it differs; the shell side (app
-windows, the role picker, `@faber-os/shell`) is Phase 5b and not built yet. The open questions in
+Status: **design v1; Phase 5a (apps in the core) and 5b (apps in the shell) built** (2026-10-16).
+Builds on D03, D04, D24, D29 and architecture.md §7. §8 says what 5a built and how it differs, §9
+what 5b built: app windows, the message protocol, `@faber-os/shell`, the role picker and Apps. The open questions in
 §7 were answered with their recommendations while Mikkel was away: both wasm logic and UI-only
 apps; SENNEP's app in the SENNEP V2 repo, with a small example app here.
 
@@ -142,8 +142,120 @@ wall). `core/tests/apps.rs` proves it in the apartment world.
 app over a `count = "1.."` role, with a UI), `faber check` (manifest, UI files, build, load in the
 sandbox, then start, 20 ticks and stop with no parts picked) and `faber pack`.
 
-**Not built in 5a**: the shell (app windows in a sandboxed iframe, the message channel and
-`@faber-os/shell`, the role picker in the Install window, the "app" badge), roles filled by
-derived signals (`accept`), and apps in backups: a backup holds neither `config/apps.toml` nor
-`<data>/apps/` yet, though its `packages.toml` lists installed apps.
+**Not built in 5a**: the shell side and apps in backups (both built in 5b, §9), and roles filled
+by derived signals (`accept`).
 
+## 9. As built (Phase 5b: apps in the shell)
+
+**Installing.** Opening an app's `.faberpkg` shows the Install window's app pane
+(`shell/src/windows/InstallApp.svelte`): name, version, publisher, how it runs, its README (safe
+minimal Markdown, as for connectors), the "Not checked by the Faber registry" warning, and **what
+it needs**: a picker per role offering only the parts that provide the role's capability (a
+select for `count = "1"`, checkboxes for `"1.."`; the only part that fits is suggested). A role
+with `command = true` says it in words: "Wall follower will be able to drive "base"." Its derived
+signals are listed with an **app** badge (D24). Install, then `PUT …/roles` with the picks, then,
+if "Turn it on now" is ticked (only possible once every role has a part), `POST …/enable`.
+
+**Apps** is a tool of its own (Start → Apps, `tool:apps`), not a Settings section: apps are what a
+beginner installs first (principles.md, step 0), and it is work with live state, like Parts, not a
+preference. Settings → Connectors lists connector packages only. Each app shows its state in words
+(the part states, with the core's message and hint), an on/off switch that shows what the core
+says (it flips when the `apps` topic does), its parts (the same picker; Save restarts an app that
+is on), Open (its window), its derived signals with the badge and a viewer, and Uninstall,
+disabled while it is on with the reason ("Turn it off to uninstall it, so nothing it drives stops
+by surprise"). The list comes only from the `apps` topic: an answer to "turn it on" can be older
+than what the topic already said.
+
+**Icons.** An app's own `icon.svg` (at the root of its package) is served at
+`/apps/<id>/icon.svg` as an image only (api.md, "Apps"); `AppInfo.icon` names the icon to show
+(its `[window]` icon, else that one). The shell shows it with `<img>` in the window's title, the
+taskbar and Apps, never inline, so an SVG can't run script or load anything.
+
+**App windows** (`shell/src/windows/AppWindow.svelte`). An app with a UI opens as a window titled
+and sized by its `[window]`: an `<iframe sandbox="allow-scripts" referrerpolicy="no-referrer">`
+on `/apps/<id>/ui/index.html`. The page talks only to the shell, through `postMessage`, answered by
+the **host** (`shell/src/lib/state/appHost.ts`, plain TypeScript, tested against hostile
+messages).
+
+**The protocol, v1** (`sdk/js/shell/src/protocol.ts`, shared by the SDK and the host). Every
+message carries `faber: 1`. A request is `{faber, id, type, …}`; each gets one reply,
+`{faber, re: id, ok: true, value}` or `{faber, re: id, ok: false, error: {code, message, hint}}`.
+
+| `type` | Fields | Answers |
+|---|---|---|
+| `hello` | | the app (`id`, `name`, `version`), `roles`, `published`, `status`, `theme` |
+| `roles` | | `[{role, capability, command, count, parts}]`: `parts` is how many, never which |
+| `status` | | `{enabled, state, message?}` |
+| `theme` | | `{scheme: 'light' \| 'dark', tokens}`: a fixed list of the shell's CSS tokens |
+| `latest` | `source` | the newest reading or `null` |
+| `subscribe` | `source`, `maxHz?` | `{subscription}`; then `signal` events. At most 20 Hz (default 10) and 16 at once |
+| `unsubscribe` | `subscription` | `null` |
+| `drive` | `role`, `index?` | `null` once the lease is held |
+| `renew` | `role`, `index?` | `null`; keeps the lease alive without a command |
+| `command` | `role`, `index?`, `command` | `{applied, clamped}` |
+| `release` | `role`, `index?` | `null`; the part gets its safe state |
+
+A `source` is `{role, index?}` (a role's part, `index` for a `1..` role) or `{published: name}`
+(the app's own derived signal). Events, unasked: `signal`, `signal-ended`, `status`, `theme`,
+`lease-ended` (`role`, `index`, `reason`, `error`). Error codes: `bad-request`, `unknown-request`,
+`unsupported-version`, `unknown-role`, `unknown-signal`, `no-part`, `not-commandable`, `app-off`,
+`not-confirmed`, `lease-required`, `bad-command`, `too-many-requests` (over 200 a second),
+`too-many-subscriptions`, `app-gone`, and the core's own (`lease-held`, `estop-engaged`, …).
+
+**The sandbox, as built.**
+
+- The iframe has `allow-scripts` only: no `allow-same-origin`, so the page's origin is opaque. Its
+  files are served with `sandbox allow-scripts` in their CSP too, so a UI page opened on its own is
+  just as sandboxed and never runs as the shell's origin. `connect-src 'none'` blocks fetch,
+  XHR and WebSockets; `frame-src 'none'` stops it framing the shell; `form-action 'none'`.
+  Its own files answer the opaque origin (`Access-Control-Allow-Origin: null`) so module scripts
+  load.
+- The shell's page has `frame-src 'self'`, so the frame can't be navigated to another site to
+  carry what it read away.
+- The host reads only messages whose `source` is this window's own frame **and** whose origin is
+  `null`; anything else is dropped unanswered. Every field is checked; a role the app doesn't
+  have, a part index it doesn't have, a signal it doesn't publish, a command on a role without
+  `command = true` or of another capability are refused before anything reaches the core.
+- An app sees roles only: never part names, ports or other parts.
+- Nothing an app sends is ever shown as HTML by the shell: its title and errors are text, its
+  icon an `<img>`.
+- A new page in the frame (a reload), the app turned off, a role given another part, Stop, and
+  closing the window end what the page had (leases, subscriptions); answers for an old page are
+  dropped.
+
+**Driving from a window.** Only a `command = true` role, only while the app is on (the switch is
+the user's "this app may act"), and only after the **D46 confirm**, asked by the shell, outside
+the frame, once per session like the Drive window ("Wall follower wants to drive "base"…").
+Background logic needs no confirm (5a). The lease is held as **`app:<id>`**, the same holder as the
+app's logic: the core's lease rules key on lease ids, not holder names, so this gives the window
+no extra right, and every lease list and "… is driving" message shows the user the app they
+installed. Two holders of one app can't drive one part at once (leases are exclusive). The host
+never renews on its own: the SDK's `Drive` renews every 100 ms from the page's own timer, so a page
+that hangs or is closed lets the lease lapse within 250 ms (the dead man's switch). While a window
+drives, the shell shows a bar above the frame, "Wall follower is driving base.", with a **Stop**
+the app can't hide.
+
+**`@faber-os/shell`** (`sdk/js/shell`, README there): one dependency-free ES module,
+`faber.hello/roles/latest/subscribe/published/subscribePublished/drive/status/onStatus/theme/
+onTheme`, `applyTheme`, `connect` for tests, errors as `FaberError` (`code`, `message`, `hint`).
+Tested with vitest against a fake parent window. Not published to npm (it is `private` until
+Mikkel decides).
+
+**The wall follower's window** (`examples/apps/wall-follower/ui`): on/off, and the wall distance
+live from its own derived signal, in the shell's look. It carries the built SDK (the SDK's test
+rewrites the copy when the SDK changes). No speed slider: see "Not built".
+
+**Backups** hold `config/apps.toml` and every app's folder with its `state.toml`; a restore checks
+each app like an install (api.md, "Storage and backups").
+
+**Tests.** `shell/src/lib/state/appHost.test.ts` sends the host hostile messages (other origins,
+other windows, junk, unknown types, roles the app lacks, commands on read-only roles, floods);
+component tests cover the Install pane, Apps and the app window (the sandbox attribute, the D46
+sheet, Stop, closing); `shell/e2e/apps.spec.ts` installs the packed example from the desktop, runs
+it in the apartment and watches its window; the layout test opens an app window.
+
+**Not built in 5b:** a window changing its app's saved state (no `state` messages: the logic owns
+`state.toml` while it runs, so writing it from the API needs a shared store first); apps in the
+start menu and pinning an app's window to the taskbar (`[window] pinned` is read but not used);
+the template (`faber new app`) doesn't carry the SDK yet; roles filled by derived signals
+(`accept`, from 5a).

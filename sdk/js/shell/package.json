@@ -1,0 +1,35 @@
+{
+  "name": "@faber-os/shell",
+  "version": "0.1.0",
+  "description": "The JavaScript SDK for a Faber app's UI: its roles, readings, driving and the shell's theme, through the shell around it.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "private": true,
+  "main": "dist/faber-shell.js",
+  "module": "dist/faber-shell.js",
+  "types": "dist/faber-shell.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/faber-shell.d.ts",
+      "import": "./dist/faber-shell.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "node --disable-warning=ExperimentalWarning scripts/build.ts",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "prettier": "^3.9.10",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.4"
+  }
+}

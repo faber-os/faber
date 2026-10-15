@@ -377,14 +377,17 @@ gets ` (2)`. Inside, it is laid out like the data folder:
 config/parts.toml
 config/settings.toml        (if the settings were ever changed)
 config/packages.toml        (if a package was ever installed)
+config/apps.toml            (if an app was ever turned on or given parts)
 connectors/<id>/…           each installed package's connector, as installed
+apps/<id>/…                 each installed app, as installed, with its saved state.toml
 files/Desktop/…
 files/Documents/…
 files/Recordings/…          only with includeRecordings
 ```
 
-Only packages listed in `packages.toml` are backed up; a folder copied into `connectors/` by hand
-isn't a package and is left out.
+Only packages listed in `packages.toml` are backed up; a folder copied into `connectors/` or
+`apps/` by hand isn't a package and is left out. An app's `state.toml` is its data, so it is backed
+up with the app (the `.tmp` and `.broken` files Faber leaves while saving it are not).
 
 **Restore checks everything before anything changes:** the zip must be a Faber backup
 (`config/parts.toml`, and nothing outside the folders above: `backup-invalid`), `parts.toml` must
@@ -394,15 +397,24 @@ disk. **Connector code is never copied in blind:** every connector in the backup
 its `packages.toml` and goes through the same checks and staging load as
 `POST /api/v0/packages`. One that fails fails the whole restore with `422 backup-invalid`, naming
 the connector and why (e.g. `The connector "my-sensor" in this backup can't be restored:
-connectors/my-sensor/faber.toml line 13: …`). A backup made before connectors were backed up has
-none, and restores as before. Then:
+connectors/my-sensor/faber.toml line 13: …`). **Apps are checked the same way:** each must be
+listed as an app in the backup's `packages.toml` and passes the install checks and staging load
+(its logic compiled in the sandbox, its UI's files checked); its `state.toml` must read as the
+app reads it (text keys and values, at most 64 KB); and `apps.toml` must be valid
+(`422 config-invalid`, with the line, like `parts.toml`). A backup made before connectors or apps
+were backed up has none, and restores as before, leaving the installed ones (and `apps.toml`)
+alone. Then:
 
 - The connectors are put in place first, like an install: one installed already at the same
   version is left alone; another version replaces the installed one, and the parts on it restart.
   Its `source` is kept from the backup, `installedAt` is the time of the restore. Packages that
   aren't in the backup stay. If one doesn't load once in place, all are put back and the restore
   fails before anything else changes. The `packages` topic announces the change.
-- `parts.toml` is saved and applied at once (parts start or stop).
+- The apps are put in place the same way, with their runs stopped meanwhile (an app saves its
+  state when its run ends, so it can't overwrite the restored one). Each gets the state from the
+  backup; an app whose backup has no `state.toml` keeps the one it has.
+- `parts.toml` is saved and applied at once (parts start or stop), then `apps.toml` (if the backup
+  has one): apps that were on start again once their parts are there.
 - The settings are replaced, **except the developer settings**: a backup never turns
   whole-machine files on. A time zone this machine doesn't know falls back to its own.
 - Files are put back where they were. A file that is already there with other contents is first
@@ -531,12 +543,13 @@ end when it is turned off, when it stops or traps, and when the core stops.
 
 | Method and path | Body / result |
 |---|---|
-| `GET /api/v0/apps` | `AppInfo[]`: `id`, `name`, `version`, `publisher?`, `enabled`, `state` (a `PartState`: the same states as a part, below), `logic` (it has a component), `tickHz?`, `roles` (`role`, `capability`, `command`, `count`: `1` or `1..`, `parts`: the parts picked), `publishes` (`name`, `capability`, `address`: `app:<id>/<name>`), `ui?` (`/apps/<id>/ui/index.html`) and `window?` (`title?`, `icon?` (a URL, for an icon under `ui/`), `width?`, `height?`, `pinned`). |
+| `GET /api/v0/apps` | `AppInfo[]`: `id`, `name`, `version`, `publisher?`, `enabled`, `state` (a `PartState`: the same states as a part, below), `logic` (it has a component), `tickHz?`, `roles` (`role`, `capability`, `command`, `count`: `1` or `1..`, `parts`: the parts picked), `publishes` (`name`, `capability`, `address`: `app:<id>/<name>`), `ui?` (`/apps/<id>/ui/index.html`), `icon?` (what the shell shows for it: its `[window]` icon, else the package's own `icon.svg` as `/apps/<id>/icon.svg`) and `window?` (`title?`, `icon?` (a URL, for an icon under `ui/`), `width?`, `height?`, `pinned`). |
 | `GET /api/v0/apps/{id}` | One `AppInfo`. `404 unknown-app`. |
 | `POST /api/v0/apps/{id}/enable` | Turns it on (`enabled = true` in apps.toml): `200 AppInfo`. It starts when its roles are filled. `404 unknown-app`, `422 config-broken` (apps.toml can't be read: the message has its line). |
 | `POST /api/v0/apps/{id}/disable` | Turns it off: its logic stops, its leases end and its parts get their safe state before this answers. `200 AppInfo`. |
 | `PUT /api/v0/apps/{id}/roles` | `{"roles": {"lidar": "lidar", "proximity": ["front", "rear"]}}` (a part's name, or a list): exactly these roles get these parts; roles left out get none. An app that is on restarts with its new parts. `200 AppInfo`. Errors: `400 unknown-role`, `400 too-many-parts` (more than one for a `count = "1"` role), `400 bad-request` (a part twice), `422 unknown-part`, `422 role-mismatch` (the part doesn't provide the role's capability: the message says what it provides). Sub-parts (`mega.left`) fill roles like any part. |
-| `GET /apps/{id}/ui/{path}` | The app's UI files, for the shell's app window. Only files the installer accepts, with their type from their extension, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Content-Security-Policy: default-src 'self'; connect-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`: a UI can't reach the network or the API, only the shell, through `postMessage` (Phase 5b). `404 not-found` for anything else. |
+| `GET /apps/{id}/ui/{path}` | The app's UI files, for the shell's app window. Only files the installer accepts, with their type from their extension, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Content-Security-Policy: default-src 'self'; connect-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self'; object-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-scripts`: a UI can't reach the network or the API, only the shell, through `postMessage` ([apps.md](apps.md) §9). `sandbox` gives every page an opaque origin even when it is opened on its own, so it never runs as the shell's origin; its own files answer that origin with `Access-Control-Allow-Origin: null` (module scripts and fonts are fetched with CORS). `404 not-found` for anything else. |
+| `GET /apps/{id}/icon.svg` | The icon at the root of an app's package, for `<img>` only: `image/svg+xml`, `nosniff` and `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox`, so opened on its own it runs and loads nothing. The shell never puts an app's SVG inline. `404 not-found` when the app has none. |
 
 **States** (`state.kind`, with `message` and `hint` where there is a problem):
 

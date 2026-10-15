@@ -1,11 +1,16 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 /**
  * No window may cut its content off. A window's body never scrolls itself, so anything taller
  * than it must sit in a scrolling area inside the window. This opens every program, and the
  * viewers of a simulated drive base and distance sensor, at the project's screen size and at a
- * small browser window, and checks that no body overflows.
+ * small browser window, and checks that no body overflows. An app's window (the wall follower's,
+ * installed for it) is open too.
  */
+const APP_PACKAGE = readFileSync(
+  new URL('./fixtures/wall-follower-0.1.0.faberpkg', import.meta.url),
+);
 const SIM_PARTS = [
   { name: 'layout_base', connector: 'generic-planar-base' },
   { name: 'layout_front', connector: 'generic-distance' },
@@ -17,13 +22,22 @@ async function removeSimParts(request: APIRequestContext) {
 
 test.beforeEach(async ({ request }) => {
   await removeSimParts(request);
+  await request.post('/api/v0/apps/wall-follower/disable');
+  const app = await request.post('/api/v0/packages?name=wall-follower-0.1.0.faberpkg', {
+    data: APP_PACKAGE,
+    headers: { 'content-type': 'application/octet-stream' },
+  });
+  expect(app.status()).toBe(201);
   for (const p of SIM_PARTS) {
     const res = await request.post('/api/v0/parts', { data: { ...p, simulate: 'manual' } });
     expect(res.status()).toBe(201);
   }
 });
 
-test.afterEach(async ({ request }) => removeSimParts(request));
+test.afterEach(async ({ request }) => {
+  await removeSimParts(request);
+  await request.delete('/api/v0/packages/wall-follower');
+});
 
 async function clipped(page: Page): Promise<string[]> {
   return page.locator('[data-window-kind] .body').evaluateAll((bodies) =>
@@ -75,6 +89,15 @@ test('no window cuts its content off, also after the browser shrinks', async ({ 
   expect(kinds).toContain('drive');
   expect(kinds).toContain('arduino-flasher');
   await openSimViewers(page);
+  await page
+    .getByRole('navigation', { name: 'Taskbar' })
+    .getByRole('button', { name: 'Apps' })
+    .click();
+  await page
+    .getByRole('dialog', { name: 'Apps' })
+    .getByRole('button', { name: 'Open Wall follower' })
+    .click();
+  await expect(page.locator('[data-window-kind="app"]')).toBeVisible();
   expect(await clipped(page)).toEqual([]);
 
   await page.setViewportSize({ width: 760, height: 520 });

@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+    <!-- App windows are iframes of the app's own pages (docs/apps.md §9): they may never be
+         navigated to another site, so an app can't send what it reads anywhere. -->
+    <meta http-equiv="Content-Security-Policy" content="frame-src 'self'" />
     <title>Faber</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <script>

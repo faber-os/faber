@@ -27,4 +27,10 @@ tickHz?: number, roles: Array<AppRole>, publishes: Array<AppSignal>,
 /**
  * Where its UI starts (`/apps/<id>/ui/index.html`), when it has one.
  */
-ui?: string, window?: AppWindow, };
+ui?: string, 
+/**
+ * The icon the shell shows for it (its window, the taskbar, the apps list): its `[window]`
+ * icon, else the `icon.svg` at the root of its package (`/apps/<id>/icon.svg`). An image
+ * only: the shell shows it with `<img>`, never inline.
+ */
+icon?: string, window?: AppWindow, };

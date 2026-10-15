@@ -7,7 +7,18 @@
   import { item, separator } from '../lib/desktop/contextMenu';
   import { menuTrigger, useMenu, type MenuRequest } from './menuController.svelte';
 
-  let { win, icon, children }: { win: WindowState; icon: IconName; children: Snippet } = $props();
+  let {
+    win,
+    icon,
+    iconSrc,
+    children,
+  }: {
+    win: WindowState;
+    icon: IconName;
+    /** An image icon of its own (an app's), shown with `<img>`: never inline SVG. */
+    iconSrc?: string | null;
+    children: Snippet;
+  } = $props();
 
   const desktop = useDesktop();
   const title = $derived(desktop.titleOf(win));
@@ -222,7 +233,15 @@
     {:else}
       <div class="tabs">
         <div class="tab on solo">
-          <span class="title-icon"><Icon name={icon} size={15} /></span>
+          <span class="title-icon"
+            >{#if iconSrc}<img
+                src={iconSrc}
+                alt=""
+                width="15"
+                height="15"
+                referrerpolicy="no-referrer"
+              />{:else}<Icon name={icon} size={15} />{/if}</span
+          >
           <h2 id={titleId} class="title">{title}</h2>
         </div>
       </div>

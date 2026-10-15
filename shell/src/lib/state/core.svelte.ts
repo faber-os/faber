@@ -15,6 +15,10 @@ import type {
   ConnectorProblem,
   PackageInfo,
   PackagePreview,
+  AppInfo,
+  AppPackagePreview,
+  RoleParts,
+  SignalValue,
   ErrorBody,
   LogEntry,
   NewPart,
@@ -103,6 +107,8 @@ export class CoreState {
    * shows here too); `null` until the core has sent them.
    */
   packages = $state.raw<PackageInfo[] | null>(null);
+  /** Installed apps, live from the `apps` topic (docs/api.md, "Apps"); `null` until sent. */
+  apps = $state.raw<AppInfo[] | null>(null);
   system = $state.raw<SystemInfo | null>(null);
   systemError = $state.raw<ErrorBody | null>(null);
   /**
@@ -251,6 +257,14 @@ export class CoreState {
           },
         },
       ),
+      s.subscribe(
+        { kind: 'apps' },
+        {
+          onMessage: (m) => {
+            if (m.type === 'apps') this.apps = m.apps;
+          },
+        },
+      ),
     );
     s.connect();
     void this.loadConnectors();
@@ -316,8 +330,14 @@ export class CoreState {
     return r;
   }
 
-  /** What a package file would install, checked in full by the core; nothing is installed. */
-  previewPackage(file: Uint8Array | Blob, name: string): Promise<Result<PackagePreview>> {
+  /**
+   * What a package file would install, checked in full by the core; nothing is installed. A
+   * connector's package answers a `PackagePreview`, an app's an `AppPackagePreview`.
+   */
+  previewPackage(
+    file: Uint8Array | Blob,
+    name: string,
+  ): Promise<Result<PackagePreview | AppPackagePreview>> {
     return this.call(() => this.http.previewPackage(file, name));
   }
 
@@ -333,6 +353,25 @@ export class CoreState {
     const r = await this.call(() => this.http.uninstallPackage(id));
     if (r.ok) await Promise.all([this.loadConnectors(), this.loadPackages()]);
     return r;
+  }
+
+  /**
+   * Turns an app on or off. Off ends its leases (and stops its logic) before this answers. The
+   * list (`apps`) follows from the `apps` topic only: an answer can be older than what the topic
+   * already said (the app went from starting to running meanwhile), so it never overwrites it.
+   */
+  setAppEnabled(id: string, enabled: boolean): Promise<Result<AppInfo>> {
+    return this.call(() => this.http.setAppEnabled(id, enabled));
+  }
+
+  /** Exactly these parts for an app's roles; roles left out get none. The topic follows. */
+  setAppRoles(id: string, roles: Record<string, RoleParts>): Promise<Result<AppInfo>> {
+    return this.call(() => this.http.setAppRoles(id, roles));
+  }
+
+  /** The newest reading of a signal, once (an app's derived signals too). */
+  readSignal(address: string): Promise<Result<SignalValue>> {
+    return this.call(() => this.http.getSignal(address));
   }
 
   async loadSystem(): Promise<void> {

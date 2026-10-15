@@ -15,6 +15,8 @@
   let { winId }: { winId: string } = $props();
 
   const core = useCore();
+  /** Connector packages only: apps have their own tool (Apps). */
+  const packages = $derived(core.packages?.filter((p) => p.kind !== 'app') ?? null);
 
   let error = $state.raw<ErrorBody | null>(null);
   let confirming = $state.raw<PackageInfo | null>(null);
@@ -51,13 +53,13 @@
   <p class="intro">{t('settings.connectors.intro')}</p>
   {#if error}<ErrorNotice {error} />{/if}
 
-  {#if core.packages === null}
+  {#if packages === null}
     <p class="desc">{t('settings.connectors.loading')}</p>
-  {:else if core.packages.length === 0}
+  {:else if packages.length === 0}
     <p class="desc">{t('settings.connectors.empty')}</p>
   {:else}
     <ul class="packages" aria-label={t('settings.connectors.title')}>
-      {#each core.packages as p (p.id)}
+      {#each packages as p (p.id)}
         <li class="row">
           <div class="text">
             <p class="name">

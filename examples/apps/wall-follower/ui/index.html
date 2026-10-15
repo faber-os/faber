@@ -2,15 +2,32 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Wall follower</title>
     <link rel="stylesheet" href="style.css" />
+    <!-- The page talks to Faber only through faber-shell.js (the @faber-os/shell SDK). -->
+    <script type="module" src="app.js"></script>
   </head>
   <body>
-    <h1>Wall follower</h1>
-    <p>
-      The base drives along the wall on its right, 0.3 m from it. Watch it in the World window,
-      and its distance to the wall on <code>app:wall-follower/wall-distance</code>.
+    <header>
+      <h1>Wall follower</h1>
+      <span id="state" class="state" data-on="false">…</span>
+    </header>
+
+    <section aria-labelledby="gap-label">
+      <p id="gap-label" class="label">Distance to the wall</p>
+      <p id="gap" class="value" data-testid="wall-distance">–</p>
+      <div class="bar" aria-hidden="true">
+        <div id="bar"></div>
+        <span class="target"></span>
+      </div>
+      <p class="hint">It keeps the base's right side 0.3 m from the wall.</p>
+    </section>
+
+    <p id="problem" class="problem" hidden></p>
+    <p class="hint">
+      Turn it on and off in Apps. Press Stop on the taskbar at any time: the
+      base stops and the app waits.
     </p>
-    <p>Press Stop on the taskbar at any time: the base stops and the app waits.</p>
   </body>
 </html>

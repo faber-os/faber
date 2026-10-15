@@ -10,6 +10,7 @@
     colour,
     size = 52,
     flat = false,
+    src = null,
   }: {
     icon: IconName;
     /** `--app-<colour>`, e.g. `files`. */
@@ -18,6 +19,8 @@
     size?: number;
     /** No plate, just the coloured glyph (the small taskbar). */
     flat?: boolean;
+    /** An image of its own instead of the glyph (an app's icon): `<img>` only, never inline. */
+    src?: string | null;
   } = $props();
 </script>
 
@@ -29,7 +32,18 @@
   style:height="{size}px"
   style:border-radius="{Math.round(size * 0.27)}px"
 >
-  <Icon name={icon} size={flat ? size : Math.round(size * 0.52)} />
+  {#if src}
+    <img
+      {src}
+      alt=""
+      width={flat ? size : Math.round(size * 0.62)}
+      height={flat ? size : Math.round(size * 0.62)}
+      referrerpolicy="no-referrer"
+      draggable="false"
+    />
+  {:else}
+    <Icon name={icon} size={flat ? size : Math.round(size * 0.52)} />
+  {/if}
 </span>
 
 <style>

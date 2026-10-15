@@ -174,7 +174,7 @@ describe('CoreState', () => {
     expect(core.connection).toBe('reconnecting');
   });
 
-  it('subscribes to parts, ports, logs, settings, files, leases, the e-stop and packages on start', () => {
+  it('subscribes to parts, ports, logs, settings, files, leases, the e-stop, packages and apps on start', () => {
     const { ws } = setup();
     expect(sentTopics(ws).map((m) => m.topic?.kind)).toEqual([
       'parts',
@@ -185,7 +185,25 @@ describe('CoreState', () => {
       'leases',
       'estop',
       'packages',
+      'apps',
     ]);
+  });
+
+  it('keeps the apps from their topic only, never from an answer that may be older', async () => {
+    const { core, ws } = setup();
+    expect(core.apps).toBeNull();
+    const starting = { id: 'wall-follower', enabled: true, state: { kind: 'starting' } };
+    const running = { ...starting, state: { kind: 'running' } };
+    const id = sentTopics(ws).find((m) => m.topic?.kind === 'apps')!.id;
+    // The topic says it runs before the answer to "turn it on" (which said "starting") arrives.
+    ws.receive(bin({ type: 'apps', id, apps: [running, { id: 'other' }] }));
+    f.route({ method: 'POST', path: '/api/v0/apps/wall-follower/enable', body: starting });
+    expect(await core.setAppEnabled('wall-follower', true)).toEqual({ ok: true, value: starting });
+    expect(core.apps).toEqual([running, { id: 'other' }]);
+    f.route({ method: 'PUT', path: '/api/v0/apps/wall-follower/roles', body: starting });
+    expect((await core.setAppRoles('wall-follower', { base: 'base' })).ok).toBe(true);
+    expect(f.calls.at(-1)!.body).toEqual({ roles: { base: 'base' } });
+    expect(core.apps![0]).toEqual(running);
   });
 
   it('keeps the packages from their topic and reads the connectors again with them', async () => {

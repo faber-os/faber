@@ -30,6 +30,7 @@ sdk/rust/faberlink/       faberlink: the FaberLink bridge protocol, core side (d
 sdk/rust/flash/           faber-flash: the Arduino flasher's protocols (Intel HEX, STK500v1 and v2)
 connectors/ldrobot-ld19/  first connector: built in, and the same code as a WebAssembly component
 shell/                    the web desktop (Svelte 5 + Vite + TypeScript)
+sdk/js/shell/             @faber-os/shell: the JavaScript SDK an app's UI uses, and the app protocol (docs/apps.md §9)
 tools/arch-check/         enforces the crate dependency rules below
 tools/faber-cli/          the `faber` command: new connector from a template, check, pack
 tools/faberlink-interop/  tests the Rust FaberLink session against the C++ library, compiled for the PC
@@ -88,6 +89,7 @@ points up or sideways. Every module that does I/O does it behind a trait, so its
 | `src/lib/desktop/` | Plain TypeScript logic for the desktop and its accessories (windows, icons, menus, file paths, the Notes document), no Svelte | `i18n` |
 | `src/lib/viewers/` | Canvas drawing for capability viewers, and the display units (`units.ts`), as pure functions | `i18n` |
 | `src/components/`, `src/windows/` | Svelte UI | `state`, `desktop`, `viewers`, `i18n`, never `api` directly |
+| `../sdk/js/shell/src/protocol.ts` | The app protocol's types, shared with the SDK | nothing; only the app window host (`src/lib/state/appHost.ts`) imports it, never the SDK itself |
 
 **Texts** (D44): no visible text is written straight into a component or module. It goes into
 `src/lib/i18n/en.ts` and is shown with `t('key')`; `src/lib/i18n/noRawText.test.ts` fails on any
@@ -107,6 +109,8 @@ that isn't. How translations work, and `npm run i18n:check`: [translations.md](t
 | FaberLink | `cargo test` | `sdk/rust/faberlink`: property tests for the framing, every message and capability layout, and the session state machine. `tools/faberlink-interop`: the Rust session against the Arduino library's C++ core, compiled on the PC with the `cc` crate (MSVC on Windows, g++/clang elsewhere) and driven over an in-memory pipe with a fake clock: handshake, readings, commands, the board's safety rules, corruption and version mismatch. `core/tests/bridge.rs` is the Phase 4 proof: the same C++ board behind a fake serial port, driven through the HTTP API |
 | Packages | `cargo test` | `core/tests/packages.rs`: preview, install while the core runs, parts restarting on an update, uninstall refused while used, and every refusal with its hint |
 | Apps | `cargo test` | `core/tests/apps.rs` is the Phase 5a proof: the wall-follower example (`examples/apps/wall-follower`), built and packed, installed on a test core, bound to a simulated SENNEP in the apartment, drives along a wall without bumping and publishes its derived signal; turning it off, a part leaving a role, an operator taking over and a trap in a test app (`core/tests/wasm-guests/app-trap`) each end its lease and stop the base. `tools/faber-cli/tests/first_app.rs` takes `faber new app` from the template to running on a core. Skipped like the wasm tests without the target |
+| The app SDK | Vitest | `sdk/js/shell`: `npm test` (against a fake shell window; also checks that the example apps carry the built SDK), `npm run check`, `npm run format:check`, `npm run build` |
+| App windows | Vitest + Playwright | `shell/src/lib/state/appHost.test.ts` (the host against hostile messages), the window tests, and `shell/e2e/apps.spec.ts` (the packed wall follower, `shell/e2e/fixtures/`, written by `core/tests/apps.rs`; its component is refreshed only with `FABER_REFRESH_FIXTURES=1`, since its bytes depend on the toolchain) |
 | Interfaces | `wasm-tools component wit wit/capabilities`, the connector world (see [wit/connector](../wit/connector/README.md)) and the app world (see [wit/app](../wit/app/README.md)) | CI |
 
 ## End-to-end tests

@@ -28,9 +28,13 @@ It publishes how far the base's side is from the wall as the derived signal
    simulated base (`generic-planar-base`, 0.8 × 0.65 m) and a simulated LD19 called `lidar`.
    Put the base in the living room near the south wall:
    `PUT /api/v0/world` with `{"name": "apartment", "start": {"x": 7.0, "y": 0.8, "yaw": 0}}`.
-4. **Pick its parts:** `PUT /api/v0/apps/wall-follower/roles` with
+4. **Pick its parts:** the Install window offers the parts that fit each role (or, in Apps, change
+   them later). Without the shell: `PUT /api/v0/apps/wall-follower/roles` with
    `{"roles": {"lidar": "lidar", "base": "base"}}`.
-5. **Turn it on:** `POST /api/v0/apps/wall-follower/enable`.
+5. **Turn it on:** tick "Turn it on now" when installing, or switch it on in Apps
+   (`POST /api/v0/apps/wall-follower/enable`).
+6. **Open its window:** Apps → Wall follower → Open. It shows whether it is on and its distance
+   to the wall, live.
 
 ## What you should see
 
@@ -60,3 +64,18 @@ about 0.3 m. The Drive window shows `app:wall-follower` driving the base.
   It sends between scans too: every command renews the lease, and a lease that isn't renewed
   ends and stops the base (the dead man's switch). If the lease ended (an operator took over,
   the e-stop), it asks for it again, and waits while someone else drives.
+
+`ui/` is the app's window: plain HTML and JavaScript, no build step.
+
+- `index.html` loads `app.js` as a module. Faber shows the page in a sandboxed frame that can't
+  reach the network or Faber's API, so everything goes through `faber-shell.js`: the
+  [`@faber-os/shell`](../../../sdk/js/shell/README.md) SDK, copied in because an app's page can
+  only load its own files. Don't edit it: the SDK's tests rewrite it when the SDK changes.
+- `app.js` takes the shell's look (`faber.theme()`, `applyTheme`), shows whether the app is on
+  (`faber.status()`, `faber.onStatus`), and follows the app's own derived signal
+  (`faber.subscribePublished('wall-distance', …)`, at most 5 times a second). The window only
+  watches; the logic drives the base whether the window is open or not.
+
+A speed slider would need the window to change the app's saved state (`state.toml`), which the
+logic reads. Faber can't do that from a window yet (the app protocol has no state messages), so
+the speed is still tuned in `state.toml` (above).

@@ -358,8 +358,9 @@ describe('Settings: about and diagnostics', () => {
       usedBy: [],
     };
     const lines = { ...acme, id: 'lines', name: 'Lines', kind: 'declarative', usedBy: ['front'] };
+    const app = { ...acme, id: 'wall-follower', name: 'Wall follower', kind: 'app' };
     const shell = setup([
-      { path: '/api/v0/packages', body: [acme, lines] },
+      { path: '/api/v0/packages', body: [acme, lines, app] },
       {
         path: '/api/v0/connectors/problems',
         body: [{ folder: 'broken', message: 'faber.toml line 3: no.', hint: 'Fix line 3.' }],
@@ -374,6 +375,8 @@ describe('Settings: about and diagnostics', () => {
     await waitFor(() => expect(section).toHaveTextContent('faber.toml line 3: no.'));
     expect(section).toHaveTextContent('Fix line 3.');
     expect(within(section).getByRole('button', { name: 'Uninstall Lines' })).toBeDisabled();
+    // Apps are managed in Apps, not here.
+    expect(section).not.toHaveTextContent('Wall follower');
 
     shell.fetch.route({ path: '/api/v0/packages', body: [lines] });
     await userEvent.click(within(section).getByRole('button', { name: 'Uninstall Acme ranger' }));

@@ -373,6 +373,12 @@ pub struct AppInfo {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui: Option<String>,
+    /// The icon the shell shows for it (its window, the taskbar, the apps list): its `[window]`
+    /// icon, else the `icon.svg` at the root of its package (`/apps/<id>/icon.svg`). An image
+    /// only: the shell shows it with `<img>`, never inline.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window: Option<AppWindow>,

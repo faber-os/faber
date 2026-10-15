@@ -4,6 +4,7 @@
   import { item, separator, type MenuEntry } from '../lib/desktop/contextMenu';
   import { taskClick, taskbarItems, type TaskItem } from '../lib/desktop/taskbar';
   import AppIcon from './AppIcon.svelte';
+  import { windowIcon } from './appWindow';
   import Clock from './Clock.svelte';
   import EstopButton from './EstopButton.svelte';
   import EstopRelease from './EstopRelease.svelte';
@@ -44,6 +45,13 @@
 
   function def(kind: string): WindowDef | undefined {
     return defs.find((d) => d.kind === kind);
+  }
+
+  /** An app window's own icon (an image), for a window's button. */
+  function imageIcon(i: TaskItem): string | null {
+    if (i.type !== 'window') return null;
+    const w = desktop.state.windows.find((x) => x.id === i.id);
+    return w ? windowIcon(core, w) : null;
   }
 
   function itemKey(i: TaskItem): string {
@@ -205,10 +213,21 @@
             onclick={() => click(i)}
           >
             {#if large}
-              <AppIcon icon={d?.icon ?? 'info'} colour={d?.colour ?? 'about'} size={30} />
+              <AppIcon
+                icon={d?.icon ?? 'info'}
+                colour={d?.colour ?? 'about'}
+                size={30}
+                src={imageIcon(i)}
+              />
               <span class="task-title" aria-hidden="true">{name}</span>
             {:else}
-              <AppIcon icon={d?.icon ?? 'info'} colour={d?.colour ?? 'about'} size={22} flat />
+              <AppIcon
+                icon={d?.icon ?? 'info'}
+                colour={d?.colour ?? 'about'}
+                size={22}
+                flat
+                src={imageIcon(i)}
+              />
             {/if}
             <span class="mark" aria-hidden="true"></span>
           </button>

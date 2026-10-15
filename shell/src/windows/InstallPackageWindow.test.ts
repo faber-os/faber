@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { fakeShell } from '../test/fakeShell';
+import { fakeShell, part, simBase } from '../test/fakeShell';
 import type { FakeRoute } from '../test/fakeFetch';
 import { openEntry } from '../components/fileOps';
 import { openDroppedPackage } from '../components/installWindow';
@@ -137,5 +137,130 @@ describe('Install window', () => {
     await screen.findByRole('heading', { name: 'Acme ranger', level: 3 });
     expect(shell.fetch.calls.some((c) => c.path.startsWith('/api/v0/files'))).toBe(false);
     expect(shell.fetch.calls.find((c) => c.path.includes('mode=preview'))?.raw).toBe(file);
+  });
+});
+
+describe('Install window for an app', () => {
+  const APP = {
+    id: 'wall-follower',
+    name: 'Wall follower',
+    version: '0.1.0',
+    publisher: 'Faber',
+    enabled: false,
+    state: { kind: 'stopped', message: 'The app is turned off.' },
+    logic: true,
+    tickHz: 20,
+    roles: [
+      { role: 'lidar', capability: 'laser-scan@1', command: false, count: '1', parts: [] },
+      { role: 'base', capability: 'planar-base@1', command: true, count: '1', parts: [] },
+    ],
+    publishes: [
+      {
+        name: 'wall-distance',
+        capability: 'distance@1',
+        address: 'app:wall-follower/wall-distance',
+      },
+    ],
+    ui: '/apps/wall-follower/ui/index.html',
+    window: { title: 'Wall follower', width: 420, height: 260, pinned: false },
+  };
+  const APP_PREVIEW = {
+    app: APP,
+    readme:
+      '# Wall follower\n\nKeeps the base `0.3 m` from the wall.\n\n<img src=x onerror=alert(1)>',
+    checked: false,
+  };
+  const APP_INFO = { ...INFO, id: 'wall-follower', name: 'Wall follower', kind: 'app' };
+
+  function setupApp(routes: FakeRoute[] = []) {
+    const s = setup([
+      { method: 'POST', path: `/api/v0/packages?mode=preview&${NAME}`, body: APP_PREVIEW },
+      { method: 'POST', path: `/api/v0/packages?${NAME}`, status: 201, body: APP_INFO },
+      ...routes,
+    ]);
+    s.shell.pushParts([part('lidar'), part('lidar2'), simBase('base'), simBase('other-base')]);
+    return s;
+  }
+
+  it('shows what the app needs, what it may drive and what it publishes, before installing', async () => {
+    setupApp();
+    const dialog = await screen.findByTestId('install-package');
+    await waitFor(() => expect(dialog).toHaveTextContent('Wall follower'));
+    expect(dialog).toHaveTextContent('0.1.0');
+    expect(dialog).toHaveTextContent('Faber');
+    expect(dialog).toHaveTextContent('In the background, 20 times a second');
+    expect(dialog).toHaveTextContent('Not checked by the Faber registry');
+    // Each role offers only the parts with its capability.
+    const lidar = screen.getByRole('combobox', { name: 'lidar' });
+    expect([...lidar.querySelectorAll('option')].map((o) => o.textContent)).toEqual([
+      'Pick later',
+      'lidar',
+      'lidar2',
+    ]);
+    const base = screen.getByRole('combobox', { name: 'base' });
+    expect([...base.querySelectorAll('option')].map((o) => o.value)).toEqual([
+      '',
+      'base',
+      'other-base',
+    ]);
+    expect(dialog).toHaveTextContent('Wall follower will be able to drive the part you pick here.');
+    await userEvent.selectOptions(base, 'base');
+    expect(dialog).toHaveTextContent('Wall follower will be able to drive "base".');
+    // Its derived signal, marked as the app's.
+    const publishes = screen.getByRole('region', { name: 'What it publishes' });
+    expect(publishes).toHaveTextContent('app:wall-follower/wall-distance');
+    expect(within(publishes).getByText('app')).toBeInTheDocument();
+    // The README is text: its HTML never becomes an element.
+    expect(dialog.querySelector('img')).toBeNull();
+    expect(dialog).toHaveTextContent('<img src=x onerror=alert(1)>');
+  });
+
+  it('turns on only once every role has a part, then installs, binds and turns it on', async () => {
+    const on = { ...APP, enabled: true, state: { kind: 'running' } };
+    const { shell, win } = setupApp([
+      { method: 'PUT', path: '/api/v0/apps/wall-follower/roles', body: APP },
+      { method: 'POST', path: '/api/v0/apps/wall-follower/enable', body: on },
+    ]);
+    const turnOn = await screen.findByRole('checkbox', { name: 'Turn it on now' });
+    expect(turnOn).toBeDisabled();
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'lidar' }), 'lidar2');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'base' }), 'base');
+    expect(turnOn).toBeEnabled();
+    await userEvent.click(turnOn);
+    await userEvent.click(screen.getByRole('button', { name: 'Install' }));
+    expect(await screen.findByText('Wall follower is installed')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(shell.fetch.calls.map((c) => `${c.method} ${c.path}`)).toContain(
+        'POST /api/v0/apps/wall-follower/enable',
+      ),
+    );
+    const calls = shell.fetch.calls.filter((c) => c.method !== 'GET');
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      `POST /api/v0/packages?mode=preview&${NAME}`,
+      `POST /api/v0/packages?${NAME}`,
+      'PUT /api/v0/apps/wall-follower/roles',
+      'POST /api/v0/apps/wall-follower/enable',
+    ]);
+    expect(calls[2]!.body).toEqual({ roles: { lidar: 'lidar2', base: 'base' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Open its window' }));
+    const appWin = shell.desktop.state.windows.find((w) => w.kind === 'app');
+    expect(appWin).toMatchObject({ key: 'wall-follower', title: 'Wall follower' });
+    expect(appWin?.rect).toMatchObject({ w: 420, h: 260 });
+    expect(shell.desktop.state.windows.some((w) => w.id === win.id)).toBe(false);
+  });
+
+  it('suggests the only part that fits, and installs without turning on', async () => {
+    const { shell } = setup([
+      { method: 'POST', path: `/api/v0/packages?mode=preview&${NAME}`, body: APP_PREVIEW },
+      { method: 'POST', path: `/api/v0/packages?${NAME}`, status: 201, body: APP_INFO },
+      { method: 'PUT', path: '/api/v0/apps/wall-follower/roles', body: APP },
+    ]);
+    shell.pushParts([part('lidar'), simBase('base')]);
+    const lidar = await screen.findByRole('combobox', { name: 'lidar' });
+    await waitFor(() => expect(lidar).toHaveValue('lidar'));
+    expect(screen.getByRole('combobox', { name: 'base' })).toHaveValue('base');
+    await userEvent.click(screen.getByRole('button', { name: 'Install' }));
+    expect(await screen.findByText(/It is off. Turn it on in Apps/)).toBeInTheDocument();
+    expect(shell.fetch.calls.some((c) => c.path.endsWith('/enable'))).toBe(false);
   });
 });

@@ -88,15 +88,58 @@ fn component(package: &str) -> Option<Vec<u8>> {
     Some(component)
 }
 
-/// The wall-follower example, packed as `faber pack` packs it.
+/// The wall-follower example, packed as `faber pack` packs it: its manifest, README, LICENSE,
+/// every file of its UI and its component.
 fn wall_follower_package(wasm: &[u8]) -> Vec<u8> {
     let dir = workspace().join("examples/apps/wall-follower");
     let mut files = BTreeMap::new();
-    for f in ["faber.toml", "README.md", "LICENSE", "ui/index.html", "ui/style.css"] {
+    for f in ["faber.toml", "README.md", "LICENSE"] {
         files.insert(f.to_string(), std::fs::read(dir.join(f)).unwrap());
+    }
+    for entry in std::fs::read_dir(dir.join("ui")).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        files.insert(format!("ui/{name}"), std::fs::read(entry.path()).unwrap());
     }
     files.insert("app.wasm".to_string(), wasm.to_vec());
     packages::pack(&files).unwrap()
+}
+
+/// A package's files by name, all but its component.
+fn files_but_the_component(package: &[u8]) -> BTreeMap<String, Vec<u8>> {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(package)).unwrap();
+    let mut out = BTreeMap::new();
+    for i in 0..zip.len() {
+        let mut e = zip.by_index(i).unwrap();
+        let name = e.name().unwrap().into_owned();
+        if !name.ends_with(".wasm") {
+            let mut data = Vec::new();
+            e.read_to_end(&mut data).unwrap();
+            out.insert(name, data);
+        }
+    }
+    out
+}
+
+/// The package the shell's end-to-end test installs (shell/e2e/apps.spec.ts): the wall-follower
+/// example, packed. Written here and committed, like the generated TypeScript types. Every file
+/// but the component must match the example; the component's bytes depend on the Rust toolchain
+/// (CI's stable moves on), so it is only rewritten with FABER_REFRESH_FIXTURES set, or with the
+/// rest.
+#[test]
+fn the_e2e_package_is_the_packed_wall_follower() {
+    let Some(wasm) = component("wall-follower") else { return };
+    let fresh = wall_follower_package(&wasm);
+    let committed = workspace().join("shell/e2e/fixtures/wall-follower-0.1.0.faberpkg");
+    let old = std::fs::read(&committed).ok();
+    let refresh = std::env::var_os("FABER_REFRESH_FIXTURES").is_some();
+    let same = old.as_deref().is_some_and(|o| files_but_the_component(o) == files_but_the_component(&fresh));
+    if !same || (refresh && old.as_deref() != Some(&fresh)) {
+        std::fs::create_dir_all(committed.parent().unwrap()).unwrap();
+        std::fs::write(&committed, fresh).unwrap();
+        panic!("{} was out of date and has been rewritten; commit it", committed.display());
+    }
+    packages::open(&old.unwrap()).expect("the committed package opens");
 }
 
 const TRAPPER: &str = "faber-manifest = 1\n[package]\nid = \"trapper\"\ntype = \"app\"\nversion = \"0.1.0\"\n\

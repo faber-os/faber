@@ -34,7 +34,8 @@ pub const LIST_FILE: &str = "packages.toml";
 const MANIFEST: &str = manifest_file::FILE_NAME;
 const README: &str = "README.md";
 const LICENSE: &str = "LICENSE";
-const ICON: &str = "icon.svg";
+/// A package's own icon, at its root: shown as an image only (`<img>`), never inline.
+pub const ICON: &str = "icon.svg";
 const CAPTURES: &str = "captures/";
 const FIRMWARE: &str = "firmware/";
 const UI: &str = "ui/";

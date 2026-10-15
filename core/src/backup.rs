@@ -4,16 +4,18 @@
 //! ```text
 //! config/parts.toml
 //! config/settings.toml
-//! config/packages.toml    the installed connector packages
+//! config/packages.toml    the installed packages (connectors and apps)
+//! config/apps.toml        which apps are on, and which parts fill their roles
 //! connectors/<id>/…       each installed package's connector
+//! apps/<id>/…             each installed app, with its saved state (state.toml)
 //! files/Desktop/…
 //! files/Documents/…
 //! files/Recordings/…      only when asked for (recordings are big)
 //! ```
 //!
 //! This module only packs and unpacks. Checking what is inside before anything changes (for a
-//! connector: the same checks and staging load as installing its package), and putting it back,
-//! is the machine's job.
+//! connector or an app: the same checks and staging load as installing its package), and putting
+//! it back, is the machine's job.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
@@ -25,7 +27,9 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 pub const PARTS: &str = "config/parts.toml";
 pub const SETTINGS: &str = "config/settings.toml";
 pub const PACKAGES: &str = "config/packages.toml";
+pub const APPS_TOML: &str = "config/apps.toml";
 const CONNECTORS: &str = "connectors/";
+const APPS: &str = "apps/";
 const FILES: &str = "files/";
 /// The home folder's own folders a backup holds. Recordings only when asked for.
 const FOLDERS: [&str; 3] = ["Desktop", "Documents", "Recordings"];
@@ -67,6 +71,11 @@ pub struct Sources<'a> {
     /// `<data>/connectors`, and which folders in it to back up: the installed packages.
     pub connectors: &'a Path,
     pub connector_ids: &'a [String],
+    /// `config/apps.toml`, copied as it is (if there is one).
+    pub apps_toml: &'a Path,
+    /// `<data>/apps`, and which folders in it to back up: the installed apps.
+    pub apps: &'a Path,
+    pub app_ids: &'a [String],
     /// The home folder (`<data>/files`).
     pub home: &'a Path,
     pub include_recordings: bool,
@@ -99,12 +108,20 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf, u64)>) {
     }
 }
 
-/// Every file of the connectors backed up, as `connectors/<id>/…`.
-fn connector_files(src: &Sources) -> Vec<(String, PathBuf, u64)> {
+/// Every file of the connectors and apps backed up, as `connectors/<id>/…` and `apps/<id>/…`.
+/// An app's folder is backed up with its saved state, but without the files Faber leaves while
+/// saving it (`*.tmp`) or sets aside when it can't be read (`*.broken`).
+fn package_files(src: &Sources) -> Vec<(String, PathBuf, u64)> {
     let mut out = Vec::new();
     for id in src.connector_ids {
         walk(&src.connectors.join(id), &format!("{CONNECTORS}{id}/"), &mut out);
     }
+    let mut apps = Vec::new();
+    for id in src.app_ids {
+        walk(&src.apps.join(id), &format!("{APPS}{id}/"), &mut apps);
+    }
+    apps.retain(|(rel, _, _)| !rel.ends_with(".tmp") && !rel.ends_with(".broken"));
+    out.extend(apps);
     out.retain(|(rel, _, _)| !rel.ends_with('/'));
     out
 }
@@ -120,12 +137,12 @@ fn home_entries(src: &Sources) -> Vec<(String, PathBuf, u64)> {
 
 /// Bytes the backup will hold before compression, to check there is room for it first.
 pub fn source_bytes(src: &Sources) -> u64 {
-    let config = [src.parts_toml, src.settings_toml, src.packages_toml]
+    let config = [src.parts_toml, src.settings_toml, src.packages_toml, src.apps_toml]
         .iter()
         .filter_map(|p| fs::metadata(p).ok())
         .map(|m| m.len())
         .sum::<u64>();
-    let files = connector_files(src).into_iter().chain(home_entries(src));
+    let files = package_files(src).into_iter().chain(home_entries(src));
     config + files.map(|(_, _, size)| size).sum::<u64>()
 }
 
@@ -163,7 +180,10 @@ fn write_zip(src: &Sources, out: &Path) -> Result<(), BackupError> {
     if let Ok(meta) = fs::metadata(src.packages_toml) {
         add_file(&mut zip, PACKAGES, src.packages_toml, meta.len())?;
     }
-    for (name, path, size) in connector_files(src) {
+    if let Ok(meta) = fs::metadata(src.apps_toml) {
+        add_file(&mut zip, APPS_TOML, src.apps_toml, meta.len())?;
+    }
+    for (name, path, size) in package_files(src) {
         add_file(&mut zip, &name, &path, size)?;
     }
     for (rel, path, size) in home_entries(src) {
@@ -196,13 +216,36 @@ pub struct Item {
     pub size: u64,
 }
 
-/// One file of a connector inside a backup.
+/// One file of a connector or an app inside a backup.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ConnectorFile {
+struct PackageFile {
     index: usize,
-    /// Its path inside the connector's folder, e.g. `faber.toml` or `captures/a.fbcap`.
+    /// Its path inside the package's folder, e.g. `faber.toml` or `captures/a.fbcap`.
     path: String,
     size: u64,
+}
+
+/// Which kind of package folder a backup holds: `connectors/<id>/` or `apps/<id>/`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Folder {
+    Connectors,
+    Apps,
+}
+
+impl Folder {
+    fn prefix(self) -> &'static str {
+        match self {
+            Folder::Connectors => CONNECTORS,
+            Folder::Apps => APPS,
+        }
+    }
+
+    fn what(self) -> &'static str {
+        match self {
+            Folder::Connectors => "connector",
+            Folder::Apps => "app",
+        }
+    }
 }
 
 /// An opened backup: its config, its settings and a list of everything else, read before
@@ -212,8 +255,11 @@ pub struct Archive {
     parts_toml: String,
     settings_toml: Option<String>,
     packages_toml: Option<String>,
+    apps_toml: Option<String>,
     /// By the connector folder's name, as the backup has it (not checked yet).
-    connectors: BTreeMap<String, Vec<ConnectorFile>>,
+    connectors: BTreeMap<String, Vec<PackageFile>>,
+    /// By the app folder's name, as the backup has it (not checked yet).
+    apps: BTreeMap<String, Vec<PackageFile>>,
     items: Vec<Item>,
 }
 
@@ -222,9 +268,10 @@ impl Archive {
         let file = File::open(path).map_err(|e| BackupError::io("open the backup", &e))?;
         let mut zip = ZipArchive::new(file)
             .map_err(|e| BackupError::invalid(format!("This isn't a zip file Faber can read ({e}).")))?;
-        let (mut parts_toml, mut settings_toml, mut packages_toml) = (None, None, None);
+        let (mut parts_toml, mut settings_toml, mut packages_toml, mut apps_toml) = (None, None, None, None);
         let mut items = Vec::new();
-        let mut connectors = BTreeMap::<String, Vec<ConnectorFile>>::new();
+        let mut connectors = BTreeMap::<String, Vec<PackageFile>>::new();
+        let mut apps = BTreeMap::<String, Vec<PackageFile>>::new();
         let mut unexpected: Option<String> = None;
         for index in 0..zip.len() {
             let mut entry = zip
@@ -234,22 +281,29 @@ impl Archive {
                 .name()
                 .map_err(|e| BackupError::invalid(format!("A name in the backup can't be read ({e}).")))?
                 .into_owned();
-            if name == PARTS || name == SETTINGS || name == PACKAGES {
+            if name == PARTS || name == SETTINGS || name == PACKAGES || name == APPS_TOML {
                 let text = Some(read_config(&mut entry, &name)?);
                 match name.as_str() {
                     PARTS => parts_toml = text,
                     SETTINGS => settings_toml = text,
+                    APPS_TOML => apps_toml = text,
                     _ => packages_toml = text,
                 }
                 continue;
             }
-            // connectors/<id>/<path>: only listed here; the machine checks it as a package.
-            if let Some(rest) = name.strip_prefix(CONNECTORS) {
+            // connectors/<id>/<path> and apps/<id>/<path>: only listed here; the machine checks
+            // each as a package.
+            let package = if let Some(rest) = name.strip_prefix(CONNECTORS) {
+                Some((rest, &mut connectors))
+            } else {
+                name.strip_prefix(APPS).map(|rest| (rest, &mut apps))
+            };
+            if let Some((rest, list)) = package {
                 match rest.split_once('/') {
                     Some((id, path)) if !id.is_empty() => {
                         if !entry.is_dir() && !path.is_empty() {
-                            let file = ConnectorFile { index, path: path.to_string(), size: entry.size() };
-                            connectors.entry(id.to_string()).or_default().push(file);
+                            let file = PackageFile { index, path: path.to_string(), size: entry.size() };
+                            list.entry(id.to_string()).or_default().push(file);
                         }
                     }
                     _ => {
@@ -280,7 +334,7 @@ impl Archive {
                 "The backup holds {name}, which a Faber backup never does."
             )));
         }
-        Ok(Archive { zip, parts_toml, settings_toml, packages_toml, connectors, items })
+        Ok(Archive { zip, parts_toml, settings_toml, packages_toml, apps_toml, connectors, apps, items })
     }
 
     pub fn parts_toml(&self) -> &str {
@@ -298,9 +352,27 @@ impl Archive {
         self.packages_toml.as_deref()
     }
 
+    /// `config/apps.toml`; `None` in a backup made before apps were backed up, or on a machine
+    /// that never had an app.
+    pub fn apps_toml(&self) -> Option<&str> {
+        self.apps_toml.as_deref()
+    }
+
+    fn folders(&self, folder: Folder) -> &BTreeMap<String, Vec<PackageFile>> {
+        match folder {
+            Folder::Connectors => &self.connectors,
+            Folder::Apps => &self.apps,
+        }
+    }
+
     /// The connector folders in the backup, by name.
     pub fn connector_ids(&self) -> Vec<String> {
-        self.connectors.keys().cloned().collect()
+        self.package_ids(Folder::Connectors)
+    }
+
+    /// The connector (or app) folders in the backup, by name.
+    pub fn package_ids(&self, folder: Folder) -> Vec<String> {
+        self.folders(folder).keys().cloned().collect()
     }
 
     /// Every file of one connector folder (path inside it → contents), read into memory. Fails
@@ -310,9 +382,20 @@ impl Archive {
         id: &str,
         max_bytes: u64,
     ) -> Result<BTreeMap<String, Vec<u8>>, BackupError> {
-        let files = self.connectors.get(id).cloned().unwrap_or_default();
+        self.package_files(Folder::Connectors, id, max_bytes)
+    }
+
+    /// Every file of one connector or app folder, as [`Archive::connector_files`].
+    pub fn package_files(
+        &mut self,
+        folder: Folder,
+        id: &str,
+        max_bytes: u64,
+    ) -> Result<BTreeMap<String, Vec<u8>>, BackupError> {
+        let files = self.folders(folder).get(id).cloned().unwrap_or_default();
+        let prefix = folder.prefix();
         let unreadable = |path: &str, e: &dyn std::fmt::Display| {
-            BackupError::invalid(format!("connectors/{id}/{path} in the backup can't be read ({e})."))
+            BackupError::invalid(format!("{prefix}{id}/{path} in the backup can't be read ({e})."))
         };
         let mut out = BTreeMap::new();
         let mut left = max_bytes;
@@ -322,7 +405,8 @@ impl Archive {
             entry.take(left + 1).read_to_end(&mut data).map_err(|e| unreadable(&f.path, &e))?;
             if data.len() as u64 > left {
                 return Err(BackupError::invalid(format!(
-                    "The connector \"{id}\" in the backup is larger than a package may be."
+                    "The {} \"{id}\" in the backup is larger than a package may be.",
+                    folder.what()
                 )));
             }
             left -= data.len() as u64;
@@ -335,10 +419,11 @@ impl Archive {
         &self.items
     }
 
-    /// Bytes the files and connectors take once unpacked.
+    /// Bytes the files, connectors and apps take once unpacked.
     pub fn unpacked_bytes(&self) -> u64 {
-        let connectors = self.connectors.values().flatten().map(|f| f.size).sum::<u64>();
-        self.items.iter().map(|i| i.size).sum::<u64>() + connectors
+        let packages =
+            self.connectors.values().chain(self.apps.values()).flatten().map(|f| f.size).sum::<u64>();
+        self.items.iter().map(|i| i.size).sum::<u64>() + packages
     }
 
     /// Writes a file item's contents to `dest` (which must not be a folder).
@@ -399,6 +484,13 @@ mod tests {
             fs::write(d.join("connectors/my-sensor/faber.toml"), "toml").unwrap();
             fs::write(d.join("connectors/my-sensor/captures/a.fbcap"), "cap").unwrap();
             fs::write(d.join("connectors/not-a-package/faber.toml"), "toml").unwrap();
+            fs::write(d.join("config/apps.toml"), "[apps.gauges]\nenabled = true\n").unwrap();
+            fs::create_dir_all(d.join("apps/gauges/ui")).unwrap();
+            fs::write(d.join("apps/gauges/faber.toml"), "app").unwrap();
+            fs::write(d.join("apps/gauges/ui/index.html"), "<p>").unwrap();
+            fs::write(d.join("apps/gauges/state.toml"), "laps = \"3\"\n").unwrap();
+            fs::write(d.join("apps/gauges/state.toml.tmp"), "half-written").unwrap();
+            fs::write(d.join("apps/gauges/state.toml.broken"), "laps = [").unwrap();
             Data { dir }
         }
 
@@ -406,6 +498,12 @@ mod tests {
         fn packages(&self) -> (PathBuf, PathBuf) {
             let d = self.dir.path();
             (d.join("config/packages.toml"), d.join("connectors"))
+        }
+
+        /// apps.toml and the apps folder.
+        fn apps(&self) -> (PathBuf, PathBuf) {
+            let d = self.dir.path();
+            (d.join("config/apps.toml"), d.join("apps"))
         }
 
         /// parts.toml, settings.toml and the home folder.
@@ -419,13 +517,18 @@ mod tests {
         let (parts, settings, home) = data.sources();
         let dest = data.dir.path().join("files/Backups/b.zip");
         let (packages, connectors) = data.packages();
+        let (apps_toml, apps) = data.apps();
         let ids = ["my-sensor".to_string()];
+        let app_ids = ["gauges".to_string()];
         let src = Sources {
             parts_toml: &parts,
             settings_toml: &settings,
             packages_toml: &packages,
             connectors: &connectors,
             connector_ids: &ids,
+            apps_toml: &apps_toml,
+            apps: &apps,
+            app_ids: &app_ids,
             home: &home,
             include_recordings,
         };
@@ -458,7 +561,22 @@ mod tests {
                 "Documents/robot/notes.txt"
             ]
         );
-        assert_eq!(a.unpacked_bytes(), 6 + 12 + 4 + 3);
+        assert_eq!(a.unpacked_bytes(), 6 + 12 + 4 + 3 + 3 + 3 + 11);
+    }
+
+    #[test]
+    fn a_backup_holds_the_installed_apps_with_their_state_and_apps_toml() {
+        let data = Data::new();
+        let mut a = Archive::open(&make(&data, false)).unwrap();
+        assert_eq!(a.apps_toml(), Some("[apps.gauges]\nenabled = true\n"));
+        assert_eq!(a.package_ids(Folder::Apps), ["gauges"]);
+        let files = a.package_files(Folder::Apps, "gauges", 100).unwrap();
+        let names: Vec<_> = files.keys().map(String::as_str).collect();
+        assert_eq!(names, ["faber.toml", "state.toml", "ui/index.html"], "no .tmp or .broken files");
+        assert_eq!(files["state.toml"], b"laps = \"3\"\n");
+        let e = a.package_files(Folder::Apps, "gauges", 5).unwrap_err();
+        assert!(e.message.contains("The app \"gauges\"") && e.message.contains("larger"), "{e:?}");
+        assert_eq!(a.connector_ids(), ["my-sensor"], "apps aren't connectors");
     }
 
     #[test]
@@ -483,12 +601,16 @@ mod tests {
         assert!(paths(&a).contains(&"Recordings/bench.fbcap".to_string()));
         let (parts, settings, home) = data.sources();
         let (packages, connectors) = data.packages();
+        let (apps_toml, apps) = data.apps();
         let with = Sources {
             parts_toml: &parts,
             settings_toml: &settings,
             packages_toml: &packages,
             connectors: &connectors,
             connector_ids: &[],
+            apps_toml: &apps_toml,
+            apps: &apps,
+            app_ids: &[],
             home: &home,
             include_recordings: true,
         };

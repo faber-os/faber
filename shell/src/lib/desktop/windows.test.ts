@@ -136,6 +136,13 @@ describe('openWindow', () => {
     expect(w.maximised).toBe(false);
   });
 
+  it('opens at a size of its own when asked (an app’s window), never below the minimum', () => {
+    const { state } = openWindow(emptyDesktop(), { kind: parts, size: { w: 420, h: 260 } }, area);
+    expect(state.windows[0]!.rect).toMatchObject({ w: 420, h: 260 });
+    const small = openWindow(emptyDesktop(), { kind: parts, size: { w: 10, h: 10 } }, area);
+    expect(small.state.windows[0]!.rect).toMatchObject(parts.minSize);
+  });
+
   it('only ever opens one window of a single-instance kind', () => {
     let { state } = openWindow(emptyDesktop(), { kind: parts }, area);
     const first = state.windows[0]!.id;
