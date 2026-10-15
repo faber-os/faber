@@ -53,7 +53,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 |---|---|---|
 | 5 | `api` | HTTP + WebSocket. Translates between the wire and the machine. No logic of its own. |
 | 4 | `machine` | Ties everything together. The only place that changes what runs: it writes `parts.toml` first, then reconciles. |
-| 3 | `runtime`, `suggest` | Supervising parts, and detect-then-suggest. Built on layer 2. |
+| 3 | `runtime`, `simparts`, `suggest` | Supervising parts, the world engine that runs `simulate = "world"` parts, and detect-then-suggest. Built on layer 2. |
 | 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `ports`, `router`, `settings`, `sim`, `simulation`, `translations` | One job each. They don't know about HTTP or each other. |
 | 1 | `clock`, `names` | Small pure building blocks. |
 

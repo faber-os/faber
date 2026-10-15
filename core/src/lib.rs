@@ -24,10 +24,13 @@ pub mod simulation;
 pub mod suggest;
 pub mod translations;
 
-// Layer 3: ties everything together.
+// Layer 3: runs parts (`runtime` and `suggest` too; see docs/development.md).
+pub mod simparts;
+
+// Layer 4: ties everything together.
 pub mod machine;
 
-// Layer 4: the wire.
+// Layer 5: the wire.
 pub mod api;
 
 use std::net::SocketAddr;
