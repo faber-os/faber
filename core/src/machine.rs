@@ -248,6 +248,7 @@ pub struct Machine {
     translations: Translations,
     state: Mutex<State>,
     ports_changed: watch::Sender<u64>,
+    packages_changed: watch::Sender<u64>,
     files_changed: broadcast::Sender<Vec<String>>,
     stop_scanning: Arc<AtomicBool>,
     scanner: Mutex<Option<JoinHandle<()>>>,
@@ -316,6 +317,7 @@ impl Machine {
                 world: world::Loaded::default(),
             }),
             ports_changed: watch::channel(0).0,
+            packages_changed: watch::channel(0).0,
             files_changed: broadcast::channel(64).0,
             stop_scanning: Arc::new(AtomicBool::new(false)),
             scanner: Mutex::new(None),
@@ -996,9 +998,15 @@ impl Machine {
     pub fn create_backup(&self, include_recordings: bool) -> Result<(String, u64), MachineError> {
         let home = self.files.home_dir().to_path_buf();
         let settings_path = self.config_path.with_file_name(settings_file::FILE_NAME);
+        // No install or uninstall half-way through while the connectors are copied.
+        let _one_at_a_time = self.package_lock.lock().expect("package lock");
+        let (packages_path, connectors, connector_ids) = self.packages_to_back_up()?;
         let src = backup::Sources {
             parts_toml: &self.config_path,
             settings_toml: &settings_path,
+            packages_toml: &packages_path,
+            connectors: &connectors,
+            connector_ids: &connector_ids,
             home: &home,
             include_recordings,
         };
@@ -1020,8 +1028,9 @@ impl Machine {
     }
 
     /// Restores a backup from the home folder. Everything in it is checked before anything
-    /// changes, so a broken parts.toml is refused with its line and nothing is touched. Files
-    /// that the backup replaces go to the Trash; files it doesn't have stay.
+    /// changes, so a broken parts.toml is refused with its line and nothing is touched, and every
+    /// connector in it is checked and loaded in staging exactly like installing its package.
+    /// Files that the backup replaces go to the Trash; files and packages it doesn't have stay.
     pub fn restore_backup(&self, path: &str) -> Result<(), MachineError> {
         let p = VPath::parse(path)?;
         let real = self.files.local_path(&p)?;
@@ -1062,8 +1071,12 @@ impl Machine {
             "Restoring this backup",
             "Delete old backups or recordings and empty the Trash, then try again.",
         )?;
+        let _one_at_a_time = self.package_lock.lock().expect("package lock");
+        let connectors = self.stage_backup_connectors(&mut archive)?;
 
-        // 2. Then change things: the config and settings first, as they matter most.
+        // 2. Then change things: the connectors first, so the parts find them, then the config
+        // and settings, as they matter most.
+        self.restore_connectors(connectors)?;
         self.write_config_text(archive.parts_toml().as_bytes())?;
         if let Some(s) = restored_settings {
             self.settings.restore(s)?;

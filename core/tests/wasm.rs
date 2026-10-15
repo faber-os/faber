@@ -512,4 +512,89 @@ mod installed {
         assert_eq!(ld19[0]["kind"], "built-in");
         machine.shutdown();
     }
+
+    /// Sends a package file to the core, as the Install window does.
+    async fn upload(app: &axum::Router, files: &[(&str, &[u8])]) -> Value {
+        let files = files.iter().map(|(n, d)| (n.to_string(), d.to_vec())).collect();
+        let bytes = faber_core::packages::pack(&files).unwrap();
+        let req = Request::builder().method("POST").uri("/api/v0/packages?name=pkg.faberpkg");
+        let res = app.clone().oneshot(req.body(Body::from(bytes)).unwrap()).await.unwrap();
+        assert_eq!(res.status(), axum::http::StatusCode::CREATED);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    /// A backup holds the installed connectors, wasm and declarative, so restoring it onto a
+    /// fresh machine (a new SD card) brings back the parts with their connectors.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backup_brings_back_installed_wasm_and_declarative_connectors() {
+        let Some(wasm) = component("ldrobot-ld19") else { return };
+        let data = tempfile::tempdir().unwrap();
+        let (machine, app) = start(data.path());
+        let toml = std::fs::read_to_string(workspace().join("connectors/ldrobot-ld19/faber.toml")).unwrap();
+        let toml = toml.replace("id = \"ldrobot-ld19\"", "id = \"ld19-wasm\"");
+        let readme = b"# LD19 as wasm".as_slice();
+        upload(
+            &app,
+            &[
+                ("faber.toml", toml.as_bytes()),
+                ("connector.wasm", &wasm),
+                ("README.md", readme),
+                ("LICENSE", b"MIT"),
+            ],
+        )
+        .await;
+        let lines = "faber-manifest = 1
+[package]
+id = \"my-sensor\"
+type = \"connector\"
+            kind = \"declarative\"
+version = \"0.1.0\"
+name = \"My sensor\"
+[ports]
+            serial = { baud = 9600 }
+[[provides]]
+capability = \"distance@1\"
+            line = { pattern = \"D:{meters:f32}\" }
+";
+        upload(&app, &[("faber.toml", lines.as_bytes()), ("README.md", b"# Lines"), ("LICENSE", b"MIT")])
+            .await;
+        let part = json!({"name": "lidar", "connector": "ld19-wasm", "port": "replay:demo-ld19"});
+        call(&app, "POST", "/api/v0/parts", Some(part)).await;
+        let backup = call(&app, "POST", "/api/v0/backups", Some(json!({"includeRecordings": false}))).await;
+        let path = backup["path"].as_str().unwrap().to_string();
+        let zip_file = data.path().join("files").join(path.strip_prefix("home:/").unwrap());
+        machine.shutdown();
+
+        // A new machine: only the backup file is copied over.
+        let fresh = tempfile::tempdir().unwrap();
+        let copy = fresh.path().join("files/Backups").join(zip_file.file_name().unwrap());
+        std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        std::fs::copy(&zip_file, &copy).unwrap();
+        let (machine, app) = start(fresh.path());
+        assert_eq!(call(&app, "GET", "/api/v0/packages", None).await, json!([]));
+        let restored = call(&app, "POST", "/api/v0/backups/restore", Some(json!({ "path": path }))).await;
+        assert_eq!(restored, Value::Null, "204");
+
+        let packages = call(&app, "GET", "/api/v0/packages", None).await;
+        let ids: Vec<(&str, &str)> = packages
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| (p["id"].as_str().unwrap(), p["kind"].as_str().unwrap()))
+            .collect();
+        assert_eq!(ids, [("ld19-wasm", "wasm"), ("my-sensor", "declarative")], "{packages}");
+        assert_eq!(packages[0]["source"], "pkg.faberpkg");
+        assert_eq!(packages[0]["usedBy"], json!(["lidar"]));
+        let started = Instant::now();
+        loop {
+            let parts = call(&app, "GET", "/api/v0/parts", None).await;
+            if parts[0]["state"]["kind"] == "running" {
+                break;
+            }
+            assert!(started.elapsed() < Duration::from_secs(10), "never ran: {parts}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        machine.shutdown();
+    }
 }

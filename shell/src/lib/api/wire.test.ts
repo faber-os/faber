@@ -55,7 +55,7 @@ describe('encodeClientMessage', () => {
 });
 
 describe('decodeServerMessage', () => {
-  it('reads the settings, files and recording messages', () => {
+  it('reads the settings, files, packages and recording messages', () => {
     const settings = {
       appearance: { theme: 'dark', wallpaper: 'graphite' },
       desktop: { icons: [{ key: 'tool:parts', x: 16, y: 16 }] },
@@ -64,6 +64,7 @@ describe('decodeServerMessage', () => {
     for (const m of [
       { type: 'settings', id: 1, settings },
       { type: 'files-changed', id: 2, folders: ['home:/Desktop'] },
+      { type: 'packages', id: 4, packages: [] },
       { type: 'serial-recording', id: 3, path: 'home:/Recordings/a.fbcap' },
       { type: 'serial-recording-stopped', id: 3, path: 'home:/Recordings/a.fbcap', bytes: 9 },
     ]) {

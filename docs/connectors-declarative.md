@@ -237,7 +237,9 @@ line 1: This faber.toml doesn't say which manifest format it is written in. Add 
 ```
 
 A connector with a mistake isn't loaded; the core starts without it and writes the message to
-the core's log, as `connectors/<id>/faber.toml line N: …`.
+the core's log, as `connectors/<id>/faber.toml line N: …`. Installing a package with a mistake is
+refused before anything changes, naming the package file and the file inside it:
+`my-sensor-0.1.0.faberpkg: faber.toml line N: …`.
 
 ## 8. Testing with a capture and a replay port
 

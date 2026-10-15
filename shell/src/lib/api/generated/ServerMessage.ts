@@ -4,6 +4,7 @@ import type { EstopStatus } from "./EstopStatus";
 import type { LeaseEndReason } from "./LeaseEndReason";
 import type { LeaseInfo } from "./LeaseInfo";
 import type { LogEntry } from "./LogEntry";
+import type { PackageInfo } from "./PackageInfo";
 import type { PartInfo } from "./PartInfo";
 import type { PortInfo } from "./PortInfo";
 import type { PortProblem } from "./PortProblem";
@@ -20,7 +21,7 @@ export type ServerMessage = { "type": "signal", id: number, address: string, rea
 /**
  * Left out when there are none.
  */
-problems?: Array<PortProblem>, } | { "type": "log", id: number, entry: LogEntry, } | { "type": "serial-data", id: number, tUs: number, data: Uint8Array, } | { "type": "serial-opened", id: number, port: string, } | { "type": "serial-closed", id: number, reason?: string, } | { "type": "settings", id: number, settings: Settings, } | { "type": "files-changed", id: number, folders: Array<string>, } | { "type": "serial-recording", id: number, path: string, } | { "type": "serial-recording-stopped", id: number, path: string, bytes: number, } | { "type": "leases", id: number, leases: Array<LeaseInfo>, } | { "type": "lease-granted", id: number, lease: LeaseInfo, } | { "type": "lease-ended", id: number, lease: LeaseInfo, reason: LeaseEndReason, } | { "type": "estop", id: number, status: EstopStatus, } | { "type": "world", id: number, 
+problems?: Array<PortProblem>, } | { "type": "log", id: number, entry: LogEntry, } | { "type": "serial-data", id: number, tUs: number, data: Uint8Array, } | { "type": "serial-opened", id: number, port: string, } | { "type": "serial-closed", id: number, reason?: string, } | { "type": "settings", id: number, settings: Settings, } | { "type": "files-changed", id: number, folders: Array<string>, } | { "type": "serial-recording", id: number, path: string, } | { "type": "serial-recording-stopped", id: number, path: string, bytes: number, } | { "type": "leases", id: number, leases: Array<LeaseInfo>, } | { "type": "lease-granted", id: number, lease: LeaseInfo, } | { "type": "lease-ended", id: number, lease: LeaseInfo, reason: LeaseEndReason, } | { "type": "estop", id: number, status: EstopStatus, } | { "type": "packages", id: number, packages: Array<PackageInfo>, } | { "type": "world", id: number, 
 /**
  * The ground truth, in the world frame (m, rad).
  */

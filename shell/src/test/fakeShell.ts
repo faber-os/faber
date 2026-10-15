@@ -364,6 +364,9 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
     /** A reading of `address` to every subscription to it. */
     pushReading: (address: string, reading: unknown) =>
       ws.receive(bin({ type: 'signal', id: subscriptionId('signal', address), address, reading })),
+    /** What another browser tab's install or uninstall sends every tab (the `packages` topic). */
+    pushPackages: (packages: unknown[]) =>
+      ws.receive(bin({ type: 'packages', id: subscriptionId('packages'), packages })),
     filesChanged: (folders: string[]) =>
       ws.receive(bin({ type: 'files-changed', id: subscriptionId('files'), folders })),
   };

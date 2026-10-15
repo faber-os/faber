@@ -1025,7 +1025,7 @@ export const en = {
     "Delete recordings or old backups you don't need, then empty the Trash. Faber never deletes anything by itself.",
   'settings.storage.backup.name': 'Back up this machine',
   'settings.storage.backup.desc':
-    'Saves parts, settings, Desktop and Documents as one .zip in Backups. Download it to keep a copy off this machine.',
+    'Saves parts, settings, installed connectors, Desktop and Documents as one .zip in Backups. Download it to keep a copy off this machine.',
   'settings.storage.backup.recordings': 'Include recordings',
   'settings.storage.backup.recordingsSize': 'Include recordings ({size})',
   'settings.storage.backup.now': 'Back up now',

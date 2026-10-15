@@ -26,6 +26,17 @@
   let preview = $state.raw<PackagePreview | null>(null);
   let error = $state.raw<ErrorBody | null>(null);
   let phase = $state<'loading' | 'ready' | 'installing' | 'done' | 'missing'>('loading');
+  /**
+   * The version installed now. The packages topic keeps it current, also when another tab
+   * installs or uninstalls this connector while the window is open.
+   */
+  const replaces = $derived(
+    preview === null
+      ? undefined
+      : core.packages === null
+        ? preview.replaces
+        : core.packages.find((p) => p.id === preview?.connector.id)?.version,
+  );
 
   $effect(() => {
     untrack(() => void load());
@@ -136,8 +147,8 @@
         </div>
       </dl>
 
-      {#if preview.replaces}
-        <p class="note">{t('install.replaces', { version: preview.replaces })}</p>
+      {#if replaces}
+        <p class="note">{t('install.replaces', { version: replaces })}</p>
       {/if}
 
       <section aria-labelledby="{win.id}-touch">

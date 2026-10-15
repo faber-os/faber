@@ -133,6 +133,10 @@ captures/*.fbcap    optional: recordings, used by `faber check` and offered as s
   parts already on that connector are stopped (their leases end with `part-restarted`) and
   started again from the new version. If the new version doesn't load once in place, the old
   folder is put back. `core/tests/packages.rs` tests all of it on a running core.
+- **Backups** (D41) hold the installed packages (`config/packages.toml` and `connectors/<id>/`),
+  so a backup restored onto a new SD card brings the parts back with their connectors. A restore
+  checks each connector exactly like an install before anything changes (docs/api.md, "Storage
+  and backups").
 - **Uninstall** is refused while a part in `parts.toml` uses the connector (`409 package-in-use`,
   naming the parts), and a package can't take a built-in connector's id (`409 package-id-taken`).
 - **`publisher`** is a new optional key in `[package]`, read by both engines.

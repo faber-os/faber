@@ -3,7 +3,7 @@
 //! package installer (Phase 3) writes these folders; until then they can be copied in by hand.
 
 use super::{Limits, definition};
-use crate::connectors::LoadProblem;
+use crate::connectors::{LoadProblem, ShownAs};
 use faber_connector::{Definition, Problem, manifest_file};
 use std::path::Path;
 
@@ -19,7 +19,7 @@ pub fn load_installed(dir: &Path, limits: Limits) -> (Vec<Definition>, Vec<LoadP
     folders.sort();
     for folder in folders {
         let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        match load_one(&folder, &name, limits) {
+        match load_one(&folder, &name, &ShownAs::installed(&name), limits) {
             Ok(Some(d)) => {
                 tracing::info!(target: "core::wasm", "loaded the wasm connector {} {}", d.manifest.id, d.manifest.version);
                 defs.push(d);
@@ -41,10 +41,11 @@ pub fn load_installed(dir: &Path, limits: Limits) -> (Vec<Definition>, Vec<LoadP
 }
 
 /// Loads the one wasm connector in `folder`, which must be named after its id: what the
-/// package installer checks a package with before it installs it.
-pub fn load_folder(folder: &Path, limits: Limits) -> Result<Definition, Problem> {
+/// package installer checks a package with before it installs it. Problems name its files as
+/// `shown` says (the package file, while it is still in staging).
+pub fn load_folder(folder: &Path, shown: &ShownAs, limits: Limits) -> Result<Definition, Problem> {
     let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    load_one(folder, &name, limits)?.ok_or_else(|| {
+    load_one(folder, &name, shown, limits)?.ok_or_else(|| {
         Problem::new(
             format!("The connector in \"{name}\" isn't a wasm connector."),
             "Use kind = \"wasm\" in its faber.toml.",
@@ -52,14 +53,20 @@ pub fn load_folder(folder: &Path, limits: Limits) -> Result<Definition, Problem>
     })
 }
 
-fn load_one(folder: &Path, name: &str, limits: Limits) -> Result<Option<Definition>, Problem> {
+fn load_one(
+    folder: &Path,
+    name: &str,
+    shown: &ShownAs,
+    limits: Limits,
+) -> Result<Option<Definition>, Problem> {
     // A folder without a readable faber.toml is the declarative engine's to report.
     let Ok(text) = std::fs::read_to_string(folder.join(manifest_file::FILE_NAME)) else { return Ok(None) };
     if manifest_file::package_kind(&text).as_deref() != Some("wasm") {
         return Ok(None);
     }
-    let package = manifest_file::parse(&text)
-        .map_err(|p| Problem::new(format!("connectors/{name}/faber.toml: {}", p.message), p.hint))?;
+    let package = manifest_file::parse(&text).map_err(|p| {
+        Problem::new(format!("{}: {}", shown.file(manifest_file::FILE_NAME), p.message), p.hint)
+    })?;
     let id = &package.manifest.id;
     if id != name {
         return Err(Problem::new(
