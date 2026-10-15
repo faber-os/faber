@@ -242,10 +242,13 @@ pub fn start_manual(spec: PartSpec) -> Box<dyn SimulatedPart> {
             .spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
                     let now = clock.now_us();
-                    let readings = shared.lock().expect("manual part lock").tick(now);
-                    for (name, r) in readings {
+                    // Published under the lock, so a tick can never publish an older state
+                    // after a command has published a newer one.
+                    let mut m = shared.lock().expect("manual part lock");
+                    for (name, r) in m.tick(now) {
                         outlet.publish(&name, r);
                     }
+                    drop(m);
                     sleep_unless_stopped(period, &stop);
                 }
             })
@@ -405,7 +408,8 @@ fn sensor_reading(capability: Capability, info: Option<&Info>, t_us: u64, value:
 impl SimulatedPart for ManualPart {
     fn command(&mut self, command: Command) -> Result<Applied, CommandError> {
         let now = self.clock.now_us();
-        let (name, reading) = self.shared.lock().expect("manual part lock").command(command, now)?;
+        let mut m = self.shared.lock().expect("manual part lock");
+        let (name, reading) = m.command(command, now)?;
         self.outlet.publish(&name, reading);
         Ok(Applied { command })
     }
