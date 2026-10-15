@@ -3,7 +3,9 @@
 //! Vite dev server instead.
 
 use axum::http::{StatusCode, Uri};
-use axum::response::{Html, IntoResponse, Response};
+#[cfg(not(feature = "embed-shell"))]
+use axum::response::Html;
+use axum::response::{IntoResponse, Response};
 
 #[cfg(feature = "embed-shell")]
 #[derive(rust_embed::Embed)]

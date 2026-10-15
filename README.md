@@ -1,6 +1,6 @@
 # Faber
 
-> **Status: design phase.** There is no code yet, only the plan. Built for the Raspberry Pi 5,
+> **Status: Phase 1.** The core and web desktop run on a PC with an LD19 LiDAR (or its built-in recording). Built for the Raspberry Pi 5,
 > developed alongside a real robot.
 
 **Faber turns a Raspberry Pi into a hardware workbench you control from a browser.**
@@ -29,6 +29,20 @@ SD card survives a power cut. Faber does that plumbing once, for everyone:
   didn't ask for.
 - **One desktop, two screens:** the same UI in your browser and on a screen attached to the Pi.
 - **Local-first:** no account, no cloud. Remote access through Tailscale if you want it.
+
+## Try it (Phase 1, on a PC)
+
+You need [Rust](https://rustup.rs) and [Node.js](https://nodejs.org). No hardware needed:
+Faber has a built-in recording of a real LD19 LiDAR.
+
+```bash
+npm --prefix shell ci
+npm --prefix shell run build
+cargo run -p faber-core --features embed-shell
+```
+
+Open <http://127.0.0.1:7878>, click **Add the first part**, pick the port `replay:demo-ld19` and the
+LD19 connector, and watch the scan. Have an LD19? Plug it in and pick its USB port instead.
 
 ## The four building blocks
 

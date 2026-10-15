@@ -7,8 +7,8 @@ use crate::clock::SharedClock;
 use crate::config::{self, ConfigError, PartConfig, PartsConfig};
 use crate::names::{PartName, SignalAddress};
 use crate::ports::{
-    Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortWriter, ReplayLibrary, SerialDiscovery,
-    catalog, spawn_reader,
+    Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortReader, PortWriter, ReplayLibrary,
+    SerialDiscovery, catalog, spawn_reader,
 };
 use crate::router::Router;
 use crate::runtime::{self, PartHandle, PartStatus, RunDeps, RunSpec, StatusBoard, Timing};
@@ -461,14 +461,9 @@ impl Machine {
         }
     }
 
-    /// Opens a port for the serial monitor. Events go to `sink` until the session is dropped
-    /// or `sink` returns false.
-    pub fn open_serial(
-        self: &Arc<Self>,
-        port: &str,
-        baud: u32,
-        sink: impl FnMut(PortEvent) -> bool + Send + 'static,
-    ) -> Result<SerialSession, MachineError> {
+    /// Opens and claims a port for the serial monitor. Nothing is read until
+    /// [`SerialSession::start`], so the caller can announce the session before data flows.
+    pub fn open_serial(self: &Arc<Self>, port: &str, baud: u32) -> Result<SerialSession, MachineError> {
         let mut st = self.state.lock().expect("machine lock");
         let entry = PortId::parse(port)
             .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
@@ -497,14 +492,14 @@ impl Machine {
             }
         };
         self.ports_changed.send_modify(|n| *n += 1);
-        let stop = Arc::new(AtomicBool::new(false));
-        let thread = spawn_reader(reader, self.clock.clone(), sink, Arc::clone(&stop));
         Ok(SerialSession {
             machine: Arc::downgrade(self),
+            clock: self.clock.clone(),
             port: entry.id,
+            reader: Mutex::new(Some(reader)),
             writer: Mutex::new(writer),
-            stop,
-            thread: Some(thread),
+            stop: Arc::new(AtomicBool::new(false)),
+            thread: None,
         })
     }
 
@@ -525,13 +520,28 @@ impl Drop for Machine {
 /// A port held open by the serial monitor. Dropping it closes the port and releases the claim.
 pub struct SerialSession {
     machine: Weak<Machine>,
+    clock: SharedClock,
     port: PortId,
+    /// Taken by `start`. In a mutex so a session can be shared between threads.
+    reader: Mutex<Option<Box<dyn PortReader>>>,
     writer: Mutex<Box<dyn PortWriter>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl SerialSession {
+    pub fn port(&self) -> String {
+        self.port.to_string()
+    }
+
+    /// Starts reading. Events go to `sink` until the session is dropped or `sink` returns false.
+    /// Calling it twice does nothing the second time.
+    pub fn start(&mut self, sink: impl FnMut(PortEvent) -> bool + Send + 'static) {
+        if let Some(reader) = self.reader.get_mut().expect("reader lock").take() {
+            self.thread = Some(spawn_reader(reader, self.clock.clone(), sink, Arc::clone(&self.stop)));
+        }
+    }
+
     pub fn write(&self, data: &[u8]) -> io::Result<()> {
         self.writer.lock().expect("writer lock").write(data)
     }
@@ -810,14 +820,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let m = machine(dir.path(), no_ports());
         let (tx, rx) = std::sync::mpsc::channel();
-        let session = m.open_serial("replay:demo-ld19", 230_400, move |e| tx.send(e).is_ok()).unwrap();
+        let mut session = m.open_serial("replay:demo-ld19", 230_400).unwrap();
+        assert_eq!(session.port(), "replay:demo-ld19");
+        session.start(move |e| tx.send(e).is_ok());
         assert!(matches!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), PortEvent::Data { .. }));
         let e = m.add_part(demo("lidar")).unwrap_err();
         assert_eq!(e.code, "port-claimed");
         assert!(e.message.contains("serial monitor"), "{e:?}");
         drop(session);
         m.add_part(demo("lidar")).unwrap();
-        let e = m.open_serial("replay:demo-ld19", 230_400, |_| true).err().unwrap();
+        let e = m.open_serial("replay:demo-ld19", 230_400).err().unwrap();
         assert_eq!(e.code, "port-claimed");
         m.shutdown();
     }

@@ -28,8 +28,8 @@ Goal: `faber-core` runs on Windows and shows live data from real hardware over U
 - [x] Supervisor: port failures retried, connector crashes restarted with backoff, then stopped
 - [x] API v0: REST + WebSocket (MessagePack, JSON debug mode), generated TypeScript types
 - [x] Architecture enforced in tests: crate rules (`faber-arch-check`) and core module layers
-- [ ] Shell v0: desktop, windows, Parts window with Add part, laser-scan viewer, Serial monitor, Logs
-- [ ] End-to-end test in a real browser
+- [x] Shell v0: desktop, windows, Parts window with Add part, laser-scan viewer, Serial monitor, Logs
+- [x] End-to-end test in a real browser, against the release build (shell compiled into the core)
 - [ ] Tested with the real LD19 on Mikkel's PC
 
 A `distance` viewer moves to Phase 3, together with the first distance connector (no viewer

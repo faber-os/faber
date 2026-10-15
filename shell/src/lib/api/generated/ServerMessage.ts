@@ -8,4 +8,4 @@ import type { Reading } from "./Reading";
 /**
  * Messages from the core to the shell. `id` is the subscription or serial session it belongs to.
  */
-export type ServerMessage = { "type": "signal", id: number, address: string, reading: Reading, } | { "type": "parts", id: number, parts: Array<PartInfo>, } | { "type": "ports", id: number, ports: Array<PortInfo>, } | { "type": "log", id: number, entry: LogEntry, } | { "type": "serial-data", id: number, tUs: number, data: Uint8Array, } | { "type": "serial-closed", id: number, reason?: string, } | { "type": "error", id?: number, error: ErrorBody, };
+export type ServerMessage = { "type": "signal", id: number, address: string, reading: Reading, } | { "type": "parts", id: number, parts: Array<PartInfo>, } | { "type": "ports", id: number, ports: Array<PortInfo>, } | { "type": "log", id: number, entry: LogEntry, } | { "type": "serial-data", id: number, tUs: number, data: Uint8Array, } | { "type": "serial-opened", id: number, port: string, } | { "type": "serial-closed", id: number, reason?: string, } | { "type": "error", id?: number, error: ErrorBody, };

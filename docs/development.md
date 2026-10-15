@@ -77,8 +77,17 @@ points up or sideways. Every module that does I/O does it behind a trait, so its
 | Rust units | `cargo test` | next to the code (`#[cfg(test)]`) |
 | Rust integration | `cargo test` | `core/tests/`. A real LD19 capture goes through the whole core: replay port → connector → router → WebSocket |
 | Shell units | Vitest + Testing Library | `shell/src/**/*.test.ts` |
-| End-to-end | Playwright | `shell/e2e/`. Starts the real core with the demo capture and checks that a scan is drawn |
+| End-to-end | Playwright | `shell/e2e/`. Builds the shell, starts the real core with it compiled in (`embed-shell`), adds a part on the demo recording and checks that a scan is drawn, at desktop and 7" sizes |
 | Interfaces | `wasm-tools component wit wit/capabilities` | CI |
+
+## End-to-end tests
+
+```bash
+npm --prefix shell run test:e2e
+```
+
+Playwright builds and starts everything itself. It needs a browser: run `npx playwright install chromium`
+once in `shell/`, or set `FABER_E2E_CHANNEL=chrome` to use an installed Chrome.
 
 ## Running it (Phase 1)
 
@@ -92,6 +101,7 @@ Then in a second terminal:
 npm --prefix shell run dev
 ```
 
-Open the address Vite prints. During development Vite forwards `/api` to the core. A release
+Open the address Vite prints. During development Vite forwards `/api` to the core. Add `?wire=json`
+to the page address to switch the WebSocket to JSON and read every message in the browser's dev tools. A release
 build (`cargo build --release -p faber-core --features embed-shell`) compiles the shell into
 the core binary, so the machine only runs one file and no Node.js.

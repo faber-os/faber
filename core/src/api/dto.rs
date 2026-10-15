@@ -296,6 +296,12 @@ pub enum ServerMessage {
         #[ts(type = "Uint8Array")]
         data: Vec<u8>,
     },
+    /// The port asked for in `serial-open` is open. From now on only `serial-closed` ends the
+    /// session; an `error` for it (e.g. a failed write) leaves it open.
+    SerialOpened {
+        id: u32,
+        port: String,
+    },
     SerialClosed {
         id: u32,
         #[ts(optional)]

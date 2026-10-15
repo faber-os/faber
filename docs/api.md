@@ -55,11 +55,39 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `signal` | `address`, `maxHz?` | `signal` messages with readings of `part/name` |
 | `parts` | — | a `parts` message now and after every change |
 | `ports` | — | a `ports` message now and after every change |
-| `logs` | — | the recent log as `log` messages, then each new entry |
+| `logs` | — | the recent log (up to 1000 entries) as `log` messages, then each new entry. Every new subscription gets the recent log again, so a client that reconnects should start its log view afresh. |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
-`serial-data`, `serial-closed`, `error`. Each carries the `id` of the subscription or serial session
-it belongs to. `error` may come without an `id`.
+`serial-opened`, `serial-data`, `serial-closed`, `error`. Each carries the `id` of the subscription
+or serial session it belongs to. `error` may come without an `id`.
+
+**Serial sessions**, step by step:
+
+1. The client sends `serial-open`.
+2. The core answers either `serial-opened` (with the port id) or an `error` with the same `id`.
+   An `error` before `serial-opened` means the port never opened.
+3. `serial-data` only ever arrives after `serial-opened`.
+4. After `serial-opened`, only `serial-closed` ends the session: after `serial-close`, when the port
+   stops working (its `reason` says why), or when the WebSocket closes. An `error` for an open
+   session (e.g. `serial-write-failed`) leaves it open.
+
+While a session is open, the port shows `claimedBy: "tool:serial-monitor"`. A part's claim shows
+the part's name.
+
+**WebSocket error codes:**
+
+| Code | When |
+|---|---|
+| `bad-message` | The core couldn't read a client message (no `id`) |
+| `id-in-use` | `subscribe` or `serial-open` reused an id that is still active |
+| `unknown-signal` | `subscribe` to a signal address that doesn't exist right now |
+| `signal-ended` | A subscribed signal went away (its part was removed or restarted). Subscribe again when the part is back. |
+| `unknown-port`, `port-claimed`, `port-unavailable` | `serial-open` failed (see step 2) |
+| `serial-write-failed` | `serial-send` couldn't write. The session stays open. |
+| `unknown-session` | `serial-send` for a session that isn't open |
+| `internal` | A bug in the core. The log has details. |
+
+Every error carries `message` and `hint`, like REST errors.
 
 ## Format details
 

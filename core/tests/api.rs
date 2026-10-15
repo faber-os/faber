@@ -227,6 +227,15 @@ async fn the_serial_monitor_reads_a_port_and_refuses_one_in_use() {
     let mut ws = connect(addr, "msgpack").await;
     send(&mut ws, &dto::ClientMessage::SerialOpen { id: 9, port: "replay:demo-ld19".into(), baud: 230_400 })
         .await;
+    let first = wait_for(&mut ws, |m| {
+        matches!(m, dto::ServerMessage::SerialOpened { .. } | dto::ServerMessage::SerialData { .. })
+    })
+    .await;
+    assert_eq!(
+        first,
+        dto::ServerMessage::SerialOpened { id: 9, port: "replay:demo-ld19".into() },
+        "the session is announced before any data"
+    );
     let dto::ServerMessage::SerialData { data, .. } =
         wait_for(&mut ws, |m| matches!(m, dto::ServerMessage::SerialData { .. })).await
     else {

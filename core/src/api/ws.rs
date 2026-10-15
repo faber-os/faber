@@ -170,8 +170,11 @@ async fn handle(
                     false
                 }
             };
-            match tokio::task::spawn_blocking(move || machine.open_serial(&port, baud, sink)).await {
-                Ok(Ok(session)) => {
+            match tokio::task::spawn_blocking(move || machine.open_serial(&port, baud)).await {
+                Ok(Ok(mut session)) => {
+                    // Announce first, then start reading: data never arrives before `serial-opened`.
+                    let _ = out.send(dto::ServerMessage::SerialOpened { id, port: session.port() }).await;
+                    session.start(sink);
                     serial.insert(id, Arc::new(session));
                 }
                 Ok(Err(e)) => {
