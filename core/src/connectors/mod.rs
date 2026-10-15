@@ -40,7 +40,7 @@ impl ShownAs {
 }
 
 pub fn built_in() -> Vec<Definition> {
-    let mut defs = vec![ldrobot_ld19::definition()];
+    let mut defs = vec![ldrobot_ld19::definition(), bridge::definition()];
     defs.extend(generic::definitions());
     defs
 }

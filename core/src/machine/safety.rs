@@ -5,15 +5,18 @@
 //!   renews the lease;
 //! - whenever a lease ends, for any reason, its parts get their safe state and `lease-ended` is
 //!   announced;
-//! - a sweeper ends expired leases (and leases on parts that failed) within 50 ms.
+//! - a sweeper ends expired leases (and leases on parts that failed) within 50 ms;
+//! - a bridge's sub-parts (`mega.left`) take leases and commands like any part; their commands,
+//!   safe states and the e-stop go to the board through the bridge.
 
-use super::{ErrorKind, Machine, MachineError, Running, State};
+use super::{ErrorKind, Machine, MachineError, Running, State, bridge_handle};
+use crate::bridge::{BridgeEvent, BridgeHandle};
 use crate::leases::{EndReason, Ended, Lease, LeaseError, Request};
 use crate::names::PartName;
 use crate::runtime::PartStatus;
 use crate::simulation::{Pattern, PatternError, SimulatedPart};
 use faber_capabilities::{Command, Info, Refused, estop};
-use faber_connector::{Applied, CommandError};
+use faber_connector::{Applied, CommandError, Problem, Provide};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -21,10 +24,12 @@ use std::time::Duration;
 /// How often the sweeper looks for expired leases. Well inside the 50 ms the design promises.
 pub(super) const SWEEP_EVERY: Duration = Duration::from_millis(10);
 
-/// What runs a part: the runtime (a real part on its port) or a simulation.
+/// What runs a part: the runtime (a real part on its port), a simulation, or a bridge (a
+/// FaberLink board on its port, which runs its sub-parts too).
 pub(super) enum Runner {
     Real(crate::runtime::PartHandle),
     Simulated(Box<dyn SimulatedPart>),
+    Bridge(BridgeHandle),
 }
 
 impl Runner {
@@ -32,6 +37,8 @@ impl Runner {
         match self {
             Runner::Real(h) => h.command(command),
             Runner::Simulated(s) => s.command(command),
+            // The bridge itself takes no commands; its sub-parts do.
+            Runner::Bridge(_) => Err(CommandError::Unsupported),
         }
     }
 
@@ -39,8 +46,26 @@ impl Runner {
         match self {
             Runner::Real(h) => h.stop(),
             Runner::Simulated(s) => drop(s),
+            Runner::Bridge(h) => h.stop(),
         }
     }
+}
+
+/// The bridge a sub-part is on, while the bridge runs.
+fn bridge_of<'a>(st: &'a State, part: &PartName) -> Option<&'a BridgeHandle> {
+    bridge_handle(st, &part.bridge()?)
+}
+
+/// What a part provides now: its own (with its settings), or a sub-part's, from its board.
+fn provides_of(st: &State, part: &PartName) -> Vec<Provide> {
+    if part.is_sub() {
+        return bridge_of(st, part)
+            .and_then(|b| b.sub_part(part))
+            .and_then(|s| s.provide)
+            .into_iter()
+            .collect();
+    }
+    st.running.get(part).map(|r| r.provides.clone()).unwrap_or_default()
 }
 
 /// A lease was granted or ended (the `leases` WebSocket topic).
@@ -125,11 +150,36 @@ impl Machine {
         EstopView { engaged: st.estop.engaged().cloned(), history: st.estop.history().cloned().collect() }
     }
 
+    /// A part in parts.toml, or a sub-part its bridge's board has (or parts.toml names).
     fn known_part(st: &State, name: &str) -> Result<PartName, MachineError> {
-        PartName::parse(name)
-            .ok()
-            .filter(|n| st.config.parts.contains_key(n))
-            .ok_or_else(|| unknown_part(name))
+        let exists = |n: &PartName| match n.bridge() {
+            None => st.config.parts.contains_key(n),
+            Some(b) => {
+                st.config.parts.get(&b).is_some_and(|c| c.parts.contains_key(n.local()))
+                    || bridge_of(st, n).and_then(|h| h.sub_part(n)).is_some()
+            }
+        };
+        PartName::parse_any(name).ok().filter(exists).ok_or_else(|| unknown_part(name))
+    }
+
+    /// Hands a command to whatever runs the part: its runner, or its bridge.
+    fn apply(st: &mut State, part: &PartName, command: Command) -> Result<Applied, CommandError> {
+        if part.is_sub() {
+            return match bridge_of(st, part) {
+                Some(b) => b.command(part, command),
+                None => Err(CommandError::NotReady(Problem::new(
+                    format!("\"{part}\" isn't running: its bridge isn't."),
+                    "Check the bridge's state in Parts.",
+                ))),
+            };
+        }
+        match st.running.get_mut(part).and_then(|r| r.runner.as_mut()) {
+            Some(r) => r.command(command),
+            None => Err(CommandError::NotReady(Problem::new(
+                format!("\"{part}\" isn't running."),
+                "Check its state in Parts.",
+            ))),
+        }
     }
 
     /// Grants `holder` the lease on `part`, or says who holds it. `take_over` ends the lease in
@@ -149,9 +199,7 @@ impl Machine {
                 "Send {\"holder\": \"…\"} with a name people recognise, e.g. the program's name.",
             ));
         }
-        let running = st.running.get(&name);
-        let leased = running
-            .and_then(|r| r.provides.iter().find_map(|p| Some((p.capability.lease()?, p.info.clone()))));
+        let leased = provides_of(&st, &name).into_iter().find_map(|p| Some((p.capability.lease()?, p.info)));
         let Some((policy, info)) = leased else {
             return Err(err(
                 ErrorKind::BadRequest,
@@ -161,7 +209,7 @@ impl Machine {
             ));
         };
         let locks = info.as_ref().map(Info::built_from).unwrap_or_default();
-        let locks = locks.iter().filter_map(|n| PartName::parse(n).ok()).collect();
+        let locks = locks.iter().filter_map(|n| PartName::parse_any(n).ok()).collect();
         let now = self.clock.now_us();
         let req = Request {
             part: name.clone(),
@@ -219,17 +267,10 @@ impl Machine {
         if st.estop.is_engaged() {
             return Err(estop_engaged(&st));
         }
-        let provide = st
-            .running
-            .get(&name)
-            .and_then(|r| r.provides.iter().find(|p| p.capability == command.capability()))
-            .cloned();
+        let provides = provides_of(&st, &name);
+        let provide = provides.iter().find(|p| p.capability == command.capability()).cloned();
         let Some(provide) = provide else {
-            let has: Vec<_> = st
-                .running
-                .get(&name)
-                .map(|r| r.provides.iter().map(|p| p.capability.id()).collect())
-                .unwrap_or_default();
+            let has: Vec<_> = provides.iter().map(|p| p.capability.id()).collect();
             return Err(err(
                 ErrorKind::BadRequest,
                 "bad-command",
@@ -246,15 +287,7 @@ impl Machine {
             Some(info) => command.clamp(info).map_err(|r| refused(&name, r))?,
             None => faber_capabilities::Clamped { command, clamped: false },
         };
-        let runner = st.running.get_mut(&name).and_then(|r| r.runner.as_mut());
-        let applied = match runner {
-            Some(r) => r.command(clamped.command),
-            None => Err(CommandError::NotReady(faber_connector::Problem::new(
-                format!("\"{name}\" isn't running."),
-                "Check its state in Parts.",
-            ))),
-        };
-        let applied = applied.map_err(|e| match e {
+        let applied = Self::apply(&mut st, &name, clamped.command).map_err(|e| match e {
             CommandError::Unsupported => err(
                 ErrorKind::BadRequest,
                 "bad-command",
@@ -287,16 +320,42 @@ impl Machine {
         for name in names {
             self.make_safe(&mut st, &name);
         }
+        // Every board hears it at once (ESTOP and SAFE for everything) and in every heartbeat.
+        let level = st.estop.engaged().map(|r| (r.source, r.reason.clone()));
+        for b in st.running.values().filter_map(|r| r.runner.as_ref()) {
+            if let Runner::Bridge(h) = b {
+                h.set_estop(level.clone());
+            }
+        }
         EstopView { engaged: st.estop.engaged().cloned(), history: st.estop.history().cloned().collect() }
     }
 
-    pub fn release_estop(&self, source: estop::Source) -> EstopView {
+    /// Releases the e-stop, unless a board's own stop button is still latched: that is reset on
+    /// the board first (docs/faberlink.md §5, rule 3). Releasing never restarts anything.
+    pub fn release_estop(&self, source: estop::Source) -> Result<EstopView, MachineError> {
         let mut st = self.state.lock().expect("machine lock");
+        let latched = st.running.iter().find_map(|(name, r)| match &r.runner {
+            Some(Runner::Bridge(h)) if h.hardware_estop_latched() => Some(name.clone()),
+            _ => None,
+        });
+        if let Some(bridge) = latched {
+            return Err(err(
+                ErrorKind::Conflict,
+                "estop-latched",
+                format!("The stop button on the board \"{bridge}\" is still pressed."),
+                "Reset it on the board first, then release the e-stop here.",
+            ));
+        }
         if let Some(change) = st.estop.release(source, "Released", self.clock.now_us()) {
             tracing::warn!(target: "core::estop", "e-stop released");
             let _ = self.estop_events.send(change);
         }
-        EstopView { engaged: None, history: st.estop.history().cloned().collect() }
+        for b in st.running.values().filter_map(|r| r.runner.as_ref()) {
+            if let Runner::Bridge(h) = b {
+                h.set_estop(None);
+            }
+        }
+        Ok(EstopView { engaged: None, history: st.estop.history().cloned().collect() })
     }
 
     /// Sets the value pattern of a manual simulated sensor.
@@ -329,6 +388,44 @@ impl Machine {
         self.finish(st, ended);
     }
 
+    /// Ends the leases on `part` and, for a bridge, on each of its sub-parts, while their safe
+    /// states can still reach the board (it is about to stop).
+    pub(super) fn end_part(&self, st: &mut State, part: &PartName, reason: EndReason) {
+        self.revoke_part(st, part, reason);
+        let subs: Vec<PartName> = bridge_handle(st, part)
+            .map(|h| h.sub_parts().into_iter().map(|s| s.name).collect())
+            .unwrap_or_default();
+        for sub in subs {
+            self.revoke_part(st, &sub, reason);
+        }
+    }
+
+    /// Acts on what bridges reported since the last sweep.
+    fn handle_bridge_events(&self) {
+        let events: Vec<BridgeEvent> =
+            self.bridge_inbox.lock().expect("bridge inbox lock").try_iter().collect();
+        for event in events {
+            match event {
+                BridgeEvent::HardwareEstop { bridge, reason } => {
+                    tracing::warn!(target: "core::estop", part = %bridge, "the board's stop button was pressed");
+                    self.engage_estop(estop::Source::Part, &reason);
+                }
+                BridgeEvent::PartsChanged { bridge, removed, changed } => {
+                    tracing::info!(target: "core::bridge", part = %bridge, "the board has other parts now");
+                    let mut st = self.state.lock().expect("machine lock");
+                    for p in &removed {
+                        self.revoke_part(&mut st, p, EndReason::PartRemoved);
+                    }
+                    for p in &changed {
+                        self.revoke_part(&mut st, p, EndReason::PartRestarted);
+                    }
+                    drop(st);
+                    self.status.touch();
+                }
+            }
+        }
+    }
+
     /// Ends every lease (the core is stopping).
     pub(super) fn revoke_all(&self, st: &mut State, reason: EndReason) {
         let ended = st.leases.revoke_all(reason);
@@ -337,6 +434,7 @@ impl Machine {
 
     /// Ends expired leases, and leases on parts that stopped working.
     pub(super) fn sweep(&self) {
+        self.handle_bridge_events();
         let mut st = self.state.lock().expect("machine lock");
         let mut ended = st.leases.sweep(self.clock.now_us());
         let failed: Vec<PartName> = st
@@ -374,8 +472,16 @@ impl Machine {
         }
     }
 
-    /// Sends the safe state of every leased capability `part` has.
+    /// Sends the safe state of every leased capability `part` has. A sub-part's goes to its
+    /// board as SAFE.
     fn make_safe(&self, st: &mut State, part: &PartName) {
+        if part.is_sub() {
+            let moves = provides_of(st, part).iter().any(|p| p.capability.lease().is_some());
+            if let Some(b) = bridge_of(st, part).filter(|_| moves) {
+                b.safe(part);
+            }
+            return;
+        }
         let Some(Running { provides, runner: Some(runner), .. }) = st.running.get_mut(part) else { return };
         for policy in provides.iter().filter_map(|p| p.capability.lease()) {
             match runner.command(policy.safe_state) {

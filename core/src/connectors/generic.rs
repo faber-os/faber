@@ -1,7 +1,7 @@
 //! Generic connectors (docs/simulation.md, section 3): a motor, a drive base and a distance
-//! sensor described by their settings alone. Real ones are reached through a FaberLink bridge
-//! (Phase 4), so for now they can only be simulated; their manifests say so with
-//! [`PortRequirement::Bridge`].
+//! sensor described by their settings alone. Real ones sit on a FaberLink board and appear as its
+//! sub-parts by themselves (`faber-bridge`), so a generic part is only ever simulated; their
+//! manifests say so with [`PortRequirement::Bridge`].
 //!
 //! The settings are the part's limits, which become its capability info: the core clamps every
 //! command to them, and simulations respect them. Each manifest declares its settings

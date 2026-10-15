@@ -417,7 +417,7 @@ impl Machine {
             .map(|(n, _)| n.clone())
             .collect();
         for name in names {
-            self.revoke_part(st, &name, EndReason::PartRestarted);
+            self.end_part(st, &name, EndReason::PartRestarted);
             self.stop_part(st, &name);
         }
         self.reconcile(st);

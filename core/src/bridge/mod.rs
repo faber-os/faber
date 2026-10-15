@@ -53,9 +53,9 @@ pub trait BridgeOutlet: Send + Sync {
 /// What a bridge needs the machine to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BridgeEvent {
-    /// The board was described with other parts than before (new firmware): leases on parts that
-    /// are gone or changed must end.
-    PartsChanged(PartName),
+    /// The board was described with other parts than before (new firmware). Leases on parts it
+    /// no longer has (`removed`), or that are now something else (`changed`), must end.
+    PartsChanged { bridge: PartName, removed: Vec<PartName>, changed: Vec<PartName> },
     /// The board's own stop button (a hardware e-stop) was pressed: engage Faber's e-stop.
     HardwareEstop { bridge: PartName, reason: String },
 }
@@ -578,8 +578,16 @@ impl<'a> Run<'a> {
 
     /// The board described its parts: they become sub-parts, with signals.
     fn described(&mut self, l: &mut Link, subs: Vec<SubPart>) {
-        let changed = subs != l.subs;
+        let differs = subs != l.subs;
         let same = |a: &SubPart, b: &SubPart| a.name == b.name && a.provide == b.provide;
+        let (mut removed, mut changed) = (Vec::new(), Vec::new());
+        for old in &l.subs {
+            match subs.iter().find(|s| s.name == old.name) {
+                None => removed.push(old.name.clone()),
+                Some(new) if !same(new, old) => changed.push(old.name.clone()),
+                Some(_) => {}
+            }
+        }
         for old in &l.subs {
             if !subs.iter().any(|s| same(s, old))
                 && let Some(p) = &old.provide
@@ -602,8 +610,12 @@ impl<'a> Run<'a> {
         }
         l.subs = subs;
         l.state = LinkState::Ready;
-        if changed {
-            self.deps.outlet.event(BridgeEvent::PartsChanged(self.spec.name.clone()));
+        if differs {
+            self.deps.outlet.event(BridgeEvent::PartsChanged {
+                bridge: self.spec.name.clone(),
+                removed,
+                changed,
+            });
         }
     }
 

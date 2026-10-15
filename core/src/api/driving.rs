@@ -118,6 +118,6 @@ async fn release_estop(State(s): State<AppState>, body: Bytes) -> Result<Json<dt
         })?;
         b.source.unwrap_or(Source::App)
     };
-    let view = blocking(move || s.machine.release_estop(source)).await?;
+    let view = blocking(move || s.machine.release_estop(source)).await??;
     Ok(Json(convert::estop_status(&view)))
 }

@@ -61,7 +61,8 @@ pub enum PortRequirementInfo {
     Serial {
         baud: u32,
     },
-    /// Needs a FaberLink bridge (Phase 4). Until then the part can only be simulated.
+    /// Hardware like this is reached through a FaberLink board, whose own parts appear by
+    /// themselves once the board is added; a part on this connector can only be simulated.
     Bridge,
 }
 

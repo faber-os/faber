@@ -237,7 +237,9 @@ fn new_firmware_with_other_parts_is_described_again_on_reconnect() {
     assert_eq!(r.outlet.health("mega.left"), None);
     let signals: Vec<_> = r.router.signals().into_iter().map(|(a, _)| a.to_string()).collect();
     assert!(signals.contains(&"mega.right/motor".into()) && !signals.contains(&"mega.left/motor".into()));
-    assert!(r.outlet.events.lock().unwrap().contains(&BridgeEvent::PartsChanged(name("mega"))));
+    let change =
+        BridgeEvent::PartsChanged { bridge: name("mega"), removed: vec![name("mega.left")], changed: vec![] };
+    assert!(r.outlet.events.lock().unwrap().contains(&change), "{:?}", r.outlet.events.lock().unwrap());
 }
 
 #[test]

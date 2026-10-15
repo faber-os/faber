@@ -3,6 +3,8 @@
 //! the source of truth**. Changes are written to the file first, then `reconcile` makes the
 //! running parts match it.
 
+#[cfg(test)]
+mod bridge_tests;
 mod packages;
 mod safety;
 mod world;
@@ -12,8 +14,11 @@ pub use safety::{CommandReply, EstopView, LeaseEvent};
 pub use world::{DEFAULT_WORLD, WorldChanged, WorldView};
 
 use crate::backup::{self, Archive, BackupError, Item};
+use crate::bridge::{
+    self, BoardView, BridgeDeps, BridgeEvent, BridgeHandle, BridgeOutlet, BridgeSpec, ProbeOutcome,
+};
 use crate::clock::SharedClock;
-use crate::config::{self, ConfigError, PartConfig, PartsConfig, Simulate, Source};
+use crate::config::{self, BRIDGE_CONNECTOR, ConfigError, PartConfig, PartsConfig, Simulate, Source};
 use crate::connectors::LoadProblem;
 use crate::disks::{Disk, DiskDiscovery};
 use crate::estop::Estop;
@@ -44,12 +49,15 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
 
 const SERIAL_MONITOR: &str = "serial-monitor";
+/// Holds a port while Faber checks it for a FaberLink board.
+const BOARD_CHECK: &str = "board-check";
 const NEW_FILE_HEADER: &str = "# The parts on this Faber machine.\n# Add and remove parts in the shell, or edit this file by hand: Faber keeps your comments.\n";
 
 pub struct MachineOptions {
@@ -136,15 +144,36 @@ impl MachineError {
     }
 }
 
-/// A part as the shell shows it.
+/// A part as the shell shows it. A bridge's sub-parts follow it in [`Machine::parts`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct PartView {
     pub name: PartName,
     pub connector: String,
+    /// A sub-part shows its bridge's source: the board's port.
     pub source: Source,
     pub mount: Mount,
     pub status: PartStatus,
     pub signals: Vec<SignalView>,
+    /// For a sub-part: the bridge it is on.
+    pub bridge: Option<PartName>,
+    /// For a bridge: its board and the link to it.
+    pub board: Option<BoardView>,
+}
+
+/// What checking a port for a FaberLink board found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BoardCheck {
+    Found {
+        board: String,
+        firmware: String,
+        firmware_version: String,
+        parts: u8,
+    },
+    /// A FaberLink board that speaks another protocol version; the message says what to update.
+    OtherVersion {
+        message: String,
+    },
+    Nothing,
 }
 
 /// One signal of a part, with its info (limits) as the part's own settings give it. `info` is
@@ -220,6 +249,8 @@ struct State {
     estop: Estop,
     /// The `[world]` loaded into the world engine.
     world: world::Loaded,
+    /// FaberLink boards found by checking a port, until the port goes away.
+    board_checks: BTreeMap<PortId, BoardCheck>,
 }
 
 pub struct Machine {
@@ -256,6 +287,10 @@ pub struct Machine {
     lease_events: broadcast::Sender<LeaseEvent>,
     estop_events: broadcast::Sender<estop::Reading>,
     world_events: broadcast::Sender<WorldChanged>,
+    /// What bridges need the machine to do. Their threads send without waiting; the sweeper
+    /// handles it, so a bridge never waits for the machine's lock.
+    bridge_events: mpsc::Sender<BridgeEvent>,
+    bridge_inbox: Mutex<mpsc::Receiver<BridgeEvent>>,
     stop_sweeping: Arc<AtomicBool>,
     sweeper: Mutex<Option<JoinHandle<()>>>,
 }
@@ -284,6 +319,7 @@ impl Machine {
         opts.world.attach(Arc::clone(&router));
         let (connectors, connector_problems) =
             installed_connectors(opts.connectors.clone(), &opts.data_dir.join("connectors"));
+        let (bridge_events, bridge_inbox) = mpsc::channel();
         let machine = Arc::new(Machine {
             clock: opts.clock,
             router,
@@ -315,6 +351,7 @@ impl Machine {
                 leases: Leases::new(lease_seed()),
                 estop: Estop::default(),
                 world: world::Loaded::default(),
+                board_checks: BTreeMap::new(),
             }),
             ports_changed: watch::channel(0).0,
             packages_changed: watch::channel(0).0,
@@ -325,6 +362,8 @@ impl Machine {
             lease_events: broadcast::channel(256).0,
             estop_events: broadcast::channel(64).0,
             world_events: broadcast::channel(16).0,
+            bridge_events,
+            bridge_inbox: Mutex::new(bridge_inbox),
             stop_sweeping: Arc::new(AtomicBool::new(false)),
             sweeper: Mutex::new(None),
         });
@@ -413,38 +452,97 @@ impl Machine {
         self.connectors.read().expect("connectors lock").iter().find(|d| d.manifest.id == id).cloned()
     }
 
+    /// Every part in parts.toml, each bridge followed by its sub-parts.
     pub fn parts(&self) -> Vec<PartView> {
         let st = self.state.lock().expect("machine lock");
-        st.config
-            .parts
+        let mut out = Vec::new();
+        for (name, cfg) in &st.config.parts {
+            // What it provides with its own settings, resolved when it was (re)started.
+            let own = st.running.get(name).map(|r| r.provides.as_slice()).unwrap_or_default();
+            let signals = self
+                .definition(&cfg.connector)
+                .map(|d| {
+                    d.manifest
+                        .provides
+                        .iter()
+                        .map(|p| SignalView {
+                            address: SignalAddress::new(name.clone(), p.name.clone()),
+                            capability: p.capability,
+                            info: own.iter().find(|o| o.name == p.name).and_then(|o| o.info.clone()),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let handle = bridge_handle(&st, name);
+            out.push(PartView {
+                name: name.clone(),
+                connector: cfg.connector.clone(),
+                source: cfg.source.clone(),
+                mount: cfg.mount,
+                status: self.status.get(name).unwrap_or(PartStatus::Starting),
+                signals,
+                bridge: None,
+                board: handle.map(BridgeHandle::view),
+            });
+            if cfg.connector == BRIDGE_CONNECTOR {
+                out.extend(self.sub_part_views(name, cfg, handle));
+            }
+        }
+        out
+    }
+
+    /// A bridge's sub-parts: those its board has, then those parts.toml names that it doesn't.
+    fn sub_part_views(
+        &self,
+        bridge: &PartName,
+        cfg: &PartConfig,
+        handle: Option<&BridgeHandle>,
+    ) -> Vec<PartView> {
+        let subs = handle.map(BridgeHandle::sub_parts).unwrap_or_default();
+        let ready = handle.is_some_and(|h| h.view().link == bridge::LinkState::Ready);
+        let view = |name: PartName, status: PartStatus, signals: Vec<SignalView>| PartView {
+            mount: cfg.parts.get(name.local()).map(|c| c.mount).unwrap_or_default(),
+            name,
+            connector: cfg.connector.clone(),
+            source: cfg.source.clone(),
+            status,
+            signals,
+            bridge: Some(bridge.clone()),
+            board: None,
+        };
+        let mut out: Vec<PartView> = subs
             .iter()
-            .map(|(name, cfg)| {
-                // What it provides with its own settings, resolved when it was (re)started.
-                let own = st.running.get(name).map(|r| r.provides.as_slice()).unwrap_or_default();
-                let signals = self
-                    .definition(&cfg.connector)
-                    .map(|d| {
-                        d.manifest
-                            .provides
-                            .iter()
-                            .map(|p| SignalView {
-                                address: SignalAddress::new(name.clone(), p.name.clone()),
-                                capability: p.capability,
-                                info: own.iter().find(|o| o.name == p.name).and_then(|o| o.info.clone()),
-                            })
-                            .collect()
+            .map(|s| {
+                let signals = s
+                    .provide
+                    .iter()
+                    .map(|p| SignalView {
+                        address: SignalAddress::new(s.name.clone(), p.name.clone()),
+                        capability: p.capability,
+                        info: p.info.clone(),
                     })
-                    .unwrap_or_default();
-                PartView {
-                    name: name.clone(),
-                    connector: cfg.connector.clone(),
-                    source: cfg.source.clone(),
-                    mount: cfg.mount,
-                    status: self.status.get(name).unwrap_or(PartStatus::Starting),
-                    signals,
-                }
+                    .collect();
+                view(s.name.clone(), self.status.get(&s.name).unwrap_or(PartStatus::Starting), signals)
             })
-            .collect()
+            .collect();
+        for local in cfg.parts.keys() {
+            let Ok(name) = PartName::sub(bridge, local) else { continue };
+            if subs.iter().any(|s| s.name == name) {
+                continue;
+            }
+            let status = if ready {
+                PartStatus::Degraded(Problem::new(
+                    format!("Not on the board: \"{bridge}\" has no part called \"{local}\"."),
+                    format!(
+                        "Check the part's name in the board's sketch, or remove [parts.{bridge}.parts.{local}] from parts.toml."
+                    ),
+                ))
+            } else {
+                PartStatus::Starting
+            };
+            out.push(view(name, status, Vec::new()));
+        }
+        out
     }
 
     pub fn ports(&self) -> Vec<PortView> {
@@ -457,10 +555,14 @@ impl Machine {
                     PortId::Replay(name) => self.replays.get(name).and_then(|r| r.recorded_with),
                     _ => None,
                 };
+                let mut suggestions = suggestions(entry, recorded_with.as_deref(), &manifests);
+                if let Some(found) = st.board_checks.get(&entry.id).and_then(board_suggestion) {
+                    suggestions.insert(0, found);
+                }
                 PortView {
                     entry: entry.clone(),
                     claimed_by: st.claims.holder(&entry.id).map(|c| c.to_string()),
-                    suggestions: suggestions(entry, recorded_with.as_deref(), &manifests),
+                    suggestions,
                 }
             })
             .collect()
@@ -481,6 +583,7 @@ impl Machine {
         failed.sort(); // the OS's order isn't stable; only a real change may send `ports`
         let problems: Vec<PortProblem> = failed.iter().filter_map(port_problem).collect();
         let mut st = self.state.lock().expect("machine lock");
+        st.board_checks.retain(|id, _| found.iter().any(|p| &p.id == id));
         if st.ports != found || st.port_problems != problems {
             st.ports = found;
             st.port_problems = problems;
@@ -560,6 +663,15 @@ impl Machine {
                     "Leave out the port to simulate the part, or leave out simulate to use the real part.",
                 ));
             }
+            (None, Some(_)) if new.connector == BRIDGE_CONNECTOR => {
+                let p = bridge_not_simulated();
+                return Err(MachineError::new(
+                    ErrorKind::BadRequest,
+                    "bridge-not-simulated",
+                    p.message,
+                    p.hint,
+                ));
+            }
             (None, Some(mode)) => {
                 if mode == Simulate::World
                     && provides_base(&definition.manifest.provides)
@@ -615,15 +727,51 @@ impl Machine {
                 "Refresh the parts list; it may have been removed already.",
             )
         };
-        let name = PartName::parse(name).map_err(|_| unknown())?;
+        let name = PartName::parse_any(name).map_err(|_| unknown())?;
         let mut st = self.state.lock().expect("machine lock");
         refuse_if_config_broken(&st)?;
+        if let Some(bridge) = name.bridge() {
+            return self.remove_sub_part(&mut st, &bridge, &name).map_err(|e| e.unwrap_or_else(unknown));
+        }
         if !st.config.parts.contains_key(&name) {
             return Err(unknown());
         }
         let text = config::remove_part(&st.text, &name).map_err(config_write_error)?;
         self.save(&mut st, text)?;
         self.reconcile(&mut st);
+        Ok(())
+    }
+
+    /// Removes what parts.toml says about a sub-part. The board decides which parts it has, so a
+    /// sub-part it still has can't be removed; one it doesn't have (a stale entry) can.
+    /// `Err(None)`: there is no such part.
+    fn remove_sub_part(
+        &self,
+        st: &mut State,
+        bridge: &PartName,
+        name: &PartName,
+    ) -> Result<(), Option<MachineError>> {
+        let configured = st.config.parts.get(bridge).is_some_and(|c| c.parts.contains_key(name.local()));
+        let on_board = bridge_handle(st, bridge).and_then(|h| h.sub_part(name)).is_some();
+        if on_board {
+            return Err(Some(MachineError::new(
+                ErrorKind::Conflict,
+                "part-on-board",
+                format!(
+                    "\"{name}\" is a part on the board \"{bridge}\", so Faber can't remove it on its own."
+                ),
+                format!(
+                    "Take it out of the board's sketch and upload it again, or remove \"{bridge}\" to remove the whole board."
+                ),
+            )));
+        }
+        if !configured {
+            return Err(None);
+        }
+        let text = config::remove_sub_part(&st.text, bridge, name.local())
+            .map_err(|e| Some(config_write_error(e)))?;
+        self.save(st, text).map_err(Some)?;
+        self.reconcile(st);
         Ok(())
     }
 
@@ -652,7 +800,7 @@ impl Machine {
         let gone: Vec<PartName> = st
             .running
             .iter()
-            .filter(|(name, r)| st.config.parts.get(*name) != Some(&r.config))
+            .filter(|(name, r)| st.config.parts.get(*name).is_none_or(|c| !c.runs_like(&r.config)))
             .map(|(name, _)| name.clone())
             .collect();
         for name in gone {
@@ -661,8 +809,14 @@ impl Machine {
             } else {
                 EndReason::PartRemoved
             };
-            self.revoke_part(st, &name, reason);
+            self.end_part(st, &name, reason);
             self.stop_part(st, &name);
+        }
+        // Only the sub-parts' mounts changed: the bridge keeps running.
+        for (name, r) in st.running.iter_mut() {
+            if let Some(cfg) = st.config.parts.get(name) {
+                r.config = cfg.clone();
+            }
         }
         let parts: Vec<(PartName, PartConfig)> =
             st.config.parts.iter().map(|(n, c)| (n.clone(), c.clone())).collect();
@@ -719,7 +873,7 @@ impl Machine {
         };
         let runner = match cfg.source {
             Source::Simulated(mode) => self.start_simulated(st, name, cfg, mode, &provides),
-            Source::Port(_) => self.start_real(st, name, cfg, &definition).map(Runner::Real),
+            Source::Port(_) => self.start_real(st, name, cfg, &definition),
         };
         (runner, provides)
     }
@@ -732,6 +886,10 @@ impl Machine {
         mode: Simulate,
         provides: &[Provide],
     ) -> Option<Runner> {
+        if cfg.connector == BRIDGE_CONNECTOR {
+            self.status.set(name, PartStatus::Invalid(bridge_not_simulated()));
+            return None;
+        }
         if mode == Simulate::World
             && provides_base(provides)
             && let Some(other) = self.world_base(st, Some(name))
@@ -774,7 +932,7 @@ impl Machine {
         name: &PartName,
         cfg: &PartConfig,
         definition: &Definition,
-    ) -> Option<runtime::PartHandle> {
+    ) -> Option<Runner> {
         let port_name = match &cfg.source {
             Source::Port(_) if definition.manifest.port == PortRequirement::Bridge => {
                 self.status.set(name, PartStatus::Invalid(runtime::needs_bridge(&definition.manifest)));
@@ -811,8 +969,27 @@ impl Machine {
             return None;
         }
         self.ports_changed.send_modify(|n| *n += 1);
+        if definition.manifest.id == BRIDGE_CONNECTOR {
+            let deps = BridgeDeps {
+                clock: self.clock.clone(),
+                opener: Arc::clone(&self.opener),
+                router: Arc::clone(&self.router),
+                outlet: Arc::new(MachineBridgeOutlet {
+                    status: Arc::clone(&self.status),
+                    events: Mutex::new(self.bridge_events.clone()),
+                }),
+                timing: bridge::BridgeTiming {
+                    backoff_start: self.timing.backoff_start,
+                    retry_max: self.timing.port_retry_max,
+                    ..bridge::BridgeTiming::default()
+                },
+            };
+            let estop = st.estop.engaged().map(|r| (r.source, r.reason.clone()));
+            let spec = BridgeSpec { name: name.clone(), port };
+            return Some(Runner::Bridge(bridge::start(spec, deps, estop)));
+        }
         let spec = RunSpec::new(name.clone(), definition, cfg.settings.clone(), port);
-        Some(runtime::start(
+        Some(Runner::Real(runtime::start(
             spec,
             RunDeps {
                 clock: self.clock.clone(),
@@ -821,7 +998,77 @@ impl Machine {
                 status: Arc::clone(&self.status),
                 timing: self.timing,
             },
-        ))
+        )))
+    }
+
+    /// Asks a port whether a FaberLink board is on it (detect, then suggest). Only when someone
+    /// asks, and only on a port nobody uses: opening a port resets most Arduino-based devices,
+    /// so Faber never does it on its own (docs/faberlink.md §9). The port is held while it is
+    /// checked, a few seconds at most, and a board found is suggested for it from then on.
+    pub fn check_for_board(&self, port: &str) -> Result<BoardCheck, MachineError> {
+        let me = Claimant::Tool(BOARD_CHECK);
+        let entry = {
+            let mut st = self.state.lock().expect("machine lock");
+            let entry = PortId::parse(port)
+                .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
+                .ok_or_else(|| {
+                    MachineError::new(
+                        ErrorKind::BadRequest,
+                        "unknown-port",
+                        format!("There is no port called \"{port}\" right now."),
+                        "Check that it is plugged in, then pick it from the list of ports.",
+                    )
+                })?;
+            if entry.kind == crate::ports::PortKind::Replay {
+                return Err(MachineError::new(
+                    ErrorKind::BadRequest,
+                    "not-a-serial-port",
+                    format!("{} is a recording, so no board can answer on it.", entry.label),
+                    "Check a port with a board plugged into it.",
+                ));
+            }
+            if let Err(crate::ports::ClaimError::Taken(holder)) = st.claims.claim(&entry.id, me.clone()) {
+                return Err(port_claimed(&entry, &holder.to_string()));
+            }
+            self.ports_changed.send_modify(|n| *n += 1);
+            entry
+        };
+        let outcome = match self.opener.open(&entry, crate::connectors::bridge::BAUD) {
+            Ok((reader, mut writer)) => {
+                bridge::probe(reader, &mut *writer, &self.clock, &bridge::ProbeTiming::default())
+                    .map_err(|e| e.to_string())
+            }
+            Err(e) => Err(e.to_string()),
+        };
+        let mut st = self.state.lock().expect("machine lock");
+        st.claims.release(&entry.id, &me);
+        self.ports_changed.send_modify(|n| *n += 1);
+        let check = match outcome {
+            Ok(ProbeOutcome::Found(b)) => BoardCheck::Found {
+                board: b.board,
+                firmware: b.firmware,
+                firmware_version: b.firmware_version,
+                parts: b.part_count,
+            },
+            Ok(ProbeOutcome::OtherVersion { message }) => BoardCheck::OtherVersion { message },
+            Ok(ProbeOutcome::Nothing) => BoardCheck::Nothing,
+            Err(e) => {
+                self.reconcile(&mut st);
+                return Err(MachineError::new(
+                    ErrorKind::Conflict,
+                    "port-unavailable",
+                    format!("Could not check {}: {e}", entry.label),
+                    "Check that no other program (for example the Arduino IDE's serial monitor) uses it.",
+                ));
+            }
+        };
+        match &check {
+            BoardCheck::Nothing => st.board_checks.remove(&entry.id),
+            found => st.board_checks.insert(entry.id.clone(), found.clone()),
+        };
+        tracing::info!(target: "core::bridge", "checked {} for a FaberLink board: {check:?}", entry.label);
+        self.reconcile(&mut st); // a part waiting for this port can start now
+        Ok(check)
     }
 
     fn stop_part(&self, st: &mut State, name: &PartName) {
@@ -1433,6 +1680,59 @@ impl Outlet for PartOutlet {
     }
 }
 
+/// Where a bridge's health and events go: the status board, and the sweeper's inbox.
+struct MachineBridgeOutlet {
+    status: Arc<StatusBoard>,
+    events: Mutex<mpsc::Sender<BridgeEvent>>,
+}
+
+impl BridgeOutlet for MachineBridgeOutlet {
+    fn set_health(&self, part: &PartName, health: Health) {
+        let status = match health {
+            Health::Starting => PartStatus::Starting,
+            Health::Running => PartStatus::Running,
+            Health::Degraded(p) => PartStatus::Degraded(p),
+            Health::Failed(p) => PartStatus::Failed(p),
+        };
+        self.status.set(part, status);
+    }
+
+    fn forget(&self, part: &PartName) {
+        self.status.remove(part);
+    }
+
+    fn event(&self, event: BridgeEvent) {
+        let _ = self.events.lock().expect("bridge events lock").send(event);
+    }
+}
+
+/// A running bridge's handle.
+fn bridge_handle<'a>(st: &'a State, bridge: &PartName) -> Option<&'a BridgeHandle> {
+    match st.running.get(bridge)?.runner.as_ref()? {
+        Runner::Bridge(h) => Some(h),
+        _ => None,
+    }
+}
+
+fn bridge_not_simulated() -> Problem {
+    Problem::new(
+        "A FaberLink board can't be simulated: it is real hardware that hosts other parts.",
+        "Simulate its motors and sensors on their own with the generic connectors (Generic motor, Generic distance sensor), or add the board on its port.",
+    )
+}
+
+/// "This port has a FaberLink board", once a check found one.
+fn board_suggestion(check: &BoardCheck) -> Option<Suggestion> {
+    let reason = match check {
+        BoardCheck::Found { board, firmware, firmware_version, .. } => {
+            format!("A FaberLink board: {board} ({firmware} {firmware_version}).")
+        }
+        BoardCheck::OtherVersion { message } => format!("A FaberLink board, but: {message}"),
+        BoardCheck::Nothing => return None,
+    };
+    Some(Suggestion { connector: BRIDGE_CONNECTOR.into(), reason })
+}
+
 fn provides_base(provides: &[Provide]) -> bool {
     provides.iter().any(|p| p.capability == Capability::PlanarBase)
 }
@@ -1907,7 +2207,7 @@ mod tests {
         let m = machine(dir.path(), no_ports());
         let e = m.add_part(NewPart { connector: "generic-planar-base".into(), ..demo("base") }).unwrap_err();
         assert_eq!((e.kind, e.code), (ErrorKind::BadRequest, "needs-bridge"));
-        assert!(e.message.contains("Phase 4") && e.hint.contains("Simulated"), "{e:?}");
+        assert!(e.message.contains("FaberLink board") && e.hint.contains("Simulated"), "{e:?}");
         m.shutdown();
     }
 
@@ -1925,7 +2225,7 @@ mod tests {
         else {
             unreachable!()
         };
-        assert!(p.message.contains("needs a bridge"), "{p:?}");
+        assert!(p.message.contains("through a FaberLink board"), "{p:?}");
         assert!(m.ports().iter().all(|p| p.claimed_by.is_none()));
         m.shutdown();
     }
@@ -2472,7 +2772,7 @@ connector =
         assert_eq!(m.request_lease("base", "test", false).unwrap_err().code, "estop-engaged");
         m.engage_estop(estop::Source::App, "again");
         assert_eq!(m.estop().engaged.unwrap().reason, "Stop button", "the first reason stays");
-        assert!(m.release_estop(estop::Source::Shell).engaged.is_none());
+        assert!(m.release_estop(estop::Source::Shell).unwrap().engaged.is_none());
         assert!(m.request_lease("base", "test", false).is_ok());
         let seen: Vec<bool> = std::iter::from_fn(|| changes.try_recv().ok()).map(|r| r.engaged).collect();
         assert_eq!(seen, [true, false], "every change is announced once");

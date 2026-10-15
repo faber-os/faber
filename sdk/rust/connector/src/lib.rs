@@ -50,8 +50,9 @@ pub enum PortRequirement {
     /// Any serial port (UART or USB serial) at this baud rate.
     Serial { baud: u32 },
     /// Hardware reached through a FaberLink bridge (a microcontroller on a serial port), such as
-    /// motors and drive bases. Bridges arrive in Phase 4; until then such a part can only be
-    /// simulated (`simulate = "manual"` or `"world"` in parts.toml).
+    /// motors and drive bases. The real ones are the board's own parts, which appear by themselves
+    /// when the board is added (`faber-bridge`); a part on such a connector can only be simulated
+    /// (`simulate = "manual"` or `"world"` in parts.toml).
     Bridge,
 }
 
