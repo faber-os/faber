@@ -1,8 +1,8 @@
 # FaberLink
 
-Status: **protocol v1 and the Arduino library built** (Phase 4a, 2026-10-15); the `faber-bridge`
-connector that brings a board's parts into the core is Phase 4b. Builds on D11, D12 and D22
-(designed fresh, not from SENNEP's early protocol).
+Status: **protocol v1 and the Arduino library built** (Phase 4a, 2026-10-15), and the
+`faber-bridge` connector that brings a board's parts into the core (Phase 4b, §9). Builds on D11,
+D12 and D22 (designed fresh, not from SENNEP's early protocol).
 
 FaberLink is the serial protocol between the core and a microcontroller (a **bridge**). The
 microcontroller declares the parts it hosts; the `faber-bridge` connector turns them into normal
@@ -14,6 +14,7 @@ stops its own motors if the Pi goes quiet.
 | Core side (Rust) | `sdk/rust/faberlink` | framing, every message, the capability layouts, and the session state machine |
 | Board side (C++) | `firmware/faberlink` | the Arduino library: a portable protocol core plus thin Arduino glue |
 | Interop tests | `tools/faberlink-interop` | the Rust session against the C++ core, compiled on the PC |
+| The connector | `core/src/bridge` | `faber-bridge`: runs a board on its port, its parts as sub-parts (§9) |
 
 This page is exact enough to write a third implementation: §2–§4 are the wire format, §5 the
 rules a board must follow.
@@ -246,8 +247,9 @@ stack. On a Mega (250-byte payloads): 10 422 B flash and 1 011 B of globals.
 
 The C++ core is compiled for the PC with the `cc` crate (MSVC on Windows, g++/clang elsewhere,
 warnings as errors) together with a small C ABI harness: a fake board with a simulated motor
-(part 0) and distance sensor (part 1), fed bytes and a fake `millis()`. The tests drive it from the
-Rust session over an in-memory pipe and prove, on every CI run:
+(part 0) and distance sensor (part 1), fed bytes and a fake `millis()`; `FakeBoard::mega` hosts two
+motors and two distance sensors, and the core's own tests put it behind a fake serial port (§9).
+The tests drive it from the Rust session over an in-memory pipe and prove, on every CI run:
 
 - the handshake and `DESCRIBE` give the right parts, infos and heartbeat timeout (and the timeout is
   clamped to 100–1000 ms);
@@ -263,21 +265,131 @@ Rust session over an in-memory pipe and prove, on every CI run:
   board;
 - a version mismatch gives a clear error and the board stays unconnected.
 
-## 9. In the core (Phase 4b)
+## 9. In the core: the `faber-bridge` connector
 
-- `faber-bridge` connector: built-in Rust first (like the LD19), wasm later. It owns the port and
-  runs a `faberlink::Session`.
-- A board's parts appear as **sub-parts** of the bridge part: `mega` → `mega/left`, `mega/front`,
-  each with its own viewer and lease. They are **nested** in parts.toml under the bridge so their
-  names and mounts can be set: `[parts.mega.parts.left] mount = …` (decided: the bridge owns them).
-- The Arduino flasher tool (avrdude, bundled) installs the right firmware, so most people never
-  open the Arduino IDE.
+Built in Phase 4b, in Rust inside the core (`core/src/bridge/`; wasm later). Add a board as one part
+on its serial port, `connector = "faber-bridge"`; its motors and sensors appear by themselves.
+
+### Sub-parts and their names
+
+Each part the board describes becomes a **sub-part** named `<bridge>.<name>`: the board `mega`
+with the sketch's `FaberMotor left(…)` gives `mega.left`. Its one signal is named after its
+capability: `mega.left/motor`, `mega.front/distance`. The bridge's own signal is `mega/estop`, the
+board's stop button (`estop@1`).
+
+**Why `.` and not `/`** (decided in Phase 4b): a signal address is `part/name`, and a part's named
+instances already use the `/` (`mega/left` could be the `left` signal of the part `mega`). With
+`mega/left/motor`, every reader of an address would have to know which parts are bridges to split
+it, and `mega/left` would mean two things. A name the user picks may not contain a `.`, and a
+signal name never does, so `mega.left/motor` splits at its one `/` and never collides with an
+address that exists today. It also fits in URLs as it is (`/api/v0/parts/mega.left/lease`).
+
+A board's name for a part that isn't a valid part name is lowercased and every run of other
+characters becomes `_` (`Left Motor` → `left_motor`); one with nothing usable left, or a name two
+parts share, becomes `part<id>`. A drive base's built-from list names the board's parts; the core
+turns it into sub-part names, so a lease on `mega.base` locks `mega.left` and `mega.right`.
+
+### parts.toml
+
+The board decides which parts exist; parts.toml only says where they sit, nested under the bridge:
+
+```toml
+[parts.mega]
+connector = "faber-bridge"
+port = "usb:2341:0042"
+
+[parts.mega.parts.left]       # the board's part "left"
+mount = { x = 0.2, y = 0.3 }
+```
+
+- `mount` is the only key (anything else is an error with its line), and only a `faber-bridge`
+  part may have `parts`.
+- Changing a sub-part's mount doesn't restart the bridge, so leases on its parts carry on.
+- A name listed here that the board doesn't have shows as **Not on the board** (degraded), with a
+  hint to check the sketch or remove the lines. Such a stale entry can be removed in Parts; a part
+  the board has can't (the board's sketch decides).
+- Editing keeps comments: removing the bridge removes its nested tables and the comments directly
+  above them, and nothing else.
+
+### The link
+
+The bridge owns the port (claimed like any part's) and runs a `faberlink::Session` on its own
+thread: `HELLO` until the board answers, `DESCRIBE` until every `PART` arrived, a heartbeat every
+50 ms carrying Faber's e-stop, and the board's `STATUS` every 100 ms. It never waits for the
+machine's lock; what the machine must act on goes through the lease sweeper's inbox.
+
+| The bridge's state | When | What it says to do |
+|---|---|---|
+| starting | port open, saying hello or asking for parts | |
+| running | parts known, STATUS arriving | |
+| failed: *No FaberLink answer from COM5* | no `HELLO_ACK` for 2.5 s | Is the board running a FaberLink sketch, and is the baud right (115200, as in `link.begin(115200, …)`)? Faber keeps asking. |
+| failed: *The board "mega" (sennep 2.0.0) speaks FaberLink versions 2–3, but this Faber speaks version 1. Update Faber…* | `HELLO_ACK` version 0 | Faber asks again every few seconds, so a reflashed board connects by itself. |
+| failed: *The board "mega" stopped answering.* | no frame for 500 ms | Check the cable and power; `link.poll()` must run often. |
+| failed: *COM5 stopped working: …* / *Could not open COM5* | the port closed (unplugged) or can't be opened | Faber reconnects as soon as it is back. |
+| failed: *The board reports a fault: …* | `STATUS` health 2 | Check wiring and power, reset the board. |
+| degraded: *The board stopped sending its status.* | no `STATUS` for 500 ms while other frames arrive | Old firmware, or a busy `loop()`. |
+| degraded: *The stop button on the board is pressed.* | `STATUS` bit 0 | Reset it on the board, then release the e-stop in Faber. |
+| degraded: *The board stopped its motors: Faber's heartbeat didn't reach it in time.* | `STATUS` failsafe | Check the cable; motors start again on the next command. |
+| degraded: *The board has thrown away n damaged messages.* | `rx_bad` grew in the last 5 s | Check the cable. |
+
+While the board is out of reach every sub-part is **failed** ("Stopped: …"), and the lease
+sweeper ends their leases (`part-failed`). The port is reopened with backoff (1 s doubling to 5 s),
+and the board is described again on every connect: new firmware with other parts is picked up,
+signals of parts that are gone are removed, and leases on parts that went away or changed end.
+
+### Leases, commands and safety
+
+- A sub-part that moves takes a lease like any part (`POST /api/v0/parts/mega.left/lease`, 250 ms).
+  The core checks the lease and clamps the command to the board's own info **before** anything is
+  sent; `COMMAND` frames are only ever written for a command that passed.
+- Every lease end (release, expiry, takeover, e-stop, the part failing, removal) sends `SAFE` for
+  that part, and for the parts a base is built from.
+- If `SAFE` is lost on the wire, the board's own lease (250 ms for motors) stops the motor anyway;
+  if the core freezes, the board's heartbeat timeout does.
+- Faber's e-stop goes to every board as an `ESTOP` frame plus `SAFE` for everything, and as the
+  level in every heartbeat (a board that connects while it is engaged hears it in its first
+  heartbeat). Releasing restarts nothing.
+- The board's **own stop button** engages Faber's e-stop with source `part`. It stays latched:
+  releasing in Faber is refused (`409 estop-latched`) until the button is reset on the board, and
+  the release that follows clears the board's latch (§5, rule 3). A board that goes away no longer
+  blocks the release; one that comes back still latched engages the e-stop again.
+
+### Detect, then suggest
+
+A port that answers `HELLO` is suggested as "A FaberLink board: sennep-mega (sennep 0.1.0)" in
+Add part. The check (`POST /api/v0/ports/check-board`) runs **only when someone asks** ("Check for
+a FaberLink board" on a port in Add part), never by itself, and only on a port nobody uses. That is
+on purpose: opening a serial port toggles DTR, which restarts most Arduino-based devices (a 3D
+printer mid-print is one), and bytes a device doesn't expect may confuse it. The check sends only
+`HELLO` (no commands, no heartbeat), listens for up to 2.5 s because an Arduino takes about a
+second to start after the reset, then closes the port.
+
+### Tests
+
+- `core/src/bridge/tests.rs`: the bridge against the C++ board (`FakeBoard::mega`) and a scripted
+  Rust board behind a fake serial port: sub-parts and readings, commands and `SAFE`, the e-stop both
+  ways, no answer, another version, unplug and reconnect, new firmware, a board fault, status
+  silence, a base's built-from, and the probe.
+- `core/src/machine/bridge_tests.rs`: leases, commands, Not on the board, removing, mounts.
+- `core/tests/bridge.rs`: **the roadmap's proof**, through the HTTP API with the C++ board.
+  The Mega shows two motors and two distance sensors; a program with a lease drives a motor;
+  killing it stops the motor within the lease time through `SAFE` (with the board's own lease set
+  to 1 s, so only `SAFE` explains it), and with every `SAFE` lost on the cable through the board's
+  own lease; the e-stop stops everything; the stop button latches until reset on the board;
+  unplugging fails the bridge, stops its parts and ends every lease.
+
+### Not built yet
+
+- The Arduino flasher tool (avrdude, bundled), so most people never open the Arduino IDE.
+- A bridge as a wasm connector.
+- Other speeds than 115 200 baud.
+- Using the board's `t_ms` to map its clock (readings are stamped on arrival, §10 decision 5).
 
 ## 10. Decisions and open questions
 
 Decided while building Phase 4a (Mikkel's recommendations from the design, taken as given):
 
-1. **Sub-parts** are nested in parts.toml under the bridge.
+1. **Sub-parts** are nested in parts.toml under the bridge (built that way in 4b, §9).
 2. **Heartbeat timeout** 250 ms by default, configurable per board within 100–1000 ms (at SENNEP's
    0.6 m/s that is about 15 cm plus the ramp).
 3. **The library stays in the Faber repo** until Mikkel agrees to a separate
@@ -285,6 +397,13 @@ Decided while building Phase 4a (Mikkel's recommendations from the design, taken
 4. Small boards take 64-byte payloads; the board says so in `HELLO_ACK` and the core respects it.
 5. Readings are stamped with the core's clock on arrival; the board's `t_ms` is kept on the wire for
    a later clock mapping.
+
+Decided while building Phase 4b:
+
+6. **Sub-part names use `.`**: `mega.left`, with the signal `mega.left/motor` (§9 says why not `/`).
+7. **Checking a port for a board is opt-in**, per port, never automatic (§9).
+8. **A board's stop button latches in Faber too**: release is refused until it is reset on the
+   board.
 
 Still open:
 

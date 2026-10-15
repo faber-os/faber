@@ -9,9 +9,10 @@
 //   H-bridge DIR          -> pin 8
 //   Distance sensor out   -> A0  (and its 5 V and GND)
 //
-// What you should see: Faber finds the board and suggests adding it. The motor appears as
-// "<board>/left" and the sensor as "<board>/front", each with its own viewer, and the sensor's
-// reading updates 20 times a second.
+// What you should see: in Add part, "Check for a FaberLink board" on the board's port finds
+// "motor-and-distance". Add it (say as "arduino"): the motor appears as the part "arduino.left"
+// and the sensor as "arduino.front", each with its own viewer, and the sensor's reading updates
+// 20 times a second. docs/connect-an-arduino.md walks through it.
 //
 // If it doesn't work: close the Arduino IDE's Serial Monitor (only one program can use the port
 // at a time), and don't print to Serial in the sketch: the port belongs to FaberLink.

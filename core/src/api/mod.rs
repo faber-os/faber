@@ -18,7 +18,7 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use std::sync::Arc;
 
@@ -36,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/connectors/problems", get(connector_problems))
         .route("/api/v0/ports", get(ports))
         .route("/api/v0/ports/problems", get(port_problems))
+        .route("/api/v0/ports/check-board", post(check_board))
         .route("/api/v0/parts", get(parts).post(add_part))
         .route("/api/v0/parts/{name}", delete(remove_part))
         .route("/api/v0/signals/{part}/{name}", get(signal_value))
@@ -164,6 +165,15 @@ async fn ports(State(s): State<AppState>) -> Json<Vec<dto::PortInfo>> {
 
 async fn port_problems(State(s): State<AppState>) -> Json<Vec<dto::PortProblem>> {
     Json(s.machine.port_problems().iter().map(convert::port_problem).collect())
+}
+
+/// Asks a free port whether a FaberLink board is on it. Takes up to a few seconds.
+async fn check_board(
+    State(s): State<AppState>,
+    ApiJson(body): ApiJson<dto::BoardCheckRequest>,
+) -> Result<Json<dto::BoardCheck>, Failure> {
+    let check = blocking(move || s.machine.check_for_board(&body.port)).await??;
+    Ok(Json(convert::board_check(&check)))
 }
 
 /// The newest reading of one signal. The WebSocket streams them; this is for simple programs.

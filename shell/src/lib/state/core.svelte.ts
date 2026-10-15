@@ -9,6 +9,7 @@ import {
   type MachineTranslation,
 } from '../i18n/languages';
 import type {
+  BoardCheck,
   ConnectionStatus,
   ConnectorInfo,
   ConnectorProblem,
@@ -343,6 +344,11 @@ export class CoreState {
 
   removePart(name: string): Promise<Result<void>> {
     return this.call(() => this.http.removePart(name));
+  }
+
+  /** Asks a free port whether a FaberLink board is on it; a board found is suggested for it. */
+  checkBoard(port: string): Promise<Result<BoardCheck>> {
+    return this.call(() => this.http.checkBoard(port));
   }
 
   /** Replace the settings. `developer` must be unchanged; use `setDeveloper` for that. */

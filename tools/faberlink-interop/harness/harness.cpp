@@ -28,7 +28,10 @@ class BufferOutput : public faberlink::Output {
 // A motor whose "hardware" is a variable, reporting its open-loop velocity as a reading.
 class SimMotor : public faberlink::Motor {
  public:
-  SimMotor() : faberlink::Motor("left", 10.0f), driven(0), driveCalls(0) { setReadingPeriod(50); }
+  SimMotor(const char* name, uint16_t leaseMs)
+      : faberlink::Motor(name, 10.0f, faberlink::MOTOR_DC, leaseMs), driven(0), driveCalls(0) {
+    setReadingPeriod(50);
+  }
   uint8_t writeReading(uint8_t* out, uint32_t) override {
     out[0] = 1;  // velocity present
     faberlink::putF32(out + 1, driven * maxVelocity_);
@@ -48,32 +51,58 @@ class SimMotor : public faberlink::Motor {
 
 class SimDistance : public faberlink::Distance {
  public:
-  SimDistance() : faberlink::Distance("front", faberlink::DISTANCE_INFRARED, 0.1f, 0.8f, 0.1f, 50), meters(0.5f) {}
+  explicit SimDistance(const char* name)
+      : faberlink::Distance(name, faberlink::DISTANCE_INFRARED, 0.1f, 0.8f, 0.1f, 50), meters(0.5f) {}
   float meters;
 
  protected:
   float measure() override { return meters; }
 };
 
+// The small board hosts `left` (part 0) and `front` (part 1). The Mega also hosts `right` (part 1)
+// and `rear` (part 3): motors left, right, then distances front, rear.
 struct Harness {
-  explicit Harness(uint16_t heartbeatTimeoutMs) : board(out) {
-    board.setIdentity("sim-board", "faberlink-harness", "0.1.0");
+  Harness(uint16_t heartbeatTimeoutMs, bool mega, uint16_t motorLeaseMs)
+      : board(out),
+        motor("left", motorLeaseMs),
+        motor2("right", motorLeaseMs),
+        distance("front"),
+        distance2("rear") {
+    board.setIdentity(mega ? "sim-mega" : "sim-board", "faberlink-harness", "0.1.0");
     board.setHeartbeatTimeout(heartbeatTimeoutMs);
     board.add(motor);
+    if (mega) board.add(motor2);
     board.add(distance);
+    if (mega) board.add(distance2);
     board.begin();
   }
+  SimMotor& motorAt(int i) { return i == 1 ? motor2 : motor; }
+  SimDistance& distanceAt(int i) { return i == 1 ? distance2 : distance; }
   BufferOutput out;
   faberlink::Board board;
   SimMotor motor;
+  SimMotor motor2;
   SimDistance distance;
+  SimDistance distance2;
 };
 
 }  // namespace
 
 extern "C" {
 
-void* flh_new(uint16_t heartbeat_timeout_ms) { return new Harness(heartbeat_timeout_ms); }
+void* flh_new(uint16_t heartbeat_timeout_ms) {
+  return new Harness(heartbeat_timeout_ms, false, faberlink::DEFAULT_LEASE_MS);
+}
+
+// The Mega; its motors stop by themselves after motor_lease_ms without a command.
+void* flh_new_mega(uint16_t heartbeat_timeout_ms, uint16_t motor_lease_ms) {
+  return new Harness(heartbeat_timeout_ms, true, motor_lease_ms);
+}
+
+// Motor `i` (0 left, 1 right) and distance sensor `i` (0 front, 1 rear).
+float flh_motor_output_at(void* h, int i) { return static_cast<Harness*>(h)->motorAt(i).driven; }
+
+void flh_set_distance_at(void* h, int i, float meters) { static_cast<Harness*>(h)->distanceAt(i).meters = meters; }
 
 void flh_free(void* h) { delete static_cast<Harness*>(h); }
 

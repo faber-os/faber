@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import {
+  BRIDGE,
   GENERIC_BASE,
   GENERIC_DISTANCE,
   LD19,
+  MEGA_PORT,
   SAMPLE_PORT,
   USB_PORT,
+  boardMotor,
+  bridgePart,
   fakeShell,
   part,
   simBase,
@@ -114,6 +118,186 @@ describe('Parts window', () => {
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText(error.message)).toBeInTheDocument();
     expect(within(alert).getByText(error.hint)).toBeInTheDocument();
+  });
+});
+
+describe('A FaberLink board in Parts', () => {
+  it('shows the board, its link and firmware, with its parts indented beneath it', async () => {
+    const shell = setup();
+    shell.pushPorts([{ ...MEGA_PORT, claimedBy: 'mega' }]);
+    shell.pushParts([
+      bridgePart('mega'),
+      boardMotor('mega', 'left'),
+      part('mega.front', {
+        connector: 'faber-bridge',
+        port: MEGA_PORT.id,
+        bridge: 'mega',
+        signals: [{ address: 'mega.front/distance', capability: 'distance@1' }],
+      }),
+    ]);
+    const mega = (await screen.findByText('Connected')).closest('li')!;
+    expect(mega).toHaveAttribute('data-part', 'mega');
+    expect(
+      within(mega).getByText('sim-mega, firmware faberlink-harness 0.1.0'),
+    ).toBeInTheDocument();
+    expect(within(mega).getByText('FaberLink 1')).toBeInTheDocument();
+
+    const left = document.querySelector<HTMLElement>('li[data-part="mega.left"]')!;
+    expect(left).toHaveClass('sub');
+    expect(left).toHaveAttribute('data-bridge', 'mega');
+    expect(within(left).getByText('On the board mega')).toBeInTheDocument();
+    expect(within(left).getByText('motor@1')).toBeInTheDocument();
+    // Drive works on a board's motor as on any part; only the board removes its parts.
+    expect(within(left).getByRole('button', { name: 'Drive mega.left' })).toBeInTheDocument();
+    expect(
+      within(left).queryByRole('button', { name: 'Remove mega.left' }),
+    ).not.toBeInTheDocument();
+    expect(within(mega).getByRole('button', { name: 'Remove mega' })).toBeInTheDocument();
+
+    const front = document.querySelector<HTMLElement>('li[data-part="mega.front"]')!;
+    await userEvent.click(within(front).getByRole('button', { name: 'mega.front' }));
+    const viewer = shell.desktop.state.windows.find((w) => w.kind === 'distance');
+    expect(viewer?.params).toEqual({ address: 'mega.front/distance', part: 'mega.front' });
+  });
+
+  it('shows a latched stop button on the board, and what to do', async () => {
+    const shell = setup();
+    shell.pushParts([bridgePart('mega', { hardwareEstop: true }), boardMotor('mega', 'left')]);
+    const mega = (await screen.findByText('Stop button pressed')).closest('li')!;
+    expect(
+      within(mega).getByText('Reset it on the board, then release the e-stop.'),
+    ).toBeInTheDocument();
+  });
+
+  it('says when the board is out of reach', async () => {
+    const shell = setup();
+    shell.pushParts([
+      bridgePart('mega', {
+        link: 'lost',
+      }),
+      boardMotor('mega', 'left', {
+        state: {
+          kind: 'failed',
+          message: 'Stopped: "mega" can\'t reach its board right now.',
+          hint: 'It comes back by itself as soon as the board answers again.',
+        },
+      }),
+    ]);
+    expect(await screen.findByText('Board not reachable')).toBeInTheDocument();
+    expect(
+      screen.getByText('Stopped: "mega" can\'t reach its board right now.'),
+    ).toBeInTheDocument();
+  });
+
+  it('can remove a part parts.toml names but the board does not have', async () => {
+    const shell = setup([{ method: 'DELETE', path: '/api/v0/parts/mega.arm', status: 204 }]);
+    shell.pushParts([
+      bridgePart('mega'),
+      boardMotor('mega', 'arm', {
+        signals: [],
+        state: { kind: 'degraded', message: 'Not on the board: "mega" has no part called "arm".' },
+      }),
+    ]);
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove mega.arm' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await waitFor(() =>
+      expect(
+        shell.fetch.calls.some((c) => c.method === 'DELETE' && c.path.endsWith('mega.arm')),
+      ).toBe(true),
+    );
+  });
+});
+
+describe('Adding a FaberLink board', () => {
+  async function openForm(check: unknown) {
+    const shell = setup([
+      { path: '/api/v0/connectors', body: [LD19, BRIDGE] },
+      { method: 'POST', path: '/api/v0/ports/check-board', body: check },
+    ]);
+    shell.pushPorts([SAMPLE_PORT, USB_PORT, MEGA_PORT]);
+    shell.pushParts([]);
+    await userEvent.click(await screen.findByRole('button', { name: /^Add the first part$/ }));
+    await screen.findByRole('radio', { name: /faber-bridge/ });
+    return shell;
+  }
+
+  const found = {
+    result: 'found',
+    board: 'sim-mega',
+    firmware: 'faberlink-harness',
+    firmwareVersion: '0.1.0',
+    parts: 4,
+  };
+
+  it('checks a free port only when asked, then picks the board, its port and a name', async () => {
+    const shell = await openForm(found);
+    const checks = screen.getAllByRole('button', { name: 'Check for a FaberLink board' });
+    expect(checks).toHaveLength(1); // not on a recording, and not on a port in use
+    expect(screen.getByText(/only checks a port when you ask/)).toBeInTheDocument();
+    expect(shell.fetch.calls.some((c) => c.path.endsWith('/check-board'))).toBe(false);
+
+    await userEvent.click(checks[0]!);
+    expect(
+      await screen.findByText('FaberLink board: sim-mega (faberlink-harness 0.1.0)'),
+    ).toBeInTheDocument();
+    expect(shell.fetch.calls.find((c) => c.path.endsWith('/check-board'))?.body).toEqual({
+      port: 'usb:2341:0042',
+    });
+    expect(screen.getByRole('radio', { name: /usb:2341:0042/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /faber-bridge/ })).toBeChecked();
+    expect(screen.getByLabelText('Name')).toHaveValue('sim_mega');
+    const simulated = screen.getByRole('switch', { name: /Simulated/ });
+    expect(simulated).not.toBeChecked();
+    expect(simulated).toBeDisabled();
+    expect(screen.getByText(/is real hardware/)).toBeInTheDocument();
+    expect(
+      screen.getByText('Its motors and sensors appear as parts by themselves'),
+    ).toBeInTheDocument();
+
+    shell.fetch.route({
+      method: 'POST',
+      path: '/api/v0/parts',
+      status: 201,
+      body: bridgePart('sim_mega'),
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Add part' }));
+    await waitFor(() =>
+      expect(
+        shell.fetch.calls.find((c) => c.path === '/api/v0/parts' && c.method === 'POST')?.body,
+      ).toEqual({
+        name: 'sim_mega',
+        connector: 'faber-bridge',
+        port: 'usb:2341:0042',
+      }),
+    );
+  });
+
+  it('says when nothing answered, and leaves the form as it was', async () => {
+    await openForm({ result: 'nothing' });
+    await userEvent.click(screen.getByRole('button', { name: 'Check for a FaberLink board' }));
+    expect(
+      await screen.findByText('No FaberLink board answered on this port.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /usb:2341:0042/ })).not.toBeChecked();
+  });
+
+  it('a board the core found is suggested on its port from then on', async () => {
+    const shell = await openForm(found);
+    shell.pushPorts([
+      SAMPLE_PORT,
+      {
+        ...MEGA_PORT,
+        suggestions: [
+          {
+            connector: 'faber-bridge',
+            reason: 'A FaberLink board: sim-mega (faberlink-harness 0.1.0).',
+          },
+        ],
+      },
+    ]);
+    expect(await screen.findByText('A FaberLink board answered here')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: /usb:2341:0042/ }));
+    expect(screen.getByRole('radio', { name: /faber-bridge/ })).toBeChecked();
   });
 });
 
@@ -253,7 +437,7 @@ describe('Adding a simulated part', () => {
     await userEvent.click(screen.getByRole('radio', { name: /generic-planar-base/ }));
     expect(simulated()).toBeChecked();
     expect(simulated()).toBeDisabled();
-    expect(screen.getByText(/needs a FaberLink bridge to be real/)).toBeInTheDocument();
+    expect(screen.getByText(/sits on a FaberLink board/)).toBeInTheDocument();
 
     expect(screen.getByLabelText(/Length/)).toHaveValue(0.8);
     expect(screen.getByLabelText(/Width/)).toHaveValue(0.65);

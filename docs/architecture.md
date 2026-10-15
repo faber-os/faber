@@ -226,7 +226,8 @@ and users. A machine config can be exported and imported as one bundle. That's h
 Real-time work (motor loops, safety stops, fast sensors) runs on a microcontroller. A **bridge** is
 a microcontroller running the **FaberLink** library: a small, versioned, framed serial protocol with
 a handshake, heartbeat and CRC. Its firmware declares which parts it hosts. `faber-bridge` then
-makes them appear as normal parts with normal capabilities.
+makes them appear as normal parts with normal capabilities: **sub-parts** named after the bridge,
+`mega.left`, each with its own signals, viewer and lease ([faberlink.md §9](faberlink.md)).
 
 ```
  faber-core ── faber-bridge connector ── UART ── Arduino Mega running FaberLink
@@ -346,7 +347,8 @@ Every part and app goes through the same states, shown in the shell:
    [capabilities.md](capabilities.md#the-lease).
 2. **E-stop** is a core capability with a button that is always visible in the shell (and the
    kiosk). It drops all leases and sends every actuator to its safe state. A hardware e-stop on a
-   bridge appears as a part providing `estop@1`.
+   bridge is the bridge's own `estop@1` signal (`mega/estop`): pressing it engages the e-stop,
+   which then can't be released until the button is reset on the board.
 3. **Update lock.** No core, package or OS update is applied while any actuator lease is held.
 4. **Bridge heartbeat.** The microcontroller makes itself safe without the Pi (see §6).
 5. **Connector death.** If a connector driving an actuator dies, its parts go to their safe state

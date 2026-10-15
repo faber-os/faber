@@ -38,8 +38,9 @@ joystick that overshoots.
 
 ## 3. Generic parts
 
-Motors and bases have no USB connector until FaberLink (Phase 4). So the core gains built-in
-**generic** connector definitions, usable simulated now and backed by a bridge later:
+Motors and bases have no USB connector of their own: real ones sit on a FaberLink board and appear
+as its sub-parts by themselves (Phase 4, [faberlink.md §9](faberlink.md)). So the core has built-in
+**generic** connector definitions for simulating them:
 
 - `generic-planar-base`: settings `holonomic` (default true), `max-vx`, `max-vy`, `max-omega`,
   `max-accel`; footprint `length` × `width` (m).
@@ -49,8 +50,8 @@ Motors and bases have no USB connector until FaberLink (Phase 4). So the core ga
 - Existing real connectors (`ldrobot-ld19`) can be simulated too: their manifest gives the
   capability and info (range limits), the world gives the values.
 
-A generic part without `simulate` is refused with a hint ("needs a bridge, Phase 4; tick
-Simulated for now").
+A generic part without `simulate` is refused with a hint (add the FaberLink board it sits on
+instead, or tick Simulated).
 
 ## 4. Simulated parts in parts.toml
 

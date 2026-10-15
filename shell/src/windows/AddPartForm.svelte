@@ -4,13 +4,21 @@
   import { t } from '../lib/i18n';
   import { validatePartName } from '../lib/state/partName';
   import { portAvailability, portHints } from '../lib/state/portHints';
+  import { BRIDGE_CONNECTOR, boardCheckText, nameFromBoard } from '../lib/state/bridges';
   import {
     defaultValues,
     readSettings,
     settingFields,
     type SettingValues,
   } from '../lib/state/connectorSettings';
-  import type { ErrorBody, NewPart, SettingInfo, Simulate } from '../lib/state/types';
+  import type {
+    BoardCheck,
+    ErrorBody,
+    NewPart,
+    PortInfo,
+    SettingInfo,
+    Simulate,
+  } from '../lib/state/types';
   import { useDesktop } from '../components/desktopController.svelte';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
@@ -66,9 +74,14 @@
   const showNameProblem = $derived(nameTouched && nameProblem !== null);
   const errorField = $derived(fieldFor(error?.code));
   const chosen = $derived(connectors?.find((c) => c.id === connector) ?? null);
-  /** Generic connectors need a FaberLink bridge to be real (Phase 4): simulated only for now. */
+  /** Real generic parts sit on a FaberLink board and appear by themselves: here, simulated only. */
   const needsBridge = $derived(chosen?.port.kind === 'bridge');
-  const simulated = $derived(simulatedChoice || needsBridge);
+  /** A FaberLink board is real hardware with parts of its own: never simulated. */
+  const isBoard = $derived(chosen?.id === BRIDGE_CONNECTOR);
+  const simulated = $derived(!isBoard && (simulatedChoice || needsBridge));
+  /** Ports checked for a FaberLink board in this form, by port id. */
+  let checks = $state<Record<string, { result?: BoardCheck; error?: ErrorBody }>>({});
+  let checking = $state<string | null>(null);
   const fields = $derived(settingFields(chosen));
   const mainFields = $derived(fields.filter((f) => !f.advanced));
   const advancedFields = $derived(fields.filter((f) => f.advanced));
@@ -119,6 +132,23 @@
     if (!connectorTouched && suggestion && connectors?.some((c) => c.id === suggestion.connector)) {
       chooseConnector(suggestion.connector);
     }
+  }
+
+  /** A port a board could be on: a real serial port that nobody uses. */
+  function checkable(p: PortInfo): boolean {
+    return p.kind !== 'replay' && portAvailability(p).free;
+  }
+
+  // Detect, then suggest, but only when asked (opening a port restarts most Arduino boards).
+  async function checkBoard(id: string) {
+    checking = id;
+    const r = await core.checkBoard(id);
+    checking = null;
+    checks = { ...checks, [id]: r.ok ? { result: r.value } : { error: r.error } };
+    if (!r.ok || r.value.result === 'nothing') return;
+    pickPort(id);
+    if (!connectorTouched) chooseConnector(BRIDGE_CONNECTOR);
+    if (r.value.result === 'found' && name === '') name = nameFromBoard(r.value.board);
   }
 
   // Started from a recording: pick its port (and the suggested connector) once both lists are in.
@@ -177,14 +207,14 @@
         {simulated ? t('addPart.source.mode') : t('addPart.port.legend')}</legend
       >
       <!-- The help sits outside the label, so the switch is just called "Simulated". -->
-      <div class="switch-row" class:locked={needsBridge}>
+      <div class="switch-row" class:locked={needsBridge || isBoard}>
         <input
           id="simulated"
           class="switch"
           type="checkbox"
           role="switch"
           checked={simulated}
-          disabled={needsBridge}
+          disabled={needsBridge || isBoard}
           aria-describedby="simulated-help"
           onchange={(e) => {
             simulatedChoice = e.currentTarget.checked;
@@ -195,8 +225,10 @@
           <label class="choice-title" for="simulated">{t('addPart.source.simulated')}</label>
           <span class="help" id="simulated-help">
             {needsBridge && chosen
-              ? t('addPart.source.locked', { connector: chosen.name })
-              : t('addPart.source.simulated.help')}
+              ? t('addPart.source.lockedOnBoard', { connector: chosen.name })
+              : isBoard
+                ? t('addPart.source.board')
+                : t('addPart.source.simulated.help')}
           </span>
         </span>
       </div>
@@ -231,6 +263,7 @@
             {#each ports as p (p.id)}
               {@const avail = portAvailability(p)}
               {@const hints = portHints(p, connectors ?? [])}
+              {@const check = checks[p.id]}
               <label class="choice" class:disabled={!avail.free}>
                 <input
                   type="radio"
@@ -253,10 +286,39 @@
                   {#each hints as h (h.connector)}
                     <span class="suggest" title={h.reason}>{h.text}</span>
                   {/each}
+                  {#if check?.result}
+                    <span class="check-result" class:found={check.result.result !== 'nothing'}
+                      >{boardCheckText(check.result)}</span
+                    >
+                    {#if check.result.result === 'other-version'}
+                      <span class="help">{check.result.message}</span>
+                    {/if}
+                  {:else if check?.error}
+                    <span class="help bad">{check.error.message} {check.error.hint}</span>
+                  {/if}
+                  {#if checkable(p) && check?.result?.result !== 'found'}
+                    <span>
+                      <button
+                        type="button"
+                        class="btn small"
+                        disabled={checking !== null}
+                        onclick={(e) => {
+                          e.preventDefault();
+                          void checkBoard(p.id);
+                        }}
+                        >{checking === p.id
+                          ? t('addPart.port.checking')
+                          : t('addPart.port.check')}</button
+                      >
+                    </span>
+                  {/if}
                 </span>
               </label>
             {/each}
           </div>
+          {#if ports.some(checkable)}
+            <p class="help check-help">{t('addPart.port.check.help')}</p>
+          {/if}
         {/if}
       {/if}
     </fieldset>
@@ -312,13 +374,15 @@
                   <span
                     >{c.port.kind === 'serial'
                       ? t('addPart.connector.serial', { baud: c.port.baud })
-                      : t('addPart.connector.bridge')}</span
+                      : t('addPart.connector.onBoard')}</span
                   >
                 </span>
                 <span class="provides">
-                  {t('addPart.connector.provides', {
-                    capabilities: c.provides.map((p) => p.capability).join(', '),
-                  })}
+                  {c.id === BRIDGE_CONNECTOR
+                    ? t('addPart.connector.boardParts')
+                    : t('addPart.connector.provides', {
+                        capabilities: c.provides.map((p) => p.capability).join(', '),
+                      })}
                 </span>
               </span>
             </label>
@@ -614,6 +678,22 @@
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--accent-ink);
+  }
+  .check-result {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+  }
+  .check-result.found {
+    font-weight: 600;
+    color: var(--ok);
+  }
+  .check-help {
+    margin-top: var(--space-2);
+  }
+  .btn.small {
+    min-height: 0;
+    padding: 2px var(--space-2);
+    font-size: var(--text-sm);
   }
   .kind {
     margin-right: var(--space-2);

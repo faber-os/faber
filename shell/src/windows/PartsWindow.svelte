@@ -5,6 +5,7 @@
   import { portKindLabel } from '../lib/state/portHints';
   import type { ErrorBody, PartInfo, SignalInfo, Simulate } from '../lib/state/types';
   import { canMove } from '../lib/state/driving';
+  import { isBridge, isSubPart, linkText, localName, removable } from '../lib/state/bridges';
   import { isManualSensor } from '../lib/state/simulation';
   import { item, separator } from '../lib/desktop/contextMenu';
   import { menuTrigger, useMenu } from '../components/menuController.svelte';
@@ -85,6 +86,8 @@
           : !port
             ? t('parts.menu.busy.missing', { port: p.port ?? '' })
             : undefined;
+    // A board's part has its board's port, which the board uses: no serial monitor for it.
+    const sub = isSubPart(p);
     return {
       label: p.name,
       entries: [
@@ -92,17 +95,18 @@
           disabledReason: signals.length ? undefined : t('parts.menu.noSignal'),
         }),
         canMove(p) && item('drive', t('parts.menu.drive'), { icon: 'drive' }),
-        item(
-          'monitor',
-          port
-            ? t('parts.menu.monitorKind', { kind: portKindLabel(port).toLowerCase() })
-            : t('parts.menu.monitor'),
-          {
-            disabledReason: busy,
-          },
-        ),
-        separator(),
-        item('remove', t('parts.menu.remove'), { danger: true }),
+        !sub &&
+          item(
+            'monitor',
+            port
+              ? t('parts.menu.monitorKind', { kind: portKindLabel(port).toLowerCase() })
+              : t('parts.menu.monitor'),
+            {
+              disabledReason: busy,
+            },
+          ),
+        removable(p) && separator(),
+        removable(p) && item('remove', t('parts.menu.remove'), { danger: true }),
       ],
       onSelect: (id: string) => {
         if (id === 'view' && signals[0]) openViewer(p, signals[0]);
@@ -236,30 +240,52 @@
         {#each parts as p (p.name)}
           {@const signals = viewable(p)}
           {@const label = portLabel(p.port)}
-          <li class="part" class:fresh={justAdded === p.name} data-part={p.name} tabindex="-1">
+          {@const sub = isSubPart(p)}
+          <li
+            class="part"
+            class:sub
+            class:fresh={justAdded === p.name}
+            data-part={p.name}
+            data-bridge={p.bridge}
+            tabindex="-1"
+          >
             <div class="main">
               <div class="title-row">
+                {#snippet partName()}{#if sub}<span class="prefix">{p.bridge}.</span>{localName(
+                      p,
+                    )}{:else}{p.name}{/if}{/snippet}
                 {#if signals[0]}
                   <button
                     class="name link"
                     onclick={() => openViewer(p, signals[0]!)}
                     title={t('parts.list.openViewer')}
                   >
-                    {p.name}
+                    {@render partName()}
                   </button>
                 {:else}
-                  <span class="name">{p.name}</span>
+                  <span class="name">{@render partName()}</span>
                 {/if}
                 <StateBadge kind={p.state.kind} />
                 {#if p.simulate}<span class="badge">{t('parts.list.simulatedBadge')}</span>{/if}
+                {#if p.board?.hardwareEstop}<span class="badge danger"
+                    >{t('parts.board.hardwareEstop')}</span
+                  >{/if}
               </div>
               <p class="meta">
-                <span>{connectorName(p.connector)}</span>
-                <span class="sep" aria-hidden="true">·</span>
-                {#if p.simulate}
-                  <span class="sim">{t(`parts.list.simulated.${p.simulate}`)}</span>
+                {#if sub}
+                  <span>{t('parts.list.onBoard', { bridge: p.bridge ?? '' })}</span>
+                  {#each p.signals as s (s.address)}
+                    <span class="sep" aria-hidden="true">·</span>
+                    <code>{s.capability}</code>
+                  {/each}
                 {:else}
-                  <span>{label ?? t('parts.list.port')} <code>{p.port}</code></span>
+                  <span>{connectorName(p.connector)}</span>
+                  <span class="sep" aria-hidden="true">·</span>
+                  {#if p.simulate}
+                    <span class="sim">{t(`parts.list.simulated.${p.simulate}`)}</span>
+                  {:else}
+                    <span>{label ?? t('parts.list.port')} <code>{p.port}</code></span>
+                  {/if}
                 {/if}
                 {#if canMove(p)}
                   {@const lease = core.leaseOn(p.name)}
@@ -271,6 +297,29 @@
                   >
                 {/if}
               </p>
+              {#if isBridge(p) && p.board}
+                {@const b = p.board}
+                <p class="meta board">
+                  <span class="link-state" data-link={b.link}>{linkText(b.link)}</span>
+                  {#if b.board}
+                    <span class="sep" aria-hidden="true">·</span>
+                    <span
+                      >{t('parts.board.firmware', {
+                        board: b.board,
+                        firmware: b.firmware ?? '',
+                        version: b.firmwareVersion ?? '',
+                      })}</span
+                    >
+                  {/if}
+                  {#if b.protocol !== undefined}
+                    <span class="sep" aria-hidden="true">·</span>
+                    <span>{t('parts.board.protocol', { version: b.protocol })}</span>
+                  {/if}
+                </p>
+                {#if b.hardwareEstop}
+                  <p class="hint estop-hint">{t('parts.board.hardwareEstop.hint')}</p>
+                {/if}
+              {/if}
               {#if isManualSensor(p)}<ManualSimulation part={p} />{/if}
               {#if p.state.message}
                 <div
@@ -323,14 +372,16 @@
                     {t('parts.list.view')}
                   </button>
                 {/each}
-                <button
-                  class="btn quiet icon"
-                  aria-label={t('parts.list.removeNamed', { name: p.name })}
-                  title={t('parts.list.removeNamed', { name: p.name })}
-                  onclick={() => (confirming = p.name)}
-                >
-                  <Icon name="trash" size={18} />
-                </button>
+                {#if removable(p)}
+                  <button
+                    class="btn quiet icon"
+                    aria-label={t('parts.list.removeNamed', { name: p.name })}
+                    title={t('parts.list.removeNamed', { name: p.name })}
+                    onclick={() => (confirming = p.name)}
+                  >
+                    <Icon name="trash" size={18} />
+                  </button>
+                {/if}
               {/if}
             </div>
           </li>
@@ -413,6 +464,42 @@
     gap: var(--space-4);
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--line);
+  }
+  /* A board's parts sit under the board, indented, joined to it by a line. */
+  .part.sub {
+    padding-left: calc(var(--space-4) + var(--space-6));
+    border-bottom-color: var(--line);
+    background: var(--surface-2);
+    position: relative;
+  }
+  .part.sub::before {
+    content: '';
+    position: absolute;
+    left: calc(var(--space-4) + var(--space-2));
+    top: 0;
+    bottom: 50%;
+    width: var(--space-3);
+    border-left: 2px solid var(--line-strong);
+    border-bottom: 2px solid var(--line-strong);
+    border-bottom-left-radius: var(--radius-sm);
+  }
+  .prefix {
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .badge.danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+  .link-state {
+    font-weight: 600;
+  }
+  .link-state[data-link='ready'] {
+    color: var(--ok);
+  }
+  .estop-hint {
+    font-size: var(--text-sm);
+    color: var(--danger);
   }
   .part.fresh {
     animation: arrive 1.6s var(--ease-out);

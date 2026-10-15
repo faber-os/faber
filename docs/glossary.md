@@ -44,6 +44,7 @@ ever two of these.
 | **Router** | The part of the core that moves signals and commands between parts, apps, the shell and outside bridges (MQTT, ROS). |
 | **Runtime** | The part of the core that loads, sandboxes, starts, restarts and stops connectors and apps. |
 | **Bridge** | A microcontroller (Arduino, Pico, ESP32) running the **FaberLink** firmware library, connected over USB/UART. The `faber-bridge` connector turns it into parts. This is where real-time work lives. |
+| **Sub-part** | A part on a bridge's board (a motor or sensor wired to it), named after the bridge and the board's own name for it: `mega.left`. It has its own signals, viewer and lease; the board decides which exist, parts.toml only where they sit (`[parts.mega.parts.left]`). |
 | **FaberLink** | The small, versioned serial protocol and Arduino/C++ library that a bridge runs. |
 | **Package** | The unit the store distributes. There are exactly two package types: **connector** and **app**. |
 | **Manifest** | The `faber.toml` file at the root of every package. It declares identity, version, capabilities, permissions and settings. |

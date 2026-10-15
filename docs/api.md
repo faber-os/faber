@@ -30,19 +30,22 @@ access, in Phase 6).
 |---|---|
 | `GET /api/v0/system` | `SystemInfo`. Its `api` is a fingerprint of the API types the core was built with (`core/build.rs`); the shell computes its own the same way and, when they differ, asks for the core to be restarted instead of failing request by request. `timeZone` is the machine's own IANA time zone (e.g. `Europe/Copenhagen`), read from its OS each time; `UTC` (with a log line) if the OS doesn't say. |
 | `GET /api/v0/about` | `AboutInfo`: `version`, `api` (the fingerprint), `dataFolder` (where config and files live on this computer), `uptimeS` (seconds since the core started), `os`, `timeZone` (the machine's own). |
-| `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run: the built-in ones and those installed in `<data>/connectors/<id>/`. `kind` says how it runs: `built-in`, `declarative` (only a `faber.toml`, run by the core's engine; [connectors-declarative.md](connectors-declarative.md)) or `wasm`. Each `provides` entry carries its capability's `info` (limits, e.g. a distance sensor's range) with the default settings; a part's own limits are in its `signals` (below). `port` is `{"kind": "serial", "baud": …}` or `{"kind": "bridge"}` (needs a FaberLink bridge, Phase 4; until then only simulated). `settings` describes every setting a part of this kind takes, in form order: `key`, `label`, `description` (both in English for now), `unit?`, `advanced` (shown behind "Advanced"), and `kind` with its values: `number` (`default`, `min?`, `minExclusive?`, `max?`, `suggested?`: where a new part's form starts), `bool` (`default`), `choice` (`default`, `choices`: `value`, `label`), `string` (`default`) or `part-list` (other parts' names, empty by default). `default` is what a part gets when parts.toml leaves the setting out. |
+| `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run: the built-in ones and those installed in `<data>/connectors/<id>/`. `kind` says how it runs: `built-in`, `declarative` (only a `faber.toml`, run by the core's engine; [connectors-declarative.md](connectors-declarative.md)) or `wasm`. Each `provides` entry carries its capability's `info` (limits, e.g. a distance sensor's range) with the default settings; a part's own limits are in its `signals` (below). `port` is `{"kind": "serial", "baud": …}` or `{"kind": "bridge"}` (the generic connectors: real hardware like this sits on a FaberLink board and appears as the board's own part, so a part on such a connector is only ever simulated). `settings` describes every setting a part of this kind takes, in form order: `key`, `label`, `description` (both in English for now), `unit?`, `advanced` (shown behind "Advanced"), and `kind` with its values: `number` (`default`, `min?`, `minExclusive?`, `max?`, `suggested?`: where a new part's form starts), `bool` (`default`), `choice` (`default`, `choices`: `value`, `label`), `string` (`default`) or `part-list` (other parts' names, empty by default). `default` is what a part gets when parts.toml leaves the setting out. |
 | `GET /api/v0/connectors/problems` | `ConnectorProblem[]`: installed connectors (wasm or declarative) the core couldn't load, when it started or since a package was installed or removed, each with its `folder` in `<data>/connectors/`, a `message` and a `hint`. The core runs without them. |
 | `GET /api/v0/packages`, `POST /api/v0/packages`, `DELETE /api/v0/packages/{id}` | Connector packages: see [Packages](#packages). |
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
+| `POST /api/v0/ports/check-board` | `{"port": "usb:2341:0042"}` → `200 BoardCheck`, after up to 2.5 s: is a FaberLink board on this port? See [FaberLink boards](#faberlink-boards-bridges). |
 | `GET /api/v0/parts` | `PartInfo[]` |
-| `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name` (including `world`, the simulated world's own name), `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: it needs a FaberLink bridge, Phase 4), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
-| `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`). |
+| `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name` (including `world`, the simulated world's own name), `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: add the FaberLink board it sits on instead), `400 bridge-not-simulated` (a `faber-bridge` with `simulate`: a board is real hardware), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
+| `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`); removing a bridge ends those on its sub-parts too. For a sub-part (`mega.arm`) it removes `[parts.mega.parts.arm]` from parts.toml, which works only while the board doesn't have that part: `409 part-on-board` otherwise. |
 
 `PartInfo` has `port` for a real part and `simulate` for a simulated one, never both. Each of its
 `signals` (`address`, `capability`, `info?`) carries the capability's `info` as **this part's own
 settings** give it (a base with `max-vx = 0.6` says 0.6, not the connector's default 0.5). `info` is
 absent when the capability has none or the part's settings can't be read (the part is `invalid`).
+A bridge's `PartInfo` has `board` and is followed by its sub-parts, which have `bridge`; see
+[FaberLink boards](#faberlink-boards-bridges).
 
 Adding or removing a part **writes `parts.toml`** (keeping comments and formatting) and then
 reconciles. The file stays the source of truth (D13).
@@ -157,7 +160,13 @@ got, and `clamped` says whether it differs from what was sent. A base that is no
 |---|---|
 | `GET /api/v0/estop` | `EstopStatus`: `engaged`, `engagedBy?` (an `estop@1` reading: `tUs`, `source`, `reason`), `history` (recent engages and releases, oldest first) |
 | `POST /api/v0/estop` | `{"reason"?: …, "source"?: "app" \| "shell" \| "part"}` → `200 EstopStatus`. **Always allowed, from anyone, and never fails**: an empty body is fine, and a body the core can't read still engages it. Every lease ends (`estop`), every actuator gets its safe state, and new leases and commands get `423 estop-engaged` until it is released. Engaging it again keeps the first reason. |
-| `POST /api/v0/estop/release` | `{"source"?: …}` (optional) → `200 EstopStatus`. Until Phase 6 (operators) anyone may release it; the shell asks to confirm. Errors: `400 bad-request` (an unreadable body). |
+| `POST /api/v0/estop/release` | `{"source"?: …}` (optional) → `200 EstopStatus`. Until Phase 6 (operators) anyone may release it; the shell asks to confirm. Releasing restarts nothing: a new command does. Errors: `400 bad-request` (an unreadable body), `409 estop-latched` (a FaberLink board's own stop button is still pressed: reset it on the board first). |
+
+**FaberLink boards.** A board's motors are leased and commanded like any part, by their sub-part
+names (`POST /api/v0/parts/mega.left/lease`). The core sends a `COMMAND` to the board only for a
+command that passed the lease check, and `SAFE` whenever the lease ends. The e-stop reaches every
+board at once and in every heartbeat; a board's own stop button engages it with `source: "part"`.
+See [FaberLink boards](#faberlink-boards-bridges).
 
 **Manual simulated sensors.** A part with `simulate = "manual"` publishes a value you set; an
 actuator reports the commands it gets (a base: `commanded`, and `measured` following it within
@@ -171,6 +180,37 @@ its acceleration limit).
 A distance reading outside the sensor's range is reported as `too-close` / `too-far` at the edge
 of the range; a manual `laser-scan` is a ring of points at the value. `simulate = "world"` parts
 get their values from [the simulated world](#the-simulated-world).
+
+## FaberLink boards (bridges)
+
+A microcontroller running the FaberLink library ([faberlink.md](faberlink.md)) is added as one part
+with `connector = "faber-bridge"` on its serial port. The board says which parts it hosts, and each
+becomes a **sub-part** named `<bridge>.<name>`: `mega.left` for the board `mega`'s part `left`.
+Its signal is `mega.left/motor` (the capability's name). A name the user picks can't contain a
+`.` and a signal name never does, so `mega.left/motor` and `mega/estop` (the board's own stop
+button, an `estop@1` signal) can't be confused. A board's name for a part that isn't a valid part
+name is lowercased with other characters turned into `_` (`Left Motor` → `left_motor`), or becomes
+`part<id>`.
+
+In `GET /api/v0/parts`, a bridge is followed by its sub-parts.
+
+- The bridge's `PartInfo` has `board` (`BoardLink`): `link` (`connecting`, `describing`, `ready`,
+  `no-answer`, `lost`, `incompatible`), and once the board has answered `board` (its name),
+  `firmware`, `firmwareVersion`, `protocol` (the FaberLink version) and `heartbeatTimeoutMs`; plus
+  `hardwareEstop` (its stop button is latched) and `failsafe` (it stopped its actuators because the
+  heartbeat didn't reach it). Its `state` says what is wrong and what to try.
+- A sub-part's `PartInfo` has `bridge` (its bridge's name), the bridge's `port`, its `mount` from
+  `[parts.<bridge>.parts.<name>]`, and its one signal with the info the board gave (limits).
+  While the board is out of reach, every sub-part is `failed` ("Stopped: …") and its leases end
+  (`part-failed`). One that parts.toml names but the board doesn't have is `degraded` with
+  "Not on the board".
+
+| Method and path | Body / result |
+|---|---|
+| `POST /api/v0/ports/check-board` | `BoardCheckRequest` `{"port": …}` → `200 BoardCheck`, tagged by `result`: `found` (`board`, `firmware`, `firmwareVersion`, `parts`: how many it hosts), `other-version` (`message`: a FaberLink board that speaks another protocol version, and what to update), or `nothing`. It opens the port, says `HELLO` a few times and listens for up to 2.5 s; it sends nothing else, so a board it finds keeps everything stopped. A board found is suggested for the port in `GET /api/v0/ports` (connector `faber-bridge`) until the port goes away. Errors: `400 unknown-port`, `400 not-a-serial-port` (a recording), `409 port-claimed` (a part or a tool uses it: it is never checked), `409 port-unavailable` (it couldn't be opened). |
+
+The core never checks a port by itself: opening a serial port restarts most Arduino-based devices
+(a 3D printer mid-print, too) and they may not like the bytes, so it happens only when someone asks.
 
 ## The simulated world
 

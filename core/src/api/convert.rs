@@ -1,6 +1,7 @@
 //! Machine types → wire types (docs/api.md). The only place that knows both.
 
 use super::dto;
+use crate::bridge::{BoardView, LinkState};
 use crate::config::Simulate;
 use crate::connectors::LoadProblem;
 use crate::files::{Entry, Kind, Special, VPath};
@@ -8,7 +9,7 @@ use crate::leases::{EndReason, Lease};
 use crate::logs;
 use crate::machine::EstopView;
 use crate::machine::WorldView;
-use crate::machine::{MachineError, PartView, PortView};
+use crate::machine::{BoardCheck, MachineError, PartView, PortView};
 use crate::ports::{PortKind, PortProblem};
 use crate::runtime::PartStatus;
 use crate::simparts::WorldState;
@@ -58,6 +59,39 @@ pub fn part(p: &PartView) -> dto::PartInfo {
             })
             .collect(),
         mount: p.mount,
+        bridge: p.bridge.as_ref().map(ToString::to_string),
+        board: p.board.as_ref().map(board_link),
+    }
+}
+
+pub fn board_link(b: &BoardView) -> dto::BoardLink {
+    let info = b.board.as_ref();
+    dto::BoardLink {
+        link: match b.link {
+            LinkState::Connecting => dto::LinkState::Connecting,
+            LinkState::Describing => dto::LinkState::Describing,
+            LinkState::Ready => dto::LinkState::Ready,
+            LinkState::NoAnswer => dto::LinkState::NoAnswer,
+            LinkState::Lost => dto::LinkState::Lost,
+            LinkState::Incompatible => dto::LinkState::Incompatible,
+        },
+        board: info.map(|i| i.board.clone()),
+        firmware: info.map(|i| i.firmware.clone()),
+        firmware_version: info.map(|i| i.firmware_version.clone()),
+        protocol: info.map(|i| i.version),
+        heartbeat_timeout_ms: info.map(|i| i.heartbeat_timeout_ms),
+        hardware_estop: b.hardware_estop,
+        failsafe: b.failsafe,
+    }
+}
+
+pub fn board_check(c: &BoardCheck) -> dto::BoardCheck {
+    match c.clone() {
+        BoardCheck::Found { board, firmware, firmware_version, parts } => {
+            dto::BoardCheck::Found { board, firmware, firmware_version, parts }
+        }
+        BoardCheck::OtherVersion { message } => dto::BoardCheck::OtherVersion { message },
+        BoardCheck::Nothing => dto::BoardCheck::Nothing,
     }
 }
 

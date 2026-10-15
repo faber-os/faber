@@ -18,6 +18,8 @@ axum = { version = "0.8.9", features = ["ws"] }
 clap = { version = "4.6.7", features = ["derive"] }
 faber-capabilities = { version = "0.1.0", path = "../sdk/rust/capabilities", features = ["typescript"] }
 faber-connector = { version = "0.1.0", path = "../sdk/rust/connector" }
+# FaberLink, the bridge protocol: the faber-bridge connector runs its session (docs/faberlink.md).
+faberlink = { version = "0.1.0", path = "../sdk/rust/faberlink" }
 futures-util = "0.3.34"
 # Free and total space on the data folder's disk (GET /api/v0/storage). Only its statvfs is used.
 fs4 = { version = "1.1.0", default-features = false }
@@ -52,6 +54,8 @@ embed-shell = ["dep:rust-embed"]
 [dev-dependencies]
 # Misbehaves on purpose, to test the wasm sandbox (tests/wasm.rs).
 faber-test-guest = { version = "0.1.0", path = "tests/wasm-guests/misbehaving" }
+# The Arduino library's C++ core as a fake board behind a fake serial port (bridge tests).
+faberlink-interop = { path = "../tools/faberlink-interop" }
 futures-util = "0.3.34"
 tempfile = "3.27.0"
 tokio-tungstenite = "0.30.0"

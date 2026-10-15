@@ -63,6 +63,11 @@ impl StatusBoard {
         }
     }
 
+    /// Says "something changed" without a status changing, e.g. a board described other parts.
+    pub fn touch(&self) {
+        self.changed.send_modify(|n| *n += 1);
+    }
+
     pub fn remove(&self, part: &PartName) {
         if self.statuses.lock().expect("status lock").remove(part).is_some() {
             self.changed.send_modify(|n| *n += 1);
@@ -245,14 +250,12 @@ impl Context for PartContext<'_> {
     }
 }
 
-/// A part that needs a FaberLink bridge, which arrives in Phase 4 (docs/simulation.md, section 3).
+/// A generic part on a port: the real thing sits on a FaberLink board (docs/simulation.md,
+/// section 3), whose parts appear by themselves once the board is added.
 pub fn needs_bridge(manifest: &Manifest) -> Problem {
     Problem::new(
-        format!(
-            "{} needs a bridge (a microcontroller board), which Faber can't use yet (Phase 4).",
-            manifest.name
-        ),
-        "Tick Simulated for now: set simulate = \"manual\" or \"world\" instead of port in parts.toml.",
+        format!("{} is reached through a FaberLink board, not on a port of its own.", manifest.name),
+        "Add the board instead (FaberLink board, on its port): its motors and sensors appear as parts by themselves. Or tick Simulated to try it without hardware (simulate = \"manual\" or \"world\" in parts.toml).",
     )
 }
 
@@ -685,7 +688,7 @@ mod tests {
         let PartStatus::Invalid(p) = wait_for(&d.status, |s| matches!(s, PartStatus::Invalid(_))) else {
             unreachable!()
         };
-        assert!(p.message.contains("needs a bridge"), "{p:?}");
+        assert!(p.message.contains("through a FaberLink board"), "{p:?}");
         assert!(p.hint.contains("Simulated"), "{p:?}");
         assert_eq!(opener.opens.load(Ordering::SeqCst), 0);
         assert!(d.router.subscribe(&SignalAddress::new(name(), "laser-scan")).is_none());

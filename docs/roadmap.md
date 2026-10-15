@@ -92,10 +92,17 @@ through the shell.
 
 ## Phase 4: Bridges
 
-- **FaberLink** v1 protocol and Arduino library, designed fresh (D22). SENNEP's Mega firmware is retrofitted onto it
-- `faber-bridge` connector
-- Bridge heartbeat (leases, safe states and the e-stop exist since Phase 2)
-- Built-in tool: **Arduino flasher**
+- [x] **FaberLink** v1 protocol and Arduino library, designed fresh (D22) ([faberlink.md](faberlink.md))
+- [ ] SENNEP's Mega firmware retrofitted onto it
+- [x] `faber-bridge` connector: a board's parts as sub-parts (`mega.left`), leases, `SAFE`, the
+  e-stop both ways, reconnect, and "Check for a FaberLink board" in Add part
+  ([faberlink.md §9](faberlink.md#9-in-the-core-the-faber-bridge-connector))
+- [x] Bridge heartbeat (leases, safe states and the e-stop exist since Phase 2)
+- [ ] Built-in tool: **Arduino flasher**
+
+**Status (2026-10-15):** the connector is built. `core/tests/bridge.rs` proves the "done when"
+below against the Arduino library's C++ core behind a fake cable; it still needs a run on a real
+Mega ([connect-an-arduino.md](connect-an-arduino.md) says which steps need hardware).
 
 **Done when:** a Mega with FaberLink exposes motors and distance sensors, an app holding a lease
 drives a motor, and killing the app stops the motor.
