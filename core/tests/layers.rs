@@ -13,6 +13,8 @@ const LAYERS: &[(&str, u8)] = &[
     ("disks", 2),
     ("files", 2),
     ("host", 2),
+    ("leases", 2),
+    ("estop", 2),
     ("settings", 2),
     ("logs", 2),
     ("ports", 2),
