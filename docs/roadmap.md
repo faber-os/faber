@@ -98,10 +98,13 @@ through the shell.
   e-stop both ways, reconnect, and "Check for a FaberLink board" in Add part
   ([faberlink.md §9](faberlink.md#9-in-the-core-the-faber-bridge-connector))
 - [x] Bridge heartbeat (leases, safe states and the e-stop exist since Phase 2)
-- [ ] Built-in tool: **Arduino flasher**
+- [x] Built-in tool: **Arduino flasher**: Uno, Nano and Mega over their own bootloaders, from Files
+  or a package's firmware ([connect-an-arduino.md](connect-an-arduino.md#flash-from-faber))
 
-**Status (2026-10-15):** the connector is built. `core/tests/bridge.rs` proves the "done when"
-below against the Arduino library's C++ core behind a fake cable; it still needs a run on a real
+**Status (2026-10-15):** the connector and the Arduino flasher are built. The flasher is tested
+against simulated bootloaders only (`sdk/rust/flash`, `core/tests/flash.rs`) and needs a run on a
+real Uno and Mega. `core/tests/bridge.rs` proves the "done when" below against the Arduino
+library's C++ core behind a fake cable; it still needs a run on a real
 Mega ([connect-an-arduino.md](connect-an-arduino.md) says which steps need hardware).
 
 **Done when:** a Mega with FaberLink exposes motors and distance sensors, an app holding a lease
