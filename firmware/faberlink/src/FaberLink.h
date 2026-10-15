@@ -52,6 +52,26 @@ class FaberDistance : public faberlink::Distance {
   uint8_t pin_;
 };
 
+// A battery measured through a voltage divider on an analog pin: battery + -> R1 -> pin -> R2 -> GND.
+// dividerRatio is (R1 + R2) / R2, e.g. 3.0 for 20 kOhm over 10 kOhm, which brings a 3S pack's
+// 12.6 V down to 4.2 V, safely under a 5 V board's reference. Pick resistors that keep the pin
+// below the reference voltage when the battery is full, and measure the ratio with a multimeter if
+// you can (resistors are only within 1-5 %). referenceVolts is the board's analog reference: 5.0
+// on an Uno or Mega, 3.3 on 3.3 V boards.
+class FaberBattery : public faberlink::Battery {
+ public:
+  FaberBattery(const char* name, uint8_t analogPin, float dividerRatio, uint8_t cellsInSeries,
+               faberlink::BatteryChemistry chemistry = faberlink::BATTERY_LI_ION,
+               float referenceVolts = 5.0f, float capacityAh = 0);
+
+ protected:
+  float measureVolts() override;
+
+ private:
+  float voltsPerCount_;
+  uint8_t pin_;
+};
+
 class FaberLink {
  public:
   // A hardware serial port: begin() also starts it at the given baud rate.
@@ -66,7 +86,7 @@ class FaberLink {
   void poll();
 
   // Adds a custom part (your own faberlink::Part); call it before begin(). FaberMotor and
-  // FaberDistance add themselves.
+  // FaberDistance and FaberBattery add themselves.
   bool add(faberlink::Part& part);
   // A hardware stop button: engageEstop() stops everything and latches; the motors may only run
   // again after resetEstop() here AND a release in Faber.

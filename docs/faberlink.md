@@ -147,6 +147,7 @@ layout maps 1:1 onto the types in `sdk/rust/capabilities` (and `wit/capabilities
 | 2 | `motor@1` |
 | 3 | `planar-base@1` |
 | 4 | `estop@1` |
+| 5 | `battery@1` |
 
 Other capabilities have no FaberLink layout yet; one is added (with a new code) when a board needs
 it. A `twist` below is `vx f32 · vy f32 · omega f32`.
@@ -157,6 +158,7 @@ it. A `twist` below is `vx f32 · vy f32 · omega f32`.
 | `motor@1` | `present u8 · velocity_rad_s f32 · position_rad f32 · current_a f32` (13 B). `present` bits 0/1/2 say which of the three are measured; the others are sent as 0. | `kind u8 · value f32` (5 B). `kind`: 0 set-velocity (rad/s), 1 set-position (rad), 2 set-duty (−1..1). The safe state is set-velocity 0. | `kind u8 · modes u8 · max_velocity_rad_s f32` (6 B). `kind`: 0 dc, 1 stepper, 2 bldc, 3 continuous-servo. `modes` bits 0/1/2: velocity, position, duty. A NaN maximum means "unknown". |
 | `planar-base@1` | `flags u8 · commanded twist · measured twist` (25 B). `flags` bit 0: `measured` is known; bit 1: bumped. | `kind u8 (0 = set-velocity) · twist` (13 B) | `holonomic u8 · max_velocity twist · max_acceleration twist · n u8 · n × str8` (the parts it is built from, by their names on the board) |
 | `estop@1` | `engaged u8 · source u8 · reason str8` | — | `hardware_latching u8` (1 B) |
+| `battery@1` | `present u8 · volts f32 · amps f32 · charge f32 · celsius f32 · level u8 · n u8 · n × cell_volts f32` (19 B + 4n). `present` bits 0/1/2/3: amps, charge, celsius, cell volts; the others are sent as 0, and `n` is 0 without bit 3. `level`: 0 ok, 1 low, 2 critical. `volts` is always finite. | — | `chemistry u8 · cells_in_series u8 · capacity_ah f32` (6 B). `chemistry`: 0 li-ion, 1 lipo, 2 lifepo4, 3 nimh, 4 lead-acid. `cells_in_series` is at least 1. A NaN capacity means "unknown". |
 
 ## 5. Rules a board follows (the library enforces them, not the sketch)
 
@@ -218,7 +220,16 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   loop when the motor's full-duty speed is given) and `FaberDistance` (analog; linear, or a curve
   function). A custom part derives from `faberlink::Part` (or `Motor`/`Distance`) and is added with
   `link.add(part)`. Globally declared parts register themselves.
-- Example: `examples/MotorAndDistance`. CI compiles every example for an Uno and a Mega.
+- `FaberBattery` measures a battery through a voltage divider on an analog pin:
+  `FaberBattery battery("battery", A1, 3.0, 3);` is a 3S Li-ion pack behind a 20 kΩ / 10 kΩ
+  divider (ratio `(R1 + R2) / R2` = 3.0). Further arguments: the chemistry, the analog reference
+  (5 V on an Uno or Mega) and the capacity in Ah. It averages 8 reads twice a second and sends the
+  voltage and the level; `faberlink::Battery` computes the level from the same per-chemistry
+  thresholds and hysteresis as `faber-capabilities` (Li-ion 3S: low below 10.5 V, critical below
+  9.9 V). The library can't link Rust, so the numbers are copied; an interop test checks that both
+  give the same level at every voltage, for every chemistry, from every previous level.
+- Examples: `examples/MotorAndDistance` and `examples/BatteryMonitor`. CI compiles every example
+  for an Uno and a Mega.
 - Not built yet: `FaberServo`, digital in/out, HC-SR04, VL53L0X, encoders, a planar-base part with
   on-board ramp-down, and negotiating 1 Mbaud.
 - **Where it lives:** inside the Faber repo for now. Moving it to its own repo
@@ -235,13 +246,20 @@ change it through build flags so every file agrees). Every message a few parts n
 |---|---|
 | The board object (two 68-byte frame buffers and its state) and the `FaberLink` glue | 189 B |
 | The table that collects globally declared parts | 33 B |
-| Each `FaberMotor` / `FaberDistance` | 33 B / 42 B |
+| Each `FaberMotor` / `FaberDistance` / `FaberBattery` | 33 B / 42 B / about 34 B |
 | Virtual tables, part names and other strings | ~100 B, depending on the sketch |
 | Stack at its deepest (receive → command → apply → stop → send), from `-fstack-usage` | ~150 B |
 
 `MotorAndDistance` on an Uno (avr-gcc 7.3, Arduino AVR core 1.8.8): **9 298 B flash (28 %)** and
 **639 B of globals (31 %)**, of which the Arduino core's `Serial` is 157 B, leaving 1 409 B for the
 stack. On a Mega (250-byte payloads): 10 422 B flash and 1 011 B of globals.
+
+Battery support (2026-10-16) adds 12 B of flash and 12 B of RAM to every sketch (the
+`"battery@1"` id string). `BatteryMonitor` alone on an Uno: 6 896 B flash and 590 B of globals.
+These numbers were measured on a PC without `arduino-cli`, compiling sketch, library and AVR core
+1.8.8 with the Arduino IDE's avr-gcc 7.3 (`-Os`, LTO, `--gc-sections`, `-Wall -Wextra -Werror`);
+that build gives `MotorAndDistance` 20 B more flash and 2 B more globals than the figures above,
+which came from `arduino-cli`.
 
 ## 8. Interop tests (`tools/faberlink-interop`)
 
@@ -253,7 +271,9 @@ The tests drive it from the Rust session over an in-memory pipe and prove, on ev
 
 - the handshake and `DESCRIBE` give the right parts, infos and heartbeat timeout (and the timeout is
   clamped to 100–1000 ms);
-- readings decode to the right capability types (ok, too-close, too-far, no-target);
+- readings decode to the right capability types (ok, too-close, too-far, no-target), and a
+  battery reports its voltage and level (`FakeBoard::with_battery`); the library and
+  `faber-capabilities` give the same battery level at every voltage, for every chemistry;
 - commands apply, are clamped to the board's limits, and refused commands stop the motor;
 - no heartbeat for the timeout stops the motor, and it doesn't resume on heartbeats alone, only on a
   new command; a command without a heartbeat is refused;

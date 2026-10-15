@@ -124,6 +124,8 @@ static const char* capabilityId(Capability c) {
       return "planar-base@1";
     case ESTOP_CAP:
       return "estop@1";
+    case BATTERY:
+      return "battery@1";
   }
   return "";
 }
@@ -223,6 +225,92 @@ uint8_t Distance::writeReading(uint8_t* out, uint32_t) {
   putF32(out, m);
   out[4] = status;
   return 5;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Battery
+
+namespace {
+
+// One cell's thresholds (V): typical datasheet values, as in faber-capabilities' battery.rs.
+// A switch, not a table, so they stay in flash on an AVR instead of taking RAM.
+void cellThresholds(BatteryChemistry c, float* low, float* critical, float* hysteresis) {
+  switch (c) {
+    case BATTERY_LIFEPO4:
+      *low = 3.0f;
+      *critical = 2.8f;
+      *hysteresis = 0.03f;
+      return;
+    case BATTERY_NIMH:
+      *low = 1.1f;
+      *critical = 1.0f;
+      *hysteresis = 0.02f;
+      return;
+    case BATTERY_LEAD_ACID:
+      *low = 11.8f / 6.0f;
+      *critical = 11.5f / 6.0f;
+      *hysteresis = 0.02f;
+      return;
+    case BATTERY_LI_ION:
+    case BATTERY_LIPO:
+    default:
+      *low = 3.5f;
+      *critical = 3.3f;
+      *hysteresis = 0.05f;
+      return;
+  }
+}
+
+}  // namespace
+
+Battery::Battery(const char* name, BatteryChemistry chemistry, uint8_t cellsInSeries, float capacityAh,
+                 uint16_t readingPeriodMs)
+    : Part(name, BATTERY, 0, readingPeriodMs),
+      capacityAh_(capacityAh),
+      chemistry_(chemistry),
+      cells_(cellsInSeries == 0 ? 1 : cellsInSeries),
+      level_(BATTERY_OK) {}
+
+// battery@1 info layout: chemistry u8, cells-in-series u8, capacity-ah f32 (NaN = unknown).
+uint8_t Battery::writeInfo(uint8_t* out) const {
+  out[0] = chemistry_;
+  out[1] = cells_;
+  if (capacityAh_ > 0) {
+    putF32(out + 2, capacityAh_);
+  } else {
+    putU32(out + 2, 0x7FC00000UL);  // a quiet NaN
+  }
+  return 6;
+}
+
+// A level gets worse as soon as the voltage drops below a threshold, and better only once it is
+// a hysteresis margin above it.
+BatteryLevel Battery::levelAt(float volts, BatteryLevel previous) const {
+  float low, critical, hysteresis;
+  cellThresholds(chemistry_, &low, &critical, &hysteresis);
+  const float n = cells_;
+  BatteryLevel raw = !(volts >= critical * n) ? BATTERY_CRITICAL : volts < low * n ? BATTERY_LOW : BATTERY_OK;
+  if (raw >= previous) return raw;
+  float m = hysteresis;
+  BatteryLevel margin =
+      !(volts >= (critical + m) * n) ? BATTERY_CRITICAL : volts < (low + m) * n ? BATTERY_LOW : BATTERY_OK;
+  return margin < previous ? margin : previous;
+}
+
+// battery@1 reading layout: present u8 (nothing optional here: 0), volts f32, amps f32,
+// charge f32, celsius f32 (all 0), level u8, cell count u8 (0): 19 bytes.
+uint8_t Battery::writeReading(uint8_t* out, uint32_t) {
+  float v = measureVolts();
+  if (!isFinite(v) || v < 0) return 0;
+  level_ = levelAt(v, static_cast<BatteryLevel>(level_));
+  out[0] = 0;
+  putF32(out + 1, v);
+  putF32(out + 5, 0);
+  putF32(out + 9, 0);
+  putF32(out + 13, 0);
+  out[17] = level_;
+  out[18] = 0;
+  return 19;
 }
 
 // ---------------------------------------------------------------------------------------------

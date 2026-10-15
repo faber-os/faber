@@ -49,6 +49,16 @@ class SimMotor : public faberlink::Motor {
   }
 };
 
+class SimBattery : public faberlink::Battery {
+ public:
+  SimBattery(faberlink::BatteryChemistry chemistry, uint8_t cells, float capacityAh)
+      : faberlink::Battery("battery", chemistry, cells, capacityAh, 100), volts(12.0f) {}
+  float volts;
+
+ protected:
+  float measureVolts() override { return volts; }
+};
+
 class SimDistance : public faberlink::Distance {
  public:
   explicit SimDistance(const char* name)
@@ -59,21 +69,26 @@ class SimDistance : public faberlink::Distance {
   float measure() override { return meters; }
 };
 
-// The small board hosts `left` (part 0) and `front` (part 1). The Mega also hosts `right` (part 1)
-// and `rear` (part 3): motors left, right, then distances front, rear.
+// The small board hosts `left` (part 0) and `front` (part 1), and with a battery `battery` (part 2).
+// The Mega also hosts `right` (part 1) and `rear` (part 3): motors left, right, then distances
+// front, rear.
 struct Harness {
-  Harness(uint16_t heartbeatTimeoutMs, bool mega, uint16_t motorLeaseMs)
+  Harness(uint16_t heartbeatTimeoutMs, bool mega, uint16_t motorLeaseMs, bool withBattery = false,
+          faberlink::BatteryChemistry chemistry = faberlink::BATTERY_LI_ION, uint8_t cells = 3,
+          float capacityAh = 0)
       : board(out),
         motor("left", motorLeaseMs),
         motor2("right", motorLeaseMs),
         distance("front"),
-        distance2("rear") {
+        distance2("rear"),
+        battery(chemistry, cells, capacityAh) {
     board.setIdentity(mega ? "sim-mega" : "sim-board", "faberlink-harness", "0.1.0");
     board.setHeartbeatTimeout(heartbeatTimeoutMs);
     board.add(motor);
     if (mega) board.add(motor2);
     board.add(distance);
     if (mega) board.add(distance2);
+    if (withBattery) board.add(battery);
     board.begin();
   }
   SimMotor& motorAt(int i) { return i == 1 ? motor2 : motor; }
@@ -84,6 +99,7 @@ struct Harness {
   SimMotor motor2;
   SimDistance distance;
   SimDistance distance2;
+  SimBattery battery;
 };
 
 }  // namespace
@@ -97,6 +113,20 @@ void* flh_new(uint16_t heartbeat_timeout_ms) {
 // The Mega; its motors stop by themselves after motor_lease_ms without a command.
 void* flh_new_mega(uint16_t heartbeat_timeout_ms, uint16_t motor_lease_ms) {
   return new Harness(heartbeat_timeout_ms, true, motor_lease_ms);
+}
+
+// The small board with a battery (part 2) of this chemistry (a faberlink::BatteryChemistry),
+// cell count and capacity (0 = unknown). It reports every 100 ms.
+void* flh_new_with_battery(uint16_t heartbeat_timeout_ms, uint8_t chemistry, uint8_t cells, float capacity_ah) {
+  return new Harness(heartbeat_timeout_ms, false, faberlink::DEFAULT_LEASE_MS, true,
+                     static_cast<faberlink::BatteryChemistry>(chemistry), cells, capacity_ah);
+}
+
+void flh_set_battery_volts(void* h, float volts) { static_cast<Harness*>(h)->battery.volts = volts; }
+
+// The library's own level for `volts`, coming from `previous`.
+uint8_t flh_battery_level_at(void* h, float volts, uint8_t previous) {
+  return static_cast<Harness*>(h)->battery.levelAt(volts, static_cast<faberlink::BatteryLevel>(previous));
 }
 
 // Motor `i` (0 left, 1 right) and distance sensor `i` (0 front, 1 rear).
