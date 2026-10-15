@@ -137,26 +137,29 @@
         ><span class="n">1</span>
         {simulated ? t('addPart.source.mode') : t('addPart.port.legend')}</legend
       >
-      <label class="switch-row" class:locked={needsBridge}>
+      <!-- The help sits outside the label, so the switch is just called "Simulated". -->
+      <div class="switch-row" class:locked={needsBridge}>
         <input
+          id="simulated"
           type="checkbox"
           role="switch"
           checked={simulated}
           disabled={needsBridge}
+          aria-describedby="simulated-help"
           onchange={(e) => {
             simulatedChoice = e.currentTarget.checked;
             if (errorField === 'port') error = null;
           }}
         />
         <span class="choice-body">
-          <span class="choice-title">{t('addPart.source.simulated')}</span>
-          <span class="help">
+          <label class="choice-title" for="simulated">{t('addPart.source.simulated')}</label>
+          <span class="help" id="simulated-help">
             {needsBridge && chosen
               ? t('addPart.source.locked', { connector: chosen.name })
               : t('addPart.source.simulated.help')}
           </span>
         </span>
-      </label>
+      </div>
       {#if simulated}
         <div class="choices modes">
           {#each modes as m (m.id)}
@@ -562,9 +565,11 @@
     gap: var(--space-3);
     align-items: flex-start;
     margin-bottom: var(--space-3);
+  }
+  .switch-row label {
     cursor: pointer;
   }
-  .switch-row.locked {
+  .switch-row.locked label {
     cursor: default;
   }
   .switch-row input {
