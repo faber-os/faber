@@ -30,12 +30,14 @@ access, in Phase 6).
 |---|---|
 | `GET /api/v0/system` | `SystemInfo`. Its `api` is a fingerprint of the API types the core was built with (`core/build.rs`); the shell computes its own the same way and, when they differ, asks for the core to be restarted instead of failing request by request. `timeZone` is the machine's own IANA time zone (e.g. `Europe/Copenhagen`), read from its OS each time; `UTC` (with a log line) if the OS doesn't say. |
 | `GET /api/v0/about` | `AboutInfo`: `version`, `api` (the fingerprint), `dataFolder` (where config and files live on this computer), `uptimeS` (seconds since the core started), `os`, `timeZone` (the machine's own). |
-| `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run |
+| `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run. Each `provides` entry carries its capability's `info` (limits, e.g. a distance sensor's range) with the default settings. `port` is `{"kind": "serial", "baud": …}` or `{"kind": "bridge"}` (needs a FaberLink bridge, Phase 4; until then only simulated). |
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
 | `GET /api/v0/parts` | `PartInfo[]` |
-| `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. Errors: `400 invalid-name`, `400 unknown-connector`, `400 unknown-port`, `409 name-taken`, `409 port-claimed` |
-| `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part` |
+| `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name`, `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: it needs a FaberLink bridge, Phase 4), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
+| `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`). |
+
+`PartInfo` has `port` for a real part and `simulate` for a simulated one, never both.
 
 Adding or removing a part **writes `parts.toml`** (keeping comments and formatting) and then
 reconciles. The file stays the source of truth (D13).
@@ -65,9 +67,12 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `settings` | — | a `settings` message now and after every change |
 | `files` | — | `files-changed` with the folders whose contents changed (through the core). `home:/` means "a lot changed": refresh everything shown. |
 | `logs` | — | the recent log (up to 1000 entries) as `log` messages, then each new entry. Every new subscription gets the recent log again, so a client that reconnects should start its log view afresh. |
+| `leases` | — | a `leases` message with every live lease now, then `lease-granted` (`lease`) and `lease-ended` (`lease`, `reason`) as they happen. Lease ids are never sent here. If the client falls behind, it gets a fresh `leases` list. |
+| `estop` | — | an `estop` message (`status`: `engaged`, `engagedBy?`) now and on every engage and release. Every-message: none is lost. |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
-`serial-opened`, `serial-data`, `serial-closed`, `error`. Each carries the `id` of the subscription
+`serial-opened`, `serial-data`, `serial-closed`, `leases`, `lease-granted`, `lease-ended`, `estop`,
+`error`. Each carries the `id` of the subscription
 or serial session it belongs to. `error` may come without an `id`.
 
 **Serial sessions**, step by step:
@@ -97,6 +102,60 @@ the part's name.
 | `internal` | A bug in the core. The log has details. |
 
 Every error carries `message` and `hint`, like REST errors.
+
+## Driving: leases, commands and the e-stop
+
+The design is [simulation.md](simulation.md), sections 5 and 6; the rules come from
+[capabilities.md](capabilities.md), "The lease". A working program is
+[`examples/drive-square.py`](../examples/drive-square.py).
+
+**Leases.** Anything that can move (`motor@1`, `planar-base@1`) is commanded only by the holder
+of its **lease**: an exclusive right that lasts **250 ms** unless a command or a renewal keeps it
+alive. When a lease ends for any reason, the part gets its **safe state** (stopped) and every
+`leases` subscriber hears `lease-ended`. A lease on a part *built from* others (a base's
+`builtFrom` motors) locks those too.
+
+| Method and path | Body / result |
+|---|---|
+| `POST /api/v0/parts/{name}/lease` | `{"holder": "drive-square.py", "takeOver"?: true}` → `201 LeaseGrant` (`lease` id, `part`, `holder`, `deadlineUs`, `durationMs`, `locks`). `takeOver` ends the lease in the way (operators taking over; its holder gets `lease-ended` with `taken-over`). Errors: `404 unknown-part`, `400 not-leasable` (nothing on it moves), `400 bad-request` (empty `holder`), `409 lease-held` (the message says who drives it), `423 estop-engaged` |
+| `POST /api/v0/parts/{name}/lease/renew` | `{"lease": …}` → `200 LeaseGrant` with the new deadline. Errors: `403 lease-required`, `403 lease-ended`, `404 unknown-part` |
+| `DELETE /api/v0/parts/{name}/lease?lease=…` | `204`; the part gets its safe state. Errors: `403 lease-required`, `403 lease-ended`, `404 unknown-part` |
+| `GET /api/v0/leases` | `LeaseInfo[]`: who drives what (`part`, `holder`, `deadlineUs`, `locks`), without ids |
+| `POST /api/v0/parts/{name}/command` | `{"lease": …, "command": Command}` → `200 CommandResult` (`applied`, `clamped`, `deadlineUs`). Errors: `400 bad-command` (a capability or kind this part doesn't take, or a value that is not a number), `403 lease-required`, `403 lease-ended`, `404 unknown-part`, `409 part-not-ready` (not running now, or a world part waiting for the world), `423 estop-engaged` |
+
+A `Command` is tagged like a reading:
+`{"capability": "planar-base@1", "command": {"kind": "set-velocity", "vx": 0.2, "vy": 0, "omega": 0}}`
+(m/s and rad/s, machine frame: x forward, y left), or for a motor
+`{"capability": "motor@1", "command": {"kind": "set-velocity" | "set-duty" | "set-position", "velocityRadS" | "duty" | "positionRad": …}}`.
+Every accepted command **renews the lease**. Values beyond the part's info (its `maxVelocity`, a
+motor's `maxVelocityRadS`, duty −1..1) are **clamped**, not refused: `applied` is what the part
+got, and `clamped` says whether it differs from what was sent. A base that is not `holonomic` gets
+`vy` 0.
+
+`lease-ended` messages and `403 lease-ended` errors give the **reason**: `released`, `expired`,
+`estop`, `taken-over`, `part-removed`, `part-restarted` (its config changed), `part-failed`,
+`shutdown`. Expired leases are ended within 50 ms of their deadline.
+
+**The e-stop.**
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/estop` | `EstopStatus`: `engaged`, `engagedBy?` (an `estop@1` reading: `tUs`, `source`, `reason`), `history` (recent engages and releases, oldest first) |
+| `POST /api/v0/estop` | `{"reason"?: …, "source"?: "app" \| "shell" \| "part"}` → `200 EstopStatus`. **Always allowed, from anyone, and never fails**: an empty body is fine, and a body the core can't read still engages it. Every lease ends (`estop`), every actuator gets its safe state, and new leases and commands get `423 estop-engaged` until it is released. Engaging it again keeps the first reason. |
+| `POST /api/v0/estop/release` | `{"source"?: …}` (optional) → `200 EstopStatus`. Until Phase 6 (operators) anyone may release it; the shell asks to confirm. Errors: `400 bad-request` (an unreadable body). |
+
+**Manual simulated sensors.** A part with `simulate = "manual"` publishes a value you set; an
+actuator reports the commands it gets (a base: `commanded`, and `measured` following it within
+its acceleration limit).
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/parts/{name}/simulation` | `{"pattern": Pattern}` |
+| `PUT /api/v0/parts/{name}/simulation` | `{"pattern": Pattern}` → `200` with the same. `Pattern` is tagged by `kind`: `steady` (`value`), `sine` (`center`, `amplitude`, `periodS`), `noise` (`center`, `amplitude`), `step` (`low` for half of `periodS`, then `high`). Values are in the capability's unit (m for `distance` and `laser-scan`). Errors: `404 unknown-part`, `409 not-manual` (not `simulate = "manual"`), `400 not-a-sensor` (an actuator), `400 bad-pattern` |
+
+A distance reading outside the sensor's range is reported as `too-close` / `too-far` at the edge
+of the range; a manual `laser-scan` is a ring of points at the value. `simulate = "world"` parts
+are `degraded` ("Waiting for the world") until this core has a world engine.
 
 ## Files
 

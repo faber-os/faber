@@ -4,7 +4,7 @@
 //! `shell/src/lib/api/generated/` by `cargo test` (ts-rs), and CI fails if they are out of date.
 //! Field names are camelCase on the wire.
 
-use faber_capabilities::{Capability, Info, Mount, Reading};
+use faber_capabilities::{Capability, Command, Info, Mount, Reading};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -297,6 +297,10 @@ pub enum Topic {
     Settings,
     /// `files-changed` whenever files change through the core.
     Files,
+    /// Who drives what: a `leases` list now, then `lease-granted` and `lease-ended`.
+    Leases,
+    /// The e-stop: an `estop` message now and on every change (none is lost).
+    Estop,
 }
 
 /// Messages from the shell to the core.
@@ -402,6 +406,25 @@ pub enum ServerMessage {
         path: String,
         #[ts(type = "number")]
         bytes: u64,
+    },
+    /// Every live lease (sent when the `leases` topic is subscribed).
+    Leases {
+        id: u32,
+        leases: Vec<LeaseInfo>,
+    },
+    LeaseGranted {
+        id: u32,
+        lease: LeaseInfo,
+    },
+    /// A lease ended, and its parts got their safe state.
+    LeaseEnded {
+        id: u32,
+        lease: LeaseInfo,
+        reason: LeaseEndReason,
+    },
+    Estop {
+        id: u32,
+        status: EstopStatus,
     },
     /// Something the client asked for failed. `id` is absent when it isn't tied to one request.
     Error {
@@ -567,6 +590,175 @@ pub struct BackupInfo {
     pub path: String,
     #[ts(type = "number")]
     pub bytes: u64,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Leases, commands and the e-stop (docs/api.md, "Driving"; docs/simulation.md, sections 5–6).
+
+/// Body of `POST /api/v0/parts/{name}/lease`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LeaseRequest {
+    /// Who drives, in words people recognise: "Drive window", "drive-square.py".
+    pub holder: String,
+    /// End whoever holds it now (operators taking over). They hear `taken-over`.
+    #[ts(as = "Option<bool>", optional)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub take_over: bool,
+}
+
+/// Body of `POST /api/v0/parts/{name}/lease/renew`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LeaseRenewal {
+    pub lease: String,
+}
+
+/// A lease you hold: `201` from requesting it, `200` from renewing it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LeaseGrant {
+    /// The lease id. Send it with every command; keep it to yourself.
+    pub lease: String,
+    pub part: String,
+    pub holder: String,
+    /// When it ends unless a command or a renewal comes first (µs, core clock).
+    #[ts(type = "number")]
+    pub deadline_us: u64,
+    /// How long each command or renewal extends it.
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    /// The parts this one is built from, locked too.
+    pub locks: Vec<String>,
+}
+
+/// A lease as everyone may see it (no id).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct LeaseInfo {
+    pub part: String,
+    pub holder: String,
+    #[ts(type = "number")]
+    pub deadline_us: u64,
+    pub locks: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum LeaseEndReason {
+    Released,
+    /// No command or renewal before the deadline.
+    Expired,
+    Estop,
+    TakenOver,
+    PartRemoved,
+    PartRestarted,
+    PartFailed,
+    Shutdown,
+}
+
+/// Body of `POST /api/v0/parts/{name}/command`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CommandRequest {
+    pub lease: String,
+    pub command: Command,
+}
+
+/// What a command did.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct CommandResult {
+    /// The command as applied: clamped to the part's limits.
+    pub applied: Command,
+    /// True when the command was beyond the limits and `applied` differs from it.
+    pub clamped: bool,
+    /// The lease's new deadline (µs, core clock).
+    #[ts(type = "number")]
+    pub deadline_us: u64,
+}
+
+/// How a manual simulated sensor's value changes (in the capability's unit, e.g. m).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+#[ts(export)]
+pub enum Pattern {
+    Steady {
+        value: f32,
+    },
+    /// `center ± amplitude`, one wave every `periodS`.
+    #[serde(rename_all = "camelCase")]
+    Sine {
+        center: f32,
+        amplitude: f32,
+        period_s: f32,
+    },
+    /// `center ± amplitude`, random.
+    Noise {
+        center: f32,
+        amplitude: f32,
+    },
+    /// `low` for half of `periodS`, then `high`.
+    #[serde(rename_all = "camelCase")]
+    Step {
+        low: f32,
+        high: f32,
+        period_s: f32,
+    },
+}
+
+/// Body and answer of `PUT /api/v0/parts/{name}/simulation`, answer of `GET`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct Simulation {
+    pub pattern: Pattern,
+}
+
+/// Body of `POST /api/v0/estop`. Everything is optional: engaging is always allowed.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EstopRequest {
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Who is engaging it; `app` when left out.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<faber_capabilities::estop::Source>,
+}
+
+/// Body of `POST /api/v0/estop/release` (optional).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EstopReleaseRequest {
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<faber_capabilities::estop::Source>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct EstopStatus {
+    pub engaged: bool,
+    /// The change that engaged it, while it is engaged: who and why.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engaged_by: Option<faber_capabilities::estop::Reading>,
+    /// Recent engages and releases, oldest first. Left out on the WebSocket.
+    #[ts(as = "Option<Vec<faber_capabilities::estop::Reading>>", optional)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<faber_capabilities::estop::Reading>,
 }
 
 // Settings types live in `crate::settings` (layer 2 owns its data); re-exported for the wire.

@@ -3,6 +3,7 @@
 //! blocking pool so they never stall the async runtime.
 
 mod convert;
+mod driving;
 pub mod dto;
 mod files;
 mod shell;
@@ -36,6 +37,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/parts/{name}", delete(remove_part))
         .route("/api/v0/ws", get(ws::upgrade))
         .merge(files::routes())
+        .merge(driving::routes())
         .merge(translations::routes())
         .fallback(shell::serve)
         .with_state(state)
