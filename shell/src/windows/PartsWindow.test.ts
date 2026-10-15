@@ -445,6 +445,28 @@ describe('Parts menus and recordings', () => {
   });
 });
 
+describe('Adding a part from another window', () => {
+  it('starts the form simulated in the world, on the drive base, when asked to', async () => {
+    const shell = fakeShell([{ path: '/api/v0/connectors', body: [LD19, GENERIC_BASE] }]);
+    const id = shell.desktop.open('parts');
+    shell.desktop.update(id, {
+      params: { addSimulate: 'world', addConnector: 'generic-planar-base' },
+    });
+    const win = shell.desktop.state.windows[0]!;
+    render(PartsWindow, { props: { win, visible: true }, context: shell.context });
+    shell.pushPorts([]);
+    shell.pushParts([]);
+    const form = await screen.findByRole('form', { name: 'Add part' });
+    expect(within(form).getByRole('switch', { name: /Simulated/ })).toBeChecked();
+    expect(within(form).getByRole('radio', { name: /In the world/ })).toBeChecked();
+    await waitFor(() =>
+      expect(within(form).getByRole('radio', { name: /generic-planar-base/ })).toBeChecked(),
+    );
+    expect(within(form).getByLabelText(/Length/)).toHaveValue(0.8);
+    expect(shell.desktop.state.windows[0]!.params).toEqual({});
+  });
+});
+
 describe('Port problems', () => {
   it('explains hardware that is plugged in but never became a port, grouped by kind', async () => {
     const shell = setup();

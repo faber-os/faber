@@ -1,8 +1,9 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { useCore } from '../lib/state/context';
   import { t } from '../lib/i18n';
   import { portKindLabel } from '../lib/state/portHints';
-  import type { ErrorBody, PartInfo, SignalInfo } from '../lib/state/types';
+  import type { ErrorBody, PartInfo, SignalInfo, Simulate } from '../lib/state/types';
   import { canMove } from '../lib/state/driving';
   import { isManualSensor } from '../lib/state/simulation';
   import { item, separator } from '../lib/desktop/contextMenu';
@@ -26,12 +27,21 @@
 
   let adding = $state(false);
   let addPort = $state<string | null>(null);
+  let addSimulate = $state<Simulate | null>(null);
+  let addConnector = $state<string | null>(null);
+  /** A fresh form each time another window asks for one, even while one is open. */
+  let formKey = $state(0);
 
-  // Opened from a recording's Properties ("Add a part on this recording"): start the form there.
+  // Opened to add something particular: from a recording's Properties ("Add a part on this
+  // recording": `addPort`), or from the World window ("Add a simulated base": `addSimulate`
+  // and `addConnector`). Start the form there.
   $effect(() => {
-    const port = win.params.addPort;
-    if (!port) return;
-    addPort = port;
+    const { addPort: port, addSimulate: simulate, addConnector: connector } = win.params;
+    if (!port && !simulate) return;
+    addPort = port ?? null;
+    addSimulate = simulate === 'world' || simulate === 'manual' ? simulate : null;
+    addConnector = connector ?? null;
+    untrack(() => formKey++);
     adding = true;
     desktop.update(win.id, { params: {} });
   });
@@ -140,22 +150,27 @@
   const LINK = '\u0000';
   const noHardware = $derived(around(t('parts.empty.noHardware', { link: LINK }), LINK));
 
-  function added(name: string) {
+  function closeForm() {
     adding = false;
-    addPort = null;
+    addPort = addSimulate = addConnector = null;
+  }
+
+  function added(name: string) {
+    closeForm();
     justAdded = name;
   }
 </script>
 
 {#if adding}
-  <AddPartForm
-    initialPort={addPort}
-    onadded={added}
-    oncancel={() => {
-      adding = false;
-      addPort = null;
-    }}
-  />
+  {#key formKey}
+    <AddPartForm
+      initialPort={addPort}
+      initialSimulate={addSimulate}
+      initialConnector={addConnector}
+      onadded={added}
+      oncancel={closeForm}
+    />
+  {/key}
 {:else}
   <div class="parts">
     <div class="toolbar">
