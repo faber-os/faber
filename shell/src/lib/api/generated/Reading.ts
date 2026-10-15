@@ -5,8 +5,9 @@ import type { LaserScanReading } from "./LaserScanReading";
 import type { MotorReading } from "./MotorReading";
 import type { PlanarBaseReading } from "./PlanarBaseReading";
 import type { PoseReading } from "./PoseReading";
+import type { PositionReading } from "./PositionReading";
 
 /**
  * One reading of any capability, tagged with the capability it belongs to.
  */
-export type Reading = { "capability": "laser-scan@1", "reading": LaserScanReading } | { "capability": "distance@1", "reading": DistanceReading } | { "capability": "motor@1", "reading": MotorReading } | { "capability": "planar-base@1", "reading": PlanarBaseReading } | { "capability": "estop@1", "reading": EstopReading } | { "capability": "pose@1", "reading": PoseReading };
+export type Reading = { "capability": "laser-scan@1", "reading": LaserScanReading } | { "capability": "distance@1", "reading": DistanceReading } | { "capability": "motor@1", "reading": MotorReading } | { "capability": "planar-base@1", "reading": PlanarBaseReading } | { "capability": "estop@1", "reading": EstopReading } | { "capability": "pose@1", "reading": PoseReading } | { "capability": "position@1", "reading": PositionReading };
