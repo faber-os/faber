@@ -1,31 +1,23 @@
 <script lang="ts">
   import { t } from '../lib/i18n';
   import { useCore } from '../lib/state/context';
-  import Dialog from './Dialog.svelte';
   import Icon from './Icon.svelte';
 
   /**
    * The e-stop on the taskbar (docs/simulation.md, section 9): a red Stop whenever something can
    * move, which engages at once; while engaged, "Stopped" and a Release that asks first. The
-   * Pause/Break key engages it from anywhere (Escape never does: it closes menus).
+   * Pause/Break key engages it from anywhere (Escape never does: it closes menus). The question
+   * itself is EstopRelease, outside the taskbar, so it can cover the desktop.
    */
-  let { large = false }: { large?: boolean } = $props();
+  let { large = false, onrelease }: { large?: boolean; onrelease: () => void } = $props();
 
   const core = useCore();
   const engaged = $derived(core.estop?.engaged === true);
   const shown = $derived(engaged || core.movableParts.length > 0);
   const reason = $derived(core.estop?.engagedBy?.reason ?? '');
 
-  let confirming = $state(false);
-
   function engage(why: string) {
     void core.engageEstop(why);
-  }
-
-  async function release() {
-    confirming = false;
-    const r = await core.releaseEstop();
-    if (!r.ok) core.lastError = r.error;
   }
 
   // Capture phase on the window: no window can stop the key on its way.
@@ -46,7 +38,7 @@
       <Icon name="stop" size={16} />
       {t('estop.engaged')}
     </span>
-    <button class="release" onclick={() => (confirming = true)}>{t('estop.release')}</button>
+    <button class="release" onclick={onrelease}>{t('estop.release')}</button>
   </div>
 {:else if shown}
   <button
@@ -58,20 +50,6 @@
     <Icon name="stop" size={large ? 20 : 16} />
     {t('estop.stop')}
   </button>
-{/if}
-
-{#if confirming}
-  <div class="sheet">
-    <Dialog title={t('estop.release.title')} oncancel={() => (confirming = false)} tone="danger">
-      <p>{t('estop.release.body')}</p>
-      {#snippet actions()}
-        <button class="btn" data-autofocus onclick={() => (confirming = false)}
-          >{t('estop.release.cancel')}</button
-        >
-        <button class="btn danger solid" onclick={release}>{t('estop.release.confirm')}</button>
-      {/snippet}
-    </Dialog>
-  </div>
 {/if}
 
 <style>
@@ -127,11 +105,5 @@
   }
   .large .release {
     height: 48px;
-  }
-  /* The question covers the whole desktop, above every window. */
-  .sheet {
-    position: absolute;
-    inset: 0;
-    z-index: 100000;
   }
 </style>

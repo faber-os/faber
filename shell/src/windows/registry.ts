@@ -81,6 +81,8 @@ export const WINDOW_DEFS: WindowDef[] = [
     minSize: { w: 320, h: 280 },
     component: PlanarBaseWindow,
   },
+  // The World window (docs/simulation.md, section 9: top view, world picker, Reset position) goes
+  // next to Drive, as a tool with its own program key (`tool:world`), once the world API lands.
   {
     kind: 'drive',
     get title() {

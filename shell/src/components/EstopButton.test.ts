@@ -81,6 +81,8 @@ describe('E-stop on the taskbar', () => {
     shell.pushEstop(true);
     await userEvent.click(await within(nav()).findByRole('button', { name: 'Release' }));
     const ask = screen.getByRole('alertdialog', { name: 'Release the e-stop?' });
+    // It covers the desktop, not just the taskbar it was asked from.
+    expect(nav().contains(ask)).toBe(false);
     await userEvent.click(within(ask).getByRole('button', { name: 'Keep stopped' }));
     expect(posts(shell, '/api/v0/estop/release')).toEqual([]);
 

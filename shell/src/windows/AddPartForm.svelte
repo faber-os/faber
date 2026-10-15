@@ -141,6 +141,7 @@
       <div class="switch-row" class:locked={needsBridge}>
         <input
           id="simulated"
+          class="switch"
           type="checkbox"
           role="switch"
           checked={simulated}
@@ -280,8 +281,9 @@
             {@const id = `setting-${f.key}`}
             {@const bad = settingsProblem?.key === f.key}
             {#if f.kind === 'boolean'}
-              <label class="check wide">
+              <label class="check-row wide">
                 <input
+                  class="check"
                   type="checkbox"
                   checked={values[f.key] === true}
                   onchange={(e) => (values = { ...values, [f.key]: e.currentTarget.checked })}
@@ -572,13 +574,6 @@
   .switch-row.locked label {
     cursor: default;
   }
-  .switch-row input {
-    flex: none;
-    width: 18px;
-    height: 18px;
-    margin: 3px 0 0;
-    accent-color: var(--accent);
-  }
   .modes {
     grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
   }
@@ -611,16 +606,11 @@
     font-size: var(--text-sm);
     color: var(--text-muted);
   }
-  .check {
+  .check-row {
     display: flex;
     align-items: center;
     gap: var(--space-2);
     font-size: var(--text-sm);
-  }
-  .check input {
-    width: 18px;
-    height: 18px;
-    accent-color: var(--accent);
   }
   @media (max-width: 480px) {
     .settings {
