@@ -193,7 +193,7 @@ pub fn ray_circle(origin: Vec2, dir: Vec2, centre: Vec2, radius: f64) -> Option<
 }
 
 /// An axis-aligned rectangle.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Bounds {
     pub min: Vec2,
     pub max: Vec2,
