@@ -1,13 +1,18 @@
 //! `faber check`: builds the connector (wasm: for `wasm32-unknown-unknown`, then wrapped as a
 //! component), loads it the way the core does, and replays every recording in `captures/`
 //! through it, reporting the readings and the health it ends with.
+//!
+//! For an app: reads its faber.toml with the core's reader, checks its UI, builds its logic (if
+//! it has any), loads it in the core's sandbox, and runs it for a moment with no parts picked
+//! for its roles, so a crash at start shows up here and not on the machine.
 
 use crate::CliError;
 use faber_capabilities::Reading;
 use faber_connector::capture::{self, Chunk};
+use faber_connector::manifest_file::APP_TYPE;
 use faber_connector::manifest_file::{self, PackageHeader};
 use faber_connector::{Context, Definition, Health, Problem, Settings};
-use faber_core::{declarative, wasm};
+use faber_core::{apps, declarative, packages, wasm};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -58,6 +63,9 @@ pub struct Report {
     /// The component's file name in the package (`connector.wasm` unless faber.toml says).
     pub module: Option<String>,
     pub captures: Vec<CaptureResult>,
+    /// An app's UI files, by their path in the package (`ui/index.html`, …). Empty for a
+    /// connector.
+    pub ui: Vec<String>,
 }
 
 impl Report {
@@ -68,6 +76,9 @@ impl Report {
     /// The report as the command prints it.
     pub fn lines(&self) -> Vec<String> {
         let mut out = Vec::new();
+        if self.header.kind == APP_TYPE {
+            return out; // its checks print as they go, and fail with an error
+        }
         if self.captures.is_empty() {
             out.push(
                 "No recordings in captures/. Record your device in Faber's serial monitor and put the .fbcap file there, so faber check can test the parser.".into(),
@@ -122,6 +133,10 @@ pub fn check(dir: &Path, opts: &Options, out: &mut dyn Write) -> Result<Report, 
     let toml = read("faber.toml")?;
     let header = manifest_file::header(&toml)
         .map_err(|p| CliError::new(format!("faber.toml: {}", p.message), p.hint))?;
+    if header.kind == APP_TYPE {
+        let _ = writeln!(out, "Checking {} {} (app)", header.id, header.version);
+        return check_app(dir, &toml, header, opts, out);
+    }
     let _ = writeln!(out, "Checking {} {} ({} connector)", header.id, header.version, header.kind);
     for file in REQUIRED {
         if !dir.join(file).is_file() {
@@ -163,7 +178,150 @@ pub fn check(dir: &Path, opts: &Options, out: &mut dyn Write) -> Result<Report, 
     for (name, chunks) in recordings(dir)? {
         captures.push(replay(&definition, name, &chunks));
     }
-    Ok(Report { header, component, module, captures })
+    Ok(Report { header, component, module, captures, ui: Vec::new() })
+}
+
+/// Plays the machine for an app under check: every lease and command is refused (no parts).
+struct NoParts;
+
+impl apps::Driver for NoParts {
+    fn acquire(&self, _: &faber_core::names::PartName, _: &str) -> Result<String, apps::DriveError> {
+        Err(apps::DriveError::NoSuchRole)
+    }
+    fn renew(&self, _: &faber_core::names::PartName, _: &str) -> Result<(), apps::DriveError> {
+        Err(apps::DriveError::NoSuchRole)
+    }
+    fn release(&self, _: &faber_core::names::PartName, _: &str) {}
+    fn command(
+        &self,
+        _: &faber_core::names::PartName,
+        _: &str,
+        _: faber_capabilities::Command,
+    ) -> Result<faber_capabilities::Command, apps::DriveError> {
+        Err(apps::DriveError::NoSuchRole)
+    }
+}
+
+/// How many ticks `faber check` runs an app for.
+const SMOKE_TICKS: u64 = 20;
+
+fn check_app(
+    dir: &Path,
+    toml: &str,
+    header: PackageHeader,
+    opts: &Options,
+    out: &mut dyn Write,
+) -> Result<Report, CliError> {
+    for file in REQUIRED {
+        if !dir.join(file).is_file() {
+            return Err(CliError::new(
+                format!("The app has no {file}."),
+                "A package needs faber.toml, README.md (shown before installing) and LICENSE. Add the missing file.",
+            ));
+        }
+    }
+    let manifest = apps::manifest::parse(toml).map_err(|e| {
+        let place = e.line.map(|l| format!(" line {l}")).unwrap_or_default();
+        CliError::new(format!("faber.toml{place}: {}", e.message), e.hint)
+    })?;
+    let _ = writeln!(
+        out,
+        "ok   faber.toml: {} roles, {} derived signals.",
+        manifest.requires.len(),
+        manifest.publishes.len()
+    );
+    let ui = if manifest.ui { ui_files(dir)? } else { Vec::new() };
+    if manifest.ui {
+        let _ = writeln!(out, "ok   ui/: {} files, starting at ui/index.html.", ui.len());
+    }
+    let (component, module) = match &manifest.module {
+        None => (None, None),
+        Some(module) => {
+            let component = build_component(dir, opts, out)?;
+            let compiled = apps::compile(&manifest.name, &component, faber_core::sandbox::Limits::default())?;
+            let _ = writeln!(
+                out,
+                "ok   The component ({} KB) loads in the sandbox and asks only for the app world.",
+                component.len().div_ceil(1024)
+            );
+            smoke_run(&manifest, &compiled)?;
+            let _ = writeln!(
+                out,
+                "ok   It starts, runs {SMOKE_TICKS} ticks and stops, with no parts picked for its roles."
+            );
+            (Some(component), Some(module.clone()))
+        }
+    };
+    Ok(Report { header, component, module, captures: Vec::new(), ui })
+}
+
+/// Runs the app's logic for a moment with its roles empty, as on a machine before its parts
+/// are picked.
+fn smoke_run(manifest: &apps::manifest::AppManifest, compiled: &apps::Compiled) -> Result<(), CliError> {
+    let roles = manifest
+        .requires
+        .iter()
+        .map(|spec| apps::BoundRole { spec: spec.clone(), parts: Vec::new() })
+        .collect();
+    let session = apps::Session::new(
+        &manifest.id,
+        roles,
+        manifest.publishes.clone(),
+        std::sync::Arc::new(faber_core::router::Router::new()),
+        std::sync::Arc::new(NoParts),
+        apps::StateStore::in_memory(),
+    );
+    let crashed = |p: Problem| {
+        CliError::new(
+            format!("The app crashed with no parts picked: {}", p.message),
+            "An app starts before its parts are picked, and parts can go away: handle a role without a reading.",
+        )
+    };
+    let mut logic = compiled.instantiate(session).map_err(crashed)?;
+    use apps::Logic;
+    logic.start(0).map_err(crashed)?;
+    for i in 1..=SMOKE_TICKS {
+        logic.tick(i * 1_000_000 / u64::from(manifest.tick_hz)).map_err(crashed)?;
+    }
+    logic.stop().map_err(crashed)
+}
+
+/// Every file in `ui/`, as `ui/<path>`, checked like the installer checks them.
+fn ui_files(dir: &Path) -> Result<Vec<String>, CliError> {
+    fn walk(root: &Path, rel: &str, out: &mut Vec<String>) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(root.join(rel))? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+            if entry.file_type()?.is_dir() {
+                walk(root, &path, out)?;
+            } else {
+                out.push(path);
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    walk(&dir.join("ui"), "", &mut files).map_err(|e| {
+        CliError::new(
+            format!("The app's ui/ folder can't be read ({e})."),
+            "Add ui/index.html, or remove ui = \"ui/\" from faber.toml.",
+        )
+    })?;
+    files.sort();
+    if !files.iter().any(|f| f == "index.html") {
+        return Err(CliError::new(
+            "The app has no ui/index.html.",
+            "An app's UI starts at ui/index.html. Add it.",
+        ));
+    }
+    if let Some(bad) = files.iter().find(|f| !packages::ui_path_ok(f)) {
+        return Err(CliError::new(
+            format!("ui/{bad} can't go in the package."),
+            "UI files have plain names (letters, digits, ., - and _, none starting with .) and a web file type (html, css, js, svg, png, …).",
+        ));
+    }
+    Ok(files.into_iter().map(|f| format!("ui/{f}")).collect())
 }
 
 /// Every `captures/*.fbcap`, by name.
@@ -336,7 +494,7 @@ fn build_component(dir: &Path, opts: &Options, out: &mut dyn Write) -> Result<Ve
         .map_err(|e| {
             CliError::new(
                 format!("The built module can't be made into a component: {e}"),
-                "Check that src/lib.rs has faber_connector_wasm::export!(definition); for wasm32, as the template does.",
+                "Check that src/lib.rs exports it for wasm32, as the template does: faber_connector_wasm::export!(definition); for a connector, faber_app_wasm::export!(MyApp); for an app.",
             )
         })
 }

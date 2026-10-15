@@ -1,0 +1,26 @@
+faber-manifest = 1                # the faber.toml format version
+
+[package]
+id = "my-app"
+type = "app"
+version = "0.1.0"
+name = "My app"
+module = "app.wasm"               # the logic: src/lib.rs, built by faber check and faber pack
+ui = "ui/"                        # the window: ui/index.html
+tick-hz = 10                      # how often the logic runs (1 to 100 times a second)
+
+[window]
+title = "My app"
+width = 400
+height = 240
+
+# One or more distance sensors. When you install the app, you pick which parts fill this role.
+[[requires]]
+role = "sensors"
+capability = "distance@1"
+count = "1.."
+
+# What the app computes, for anyone to watch: app:my-app/nearest.
+[[publishes]]
+name = "nearest"
+capability = "distance@1"

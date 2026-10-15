@@ -1,0 +1,14 @@
+[package]
+name = "my-app"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# The Faber app SDK, from your Faber checkout for now (faber new wrote these paths). Once the
+# SDK is on crates.io these become plain version numbers.
+faber-app-wasm = { path = "../../sdk/rust/app-wasm" }
+faber-capabilities = { path = "../../sdk/rust/capabilities" }
+
+# A project of its own, not part of any other Cargo workspace.
+[workspace]

@@ -1,4 +1,4 @@
-//! `faber pack`: checks the connector, then writes `<id>-<version>.faberpkg` (docs/packages.md
+//! `faber pack`: checks the connector or app, then writes `<id>-<version>.faberpkg` (docs/packages.md
 //! §5) with the core's own package writer, so what packs also installs.
 
 use crate::CliError;
@@ -45,6 +45,9 @@ fn package_from(dir: &Path, report: &Report, out_dir: &Path) -> Result<PathBuf, 
     }
     if dir.join("icon.svg").is_file() {
         files.insert("icon.svg".into(), read("icon.svg")?);
+    }
+    for rel in &report.ui {
+        files.insert(rel.clone(), read(rel)?);
     }
     for c in &report.captures {
         let rel = format!("captures/{}", c.name);
