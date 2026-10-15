@@ -1,0 +1,119 @@
+# A warehouse, 30 × 20 m. Seven rows of pallet racks (1.0 m deep) run east–west with 1.5 m
+# aisles between them, split by a 2 m cross aisle at x 12–14; a 4 m aisle along the west wall
+# and an 8 m loading area in the east with pallets and two building columns. Racks are drawn
+# solid: at a LiDAR's height it sees the bottom beams and pallets. Generated once; edit freely.
+name = "warehouse"
+title = "Warehouse"
+description = "A 30 × 20 m warehouse: long pallet racks with 1.5 m aisles, a cross aisle, and a loading area with pallets and columns."
+start = { x = 2.0, y = 10.0, yaw = 0.0 }
+bounds = { min = [0.0, 0.0], max = [30.0, 20.0] }
+
+[[outline]]
+points = [[0.0, 0.0], [30.0, 0.0], [30.0, 20.0], [0.0, 20.0]]
+
+# --- Racks: rows at y = 2, 4.5, … 17; west half x 4–12, east half x 14–22
+[[box]]
+label = "rack"
+at = [8.0, 2.0]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [18.0, 2.0]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [8.0, 4.5]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [18.0, 4.5]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [8.0, 7.0]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [18.0, 7.0]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [8.0, 9.5]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [18.0, 9.5]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [8.0, 12.0]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [18.0, 12.0]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [8.0, 14.5]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [18.0, 14.5]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [8.0, 17.0]
+size = [8.0, 1.0]
+
+[[box]]
+label = "rack"
+at = [18.0, 17.0]
+size = [8.0, 1.0]
+
+# --- Loading area
+[[box]]
+label = "pallet"
+at = [25.0, 2.0]
+size = [1.2, 0.8]
+
+[[box]]
+label = "pallet"
+at = [27.5, 2.0]
+size = [1.2, 0.8]
+
+[[box]]
+label = "pallet"
+at = [25.0, 17.5]
+size = [1.2, 0.8]
+
+[[box]]
+label = "pallet"
+at = [28.5, 10.0]
+size = [1.2, 0.8]
+
+[[box]]
+label = "pallet"
+at = [24.6, 11.2]
+size = [1.2, 0.8]
+
+[[box]]
+label = "column"
+at = [26.0, 6.67]
+size = [0.4, 0.4]
+
+[[box]]
+label = "column"
+at = [26.0, 13.33]
+size = [0.4, 0.4]

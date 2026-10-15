@@ -1,0 +1,66 @@
+# A 12 × 8 m hall. The west half has boxes to weave between and two round bins; a partition
+# across the middle (x 6) leaves one 0.8 m gap (y 3.5–4.3) to squeeze through; in the east half
+# a person walks a 2.5 × 5 m loop at 1 m/s, round a box.
+name = "obstacle-course"
+title = "Obstacle course"
+description = "A 12 × 8 m hall: boxes to weave between, a 0.8 m gap in a partition, and a person walking a loop at 1 m/s."
+start = { x = 1.5, y = 4.0, yaw = 0.0 }
+bounds = { min = [0.0, 0.0], max = [12.0, 8.0] }
+
+[[outline]]
+points = [[0.0, 0.0], [12.0, 0.0], [12.0, 8.0], [0.0, 8.0]]
+
+# --- The partition and its gap
+[[box]]
+label = "partition"
+at = [6.0, 1.75]
+size = [0.1, 3.5]
+
+[[box]]
+label = "partition"
+at = [6.0, 6.15]
+size = [0.1, 3.7]
+
+# --- Boxes to weave between
+[[box]]
+label = "box"
+at = [3.0, 2.0]
+size = [0.6, 0.4]
+
+[[box]]
+label = "box"
+at = [3.5, 6.0]
+size = [0.5, 0.5]
+
+[[box]]
+label = "box"
+at = [4.2, 4.6]
+size = [0.5, 0.5]
+
+[[box]]
+label = "box"
+at = [4.8, 2.9]
+size = [0.4, 0.4]
+yaw = 0.5
+
+[[post]]
+label = "bin"
+at = [2.5, 6.8]
+radius = 0.2
+
+[[post]]
+label = "bin"
+at = [5.0, 7.2]
+radius = 0.15
+
+# --- East half: the person's loop goes round this box
+[[box]]
+label = "box"
+at = [9.25, 4.0]
+size = [0.6, 0.6]
+
+[[mover]]
+label = "person"
+radius = 0.25
+speed = 1.0
+path = [[8.0, 1.5], [10.5, 1.5], [10.5, 6.5], [8.0, 6.5]]

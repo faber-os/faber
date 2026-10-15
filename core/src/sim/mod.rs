@@ -6,3 +6,4 @@
 //! - [`worlds`]: the prebuilt worlds, built in as data files.
 
 pub mod world;
+pub mod worlds;

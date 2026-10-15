@@ -22,6 +22,10 @@ pub struct Geometry {
     /// Solid things (furniture, boxes, legs), each a closed polygon, drawn filled.
     #[serde(default)]
     pub shapes: Vec<Shape>,
+    /// Drawn only, never sensed or hit: table and desk tops, above the sensors and the machine
+    /// (the world is 2D, so only their legs are solid).
+    #[serde(default)]
+    pub overhead: Vec<Shape>,
     /// Things that move by themselves, such as a person walking a loop.
     #[serde(default)]
     pub movers: Vec<Mover>,
@@ -146,16 +150,19 @@ impl World {
 
     /// Whether a machine with `footprint` at `pose` touches anything at `t_s`.
     pub fn collides(&self, pose: Pose, footprint: Footprint, t_s: f64) -> bool {
+        self.collides_static(pose, footprint)
+            || self.geometry.movers.iter().any(|m| footprint.hits_circle(pose, m.position_at(t_s), m.radius))
+    }
+
+    /// Like [`collides`](Self::collides), ignoring the movers.
+    pub fn collides_static(&self, pose: Pose, footprint: Footprint) -> bool {
         let area = footprint.world_bounds(pose);
         if self.grid.any_near(area, |s| footprint.hits_segment(pose, s)) {
             return true;
         }
         // A footprint can sit entirely inside a shape (spawned inside a box) without crossing an
         // edge.
-        if self.geometry.shapes.iter().any(|s| s.contains(pose.position())) {
-            return true;
-        }
-        self.geometry.movers.iter().any(|m| footprint.hits_circle(pose, m.position_at(t_s), m.radius))
+        self.geometry.shapes.iter().any(|s| s.contains(pose.position()))
     }
 
     /// Every mover's position at `t_s`.
@@ -188,6 +195,7 @@ mod tests {
                     Vec2::new(3.0, 4.0),
                 ],
             }],
+            overhead: Vec::new(),
             movers: Vec::new(),
         }
     }
