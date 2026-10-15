@@ -207,6 +207,34 @@ describe('CoreState', () => {
     expect(core.apps![0]).toEqual(running);
   });
 
+  it("follows an app's state on its own topic, and sets it through the API", async () => {
+    const { core, ws } = setup();
+    const seen: unknown[] = [];
+    const stop = core.watchAppState('wall-follower', {
+      onValues: (v) => seen.push(['values', v]),
+      onChange: (k, v) => seen.push(['change', k, v]),
+      onError: (e) => seen.push(['error', e.code]),
+    });
+    const sub = sentTopics(ws).at(-1)!;
+    expect(sub.topic).toEqual({ kind: 'app-state', app: 'wall-follower' });
+    ws.receive(
+      bin({ type: 'app-state', id: sub.id, app: 'wall-follower', values: { speed: '0.2' } }),
+    );
+    ws.receive(bin({ type: 'app-state-changed', id: sub.id, app: 'wall-follower', key: 'speed' }));
+    expect(seen).toEqual([
+      ['values', { speed: '0.2' }],
+      ['change', 'speed', null],
+    ]);
+    stop();
+    const state = { values: { speed: '0.3' }, bytes: 8, maxBytes: 65536 };
+    f.route({ method: 'PUT', path: '/api/v0/apps/wall-follower/state', body: state });
+    expect(await core.setAppState('wall-follower', 'speed', '0.3')).toEqual({
+      ok: true,
+      value: state,
+    });
+    expect(f.calls.at(-1)!.body).toEqual({ key: 'speed', value: '0.3' });
+  });
+
   it('keeps the packages from their topic and reads the connectors again with them', async () => {
     const { core, ws } = setup();
     await vi.waitFor(() => expect(core.connectors).toEqual([]));

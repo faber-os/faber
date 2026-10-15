@@ -17,6 +17,7 @@ import type {
   PackagePreview,
   AppInfo,
   AppPackagePreview,
+  AppState,
   RoleParts,
   SignalValue,
   ErrorBody,
@@ -398,6 +399,35 @@ export class CoreState {
   /** Exactly these parts for an app's roles; roles left out get none. The topic follows. */
   setAppRoles(id: string, roles: Record<string, RoleParts>): Promise<Result<AppInfo>> {
     return this.call(() => this.http.setAppRoles(id, roles));
+  }
+
+  /** Sets one key of an app's saved state (`null` removes it); its logic sees it at once. */
+  setAppState(id: string, key: string, value: string | null): Promise<Result<AppState>> {
+    return this.call(() => this.http.setAppState(id, key, value));
+  }
+
+  /**
+   * An app's saved state, live (the `app-state` topic): all of it now, and again after missed
+   * changes, then every change its logic or any window makes.
+   */
+  watchAppState(
+    id: string,
+    handlers: {
+      onValues(values: Record<string, string>): void;
+      onChange(key: string, value: string | null): void;
+      onError(e: ErrorBody): void;
+    },
+  ): () => void {
+    return this.socket.subscribe(
+      { kind: 'app-state', app: id },
+      {
+        onMessage: (m) => {
+          if (m.type === 'app-state') handlers.onValues(m.values);
+          else if (m.type === 'app-state-changed') handlers.onChange(m.key, m.value ?? null);
+        },
+        onError: (e) => handlers.onError(e),
+      },
+    );
   }
 
   /** The newest reading of a signal, once (an app's derived signals too). */

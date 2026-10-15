@@ -24,6 +24,22 @@
       <p class="hint">It keeps the base's right side 0.3 m from the wall.</p>
     </section>
 
+    <section aria-labelledby="speed-label">
+      <label id="speed-label" class="label" for="speed">Speed along the wall</label>
+      <div class="row">
+        <input
+          id="speed"
+          type="range"
+          min="0.05"
+          max="0.5"
+          step="0.05"
+          value="0.25"
+          data-testid="speed"
+        />
+        <output id="speed-value" for="speed" class="small-value">0.25 m/s</output>
+      </div>
+    </section>
+
     <p id="problem" class="problem" hidden></p>
     <p class="hint">
       Turn it on and off in Apps. Press Stop on the taskbar at any time: the

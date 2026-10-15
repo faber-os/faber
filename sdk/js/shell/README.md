@@ -52,18 +52,20 @@ await base.release(); // the base stops
 
 ## API
 
-| Function                                                      | What it does                                                                                                                                                                                                      |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `faber.hello()`                                               | The app (`id`, `name`, `version`), its roles, its derived signals, its status and the theme, in one answer.                                                                                                       |
-| `faber.roles()`                                               | Each role: `role`, `capability`, `command` (may drive it), `count` (`1` or `1..`) and `parts` (how many parts fill it). Never which parts: an app sees roles only.                                                |
-| `faber.latest(role, {index})`                                 | The newest reading of the role's part (`index` picks one of a `1..` role's parts), or `null`.                                                                                                                     |
-| `faber.subscribe(role, cb, {index, maxHz, onError})`          | Calls `cb` with each new reading, at most `maxHz` a second (default 10, at most 20). Returns a function that stops it. `onError` hears why it couldn't start or ended.                                            |
-| `faber.published(name)`, `faber.subscribePublished(name, cb)` | The same for the app's own derived signals.                                                                                                                                                                       |
-| `faber.drive(role, {index})`                                  | Takes the lease on a `command = true` role's part, after the user's go-ahead. Answers a `Drive`: `command(c)` (answers `{applied, clamped}`), `release()`, `onEnd(cb)` and `ended`. The app must be turned on.    |
-| `faber.status()`, `faber.onStatus(cb)`                        | Whether the app is on (`enabled`) and how it runs (`state`: `running`, `stopped`, `invalid`, …, with `message`).                                                                                                  |
-| `faber.theme()`, `faber.onTheme(cb)`                          | `{scheme: 'light' \| 'dark', tokens}`: the shell's CSS custom properties (`--surface`, `--text`, `--text-muted`, `--accent`, `--line`, `--ok`, `--warn`, `--danger`, `--font-ui`, `--radius-md`, `--space-3`, …). |
-| `applyTheme(theme)`                                           | Sets those tokens on the page's root and its `color-scheme`, so `var(--surface)` works in your CSS.                                                                                                               |
-| `connect({parent, self, timeoutMs})`                          | A connection of your own (tests use it with a fake shell); `faber` is one made on first use.                                                                                                                      |
+| Function                                                              | What it does                                                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `faber.hello()`                                                       | The app (`id`, `name`, `version`), its roles, its derived signals, its status and the theme, in one answer.                                                                                                                                                                         |
+| `faber.roles()`                                                       | Each role: `role`, `capability`, `command` (may drive it), `count` (`1` or `1..`) and `parts` (how many parts fill it). Never which parts: an app sees roles only.                                                                                                                  |
+| `faber.latest(role, {index})`                                         | The newest reading of the role's part (`index` picks one of a `1..` role's parts), or `null`.                                                                                                                                                                                       |
+| `faber.subscribe(role, cb, {index, maxHz, onError})`                  | Calls `cb` with each new reading, at most `maxHz` a second (default 10, at most 20). Returns a function that stops it. `onError` hears why it couldn't start or ended.                                                                                                              |
+| `faber.published(name)`, `faber.subscribePublished(name, cb)`         | The same for the app's own derived signals.                                                                                                                                                                                                                                         |
+| `faber.drive(role, {index})`                                          | Takes the lease on a `command = true` role's part, after the user's go-ahead. Answers a `Drive`: `command(c)` (answers `{applied, clamped}`), `release()`, `onEnd(cb)` and `ended`. The app must be turned on.                                                                      |
+| `faber.status()`, `faber.onStatus(cb)`                                | Whether the app is on (`enabled`) and how it runs (`state`: `running`, `stopped`, `invalid`, …, with `message`).                                                                                                                                                                    |
+| `faber.theme()`, `faber.onTheme(cb)`                                  | `{scheme: 'light' \| 'dark', tokens}`: the shell's CSS custom properties (`--surface`, `--text`, `--text-muted`, `--accent`, `--line`, `--ok`, `--warn`, `--danger`, `--font-ui`, `--radius-md`, `--space-3`, …).                                                                   |
+| `faber.state.get(key)`, `.set(key, value)`, `.remove(key)`, `.keys()` | The app's saved state: strings by name, shared with the app's logic (its `state` interface) and every window of the app, kept by Faber across restarts and in backups. Keys are 1-256 bytes; keys and values together at most 64 KB. `get` answers `null` for a key that isn't set. |
+| `faber.state.onChange(cb)`                                            | Calls `cb(key, value)` for every change, whoever made it (the logic, this or another window); `value` is `null` when the key was removed. Returns a function that stops it.                                                                                                         |
+| `applyTheme(theme)`                                                   | Sets those tokens on the page's root and its `color-scheme`, so `var(--surface)` works in your CSS.                                                                                                                                                                                 |
+| `connect({parent, self, timeoutMs})`                                  | A connection of your own (tests use it with a fake shell); `faber` is one made on first use.                                                                                                                                                                                        |
 
 **Driving safely.** The lease on a part lasts 250 ms unless something renews it. A `Drive` renews
 it every 100 ms from your page's own timer, so if your page hangs or its window is closed the lease
@@ -76,25 +78,27 @@ being turned off end it too: `onEnd` says why, and `command` then fails with `le
 Every failure is a `FaberError` in Faber's house style: `message` says what happened, `hint`
 what to try next, and `code` is stable for programs.
 
-| `code`                                        | When                                                                                                     |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `no-shell`                                    | Nothing answered within 5 s: the page isn't open in a Faber app window.                                  |
-| `unknown-role`, `unknown-signal`              | The app has no such role, or doesn't publish that signal.                                                |
-| `no-part`                                     | No part fills the role (or not that many: `index`). Pick its parts in Faber's Apps window.               |
-| `not-commandable`                             | Driving a role without `command = true`.                                                                 |
-| `app-off`                                     | Driving while the app is turned off.                                                                     |
-| `not-confirmed`                               | The user didn't let the app drive.                                                                       |
-| `lease-required`, `lease-ended`               | A command without driving first, or after the lease ended.                                               |
-| `bad-request`, `unknown-request`              | A message the shell doesn't understand (a bug in the app, or an SDK newer than the shell).               |
-| `too-many-requests`, `too-many-subscriptions` | More than 200 messages a second, or 16 subscriptions at once.                                            |
-| the core's codes                              | `lease-held` (someone else drives it), `estop-engaged`, `bad-command`, `part-not-ready` … as in the API. |
+| `code`                                        | When                                                                                                        |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `no-shell`                                    | Nothing answered within 5 s: the page isn't open in a Faber app window.                                     |
+| `unknown-role`, `unknown-signal`              | The app has no such role, or doesn't publish that signal.                                                   |
+| `no-part`                                     | No part fills the role (or not that many: `index`). Pick its parts in Faber's Apps window.                  |
+| `not-commandable`                             | Driving a role without `command = true`.                                                                    |
+| `app-off`                                     | Driving while the app is turned off.                                                                        |
+| `not-confirmed`                               | The user didn't let the app drive.                                                                          |
+| `lease-required`, `lease-ended`               | A command without driving first, or after the lease ended.                                                  |
+| `bad-request`, `unknown-request`              | A message the shell doesn't understand (a bug in the app, or an SDK newer than the shell).                  |
+| `bad-key`, `state-full`                       | A state key that is empty or longer than 256 bytes, or a value that would make the state larger than 64 KB. |
+| `too-many-requests`, `too-many-subscriptions` | More than 200 messages a second, or 16 subscriptions at once.                                               |
+| the core's codes                              | `lease-held` (someone else drives it), `estop-engaged`, `bad-command`, `part-not-ready` … as in the API.    |
 
 ## The protocol
 
 Messages are plain objects posted to `window.parent`, each with `faber: 1`. A request has an `id`
 and a `type`; the shell answers each with `{faber: 1, re: id, ok: true, value}` or
 `{faber: 1, re: id, ok: false, error: {code, message, hint}}`, and sends events (`signal`,
-`signal-ended`, `status`, `theme`, `lease-ended`) on its own. Every message type is in
+`signal-ended`, `status`, `theme`, `lease-ended`, and `state` once asked with `state-watch`) on
+its own. Every message type is in
 [`src/protocol.ts`](src/protocol.ts), which the shell's host imports too.
 
 ## Develop it

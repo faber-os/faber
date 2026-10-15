@@ -33,8 +33,8 @@ It publishes how far the base's side is from the wall as the derived signal
    `{"roles": {"lidar": "lidar", "base": "base"}}`.
 5. **Turn it on:** tick "Turn it on now" when installing, or switch it on in Apps
    (`POST /api/v0/apps/wall-follower/enable`).
-6. **Open its window:** Apps → Wall follower → Open. It shows whether it is on and its distance
-   to the wall, live.
+6. **Open its window:** Apps → Wall follower → Open (or its icon in the start menu). It shows
+   whether it is on and its distance to the wall, live, and has a slider for its speed.
 
 ## What you should see
 
@@ -48,8 +48,10 @@ about 0.3 m. The Drive window shows `app:wall-follower` driving the base.
 - **It runs, but the base doesn't move:** someone else holds the base's lease (the Drive window?),
   or the e-stop is engaged. The app asks again every tick and drives as soon as it can.
 - **It drives into the wall or away from it:** the LiDAR must sit on the base's centre line,
-  looking forward. Change the tuning in the app's state (`<data>/apps/wall-follower/state.toml`):
-  `target-m`, `half-width-m` (from the LiDAR to the base's side), `front-m`, `speed`.
+  looking forward. Change the tuning in the app's state: `target-m`, `half-width-m` (from the
+  LiDAR to the base's side), `front-m` and `speed` (the window's slider sets that one), with
+  `PUT /api/v0/apps/wall-follower/state` and `{"key": "target-m", "value": "0.25"}`. The logic
+  reads them when it starts, and `speed` on every tick.
 
 ## The code, explained
 
@@ -59,8 +61,9 @@ about 0.3 m. The Drive window shows `app:wall-follower` driving the base.
   sideways to keep the gap (`vy`), turns so the rays at -60° and -120° are equally long (then
   the base is parallel to the wall), and stops and turns left when something is ahead. It is a
   plain function, so `cargo test` checks it against made-up scans, without wasm or a core.
-- `WallFollower` is the app. On every tick it polls the LiDAR role for a new scan (`poll` hands
-  each scan out once), steers by it, publishes the gap, and sends the velocity to the base role.
+- `WallFollower` is the app. On every tick it reads `speed` from its state, polls the LiDAR role
+  for a new scan (`poll` hands each scan out once; it publishes the gap once per scan), steers by
+  the newest scan, and sends the velocity to the base role.
   It sends between scans too: every command renews the lease, and a lease that isn't renewed
   ends and stops the base (the dead man's switch). If the lease ended (an operator took over,
   the e-stop), it asks for it again, and waits while someone else drives.
@@ -73,9 +76,9 @@ about 0.3 m. The Drive window shows `app:wall-follower` driving the base.
   only load its own files. Don't edit it: the SDK's tests rewrite it when the SDK changes.
 - `app.js` takes the shell's look (`faber.theme()`, `applyTheme`), shows whether the app is on
   (`faber.status()`, `faber.onStatus`), and follows the app's own derived signal
-  (`faber.subscribePublished('wall-distance', …)`, at most 5 times a second). The window only
-  watches; the logic drives the base whether the window is open or not.
-
-A speed slider would need the window to change the app's saved state (`state.toml`), which the
-logic reads. Faber can't do that from a window yet (the app protocol has no state messages), so
-the speed is still tuned in `state.toml` (above).
+  (`faber.subscribePublished('wall-distance', …)`, at most 5 times a second). The window doesn't
+  drive: the logic drives the base whether the window is open or not.
+- The speed slider is the app's saved state, which the window and the logic share
+  (`faber.state.get('speed')`, `faber.state.set('speed', …)` while sliding, at most every
+  100 ms, and `faber.state.onChange` to follow a change made elsewhere). Faber keeps it across
+  restarts and in backups.

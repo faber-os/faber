@@ -11,6 +11,8 @@
  * const base = await faber.drive('base');
  * await base.command({ capability: 'planar-base@1', command: { kind: 'set-velocity', vx: 0.2, vy: 0, omega: 0 } });
  * await base.release();
+ *
+ * await faber.state.set('speed', '0.3');   // shared with the app's logic, saved by Faber
  * ```
  *
  * No dependencies; one ES module. The protocol it speaks is in `protocol.ts`.
@@ -110,6 +112,26 @@ export interface Drive {
   onEnd(callback: (error: FaberError) => void): void;
 }
 
+/**
+ * The app's saved state: a few strings by name (64 KB together), kept by Faber across restarts
+ * and shared with the app's logic, so a setting made in the window is what the logic reads.
+ */
+export interface AppState {
+  /** One value, or `null` when it isn't set. */
+  get(key: string): Promise<string | null>;
+  /** Saves a value; the logic and every other window of the app see it at once. */
+  set(key: string, value: string): Promise<void>;
+  /** Removes a value. */
+  remove(key: string): Promise<void>;
+  /** Every key that is set. */
+  keys(): Promise<string[]>;
+  /**
+   * Calls `callback` whenever a value changes, whoever changed it (`value` is `null` when it was
+   * removed). Returns a function that stops it.
+   */
+  onChange(callback: (key: string, value: string | null) => void): () => void;
+}
+
 export interface Faber {
   /** The app, its roles and derived signals, its status and the shell's theme. */
   hello(): Promise<Hello>;
@@ -145,6 +167,8 @@ export interface Faber {
   theme(): Promise<Theme>;
   /** Calls `callback` whenever the shell's look changes. */
   onTheme(callback: (theme: Theme) => void): () => void;
+  /** The app's saved state, shared with its logic. */
+  readonly state: AppState;
   /** Stops listening to the shell (tests; a page that goes away needs nothing). */
   close(): void;
 }
@@ -186,6 +210,8 @@ export function connect(options: ConnectOptions = {}): Faber {
   const drives = new Map<string, DriveHandle>();
   const statusWatchers = new Set<(s: AppStatus) => void>();
   const themeWatchers = new Set<(t: Theme) => void>();
+  const stateWatchers = new Set<(key: string, value: string | null) => void>();
+  let stateWatch: Promise<null> | null = null;
   let hello: Promise<Hello> | null = null;
   let closed = false;
 
@@ -234,6 +260,9 @@ export function connect(options: ConnectOptions = {}): Faber {
         break;
       case 'theme':
         for (const w of [...themeWatchers]) w(m.theme);
+        break;
+      case 'state':
+        for (const w of [...stateWatchers]) w(m.key, m.value);
         break;
       case 'lease-ended':
         drives.get(key(m.role, m.index))?.lost(new FaberError(m.error));
@@ -371,6 +400,24 @@ export function connect(options: ConnectOptions = {}): Faber {
       themeWatchers.add(callback);
       return () => void themeWatchers.delete(callback);
     },
+    state: {
+      get: (key) => request<'state-get'>({ type: 'state-get', key }),
+      set: (key, value) =>
+        request<'state-set'>({ type: 'state-set', key, value }).then(() => undefined),
+      remove: (key) =>
+        request<'state-set'>({ type: 'state-set', key, value: null }).then(() => undefined),
+      keys: () => request<'state-keys'>({ type: 'state-keys' }),
+      onChange(callback) {
+        stateWatchers.add(callback);
+        // The shell sends changes once asked; ask once for every watcher (again after a failure).
+        stateWatch ??= request<'state-watch'>({ type: 'state-watch' }).catch((e: unknown) => {
+          stateWatch = null;
+          throw e;
+        });
+        stateWatch.catch(() => undefined);
+        return () => void stateWatchers.delete(callback);
+      },
+    },
     close() {
       closed = true;
       self.removeEventListener('message', onMessage);
@@ -412,6 +459,8 @@ export const faber: Faber = new Proxy({} as Faber, {
   get(_, name: keyof Faber) {
     shared ??= connect();
     const value = shared[name];
-    return typeof value === 'function' ? value.bind(shared) : value;
+    return typeof value === 'function'
+      ? (value as (...a: unknown[]) => unknown).bind(shared)
+      : value;
   },
 });

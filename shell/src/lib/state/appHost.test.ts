@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { part, simBase, simDistance } from '../../test/fakeShell';
-import { AppHost, MAX_SUBSCRIPTIONS, appHolder, type AppHostDeps } from './appHost';
+import {
+  AppHost,
+  MAX_STATE_BYTES,
+  MAX_SUBSCRIPTIONS,
+  appHolder,
+  type AppHostDeps,
+  type AppStateClient,
+} from './appHost';
 import type { LeaseClient } from './driving';
 import type { Result } from './result';
 import type { AppInfo, ErrorBody, LeaseEndReason, LeaseInfo, Reading } from './types';
@@ -87,6 +94,27 @@ function setup(options: { confirm?: boolean } = {}) {
     ),
   };
   const confirm = vi.fn(async () => options.confirm ?? true);
+  /** The core's side of the app's state: what it holds, and the host's live watch on it. */
+  const stored = new Map<string, string>([['speed', '0.25']]);
+  let stateHandlers: Parameters<AppStateClient['watch']>[0] | null = null;
+  const appState: AppStateClient = {
+    watch: (handlers) => {
+      core.push('state watch');
+      stateHandlers = handlers;
+      queueMicrotask(() => handlers.onValues(Object.fromEntries(stored)));
+      return () => {
+        core.push('state unwatch');
+        stateHandlers = null;
+      };
+    },
+    set: async (key, value) => {
+      core.push(`state set ${key}`);
+      if (value === null) stored.delete(key);
+      else stored.set(key, value);
+      stateHandlers?.onChange(key, value);
+      return ok({});
+    },
+  };
   const deps: AppHostDeps = {
     appId: 'wall-follower',
     app: () => app,
@@ -111,6 +139,7 @@ function setup(options: { confirm?: boolean } = {}) {
     watchLeaseEnds: (fn) => (leaseEnds.add(fn), () => void leaseEnds.delete(fn)),
     confirmDriving: confirm,
     theme: () => ({ scheme: 'dark', tokens: { '--surface': 'black' } }),
+    appState,
   };
   const host = new AppHost(deps);
   let nextId = 1;
@@ -149,6 +178,14 @@ function setup(options: { confirm?: boolean } = {}) {
       host.appChanged();
     },
     leaseEnded: (l: LeaseInfo, reason: LeaseEndReason) => leaseEnds.forEach((fn) => fn(l, reason)),
+    stored,
+    /** A change made elsewhere: by the app's logic, or another window. */
+    stateChangedElsewhere: (key: string, value: string | null) => {
+      if (value === null) stored.delete(key);
+      else stored.set(key, value);
+      stateHandlers?.onChange(key, value);
+    },
+    stateError: (e: ErrorBody) => stateHandlers?.onError(e),
     events: (name: string) => posted.filter((m) => m.event === name),
   };
 }
@@ -438,5 +475,83 @@ describe('the app window host: what an app may do', () => {
     const s = setup();
     s.setApp(null);
     expect((await s.ask({ type: 'roles' })).error?.code).toBe('app-gone');
+  });
+});
+
+describe('the app window host: state', () => {
+  it('reads, sets, lists and removes the state the app shares with its logic', async () => {
+    const s = setup();
+    expect(await s.ask({ type: 'state-get', key: 'speed' })).toMatchObject({
+      ok: true,
+      value: '0.25',
+    });
+    expect(await s.ask({ type: 'state-get', key: 'laps' })).toMatchObject({
+      ok: true,
+      value: null,
+    });
+    expect(await s.ask({ type: 'state-set', key: 'speed', value: '0.4' })).toMatchObject({
+      ok: true,
+    });
+    expect(s.stored.get('speed')).toBe('0.4');
+    expect(await s.ask({ type: 'state-get', key: 'speed' })).toMatchObject({ value: '0.4' });
+    await s.ask({ type: 'state-set', key: 'laps', value: '2' });
+    expect(await s.ask({ type: 'state-keys' })).toMatchObject({ value: ['laps', 'speed'] });
+    await s.ask({ type: 'state-set', key: 'laps', value: null });
+    expect(s.stored.has('laps')).toBe(false);
+    expect(s.core.filter((c) => c === 'state watch')).toHaveLength(1);
+  });
+
+  it('refuses bad keys and values, and anything past 64 KB, before the core hears of it', async () => {
+    const s = setup();
+    for (const [request, code] of [
+      [{ type: 'state-get', key: 42 }, 'bad-request'],
+      [{ type: 'state-get', key: '' }, 'bad-key'],
+      [{ type: 'state-set', key: 'k'.repeat(257), value: '1' }, 'bad-key'],
+      [{ type: 'state-set', key: 'æ'.repeat(129), value: '1' }, 'bad-key'],
+      [{ type: 'state-set', key: 'speed', value: 0.3 }, 'bad-request'],
+      [{ type: 'state-set', key: 'big', value: 'x'.repeat(MAX_STATE_BYTES) }, 'state-full'],
+    ] as const) {
+      const r = await s.ask(request);
+      expect(r.error?.code, JSON.stringify(request).slice(0, 60)).toBe(code);
+      expect(r.error?.hint).not.toBe('');
+    }
+    expect(s.core.filter((c) => c.startsWith('state set'))).toEqual([]);
+    const fits = 'x'.repeat(MAX_STATE_BYTES - 'big'.length - 'speed0.25'.length);
+    expect(await s.ask({ type: 'state-set', key: 'big', value: fits })).toMatchObject({ ok: true });
+  });
+
+  it('tells a page that asked about every change, whoever made it, until a new page loads', async () => {
+    const s = setup();
+    await s.ask({ type: 'state-get', key: 'speed' });
+    s.stateChangedElsewhere('speed', '0.1');
+    expect(s.events('state'), 'not asked for yet').toEqual([]);
+    expect(await s.ask({ type: 'state-get', key: 'speed' })).toMatchObject({ value: '0.1' });
+    await s.ask({ type: 'state-watch' });
+    s.stateChangedElsewhere('speed', '0.2');
+    await s.ask({ type: 'state-set', key: 'laps', value: '1' });
+    s.stateChangedElsewhere('laps', null);
+    expect(s.events('state')).toEqual([
+      { faber: 1, event: 'state', key: 'speed', value: '0.2' },
+      { faber: 1, event: 'state', key: 'laps', value: '1' },
+      { faber: 1, event: 'state', key: 'laps', value: null },
+    ]);
+    s.host.reset();
+    s.stateChangedElsewhere('speed', '0.3');
+    expect(s.events('state')).toHaveLength(3);
+    await s.host.dispose();
+    expect(s.core.at(-1)).toBe('state unwatch');
+  });
+
+  it('passes on why the state can’t be read, and tries again next time', async () => {
+    const s = setup();
+    const first = s.send({ type: 'state-get', key: 'speed' });
+    s.stateError({ code: 'unknown-app', message: 'gone', hint: 'reinstall' });
+    await flush();
+    expect(s.posted.find((m) => m.re === first)).toMatchObject({
+      ok: false,
+      error: { code: 'unknown-app' },
+    });
+    expect(await s.ask({ type: 'state-get', key: 'speed' })).toMatchObject({ value: '0.25' });
+    expect(s.core.filter((c) => c === 'state watch')).toHaveLength(2);
   });
 });

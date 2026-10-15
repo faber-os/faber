@@ -5,6 +5,7 @@ export type { ConnectorProblem } from '../api/generated/ConnectorProblem';
 export type { PackageInfo } from '../api/generated/PackageInfo';
 export type { PackagePreview } from '../api/generated/PackagePreview';
 export type { AppInfo } from '../api/generated/AppInfo';
+export type { AppState } from '../api/generated/AppState';
 export type { AppPackagePreview } from '../api/generated/AppPackagePreview';
 export type { AppRole } from '../api/generated/AppRole';
 export type { AppSignal } from '../api/generated/AppSignal';
