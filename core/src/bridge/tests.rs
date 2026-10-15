@@ -294,6 +294,17 @@ fn the_boards_stop_button_engages_fabers_estop_and_stays_latched_until_reset_on_
 }
 
 #[test]
+fn a_board_that_reports_a_fault_fails_with_what_went_wrong() {
+    let r = rig(ScriptedBoard::one_motor());
+    running(&r, "mega");
+    r.wire.board(|b| b.fault = true);
+    let p = failed(&r, "mega");
+    assert_eq!(p.message, "The board reports a fault: it refused a command.");
+    r.wire.board(|b| b.fault = false);
+    running(&r, "mega");
+}
+
+#[test]
 fn a_board_that_stops_sending_its_status_is_degraded() {
     let r = rig(ScriptedBoard::one_motor());
     running(&r, "mega");

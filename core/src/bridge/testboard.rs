@@ -174,6 +174,8 @@ pub struct ScriptedBoard {
     /// Doesn't answer at all (not a FaberLink board).
     pub mute: bool,
     pub hardware_estop: bool,
+    /// Says it has a fault (STATUS health 2) after refusing a command.
+    pub fault: bool,
     /// Sends no STATUS (old firmware, or a stuck loop).
     pub no_status: bool,
     pub commands: Vec<PartCommand>,
@@ -192,6 +194,7 @@ impl ScriptedBoard {
             versions: (1, 1),
             mute: false,
             hardware_estop: false,
+            fault: false,
             no_status: false,
             commands: Vec::new(),
             decoder: Decoder::new(),
@@ -294,12 +297,18 @@ impl Board for ScriptedBoard {
         if self.connected && !self.no_status && now_ms.wrapping_sub(self.last_status_ms) >= 100 {
             self.last_status_ms = now_ms;
             let status = Status {
-                health: if self.hardware_estop { Health::Degraded } else { Health::Ok },
+                health: if self.fault {
+                    Health::Fault
+                } else if self.hardware_estop {
+                    Health::Degraded
+                } else {
+                    Health::Ok
+                },
                 hardware_estop: self.hardware_estop,
                 estop: self.hardware_estop,
                 failsafe: false,
                 uptime_ms: now_ms,
-                last_fault: Fault::None,
+                last_fault: if self.fault { Fault::RefusedCommand } else { Fault::None },
                 rx_bad: 0,
                 rx_gaps: 0,
             };

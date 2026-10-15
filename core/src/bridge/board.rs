@@ -5,7 +5,7 @@ use super::Link;
 use crate::names::{PartName, board_part_name};
 use faber_capabilities::{Info, planar_base};
 use faber_connector::{Health, Problem, Provide};
-use faberlink::message::{Cause, PartDescription, PartInfo};
+use faberlink::message::{Cause, Fault, PartDescription, PartInfo};
 
 /// Where the link to a board stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,6 +131,12 @@ pub(super) fn bridge_health(l: &Link, silent: bool, recent_bad: Option<u16>) -> 
             "Its firmware may be old, or the sketch may keep loop() busy: link.poll() must run often.",
         ));
     }
+    if let Some(f) = l.fault {
+        return Health::Failed(Problem::new(
+            format!("The board reports a fault: {}.", fault_words(f)),
+            "Check its wiring and power, then reset the board. Its log in Logs may say more.",
+        ));
+    }
     if l.hardware_estop {
         return Health::Degraded(Problem::new(
             "The stop button on the board is pressed.",
@@ -150,6 +156,18 @@ pub(super) fn bridge_health(l: &Link, silent: bool, recent_bad: Option<u16>) -> 
         ));
     }
     Health::Running
+}
+
+/// The last thing that went wrong on the board, in words.
+fn fault_words(f: Fault) -> &'static str {
+    match f {
+        Fault::None => "it doesn't say which",
+        Fault::HeartbeatLost => "Faber's heartbeat stopped reaching it",
+        Fault::LeaseExpired => "a part's lease ran out",
+        Fault::BadFrames => "damaged messages",
+        Fault::RefusedCommand => "it refused a command",
+        Fault::Estop => "the e-stop",
+    }
 }
 
 /// Why the board stopped an actuator by itself, for the log.

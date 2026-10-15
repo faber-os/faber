@@ -32,7 +32,7 @@ use crate::ports::{PortEntry, PortEvent, PortOpener, PortReader, PortWriter, spa
 use crate::router::Router;
 use faber_capabilities::{Capability, Command, Reading, estop};
 use faber_connector::{Applied, CommandError, Health, Problem};
-use faberlink::message::{Cause, LogLevel};
+use faberlink::message::{Cause, Fault, LogLevel};
 use faberlink::session::{BoardInfo, CommandError as LinkError, Event, Session, SessionConfig, State};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -128,6 +128,8 @@ struct Link {
     /// The board's stop button is latched, as the board last said (STATUS, or an ESTOP from it).
     hardware_estop: bool,
     failsafe: bool,
+    /// The board says it has a fault (STATUS health 2), and the last thing that went wrong.
+    fault: Option<Fault>,
     /// Faber's e-stop, given to every new session so its first heartbeats already carry it.
     estop: EstopLevel,
 }
@@ -161,6 +163,7 @@ impl Link {
         self.state = state;
         self.hardware_estop = false;
         self.failsafe = false;
+        self.fault = None;
         let stopped = match state {
             LinkState::Incompatible => Problem::new(
                 format!("Stopped: \"{}\" can't talk to its board.", self.bridge),
@@ -303,6 +306,7 @@ pub fn start(spec: BridgeSpec, deps: BridgeDeps, estop: EstopLevel) -> BridgeHan
         board: None,
         hardware_estop: false,
         failsafe: false,
+        fault: None,
         estop,
     }));
     let stop = Arc::new(AtomicBool::new(false));
@@ -529,6 +533,7 @@ impl<'a> Run<'a> {
                     self.rx_bad = (s.rx_bad, Some(now));
                 }
                 l.failsafe = s.failsafe;
+                l.fault = (s.health == faberlink::message::Health::Fault).then_some(s.last_fault);
                 if s.hardware_estop && !l.hardware_estop {
                     self.hardware_estop(l, "Stop button pressed on the board", now);
                 } else if !s.hardware_estop && l.hardware_estop {
