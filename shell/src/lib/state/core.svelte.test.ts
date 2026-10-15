@@ -189,21 +189,21 @@ describe('CoreState', () => {
     ]);
   });
 
-  it('keeps the apps from their topic, and what turning one on or picking its parts answered', async () => {
+  it('keeps the apps from their topic only, never from an answer that may be older', async () => {
     const { core, ws } = setup();
     expect(core.apps).toBeNull();
-    const off = { id: 'wall-follower', enabled: false, roles: [] };
-    const on = { ...off, enabled: true };
+    const starting = { id: 'wall-follower', enabled: true, state: { kind: 'starting' } };
+    const running = { ...starting, state: { kind: 'running' } };
     const id = sentTopics(ws).find((m) => m.topic?.kind === 'apps')!.id;
-    ws.receive(bin({ type: 'apps', id, apps: [off, { id: 'other' }] }));
-    expect(core.apps).toEqual([off, { id: 'other' }]);
-    f.route({ method: 'POST', path: '/api/v0/apps/wall-follower/enable', body: on });
-    expect((await core.setAppEnabled('wall-follower', true)).ok).toBe(true);
-    expect(core.apps).toEqual([on, { id: 'other' }]);
-    f.route({ method: 'PUT', path: '/api/v0/apps/wall-follower/roles', body: off });
+    // The topic says it runs before the answer to "turn it on" (which said "starting") arrives.
+    ws.receive(bin({ type: 'apps', id, apps: [running, { id: 'other' }] }));
+    f.route({ method: 'POST', path: '/api/v0/apps/wall-follower/enable', body: starting });
+    expect(await core.setAppEnabled('wall-follower', true)).toEqual({ ok: true, value: starting });
+    expect(core.apps).toEqual([running, { id: 'other' }]);
+    f.route({ method: 'PUT', path: '/api/v0/apps/wall-follower/roles', body: starting });
     expect((await core.setAppRoles('wall-follower', { base: 'base' })).ok).toBe(true);
-    expect(core.apps![0]).toEqual(off);
     expect(f.calls.at(-1)!.body).toEqual({ roles: { base: 'base' } });
+    expect(core.apps![0]).toEqual(running);
   });
 
   it('keeps the packages from their topic and reads the connectors again with them', async () => {

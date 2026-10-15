@@ -69,8 +69,16 @@ describe('Apps window', () => {
     const on = await screen.findByRole('switch', { name: 'Turn Wall follower on' });
     expect(on).not.toBeChecked();
     await userEvent.click(on);
+    // It shows what the core says, from the apps topic.
+    await waitFor(() => expect(on).toBeEnabled());
+    expect(on).not.toBeChecked();
+    shell.receive({ type: 'apps', id: shell.subscriptionId('apps'), apps: [APP] });
     await waitFor(() => expect(on).toBeChecked());
     await userEvent.click(on);
+    await waitFor(() =>
+      expect(shell.fetch.calls.some((c) => c.path.endsWith('/disable'))).toBe(true),
+    );
+    shell.receive({ type: 'apps', id: shell.subscriptionId('apps'), apps: [OFF] });
     await waitFor(() => expect(on).not.toBeChecked());
     expect(shell.fetch.calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual([
       '/api/v0/apps/wall-follower/enable',

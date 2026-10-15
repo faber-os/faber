@@ -355,28 +355,23 @@ export class CoreState {
     return r;
   }
 
-  /** Turns an app on or off. Off ends its leases (and stops its logic) before this answers. */
-  async setAppEnabled(id: string, enabled: boolean): Promise<Result<AppInfo>> {
-    const r = await this.call(() => this.http.setAppEnabled(id, enabled));
-    if (r.ok) this.keepApp(r.value);
-    return r;
+  /**
+   * Turns an app on or off. Off ends its leases (and stops its logic) before this answers. The
+   * list (`apps`) follows from the `apps` topic only: an answer can be older than what the topic
+   * already said (the app went from starting to running meanwhile), so it never overwrites it.
+   */
+  setAppEnabled(id: string, enabled: boolean): Promise<Result<AppInfo>> {
+    return this.call(() => this.http.setAppEnabled(id, enabled));
   }
 
-  /** Exactly these parts for an app's roles; roles left out get none. */
-  async setAppRoles(id: string, roles: Record<string, RoleParts>): Promise<Result<AppInfo>> {
-    const r = await this.call(() => this.http.setAppRoles(id, roles));
-    if (r.ok) this.keepApp(r.value);
-    return r;
+  /** Exactly these parts for an app's roles; roles left out get none. The topic follows. */
+  setAppRoles(id: string, roles: Record<string, RoleParts>): Promise<Result<AppInfo>> {
+    return this.call(() => this.http.setAppRoles(id, roles));
   }
 
   /** The newest reading of a signal, once (an app's derived signals too). */
   readSignal(address: string): Promise<Result<SignalValue>> {
     return this.call(() => this.http.getSignal(address));
-  }
-
-  /** What the core answered for one app, until the apps topic says more. */
-  private keepApp(app: AppInfo): void {
-    if (this.apps) this.apps = this.apps.map((a) => (a.id === app.id ? app : a));
   }
 
   async loadSystem(): Promise<void> {

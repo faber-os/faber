@@ -38,7 +38,7 @@ h1 {
   color: var(--text-muted);
 }
 
-.state[data-on='true'] {
+.state[data-on="true"] {
   color: var(--ok);
   font-weight: 700;
 }

@@ -119,14 +119,20 @@
           {#if error?.app === app.id}<ErrorNotice error={error.error} />{/if}
 
           <div class="controls">
-            <label class="switch">
+            <label class="toggle">
               <input
+                class="switch"
                 type="checkbox"
                 role="switch"
                 checked={app.enabled}
                 disabled={busy === app.id}
                 aria-label={t('apps.onNamed', { name: app.name })}
-                onchange={(e) => setOn(app, e.currentTarget.checked)}
+                onchange={(e) => {
+                  const on = e.currentTarget.checked;
+                  // The switch shows what the core says: it flips when the apps topic does.
+                  e.currentTarget.checked = app.enabled;
+                  setOn(app, on);
+                }}
               />
               <span>{app.enabled ? t('apps.on') : t('apps.off')}</span>
             </label>
@@ -310,7 +316,7 @@
   .spacer {
     flex: 1;
   }
-  .switch {
+  .toggle {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
