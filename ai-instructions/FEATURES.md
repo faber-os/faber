@@ -24,6 +24,10 @@ Phase 1 is built (see `docs/roadmap.md`).
 | API fingerprint | Implemented | Shell and core detect a mismatched build and ask for a restart | 2026-10-15 | — | — |
 | Translations | Implemented | D44: 621 English texts in one catalogue, translation files built in or in `<data>/config/translations/` (no rebuild), per-key English fallback, `npm run i18n:check`, a test that fails on new raw text; picker only with 2+ languages | 2026-10-15 | Shell | — |
 | Machine name | Implemented | D45: `settings.machine.name`, browser tab, backups, `<name>.local` later | 2026-10-15 | Settings | — |
+| World engine (Phase 2b) | Implemented | `core/src/sim`: geometry, raycast grid, kinematics, LD19 scans, distance cones, a walking person, six prebuilt worlds (empty, apartment, office, warehouse, maze, obstacle course) | 2026-10-15 | — | — |
+| Driving core (Phase 2a) | Implemented | distance/motor/planar-base/estop/pose capabilities, generic parts (need a bridge, simulated for now), manual simulated parts, leases with safe states, commands with clamping, the e-stop, `examples/drive-square.py` | 2026-10-15 | — | — |
+| World wiring (Phase 2c) | In progress | world parts, world API and topic, the Phase 2 done-when test | — | 2a, 2b | — |
+| Drive window, Stop, Simulated switch (Phase 2d) | In progress | shell side of driving | — | 2a | — |
 | Restart / shut down | Planned | Power items exist in the start menu but are disabled until the machine image (Phase 6) | — | Image | Phase 6 |
 | Copy / paste, multi-select in Files | Planned | Also unlocks moving between disks and home | — | Files | — |
 | Real LD19 on the PC | Planned | Mikkel plugs in the LD19 and adds it via its USB port | — | Phase 1 | Mikkel |
