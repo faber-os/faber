@@ -11,6 +11,7 @@ const win: WindowState = {
   key: 'logs',
   title: 'Logs',
   rect: { x: 0, y: 0, w: 600, h: 400 },
+  chosen: { x: 0, y: 0, w: 600, h: 400 },
   maximised: false,
   minimised: false,
   z: 1,

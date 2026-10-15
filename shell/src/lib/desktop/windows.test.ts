@@ -257,6 +257,27 @@ describe('refit', () => {
     s = { ...s, state: refit(s.state, smaller, () => parts.minSize) };
     expect(s.state.windows[0]!.rect).toEqual({ x: 600, y: 300, w: 600, h: 400 });
   });
+
+  it('gives a window its size back when the screen grows again', () => {
+    const saved = { x: 100, y: 50, w: 900, h: 600 };
+    let s = openWindow(emptyDesktop(), { kind: parts, saved }, area).state;
+    s = refit(s, { width: 700, height: 450 }, () => parts.minSize);
+    expect(s.windows[0]!.rect).toEqual({ x: 0, y: 0, w: 700, h: 450 });
+    s = refit(s, area, () => parts.minSize);
+    expect(s.windows[0]!.rect).toEqual(saved);
+  });
+
+  it('keeps what the user chose on the small screen once they move or resize it', () => {
+    let s = openWindow(
+      emptyDesktop(),
+      { kind: parts, saved: { x: 0, y: 0, w: 900, h: 600 } },
+      area,
+    );
+    let st = refit(s.state, { width: 700, height: 450 }, () => parts.minSize);
+    st = setRect(st, s.id, { x: 10, y: 10, w: 500, h: 300 });
+    st = refit(st, area, () => parts.minSize);
+    expect(st.windows[0]!.rect).toEqual({ x: 10, y: 10, w: 500, h: 300 });
+  });
 });
 
 describe('updateWindow', () => {

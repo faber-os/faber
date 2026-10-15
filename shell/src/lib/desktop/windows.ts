@@ -4,6 +4,10 @@
  *
  * A window's `rect` is always its normal (not maximised) geometry. A maximised window is drawn
  * over the whole desktop area but keeps its rect, so restoring brings it back where it was.
+ *
+ * `chosen` is the geometry the user asked for (or the window opened with). `rect` is that,
+ * fitted into the current screen. A smaller screen squeezes `rect`; a bigger one gives back
+ * `chosen` again, so resizing the browser never loses a window's size for good.
  */
 
 export interface Size {
@@ -42,6 +46,7 @@ export interface WindowState {
   key: string;
   title: string;
   rect: Rect;
+  chosen: Rect;
   maximised: boolean;
   minimised: boolean;
   z: number;
@@ -131,17 +136,15 @@ export function openWindow(
   if (existing) return { state: focusWindow(state, existing.id), id: existing.id };
 
   const id = `w${state.nextId}`;
-  const rect = clampRect(
-    req.saved ?? cascadeRect(state, req.kind.defaultSize, area),
-    req.kind.minSize,
-    area,
-  );
+  const chosen = req.saved ?? cascadeRect(state, req.kind.defaultSize, area);
+  const rect = clampRect(chosen, req.kind.minSize, area);
   const win: WindowState = {
     id,
     kind: req.kind.kind,
     key,
     title: req.title ?? req.kind.title,
     rect,
+    chosen,
     maximised: opts.compact === true,
     minimised: false,
     z: state.nextZ,
@@ -199,7 +202,7 @@ export function updateWindow(
 
 export function setRect(state: DesktopState, id: string, rect: Rect): DesktopState {
   if (!find(state, id)) return state;
-  return replace(state, id, { rect });
+  return replace(state, id, { rect, chosen: rect });
 }
 
 /** Keep every window inside the area after the screen changed size. */
@@ -210,7 +213,10 @@ export function refit(
 ): DesktopState {
   return {
     ...state,
-    windows: state.windows.map((w) => ({ ...w, rect: clampRect(w.rect, minSize(w.kind), area) })),
+    windows: state.windows.map((w) => ({
+      ...w,
+      rect: clampRect(w.chosen, minSize(w.kind), area),
+    })),
   };
 }
 

@@ -3,7 +3,10 @@
   import { groupPortProblems } from '../lib/state/portHints';
   import Icon from './Icon.svelte';
 
-  /** Things plugged in over USB that never became a port, so an empty port list isn't a mystery. */
+  /**
+   * Things plugged in over USB that never became a port, so an empty port list isn't a mystery.
+   * One line each; what happened and what to try open on request, so it doesn't fill the window.
+   */
   const core = useCore();
   const groups = $derived(groupPortProblems(core.portProblems));
 </script>
@@ -15,8 +18,11 @@
       <p class="label">
         {p.label}{#if p.count > 1}{' '}<span class="count num">({p.count} times)</span>{/if}
       </p>
-      <p class="detail">{p.detail}</p>
-      <p class="hint">{p.hint}</p>
+      <details>
+        <summary>What to try</summary>
+        <p class="detail">{p.detail}</p>
+        <p class="hint">{p.hint}</p>
+      </details>
     </div>
   </div>
 {/each}
@@ -51,6 +57,16 @@
   .detail,
   .hint {
     font-size: var(--text-sm);
+  }
+  summary {
+    width: fit-content;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--accent-text, var(--accent));
+    cursor: pointer;
+  }
+  details[open] summary {
+    margin-bottom: var(--space-1);
   }
   .detail {
     color: var(--text-muted);

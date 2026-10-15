@@ -12,6 +12,7 @@ function setup(routes: Parameters<typeof fakeShell>[0] = []) {
     key: 'parts',
     title: 'Parts',
     rect: { x: 0, y: 0, w: 600, h: 400 },
+    chosen: { x: 0, y: 0, w: 600, h: 400 },
     maximised: false,
     minimised: false,
     z: 1,
@@ -31,9 +32,9 @@ describe('Parts window', () => {
     const shell = setup();
     shell.pushParts([]);
     expect(await screen.findByText('No parts yet')).toBeInTheDocument();
-    expect(screen.getByText(/appears here by itself/)).toBeInTheDocument();
+    expect(screen.getByText(/Faber finds it/)).toBeInTheDocument();
     expect(screen.queryByText(/replay:/)).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Files → Recordings' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Try a sample recording' }));
     const files = shell.desktop.state.windows.find((w) => w.kind === 'files');
     expect(files?.params).toEqual({ path: 'home:/Recordings' });
   });
@@ -233,8 +234,13 @@ describe('Port problems', () => {
     const notice = await screen.findByText(problem.label);
     const box = notice.closest('[data-code]')!;
     expect(box).toHaveTextContent('(2 times)');
-    expect(within(box as HTMLElement).getByText(problem.detail)).toBeInTheDocument();
-    expect(within(box as HTMLElement).getByText(problem.hint)).toBeInTheDocument();
+    // One line until asked: what happened and what to try are folded away.
+    const more = box.querySelector('details')!;
+    expect(more.open).toBe(false);
+    await userEvent.click(within(box as HTMLElement).getByText('What to try'));
+    expect(more.open).toBe(true);
+    expect(within(more).getByText(problem.detail)).toBeInTheDocument();
+    expect(within(more).getByText(problem.hint)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/device/i);
 
     // The add form shows it too, next to the empty port list.

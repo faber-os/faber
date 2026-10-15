@@ -10,6 +10,7 @@ const win: WindowState = {
   key: 'demo/laser-scan',
   title: 'demo · scan',
   rect: { x: 0, y: 0, w: 500, h: 500 },
+  chosen: { x: 0, y: 0, w: 500, h: 500 },
   maximised: false,
   minimised: false,
   z: 1,

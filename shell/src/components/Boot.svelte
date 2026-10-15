@@ -32,8 +32,7 @@
   {:else}
     <p class="line">
       {#if status === 'reconnecting' || slow}
-        Still waiting for the Faber core. It may be starting up; if this stays, check that
-        faber-core is running.
+        Waiting for the Faber core. Is faber-core running?
       {:else}
         Connecting to the core…
       {/if}

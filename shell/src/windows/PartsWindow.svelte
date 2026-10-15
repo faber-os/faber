@@ -173,16 +173,11 @@
       <div class="empty">
         <h3>No parts yet</h3>
         <PortProblems />
+        <p>Plug in your hardware. Faber finds it and suggests what it is.</p>
         <p>
-          A part is one piece of hardware you add, like a LiDAR on a USB adapter. Plug it in: its
-          port appears here by itself, and Faber suggests what it might be.
-        </p>
-        <p>
-          No hardware yet? Open <button class="inline-link" onclick={() => openRecordings()}
-            >Files → Recordings</button
-          >
-          and choose <em>Add sample recordings</em>. The sample then shows up as a port you can add
-          a part on.
+          No hardware yet? <button class="inline-link" onclick={() => openRecordings()}
+            >Try a sample recording</button
+          >.
         </p>
         <button
           class="btn primary"
@@ -299,12 +294,19 @@
   .pad {
     padding: var(--space-3) var(--space-4) 0;
   }
+  /* Scrolls on its own, so nothing is cut off when the window (or the screen) is small. */
   .empty {
     display: grid;
+    align-content: start;
     justify-items: start;
     gap: var(--space-3);
-    max-width: 52ch;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     padding: var(--space-6) var(--space-5);
+  }
+  .empty > :global(*) {
+    max-width: 52ch;
   }
   .empty h3 {
     font-size: var(--text-xl);
@@ -313,11 +315,6 @@
   }
   .empty p {
     color: var(--text-muted);
-  }
-  .empty em {
-    font-style: normal;
-    font-weight: 650;
-    color: var(--text);
   }
   .inline-link {
     padding: 0;

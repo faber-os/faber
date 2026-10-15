@@ -12,6 +12,7 @@ const win: WindowState = {
   key: 'serial-monitor',
   title: 'Serial monitor',
   rect: { x: 0, y: 0, w: 600, h: 400 },
+  chosen: { x: 0, y: 0, w: 600, h: 400 },
   maximised: false,
   minimised: false,
   z: 1,
