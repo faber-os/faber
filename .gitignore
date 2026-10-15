@@ -1,0 +1,5 @@
+# Personal notes and explainers for Mikkel. Never committed.
+private/
+
+# Rust build output
+/target/

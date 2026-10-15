@@ -1,0 +1,13 @@
+[package]
+name = "faber-core"
+version = "0.0.1"
+description = "The core of Faber, an open-source Raspberry Pi appliance OS for maker and robotics hardware. Early development; no usable API yet."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../README.md"
+keywords = ["raspberry-pi", "robotics", "embedded", "maker", "hardware"]
+categories = ["embedded", "hardware-support"]
+
+[dependencies]
