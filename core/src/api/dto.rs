@@ -192,6 +192,17 @@ pub struct PartState {
     pub hint: Option<String>,
 }
 
+/// `GET /api/v0/signals/{part}/{name}`: the newest reading, for programs that poll over HTTP.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SignalValue {
+    pub address: String,
+    pub capability: Capability,
+    /// `null` until the part has published anything.
+    pub reading: Option<Reading>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

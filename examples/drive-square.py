@@ -36,8 +36,8 @@ If it doesn't work
     "Is the Faber core running?"  Start it, or check the address.
     "… is driving base."          Someone else holds the lease (the Drive window?). Let go there.
     "The e-stop is engaged …"     Release it in the shell when it is safe.
-    In a world, it stops short     It bumped into something: the square doesn't fit where it
-                                   stands. Put it back (Reset position in the World window, or
+    "base bumped into something"   In a world, the square doesn't fit where it stands. Put it
+                                   back (Reset position in the World window, or
                                    POST /api/v0/world/reset) and run it again.
 
 How it works
@@ -62,6 +62,10 @@ SPEED = 0.25  # m/s along each side
 TURN = -0.8  # rad/s when turning on the spot: negative is clockwise, to the right
 EVERY = 0.1  # s between commands: well inside the 250 ms lease
 CLAMPED = []  # non-empty once a clamp has been reported
+
+
+class Bumped(Exception):
+    """The base ran into something in the simulated world."""
 
 
 class FaberError(Exception):
@@ -97,7 +101,16 @@ def drive_for(lease, seconds, vx=0.0, omega=0.0):
             # Faber clamps to the base's limits rather than refusing. Say so once.
             CLAMPED.append(True)
             print(f"  (the base's limits clamped this to {reply['applied']['command']})")
+        if bumped():
+            raise Bumped()
         time.sleep(EVERY)
+
+
+def bumped():
+    """Whether the base reports a bump (only a base in a simulated world can)."""
+    value = call("GET", f"/api/v0/signals/{PART}/planar-base")
+    reading = (value.get("reading") or {}).get("reading") or {}
+    return bool(reading.get("bumped"))
 
 
 def main():
@@ -122,6 +135,9 @@ def main():
         # 423: the e-stop was pressed. 403: the lease ended (someone took over, or it expired).
         # Either way the base is already stopped; tell the user why and stop driving.
         print(f"Stopped: {e.message}\n{e.hint}")
+        return 1
+    except Bumped:
+        print(f"{PART} bumped into something. Put it back (Reset position in the World window) and try again.")
         return 1
     except KeyboardInterrupt:
         print("Interrupted.")

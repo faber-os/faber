@@ -42,6 +42,13 @@ access, in Phase 6).
 Adding or removing a part **writes `parts.toml`** (keeping comments and formatting) and then
 reconciles. The file stays the source of truth (D13).
 
+### Reading a signal once
+
+`GET /api/v0/signals/{part}/{name}` → `200 SignalValue` `{address, capability, reading}`: the
+newest reading (`null` until the part has published one), events included. `404 unknown-signal`
+when no such signal exists right now. The WebSocket `signal` topic streams them; this is for
+simple programs that poll over plain HTTP (e.g. `examples/drive-square.py` checks `bumped`).
+
 ## WebSocket: `GET /api/v0/ws?format=msgpack|json`
 
 One connection carries everything live. The default `format` is `msgpack`, sent as binary frames.

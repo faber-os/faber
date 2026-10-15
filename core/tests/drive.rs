@@ -329,3 +329,33 @@ async fn every_screen_hears_who_drives_and_the_estop() {
     let released = next(&mut ws).await;
     assert_eq!(released, json!({"type": "estop", "id": 2, "status": {"engaged": false}}));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_program_can_read_the_latest_value_of_a_signal() {
+    let c = core();
+    let (s, e) = call(&c.app, "GET", "/api/v0/signals/front/distance", None).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("unknown-signal")));
+    let (s, _) = call(&c.app, "GET", "/api/v0/signals/not%20a%20name/x", None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let front = json!({"name": "front", "connector": "generic-distance", "simulate": "manual", "settings": {"max-m": 2}});
+    assert_eq!(call(&c.app, "POST", "/api/v0/parts", Some(front)).await.0, StatusCode::CREATED);
+    let steady = json!({"pattern": {"kind": "steady", "value": 1.25}});
+    assert_eq!(call(&c.app, "PUT", "/api/v0/parts/front/simulation", Some(steady)).await.0, StatusCode::OK);
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let (s, v) = call(&c.app, "GET", "/api/v0/signals/front/distance", None).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(
+            (v["address"].as_str(), v["capability"].as_str()),
+            (Some("front/distance"), Some("distance@1"))
+        );
+        // Readings from before the new pattern may still be the newest for a moment.
+        if v["reading"]["reading"]["meters"].as_f64().is_some_and(|m| (m - 1.25).abs() < 1e-6) {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "no reading arrived: {v}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}

@@ -36,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/ports/problems", get(port_problems))
         .route("/api/v0/parts", get(parts).post(add_part))
         .route("/api/v0/parts/{name}", delete(remove_part))
+        .route("/api/v0/signals/{part}/{name}", get(signal_value))
         .route("/api/v0/ws", get(ws::upgrade))
         .merge(files::routes())
         .merge(driving::routes())
@@ -151,6 +152,28 @@ async fn ports(State(s): State<AppState>) -> Json<Vec<dto::PortInfo>> {
 
 async fn port_problems(State(s): State<AppState>) -> Json<Vec<dto::PortProblem>> {
     Json(s.machine.port_problems().iter().map(convert::port_problem).collect())
+}
+
+/// The newest reading of one signal. The WebSocket streams them; this is for simple programs.
+async fn signal_value(
+    State(s): State<AppState>,
+    Path((part, name)): Path<(String, String)>,
+) -> Result<Json<dto::SignalValue>, Failure> {
+    let raw = format!("{part}/{name}");
+    let unknown = || {
+        Failure::new(
+            StatusCode::NOT_FOUND,
+            "unknown-signal",
+            format!("There is no signal called \"{raw}\" right now."),
+            "GET /api/v0/parts lists every part's signals; a stopped or removed part has none.",
+        )
+    };
+    let address = crate::names::SignalAddress::parse(&raw).ok_or_else(unknown)?;
+    let router = s.machine.router();
+    let capability =
+        router.signals().into_iter().find(|(a, _)| *a == address).map(|(_, c)| c).ok_or_else(unknown)?;
+    let reading = router.latest(&address).ok_or_else(unknown)?;
+    Ok(Json(dto::SignalValue { address: raw, capability, reading: reading.map(|r| (*r).clone()) }))
 }
 
 async fn parts(State(s): State<AppState>) -> Json<Vec<dto::PartInfo>> {

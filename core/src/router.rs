@@ -21,6 +21,8 @@ enum Channel {
 struct Signal {
     capability: Capability,
     channel: Channel,
+    /// The newest reading, for one-off reads (`GET /api/v0/signals/…`), events included.
+    last: Option<Arc<Reading>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -76,7 +78,7 @@ impl Router {
             Delivery::LatestValue => Channel::Latest(watch::channel(None).0),
             Delivery::EveryMessage => Channel::Every(broadcast::channel(EVENT_BACKLOG).0),
         };
-        self.signals.lock().expect("router lock").insert(address, Signal { capability, channel });
+        self.signals.lock().expect("router lock").insert(address, Signal { capability, channel, last: None });
     }
 
     /// Removes `address`. Its subscribers get `None` from `next()`.
@@ -85,8 +87,8 @@ impl Router {
     }
 
     pub fn publish(&self, address: &SignalAddress, reading: Reading) -> Result<(), PublishError> {
-        let signals = self.signals.lock().expect("router lock");
-        let signal = signals.get(address).ok_or(PublishError::Undeclared)?;
+        let mut signals = self.signals.lock().expect("router lock");
+        let signal = signals.get_mut(address).ok_or(PublishError::Undeclared)?;
         if reading.capability() != signal.capability {
             return Err(PublishError::WrongCapability {
                 declared: signal.capability,
@@ -94,6 +96,7 @@ impl Router {
             });
         }
         let reading = Arc::new(reading);
+        signal.last = Some(Arc::clone(&reading));
         match &signal.channel {
             Channel::Latest(tx) => {
                 tx.send_replace(Some(reading));
@@ -116,6 +119,12 @@ impl Router {
             }
             Channel::Every(tx) => Subscription::Every(tx.subscribe()),
         })
+    }
+
+    /// The newest reading of `address`: `None` if no such signal exists, `Some(None)` if it
+    /// exists but nothing has been published yet.
+    pub fn latest(&self, address: &SignalAddress) -> Option<Option<Arc<Reading>>> {
+        self.signals.lock().expect("router lock").get(address).map(|s| s.last.clone())
     }
 
     /// Every declared signal and its capability.
@@ -178,5 +187,18 @@ mod tests {
         let router = Router::new();
         router.declare(addr(), Capability::LaserScan);
         assert_eq!(router.signals(), vec![(addr(), Capability::LaserScan)]);
+    }
+
+    #[test]
+    fn the_latest_reading_can_be_read_without_subscribing() {
+        let r = Router::new();
+        assert!(r.latest(&addr()).is_none(), "unknown address");
+        r.declare(addr(), Capability::LaserScan);
+        assert_eq!(r.latest(&addr()), Some(None), "declared, nothing published yet");
+        r.publish(&addr(), scan(1)).unwrap();
+        r.publish(&addr(), scan(2)).unwrap();
+        assert_eq!(r.latest(&addr()).unwrap().unwrap().t_us(), 2);
+        r.remove(&addr());
+        assert!(r.latest(&addr()).is_none());
     }
 }
