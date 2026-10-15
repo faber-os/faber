@@ -3,12 +3,18 @@
 //! the source of truth**. Changes are written to the file first, then `reconcile` makes the
 //! running parts match it.
 
+mod safety;
+
+pub use safety::{CommandReply, EstopView, LeaseEvent};
+
 use crate::backup::{self, Archive, BackupError, Item};
 use crate::clock::SharedClock;
-use crate::config::{self, ConfigError, PartConfig, PartsConfig};
+use crate::config::{self, ConfigError, PartConfig, PartsConfig, Simulate, Source};
 use crate::disks::{Disk, DiskDiscovery};
+use crate::estop::Estop;
 use crate::files::{self, Entry, FileError, Files, Special, VPath, WriteMode};
 use crate::host;
+use crate::leases::{EndReason, Leases};
 use crate::names::{PartName, SignalAddress};
 use crate::ports::{
     Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortProblem, PortReader, PortWriter,
@@ -16,14 +22,16 @@ use crate::ports::{
     port_problem, spawn_reader,
 };
 use crate::router::Router;
-use crate::runtime::{self, PartHandle, PartStatus, RunDeps, RunSpec, StatusBoard, Timing};
+use crate::runtime::{self, PartStatus, RunDeps, RunSpec, StatusBoard, Timing};
 use crate::settings::{
     self as settings_file, DeveloperChange, Settings as MachineSettings, SettingsError, SettingsStore,
 };
+use crate::simulation::{self, Outlet, PartSpec, WorldEngine};
 use crate::suggest::{Suggestion, suggestions};
 use crate::translations::Translations;
-use faber_capabilities::{Capability, Mount};
-use faber_connector::{Definition, Manifest, Problem, Settings};
+use faber_capabilities::{Capability, Mount, Reading, estop};
+use faber_connector::{Definition, Health, Manifest, PortRequirement, Problem, Provide, Settings};
+use safety::Runner;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -50,6 +58,8 @@ pub struct MachineOptions {
     pub timing: Timing,
     /// How often to look for new or removed ports. `None` = only when asked (tests).
     pub port_scan: Option<Duration>,
+    /// Runs `simulate = "world"` parts. [`simulation::NoWorld`] until the world engine exists.
+    pub world: Arc<dyn WorldEngine>,
 }
 
 /// Why the machine refused a request, in words the user can act on.
@@ -70,8 +80,10 @@ pub enum ErrorKind {
     Internal,
     /// Understood, but the content is wrong (e.g. a parts.toml with an error).
     Unprocessable,
-    /// Not allowed with the current settings.
+    /// Not allowed with the current settings, or without a (valid) lease.
     Forbidden,
+    /// Locked by the e-stop.
+    Locked,
     /// The disk is too full for it.
     InsufficientStorage,
 }
@@ -114,7 +126,7 @@ impl MachineError {
 pub struct PartView {
     pub name: PartName,
     pub connector: String,
-    pub port: String,
+    pub source: Source,
     pub mount: Mount,
     pub status: PartStatus,
     pub signals: Vec<(SignalAddress, Capability)>,
@@ -155,14 +167,19 @@ pub struct About {
 pub struct NewPart {
     pub name: String,
     pub connector: String,
-    pub port: String,
+    /// The real part's port. Exactly one of `port` and `simulate`.
+    pub port: Option<String>,
+    pub simulate: Option<Simulate>,
     pub mount: Mount,
+    pub settings: Settings,
 }
 
 struct Running {
     config: PartConfig,
     /// `None` when the part could not start (invalid or in conflict).
-    handle: Option<PartHandle>,
+    runner: Option<Runner>,
+    /// What it provides with its settings, with info (limits). Empty if its connector is unknown.
+    provides: Vec<Provide>,
 }
 
 struct State {
@@ -175,6 +192,8 @@ struct State {
     disks: Vec<Disk>,
     claims: Claims,
     running: BTreeMap<PartName, Running>,
+    leases: Leases,
+    estop: Estop,
 }
 
 pub struct Machine {
@@ -198,6 +217,11 @@ pub struct Machine {
     files_changed: broadcast::Sender<Vec<String>>,
     stop_scanning: Arc<AtomicBool>,
     scanner: Mutex<Option<JoinHandle<()>>>,
+    world: Arc<dyn WorldEngine>,
+    lease_events: broadcast::Sender<LeaseEvent>,
+    estop_events: broadcast::Sender<estop::Reading>,
+    stop_sweeping: Arc<AtomicBool>,
+    sweeper: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Machine {
@@ -245,13 +269,27 @@ impl Machine {
                 disks: Vec::new(),
                 claims: Claims::default(),
                 running: BTreeMap::new(),
+                leases: Leases::new(lease_seed()),
+                estop: Estop::default(),
             }),
             ports_changed: watch::channel(0).0,
             files_changed: broadcast::channel(64).0,
             stop_scanning: Arc::new(AtomicBool::new(false)),
             scanner: Mutex::new(None),
+            world: opts.world,
+            lease_events: broadcast::channel(256).0,
+            estop_events: broadcast::channel(64).0,
+            stop_sweeping: Arc::new(AtomicBool::new(false)),
+            sweeper: Mutex::new(None),
         });
         machine.refresh_ports();
+        let weak = Arc::downgrade(&machine);
+        let stop = Arc::clone(&machine.stop_sweeping);
+        let sweeper = std::thread::Builder::new()
+            .name("lease-sweeper".into())
+            .spawn(move || safety::sweep_leases(weak, stop))
+            .expect("spawn lease sweeper");
+        *machine.sweeper.lock().expect("sweeper lock") = Some(sweeper);
         if let Some(every) = opts.port_scan {
             let weak = Arc::downgrade(&machine);
             let stop = Arc::clone(&machine.stop_scanning);
@@ -264,13 +302,18 @@ impl Machine {
         Ok(machine)
     }
 
-    /// Stops every part and the port scanner.
+    /// Ends every lease (sending the safe states), then stops every part, the port scanner and
+    /// the lease sweeper.
     pub fn shutdown(&self) {
         self.stop_scanning.store(true, Ordering::Relaxed);
-        if let Some(h) = self.scanner.lock().expect("scanner lock").take() {
-            let _ = h.join();
+        self.stop_sweeping.store(true, Ordering::Relaxed);
+        for slot in [&self.scanner, &self.sweeper] {
+            if let Some(h) = slot.lock().expect("thread slot lock").take() {
+                let _ = h.join();
+            }
         }
         let mut st = self.state.lock().expect("machine lock");
+        self.revoke_all(&mut st, EndReason::Shutdown);
         let names: Vec<_> = st.running.keys().cloned().collect();
         for name in names {
             self.stop_part(&mut st, &name);
@@ -327,7 +370,7 @@ impl Machine {
                 PartView {
                     name: name.clone(),
                     connector: cfg.connector.clone(),
-                    port: cfg.port.clone(),
+                    source: cfg.source.clone(),
                     mount: cfg.mount,
                     status: self.status.get(name).unwrap_or(PartStatus::Starting),
                     signals,
@@ -422,33 +465,64 @@ impl Machine {
                 "Pick one of the connectors in the list.",
             )
         })?;
-        (definition.create)(&Settings::new()).map_err(|e| {
+        let invalid_settings = |e: faber_connector::SettingsError| {
             MachineError::new(
                 ErrorKind::BadRequest,
                 "invalid-settings",
                 format!("Setting \"{}\": {}", e.key, e.message),
                 e.hint,
             )
-        })?;
-        let port = PortId::parse(&new.port)
-            .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
-            .ok_or_else(|| {
-                MachineError::new(
-                    ErrorKind::BadRequest,
-                    "unknown-port",
-                    format!("There is no port called \"{}\" right now.", new.port),
-                    "Check that it is plugged in, then pick it from the list of ports.",
-                )
-            })?;
-        if let Some(holder) = st.claims.holder(&port.id) {
-            return Err(port_claimed(&port, &holder.to_string()));
-        }
-        let cfg = PartConfig {
-            connector: new.connector,
-            port: port.id.to_string(),
-            mount: new.mount,
-            settings: Settings::new(),
         };
+        (definition.create)(&new.settings).map_err(invalid_settings)?;
+        (definition.provides)(&definition.manifest, &new.settings).map_err(invalid_settings)?;
+        let source = match (new.port, new.simulate) {
+            (Some(_), Some(_)) => {
+                return Err(MachineError::new(
+                    ErrorKind::BadRequest,
+                    "port-and-simulate",
+                    "A part either has a port or is simulated, not both.",
+                    "Leave out the port to simulate the part, or leave out simulate to use the real part.",
+                ));
+            }
+            (None, Some(mode)) => {
+                if mode == Simulate::World
+                    && provides_base(&definition.manifest.provides)
+                    && let Some(other) = self.world_base(&st, None)
+                {
+                    return Err(MachineError::new(
+                        ErrorKind::Conflict,
+                        "world-has-a-base",
+                        format!(
+                            "\"{other}\" is already the simulated base in the world; there can only be one."
+                        ),
+                        "The world's base is the machine itself. Simulate this one with simulate = \"manual\", or remove the other first.",
+                    ));
+                }
+                Source::Simulated(mode)
+            }
+            (port, None) => {
+                if definition.manifest.port == PortRequirement::Bridge {
+                    let p = runtime::needs_bridge(&definition.manifest);
+                    return Err(MachineError::new(ErrorKind::BadRequest, "needs-bridge", p.message, p.hint));
+                }
+                let port_name = port.unwrap_or_default();
+                let port = PortId::parse(&port_name)
+                    .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
+                    .ok_or_else(|| {
+                        MachineError::new(
+                            ErrorKind::BadRequest,
+                            "unknown-port",
+                            format!("There is no port called \"{port_name}\" right now."),
+                            "Check that it is plugged in, then pick it from the list of ports. Or tick Simulated to try the part without hardware.",
+                        )
+                    })?;
+                if let Some(holder) = st.claims.holder(&port.id) {
+                    return Err(port_claimed(&port, &holder.to_string()));
+                }
+                Source::Port(port.id.to_string())
+            }
+        };
+        let cfg = PartConfig { connector: new.connector, source, mount: new.mount, settings: new.settings };
         let text = config::add_part(&st.text, &name, &cfg).map_err(config_write_error)?;
         self.save(&mut st, text)?;
         self.reconcile(&mut st);
@@ -505,22 +579,43 @@ impl Machine {
             .map(|(name, _)| name.clone())
             .collect();
         for name in gone {
+            let reason = if st.config.parts.contains_key(&name) {
+                EndReason::PartRestarted
+            } else {
+                EndReason::PartRemoved
+            };
+            self.revoke_part(st, &name, reason);
             self.stop_part(st, &name);
         }
         let parts: Vec<(PartName, PartConfig)> =
             st.config.parts.iter().map(|(n, c)| (n.clone(), c.clone())).collect();
         for (name, cfg) in parts {
-            let retry = st.running.get(&name).is_some_and(|r| r.handle.is_none());
+            let retry = st.running.get(&name).is_some_and(|r| r.runner.is_none());
             if st.running.contains_key(&name) && !retry {
                 continue;
             }
             st.running.remove(&name);
-            let handle = self.try_start(st, &name, &cfg);
-            st.running.insert(name, Running { config: cfg, handle });
+            let (runner, provides) = self.try_start(st, &name, &cfg);
+            st.running.insert(name, Running { config: cfg, runner, provides });
         }
     }
 
-    fn try_start(&self, st: &mut State, name: &PartName, cfg: &PartConfig) -> Option<PartHandle> {
+    /// The part simulated as the base in the world (the machine), other than `except`.
+    fn world_base(&self, st: &State, except: Option<&PartName>) -> Option<PartName> {
+        st.running
+            .iter()
+            .filter(|(n, r)| {
+                Some(*n) != except
+                    && r.runner.is_some()
+                    && r.config.source == Source::Simulated(Simulate::World)
+                    && provides_base(&r.provides)
+            })
+            .map(|(n, _)| n.clone())
+            .next()
+    }
+
+    /// Starts a part. Returns its runner (`None` if it can't run now) and what it provides.
+    fn try_start(&self, st: &mut State, name: &PartName, cfg: &PartConfig) -> (Option<Runner>, Vec<Provide>) {
         let Some(definition) = self.definition(&cfg.connector) else {
             self.status.set(
                 name,
@@ -529,13 +624,92 @@ impl Machine {
                     "Fix the connector name in parts.toml, or remove the part and add it again.",
                 )),
             );
-            return None;
+            return (None, Vec::new());
         };
-        let Some(port_id) = PortId::parse(&cfg.port) else {
+        let provides = match (definition.provides)(&definition.manifest, &cfg.settings) {
+            Ok(p) => p,
+            Err(e) => {
+                self.status.set(
+                    name,
+                    PartStatus::Invalid(Problem::new(
+                        format!("Setting \"{}\": {}", e.key, e.message),
+                        e.hint,
+                    )),
+                );
+                return (None, Vec::new());
+            }
+        };
+        let runner = match cfg.source {
+            Source::Simulated(mode) => self.start_simulated(st, name, cfg, mode, &provides),
+            Source::Port(_) => self.start_real(st, name, cfg, definition).map(Runner::Real),
+        };
+        (runner, provides)
+    }
+
+    fn start_simulated(
+        &self,
+        st: &State,
+        name: &PartName,
+        cfg: &PartConfig,
+        mode: Simulate,
+        provides: &[Provide],
+    ) -> Option<Runner> {
+        if mode == Simulate::World
+            && provides_base(provides)
+            && let Some(other) = self.world_base(st, Some(name))
+        {
             self.status.set(
                 name,
                 PartStatus::Invalid(Problem::new(
-                    format!("\"{}\" is not a valid port.", cfg.port),
+                    format!("\"{other}\" is already the simulated base in the world; there can only be one."),
+                    "Set simulate = \"manual\" for this one in parts.toml, or remove one of them.",
+                )),
+            );
+            return None;
+        }
+        for p in provides {
+            self.router.declare(SignalAddress::new(name.clone(), p.name.clone()), p.capability);
+        }
+        self.status.set(name, PartStatus::Starting);
+        let spec = PartSpec {
+            name: name.clone(),
+            connector: cfg.connector.clone(),
+            provides: provides.to_vec(),
+            mount: cfg.mount,
+            settings: cfg.settings.clone(),
+            outlet: Arc::new(PartOutlet {
+                part: name.clone(),
+                router: Arc::clone(&self.router),
+                status: Arc::clone(&self.status),
+            }),
+            clock: self.clock.clone(),
+        };
+        Some(Runner::Simulated(match mode {
+            Simulate::Manual => simulation::start_manual(spec),
+            Simulate::World => self.world.start(spec),
+        }))
+    }
+
+    fn start_real(
+        &self,
+        st: &mut State,
+        name: &PartName,
+        cfg: &PartConfig,
+        definition: &Definition,
+    ) -> Option<runtime::PartHandle> {
+        let port_name = match &cfg.source {
+            Source::Port(_) if definition.manifest.port == PortRequirement::Bridge => {
+                self.status.set(name, PartStatus::Invalid(runtime::needs_bridge(&definition.manifest)));
+                return None;
+            }
+            Source::Port(p) => p.as_str(),
+            Source::Simulated(_) => unreachable!("simulated parts start in start_simulated"),
+        };
+        let Some(port_id) = PortId::parse(port_name) else {
+            self.status.set(
+                name,
+                PartStatus::Invalid(Problem::new(
+                    format!("\"{port_name}\" is not a valid port."),
                     "Ports look like usb:10c4:ea60, serial:COM3 or replay:demo-ld19. Fix it in parts.toml.",
                 )),
             );
@@ -545,7 +719,7 @@ impl Machine {
             self.status.set(
                 name,
                 PartStatus::Conflict(Problem::new(
-                    format!("Its port {} is not connected.", cfg.port),
+                    format!("Its port {port_name} is not connected."),
                     "Plug it in. Faber starts the part as soon as the port appears.",
                 )),
             );
@@ -574,10 +748,16 @@ impl Machine {
 
     fn stop_part(&self, st: &mut State, name: &PartName) {
         if let Some(r) = st.running.remove(name) {
-            if let Some(h) = r.handle {
-                h.stop();
+            let simulated = matches!(r.runner, Some(Runner::Simulated(_)));
+            if let Some(runner) = r.runner {
+                runner.stop();
             }
-            if let Some(id) = PortId::parse(&r.config.port) {
+            if simulated {
+                for p in &r.provides {
+                    self.router.remove(&SignalAddress::new(name.clone(), p.name.clone()));
+                }
+            }
+            if let Some(id) = r.config.source.port().and_then(PortId::parse) {
                 st.claims.release(&id, &Claimant::Part(name.clone()));
                 self.ports_changed.send_modify(|n| *n += 1);
             }
@@ -1135,7 +1315,44 @@ impl Recorder {
 impl Drop for Machine {
     fn drop(&mut self) {
         self.stop_scanning.store(true, Ordering::Relaxed);
+        self.stop_sweeping.store(true, Ordering::Relaxed);
     }
+}
+
+/// Where a simulated part's readings and health go: the router and the status board.
+struct PartOutlet {
+    part: PartName,
+    router: Arc<Router>,
+    status: Arc<StatusBoard>,
+}
+
+impl Outlet for PartOutlet {
+    fn publish(&self, name: &str, reading: Reading) {
+        if let Err(e) = self.router.publish(&SignalAddress::new(self.part.clone(), name), reading) {
+            tracing::error!(target: "core::simulation", part = %self.part, "a simulated part published wrongly: {e:?}");
+        }
+    }
+
+    fn set_health(&self, health: Health) {
+        let status = match health {
+            Health::Starting => PartStatus::Starting,
+            Health::Running => PartStatus::Running,
+            Health::Degraded(p) => PartStatus::Degraded(p),
+            Health::Failed(p) => PartStatus::Failed(p),
+        };
+        self.status.set(&self.part, status);
+    }
+}
+
+fn provides_base(provides: &[Provide]) -> bool {
+    provides.iter().any(|p| p.capability == Capability::PlanarBase)
+}
+
+/// Differs between runs of the core, so lease ids do too.
+fn lease_seed() -> u64 {
+    let nanos =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    (nanos as u64) ^ u64::from(std::process::id()).rotate_left(32)
 }
 
 /// A port held open by the serial monitor. Dropping it closes the port and releases the claim.
@@ -1346,22 +1563,32 @@ mod tests {
         discovery: Arc<FakeDiscovery>,
         usb_problems: Arc<FakeUsbProblems>,
     ) -> Arc<Machine> {
+        machine_on(dir, discovery, usb_problems, Arc::new(MonotonicClock::new()))
+    }
+
+    fn machine_on(
+        dir: &Path,
+        discovery: Arc<FakeDiscovery>,
+        usb_problems: Arc<FakeUsbProblems>,
+        clock: SharedClock,
+    ) -> Arc<Machine> {
         let replays = ReplayLibrary::with_demo();
         Machine::start(MachineOptions {
             data_dir: dir.to_path_buf(),
-            clock: Arc::new(MonotonicClock::new()),
+            clock,
             discovery,
             usb_problems,
             disks: Arc::new(FakeDisks::default()),
             opener: Arc::new(SystemOpener::new(replays.clone())),
             replays,
-            connectors: vec![ldrobot_ld19::definition()],
+            connectors: crate::connectors::built_in(),
             timing: Timing {
                 backoff_start: Duration::from_millis(10),
                 port_retry_max: Duration::from_millis(50),
                 ..Timing::default()
             },
             port_scan: None,
+            world: Arc::new(simulation::NoWorld),
         })
         .unwrap()
     }
@@ -1386,6 +1613,7 @@ mod tests {
             connectors: vec![ldrobot_ld19::definition()],
             timing: Timing::default(),
             port_scan: Some(Duration::from_millis(50)),
+            world: Arc::new(simulation::NoWorld),
         })
         .unwrap();
         let mut changes = m.ports_changed();
@@ -1479,8 +1707,10 @@ mod tests {
         NewPart {
             name: name.into(),
             connector: "ldrobot-ld19".into(),
-            port: "replay:demo-ld19".into(),
+            port: Some("replay:demo-ld19".into()),
+            simulate: None,
             mount: Mount::default(),
+            settings: Settings::new(),
         }
     }
 
@@ -1555,7 +1785,8 @@ mod tests {
             (demo("Bad Name"), "invalid-name"),
             (demo("lidar"), "name-taken"),
             (NewPart { connector: "nope".into(), ..demo("a") }, "unknown-connector"),
-            (NewPart { port: "serial:COM99".into(), ..demo("b") }, "unknown-port"),
+            (NewPart { port: Some("serial:COM99".into()), ..demo("b") }, "unknown-port"),
+            (NewPart { simulate: Some(Simulate::Manual), ..demo("c") }, "port-and-simulate"),
             (demo("second"), "port-claimed"),
         ];
         for (req, code) in cases {
@@ -1565,6 +1796,67 @@ mod tests {
         }
         let claimed = m.add_part(demo("second")).unwrap_err();
         assert!(claimed.message.contains("used by the part \"lidar\""), "{claimed:?}");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_simulated_part_is_written_with_simulate_and_claims_no_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let view =
+            m.add_part(NewPart { port: None, simulate: Some(Simulate::Manual), ..demo("lidar") }).unwrap();
+        assert_eq!(view.source, Source::Simulated(Simulate::Manual));
+        let text = std::fs::read_to_string(dir.path().join("config/parts.toml")).unwrap();
+        assert!(text.contains("simulate = \"manual\"") && !text.contains("replay:demo-ld19"), "{text}");
+        assert!(m.ports().iter().all(|p| p.claimed_by.is_none()), "a simulated part claims no port");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_generic_part_without_simulate_is_refused_with_a_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let e = m.add_part(NewPart { connector: "generic-planar-base".into(), ..demo("base") }).unwrap_err();
+        assert_eq!((e.kind, e.code), (ErrorKind::BadRequest, "needs-bridge"));
+        assert!(e.message.contains("Phase 4") && e.hint.contains("Simulated"), "{e:?}");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_generic_part_on_a_port_in_parts_toml_is_invalid_and_claims_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("config")).unwrap();
+        std::fs::write(
+            dir.path().join("config/parts.toml"),
+            "[parts.base]\nconnector = \"generic-planar-base\"\nport = \"replay:demo-ld19\"\n",
+        )
+        .unwrap();
+        let m = machine(dir.path(), no_ports());
+        let PartStatus::Invalid(p) = wait_for_status(&m, "base", |s| matches!(s, PartStatus::Invalid(_)))
+        else {
+            unreachable!()
+        };
+        assert!(p.message.contains("needs a bridge"), "{p:?}");
+        assert!(m.ports().iter().all(|p| p.claimed_by.is_none()));
+        m.shutdown();
+    }
+
+    #[test]
+    fn generic_settings_are_checked_when_the_part_is_added() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let mut settings = Settings::new();
+        settings.insert("max-vx".into(), (-1.0).into());
+        let req = NewPart {
+            connector: "generic-planar-base".into(),
+            port: None,
+            simulate: Some(Simulate::Manual),
+            settings,
+            ..demo("base")
+        };
+        let e = m.add_part(req).unwrap_err();
+        assert_eq!(e.code, "invalid-settings");
+        assert!(e.message.contains("max-vx"), "{e:?}");
         m.shutdown();
     }
 
@@ -1912,6 +2204,7 @@ connector =
             connectors: vec![ldrobot_ld19::definition()],
             timing: Timing::default(),
             port_scan: None,
+            world: Arc::new(simulation::NoWorld),
         })
         .unwrap();
         let mut changes = m.files_changed();
@@ -1932,6 +2225,255 @@ connector =
         assert_eq!(changes.try_recv().unwrap(), vec!["disk-e:/".to_string()]);
         assert_eq!(m.file_roots().len(), 1);
         assert_eq!(m.list_files("disk-e:/").unwrap_err().code, "not-found");
+        m.shutdown();
+    }
+
+    // ---- leases, commands and the e-stop -------------------------------------------------
+
+    use crate::router::Subscription;
+    use crate::simulation::Pattern;
+    use faber_capabilities::{Command, Twist2d, planar_base};
+
+    fn sim(m: &Machine, name: &str, connector: &str, mode: Simulate, settings: &str) -> PartView {
+        m.add_part(NewPart {
+            name: name.into(),
+            connector: connector.into(),
+            port: None,
+            simulate: Some(mode),
+            mount: Mount::default(),
+            settings: toml::from_str(settings).unwrap(),
+        })
+        .unwrap()
+    }
+
+    fn drive(vx: f32, omega: f32) -> Command {
+        Command::PlanarBase(planar_base::Command::SetVelocity(Twist2d::new(vx, 0.0, omega)))
+    }
+
+    fn latest(m: &Machine, addr: &str) -> Option<Reading> {
+        match m.router().subscribe(&SignalAddress::parse(addr).unwrap())? {
+            Subscription::Latest(rx) => rx.borrow().as_deref().cloned(),
+            Subscription::Every(_) => None,
+        }
+    }
+
+    fn commanded(m: &Machine) -> Twist2d {
+        match latest(m, "base/planar-base") {
+            Some(Reading::PlanarBase(r)) => r.commanded,
+            other => panic!("no base reading: {other:?}"),
+        }
+    }
+
+    fn base_machine(dir: &Path) -> Arc<Machine> {
+        let m = machine(dir, no_ports());
+        sim(&m, "base", "generic-planar-base", Simulate::Manual, "max-vx = 0.5\nmax-omega = 1.0\n");
+        wait_for_status(&m, "base", |s| *s == PartStatus::Running);
+        m
+    }
+
+    #[test]
+    fn a_leased_command_is_clamped_applied_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = base_machine(dir.path());
+        let lease = m.request_lease("base", "test", false).unwrap();
+        let reply = m.command("base", &lease.id, drive(2.0, 0.3)).unwrap();
+        assert_eq!(reply.applied, drive(0.5, 0.3));
+        assert!(reply.clamped);
+        assert!(reply.deadline_us >= lease.deadline_us, "a command renews the lease");
+        assert_eq!(commanded(&m), Twist2d::new(0.5, 0.0, 0.3), "the base reports it at once");
+        let e = m.request_lease("base", "someone else", false).unwrap_err();
+        assert_eq!((e.kind, e.code), (ErrorKind::Conflict, "lease-held"));
+        assert!(e.message.contains("\"test\""), "{e:?}");
+        m.shutdown();
+    }
+
+    #[test]
+    fn commands_need_a_live_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = base_machine(dir.path());
+        let e = m.command("base", "nope", drive(0.1, 0.0)).unwrap_err();
+        assert_eq!((e.kind, e.code), (ErrorKind::Forbidden, "lease-required"));
+        let lease = m.request_lease("base", "test", false).unwrap();
+        m.command("base", &lease.id, drive(0.2, 0.0)).unwrap();
+        m.release_lease("base", &lease.id).unwrap();
+        assert_eq!(commanded(&m), Twist2d::ZERO, "releasing stops the base");
+        let e = m.command("base", &lease.id, drive(0.1, 0.0)).unwrap_err();
+        assert_eq!((e.kind, e.code), (ErrorKind::Forbidden, "lease-ended"));
+        assert!(e.message.contains("released"), "{e:?}");
+        assert_eq!(m.command("ghost", &lease.id, drive(0.1, 0.0)).unwrap_err().code, "unknown-part");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_lease_that_goes_quiet_expires_and_stops_the_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = base_machine(dir.path());
+        let mut events = m.lease_events();
+        let lease = m.request_lease("base", "test", false).unwrap();
+        m.command("base", &lease.id, drive(0.3, 0.0)).unwrap();
+        let sent = Instant::now();
+        // The exact bound (deadline + one sweep) is checked on a hand-moved clock below; here
+        // the real sweeper thread does it, so allow for a busy test machine.
+        while commanded(&m) != Twist2d::ZERO {
+            assert!(sent.elapsed() < Duration::from_secs(2), "the sweeper stops the base");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(sent.elapsed() >= Duration::from_millis(240), "not before the lease ran out");
+        let e = m.command("base", &lease.id, drive(0.1, 0.0)).unwrap_err();
+        assert!(e.code == "lease-ended" && e.message.contains("expired"), "{e:?}");
+        assert!(matches!(events.try_recv(), Ok(LeaseEvent::Granted(_))));
+        let Ok(LeaseEvent::Ended(ended)) = events.try_recv() else { panic!("lease-ended is announced") };
+        assert_eq!(ended.reason, EndReason::Expired);
+        m.shutdown();
+    }
+
+    #[test]
+    fn the_sweeper_ends_a_lease_within_50_ms_of_its_deadline() {
+        assert!(safety::SWEEP_EVERY <= Duration::from_millis(25), "a sweep at least twice per 50 ms");
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(crate::clock::ManualClock::new(1_000_000));
+        let m = machine_on(dir.path(), no_ports(), Arc::new(FakeUsbProblems::default()), clock.clone());
+        sim(&m, "base", "generic-planar-base", Simulate::Manual, "");
+        let lease = m.request_lease("base", "test", false).unwrap();
+        m.command("base", &lease.id, drive(0.3, 0.0)).unwrap();
+        clock.set(lease.deadline_us - 1);
+        m.sweep();
+        assert_ne!(commanded(&m), Twist2d::ZERO, "still leased just before the deadline");
+        clock.set(lease.deadline_us);
+        m.sweep();
+        assert_eq!(commanded(&m), Twist2d::ZERO, "the first sweep after the deadline stops it");
+        m.shutdown();
+    }
+
+    #[test]
+    fn the_estop_stops_everything_and_refuses_leases_until_released() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = base_machine(dir.path());
+        let mut changes = m.estop_events();
+        let lease = m.request_lease("base", "test", false).unwrap();
+        m.command("base", &lease.id, drive(0.3, 0.0)).unwrap();
+        let view = m.engage_estop(estop::Source::Shell, "Stop button");
+        assert_eq!(view.engaged.unwrap().reason, "Stop button");
+        assert_eq!(commanded(&m), Twist2d::ZERO);
+        assert!(m.leases().is_empty());
+        let e = m.command("base", &lease.id, drive(0.1, 0.0)).unwrap_err();
+        assert_eq!((e.kind, e.code), (ErrorKind::Locked, "estop-engaged"));
+        assert_eq!(m.request_lease("base", "test", false).unwrap_err().code, "estop-engaged");
+        m.engage_estop(estop::Source::App, "again");
+        assert_eq!(m.estop().engaged.unwrap().reason, "Stop button", "the first reason stays");
+        assert!(m.release_estop(estop::Source::Shell).engaged.is_none());
+        assert!(m.request_lease("base", "test", false).is_ok());
+        let seen: Vec<bool> = std::iter::from_fn(|| changes.try_recv().ok()).map(|r| r.engaged).collect();
+        assert_eq!(seen, [true, false], "every change is announced once");
+        assert_eq!(m.estop().history.len(), 2);
+        m.shutdown();
+    }
+
+    #[test]
+    fn an_operator_takes_over_and_the_app_hears_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = base_machine(dir.path());
+        let app = m.request_lease("base", "drive-square.py", false).unwrap();
+        m.command("base", &app.id, drive(0.3, 0.0)).unwrap();
+        let op = m.request_lease("base", "Drive window", true).unwrap();
+        assert_eq!(commanded(&m), Twist2d::ZERO, "the safe state is sent when the old lease ends");
+        let e = m.command("base", &app.id, drive(0.3, 0.0)).unwrap_err();
+        assert!(e.message.contains("took over"), "{e:?}");
+        assert!(m.command("base", &op.id, drive(0.1, 0.0)).is_ok());
+        m.shutdown();
+    }
+
+    #[test]
+    fn removing_or_restarting_a_part_ends_its_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = base_machine(dir.path());
+        let lease = m.request_lease("base", "test", false).unwrap();
+        m.remove_part("base").unwrap();
+        assert!(m.leases().is_empty());
+        sim(&m, "base", "generic-planar-base", Simulate::Manual, "");
+        let e = m.command("base", &lease.id, drive(0.1, 0.0)).unwrap_err();
+        assert!(e.message.contains("removed"), "{e:?}");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_base_lease_locks_the_motors_it_is_built_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        sim(&m, "left", "generic-motor", Simulate::Manual, "");
+        sim(&m, "base", "generic-planar-base", Simulate::Manual, "built-from = [\"left\"]\n");
+        let base = m.request_lease("base", "Drive window", false).unwrap();
+        assert_eq!(base.locks, [PartName::parse("left").unwrap()]);
+        let e = m.request_lease("left", "motor test", false).unwrap_err();
+        assert_eq!(e.code, "lease-held");
+        assert!(e.message.contains("part of \"base\""), "{e:?}");
+        let e = m
+            .command("left", &base.id, Command::Motor(faber_capabilities::motor::Command::STOP))
+            .unwrap_err();
+        assert_eq!(e.code, "lease-required");
+        assert!(e.message.contains("part of \"base\""), "{e:?}");
+        m.shutdown();
+    }
+
+    #[test]
+    fn commands_and_leases_only_fit_what_a_part_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = base_machine(dir.path());
+        sim(&m, "front", "generic-distance", Simulate::Manual, "");
+        assert_eq!(m.request_lease("front", "test", false).unwrap_err().code, "not-leasable");
+        assert_eq!(m.request_lease("base", "  ", false).unwrap_err().code, "bad-request");
+        let lease = m.request_lease("base", "test", false).unwrap();
+        let motor = Command::Motor(faber_capabilities::motor::Command::STOP);
+        let e = m.command("base", &lease.id, motor).unwrap_err();
+        assert_eq!((e.kind, e.code), (ErrorKind::BadRequest, "bad-command"));
+        assert!(e.hint.contains("planar-base@1"), "{e:?}");
+        assert_eq!(m.command("base", &lease.id, drive(f32::NAN, 0.0)).unwrap_err().code, "bad-command");
+        m.shutdown();
+    }
+
+    #[test]
+    fn manual_sensors_take_a_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = base_machine(dir.path());
+        sim(&m, "front", "generic-distance", Simulate::Manual, "max-m = 2.0\nrate-hz = 100\n");
+        m.set_pattern("front", Pattern::Steady { value: 0.75 }).unwrap();
+        assert_eq!(m.pattern("front").unwrap(), Pattern::Steady { value: 0.75 });
+        let start = Instant::now();
+        while !matches!(latest(&m, "front/distance"), Some(Reading::Distance(r)) if r.meters == 0.75) {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(m.set_pattern("base", Pattern::Steady { value: 1.0 }).unwrap_err().code, "not-a-sensor");
+        let bad = Pattern::Sine { center: 1.0, amplitude: 1.0, period_s: 0.0 };
+        assert_eq!(m.set_pattern("front", bad).unwrap_err().code, "bad-pattern");
+        m.add_part(demo("lidar")).unwrap();
+        assert_eq!(m.set_pattern("lidar", Pattern::Steady { value: 1.0 }).unwrap_err().code, "not-manual");
+        m.shutdown();
+    }
+
+    #[test]
+    fn world_parts_wait_for_the_world_and_only_one_base_is_the_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        sim(&m, "base", "generic-planar-base", Simulate::World, "");
+        let PartStatus::Degraded(p) = wait_for_status(&m, "base", |s| matches!(s, PartStatus::Degraded(_)))
+        else {
+            unreachable!()
+        };
+        assert!(p.message.contains("Waiting for the world"), "{p:?}");
+        let lease = m.request_lease("base", "test", false).unwrap();
+        let e = m.command("base", &lease.id, drive(0.1, 0.0)).unwrap_err();
+        assert_eq!((e.kind, e.code), (ErrorKind::Conflict, "part-not-ready"));
+        let e = m
+            .add_part(NewPart {
+                connector: "generic-planar-base".into(),
+                port: None,
+                simulate: Some(Simulate::World),
+                ..demo("second")
+            })
+            .unwrap_err();
+        assert_eq!(e.code, "world-has-a-base");
+        sim(&m, "lidar", "ldrobot-ld19", Simulate::World, "");
         m.shutdown();
     }
 }

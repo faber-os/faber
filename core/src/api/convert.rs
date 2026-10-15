@@ -1,11 +1,15 @@
 //! Machine types → wire types (docs/api.md). The only place that knows both.
 
 use super::dto;
+use crate::config::Simulate;
 use crate::files::{Entry, Kind, Special, VPath};
+use crate::leases::{EndReason, Lease};
 use crate::logs;
+use crate::machine::EstopView;
 use crate::machine::{MachineError, PartView, PortView};
 use crate::ports::{PortKind, PortProblem};
 use crate::runtime::PartStatus;
+use crate::simulation::Pattern;
 use faber_connector::{Manifest, PortRequirement, Problem};
 
 pub fn error_body(e: &MachineError) -> dto::ErrorBody {
@@ -33,7 +37,8 @@ pub fn part(p: &PartView) -> dto::PartInfo {
     dto::PartInfo {
         name: p.name.to_string(),
         connector: p.connector.clone(),
-        port: p.port.clone(),
+        port: p.source.port().map(str::to_string),
+        simulate: p.source.simulate().map(simulate),
         state: part_state(&p.status),
         signals: p
             .signals
@@ -41,6 +46,85 @@ pub fn part(p: &PartView) -> dto::PartInfo {
             .map(|(addr, cap)| dto::SignalInfo { address: addr.to_string(), capability: *cap })
             .collect(),
         mount: p.mount,
+    }
+}
+
+pub fn simulate(s: Simulate) -> dto::Simulate {
+    match s {
+        Simulate::Manual => dto::Simulate::Manual,
+        Simulate::World => dto::Simulate::World,
+    }
+}
+
+pub fn simulate_from(s: dto::Simulate) -> Simulate {
+    match s {
+        dto::Simulate::Manual => Simulate::Manual,
+        dto::Simulate::World => Simulate::World,
+    }
+}
+
+/// JSON settings from the wire → a TOML table for parts.toml.
+pub fn settings(json: serde_json::Map<String, serde_json::Value>) -> Result<toml::Table, String> {
+    toml::Table::try_from(serde_json::Value::Object(json)).map_err(|e| e.to_string())
+}
+
+pub fn lease_grant(l: &Lease) -> dto::LeaseGrant {
+    dto::LeaseGrant {
+        lease: l.id.clone(),
+        part: l.part.to_string(),
+        holder: l.holder.clone(),
+        deadline_us: l.deadline_us,
+        duration_ms: l.duration_us / 1000,
+        locks: l.locks.iter().map(ToString::to_string).collect(),
+    }
+}
+
+pub fn lease_info(l: &Lease) -> dto::LeaseInfo {
+    dto::LeaseInfo {
+        part: l.part.to_string(),
+        holder: l.holder.clone(),
+        deadline_us: l.deadline_us,
+        locks: l.locks.iter().map(ToString::to_string).collect(),
+    }
+}
+
+pub fn lease_end_reason(r: EndReason) -> dto::LeaseEndReason {
+    use dto::LeaseEndReason as R;
+    match r {
+        EndReason::Released => R::Released,
+        EndReason::Expired => R::Expired,
+        EndReason::Estop => R::Estop,
+        EndReason::TakenOver => R::TakenOver,
+        EndReason::PartRemoved => R::PartRemoved,
+        EndReason::PartRestarted => R::PartRestarted,
+        EndReason::PartFailed => R::PartFailed,
+        EndReason::Shutdown => R::Shutdown,
+    }
+}
+
+pub fn estop_status(v: &EstopView) -> dto::EstopStatus {
+    dto::EstopStatus {
+        engaged: v.engaged.is_some(),
+        engaged_by: v.engaged.clone(),
+        history: v.history.clone(),
+    }
+}
+
+pub fn pattern(p: Pattern) -> dto::Pattern {
+    match p {
+        Pattern::Steady { value } => dto::Pattern::Steady { value },
+        Pattern::Sine { center, amplitude, period_s } => dto::Pattern::Sine { center, amplitude, period_s },
+        Pattern::Noise { center, amplitude } => dto::Pattern::Noise { center, amplitude },
+        Pattern::Step { low, high, period_s } => dto::Pattern::Step { low, high, period_s },
+    }
+}
+
+pub fn pattern_from(p: dto::Pattern) -> Pattern {
+    match p {
+        dto::Pattern::Steady { value } => Pattern::Steady { value },
+        dto::Pattern::Sine { center, amplitude, period_s } => Pattern::Sine { center, amplitude, period_s },
+        dto::Pattern::Noise { center, amplitude } => Pattern::Noise { center, amplitude },
+        dto::Pattern::Step { low, high, period_s } => Pattern::Step { low, high, period_s },
     }
 }
 
@@ -87,11 +171,16 @@ pub fn connector(m: &Manifest) -> dto::ConnectorInfo {
         kind: "built-in".into(),
         port: match m.port {
             PortRequirement::Serial { baud } => dto::PortRequirementInfo::Serial { baud },
+            PortRequirement::Bridge => dto::PortRequirementInfo::Bridge,
         },
         provides: m
             .provides
             .iter()
-            .map(|p| dto::ProvideInfo { name: p.name.clone(), capability: p.capability })
+            .map(|p| dto::ProvideInfo {
+                name: p.name.clone(),
+                capability: p.capability,
+                info: p.info.clone(),
+            })
             .collect(),
     }
 }
@@ -170,5 +259,9 @@ mod tests {
         assert_eq!(c.id, "ldrobot-ld19");
         assert_eq!(c.port, dto::PortRequirementInfo::Serial { baud: 230_400 });
         assert_eq!(c.provides[0].name, "laser-scan");
+        assert!(
+            matches!(c.provides[0].info, Some(faber_capabilities::Info::LaserScan(_))),
+            "the range is shown"
+        );
     }
 }

@@ -3,6 +3,7 @@
 //! blocking pool so they never stall the async runtime.
 
 mod convert;
+mod driving;
 pub mod dto;
 mod files;
 mod shell;
@@ -36,6 +37,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/parts/{name}", delete(remove_part))
         .route("/api/v0/ws", get(ws::upgrade))
         .merge(files::routes())
+        .merge(driving::routes())
         .merge(translations::routes())
         .fallback(shell::serve)
         .with_state(state)
@@ -59,6 +61,7 @@ impl From<MachineError> for Failure {
             ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
             ErrorKind::Unprocessable => StatusCode::UNPROCESSABLE_ENTITY,
             ErrorKind::Forbidden => StatusCode::FORBIDDEN,
+            ErrorKind::Locked => StatusCode::LOCKED,
             ErrorKind::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
         };
         Failure(status, convert::error_body(&e))
@@ -156,11 +159,21 @@ async fn add_part(
     State(s): State<AppState>,
     ApiJson(body): ApiJson<dto::NewPart>,
 ) -> Result<(StatusCode, Json<dto::PartInfo>), Failure> {
+    let settings = convert::settings(body.settings.unwrap_or_default()).map_err(|e| {
+        Failure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid-settings",
+            format!("The settings can't be saved in parts.toml: {e}"),
+            "Use numbers, text, true/false and lists; leave out null.",
+        )
+    })?;
     let req = NewPart {
         name: body.name,
         connector: body.connector,
         port: body.port,
+        simulate: body.simulate.map(convert::simulate_from),
         mount: body.mount.unwrap_or_default(),
+        settings,
     };
     let view = blocking(move || s.machine.add_part(req)).await??;
     Ok((StatusCode::CREATED, Json(convert::part(&view))))

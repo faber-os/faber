@@ -10,14 +10,17 @@ pub mod backup;
 pub mod config;
 pub mod connectors;
 pub mod disks;
+pub mod estop;
 pub mod files;
 pub mod host;
+pub mod leases;
 pub mod logs;
 pub mod ports;
 pub mod router;
 pub mod runtime;
 pub mod settings;
 pub mod sim;
+pub mod simulation;
 pub mod suggest;
 pub mod translations;
 
@@ -60,6 +63,8 @@ impl Core {
             connectors: connectors::built_in(),
             timing: runtime::Timing::default(),
             port_scan: Some(Duration::from_secs(2)),
+            // The world engine plugs in here (docs/simulation.md, section 7).
+            world: Arc::new(simulation::NoWorld),
         })?;
         Ok(Core { machine, logs })
     }

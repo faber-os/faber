@@ -14,14 +14,84 @@ pub const FILE_NAME: &str = "parts.toml";
 #[derive(Clone, Debug, PartialEq)]
 pub struct PartConfig {
     pub connector: String,
-    pub port: String,
+    /// Where its values come from: a real port, or a simulation (D36).
+    pub source: Source,
     pub mount: Mount,
     pub settings: toml::Table,
+}
+
+/// `port = "…"` or `simulate = "…"`: exactly one of them (docs/simulation.md, section 4).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// The real part, on this port (e.g. `usb:10c4:ea60`).
+    Port(String),
+    /// A simulated part: same name and capability, no hardware, no port claimed.
+    Simulated(Simulate),
+}
+
+impl Source {
+    pub fn port(&self) -> Option<&str> {
+        match self {
+            Source::Port(p) => Some(p),
+            Source::Simulated(_) => None,
+        }
+    }
+
+    pub fn simulate(&self) -> Option<Simulate> {
+        match self {
+            Source::Port(_) => None,
+            Source::Simulated(s) => Some(*s),
+        }
+    }
+}
+
+/// How a simulated part gets its values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Simulate {
+    /// A value or pattern set by hand; actuators report the commands they get.
+    Manual,
+    /// From the simulated world: raycasts from the part's mount, and the base moves the machine.
+    World,
+}
+
+impl Simulate {
+    pub const ALL: &'static [Simulate] = &[Simulate::Manual, Simulate::World];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Simulate::Manual => "manual",
+            Simulate::World => "world",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Simulate> {
+        Simulate::ALL.iter().copied().find(|m| m.id() == s)
+    }
+}
+
+/// The `[world]` table: which world simulated parts live in, and where the machine starts.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorldConfig {
+    pub name: String,
+    #[serde(default)]
+    pub start: Start,
+}
+
+/// A pose on the world's floor: `x`, `y` (m) and `yaw` (rad).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Start {
+    pub x: f64,
+    pub y: f64,
+    pub yaw: f64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartsConfig {
     pub parts: BTreeMap<PartName, PartConfig>,
+    /// `None` in files from before Phase 2, or when no world was picked.
+    pub world: Option<WorldConfig>,
 }
 
 /// A problem in `parts.toml`, with where it is and what to do.
@@ -54,13 +124,15 @@ const FIX_HINT: &str = "Fix this line in parts.toml, or remove the part in the s
 struct RawFile {
     #[serde(default)]
     parts: BTreeMap<String, RawPart>,
+    world: Option<WorldConfig>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawPart {
     connector: String,
-    port: String,
+    port: Option<toml::Spanned<String>>,
+    simulate: Option<toml::Spanned<String>>,
     #[serde(default)]
     mount: Mount,
     #[serde(default)]
@@ -92,12 +164,46 @@ pub fn parse(text: &str) -> Result<PartsConfig, ConfigError> {
             hint: bad.hint,
             ..ConfigError::at(text, part_key_span(text, &name), bad.message, "")
         })?;
+        let source = source(text, &name, p.port, p.simulate)?;
         parts.insert(
             part_name,
-            PartConfig { connector: p.connector, port: p.port, mount: p.mount, settings: p.settings },
+            PartConfig { connector: p.connector, source, mount: p.mount, settings: p.settings },
         );
     }
-    Ok(PartsConfig { parts })
+    Ok(PartsConfig { parts, world: raw.world })
+}
+
+/// `port` or `simulate`, exactly one, with the line of whatever is wrong.
+fn source(
+    text: &str,
+    name: &str,
+    port: Option<toml::Spanned<String>>,
+    simulate: Option<toml::Spanned<String>>,
+) -> Result<Source, ConfigError> {
+    match (port, simulate) {
+        (Some(port), None) => Ok(Source::Port(port.into_inner())),
+        (None, Some(sim)) => match Simulate::parse(sim.get_ref()) {
+            Some(mode) => Ok(Source::Simulated(mode)),
+            None => Err(ConfigError::at(
+                text,
+                Some(sim.span()),
+                format!("simulate = \"{}\" is not a way to simulate a part.", sim.get_ref()),
+                "Use simulate = \"manual\" (values you set by hand) or simulate = \"world\" (values from the simulated world).",
+            )),
+        },
+        (Some(_), Some(sim)) => Err(ConfigError::at(
+            text,
+            Some(sim.span()),
+            format!("The part \"{name}\" has both port and simulate, but it can only have one."),
+            "Remove port to simulate the part, or remove simulate to use the real part on its port.",
+        )),
+        (None, None) => Err(ConfigError::at(
+            text,
+            part_key_span(text, name),
+            format!("The part \"{name}\" has neither port nor simulate."),
+            "Add port = \"…\" with the port it is plugged into, or simulate = \"manual\" or \"world\" to simulate it.",
+        )),
+    }
 }
 
 fn edit_doc(text: &str) -> Result<toml_edit::DocumentMut, ConfigError> {
@@ -135,7 +241,10 @@ pub fn add_part(text: &str, name: &PartName, cfg: &PartConfig) -> Result<String,
     }
     let mut t = toml_edit::Table::new();
     t.insert("connector", toml_edit::value(cfg.connector.as_str()));
-    t.insert("port", toml_edit::value(cfg.port.as_str()));
+    match &cfg.source {
+        Source::Port(port) => t.insert("port", toml_edit::value(port.as_str())),
+        Source::Simulated(mode) => t.insert("simulate", toml_edit::value(mode.id())),
+    };
     if let Some(m) = mount_item(&cfg.mount) {
         t.insert("mount", m);
     }
@@ -216,7 +325,7 @@ mod tests {
     fn lidar() -> PartConfig {
         PartConfig {
             connector: "ldrobot-ld19".into(),
-            port: "usb:10c4:ea60".into(),
+            source: Source::Port("usb:10c4:ea60".into()),
             mount: Mount::default(),
             settings: toml::Table::new(),
         }
@@ -348,6 +457,119 @@ speed = 10
         let out = remove_part(text, &name("a")).unwrap();
         assert!(!out.contains("k = 1"), "{out}");
         assert_eq!(parse(&out).unwrap().parts.len(), 1);
+    }
+
+    #[test]
+    fn simulated_parts_and_the_world_from_the_design_parse() {
+        let text = r#"
+[world]
+name = "apartment"
+start = { x = 1.0, y = 1.0, yaw = 0.0 }
+
+[parts.base]
+connector = "generic-planar-base"
+simulate = "world"
+settings = { length = 0.8, width = 0.65, max-vx = 0.6, max-vy = 0.6, max-omega = 1.5 }
+
+[parts.lidar]
+connector = "ldrobot-ld19"
+simulate = "world"
+mount = { x = 0.2, z = 0.3 }
+
+[parts.front]
+connector = "generic-distance"
+simulate = "manual"
+"#;
+        let c = parse(text).unwrap();
+        assert_eq!(c.parts[&name("base")].source, Source::Simulated(Simulate::World));
+        assert_eq!(c.parts[&name("front")].source, Source::Simulated(Simulate::Manual));
+        assert_eq!(c.parts[&name("base")].settings["max-omega"].as_float(), Some(1.5));
+        assert_eq!(
+            c.world,
+            Some(WorldConfig { name: "apartment".into(), start: Start { x: 1.0, y: 1.0, yaw: 0.0 } })
+        );
+    }
+
+    #[test]
+    fn the_world_start_is_optional_and_old_files_have_no_world() {
+        let c = parse(
+            "[world]
+name = \"empty\"
+",
+        )
+        .unwrap();
+        assert_eq!(c.world.unwrap().start, Start::default());
+        assert_eq!(
+            parse(
+                "[parts.a]
+connector = \"x\"
+port = \"p\"
+"
+            )
+            .unwrap()
+            .world,
+            None
+        );
+    }
+
+    #[test]
+    fn port_and_simulate_together_point_at_the_line() {
+        let text = "[parts.a]
+connector = \"x\"
+port = \"p\"
+simulate = \"manual\"
+";
+        let e = parse(text).unwrap_err();
+        assert_eq!(e.line, Some(4), "{e:?}");
+        assert!(e.message.contains("both"), "{e:?}");
+        assert!(e.hint.contains("Remove port"), "{e:?}");
+    }
+
+    #[test]
+    fn neither_port_nor_simulate_points_at_the_part() {
+        let text = "# robot
+
+[parts.a]
+connector = \"x\"
+";
+        let e = parse(text).unwrap_err();
+        assert_eq!(e.line, Some(3), "{e:?}");
+        assert!(e.message.contains("port") && e.message.contains("simulate"), "{e:?}");
+    }
+
+    #[test]
+    fn an_unknown_simulation_mode_is_named_with_its_line() {
+        let text = "[parts.a]
+connector = \"x\"
+simulate = \"wrld\"
+";
+        let e = parse(text).unwrap_err();
+        assert_eq!(e.line, Some(3), "{e:?}");
+        assert!(e.message.contains("\"wrld\""), "{e:?}");
+        assert!(e.hint.contains("\"manual\"") && e.hint.contains("\"world\""), "{e:?}");
+    }
+
+    #[test]
+    fn adding_a_simulated_part_writes_simulate_instead_of_port() {
+        let text = "# My robot
+
+[parts.lidar] # real
+connector = \"ldrobot-ld19\"
+port = \"usb:10c4:ea60\"
+";
+        let mut settings = toml::Table::new();
+        settings.insert("max-vx".into(), 0.6.into());
+        let cfg = PartConfig {
+            connector: "generic-planar-base".into(),
+            source: Source::Simulated(Simulate::Manual),
+            mount: Mount::default(),
+            settings,
+        };
+        let out = add_part(text, &name("base"), &cfg).unwrap();
+        assert!(out.contains("# My robot") && out.contains("# real"), "{out}");
+        assert!(out.contains("simulate = \"manual\""), "{out}");
+        assert!(!out[out.find("[parts.base]").unwrap()..].contains("port"), "{out}");
+        assert_eq!(parse(&out).unwrap().parts[&name("base")], cfg);
     }
 
     #[test]

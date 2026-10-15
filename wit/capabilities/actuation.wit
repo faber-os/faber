@@ -30,7 +30,8 @@ interface planar-base {
     built-from: list<string>,
   }
   record settings { lease-ms: u32 }
-  record reading { t-us: timestamp, commanded: twist2d, measured: option<twist2d> }
+  /// `bumped`: it stopped short because it would have hit something (simulated worlds).
+  record reading { t-us: timestamp, commanded: twist2d, measured: option<twist2d>, bumped: bool }
   /// Leased. Safe state: stop, ramped down on the microcontroller.
   set-velocity: func(lease: lease-id, velocity: twist2d) -> result<_, command-error>;
 }

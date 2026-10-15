@@ -50,6 +50,25 @@ Open <http://127.0.0.1:7878>. Plug in your hardware and it appears under **Add p
 No hardware? Open **Files → Recordings → Add sample recordings** to get a real LD19 LiDAR
 recording, then add a part on the port `replay:ld19-sample`.
 
+**Drive something (no hardware).** Add a simulated drive base to `home:/System/parts.toml` (or
+through the API with `"simulate": "manual"`):
+
+```toml
+[parts.base]
+connector = "generic-planar-base"
+simulate = "manual"
+```
+
+Then let a program drive it in a 1 m square. It needs only Python's standard library:
+
+```bash
+python examples/drive-square.py
+```
+
+It takes the base's *lease*, the right to drive it, and renews it with every command. If the
+program stops, the lease runs out within 250 ms and Faber stops the base by itself. `POST
+/api/v0/estop` (the e-stop) stops everything at once. See [docs/api.md](docs/api.md#driving-leases-commands-and-the-e-stop).
+
 ## The building blocks
 
 | | What | Example |

@@ -3,7 +3,7 @@
 //! feeds it, so a slow topic never holds up another.
 
 use super::{AppState, convert, dto};
-use crate::machine::SerialSession;
+use crate::machine::{LeaseEvent, SerialSession};
 use crate::names::SignalAddress;
 use crate::ports::PortEvent;
 use axum::extract::ws::{Message, WebSocket};
@@ -384,6 +384,69 @@ fn subscribe(
                             }
                         }
                         Err(_) => return,
+                    }
+                }
+            }))
+        }
+        dto::Topic::Leases => {
+            let machine = Arc::clone(&state.machine);
+            // Subscribe before reading the list, so nothing falls between the two.
+            let mut rx = machine.lease_events();
+            Ok(tokio::spawn(async move {
+                let leases = machine.leases().iter().map(convert::lease_info).collect();
+                if out.send(dto::ServerMessage::Leases { id, leases }).await.is_err() {
+                    return;
+                }
+                loop {
+                    let msg = match rx.recv().await {
+                        Ok(LeaseEvent::Granted(l)) => {
+                            dto::ServerMessage::LeaseGranted { id, lease: convert::lease_info(&l) }
+                        }
+                        Ok(LeaseEvent::Ended(e)) => dto::ServerMessage::LeaseEnded {
+                            id,
+                            lease: convert::lease_info(&e.lease),
+                            reason: convert::lease_end_reason(e.reason),
+                        },
+                        // Missed some: send the whole list again.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            dto::ServerMessage::Leases {
+                                id,
+                                leases: machine.leases().iter().map(convert::lease_info).collect(),
+                            }
+                        }
+                        Err(_) => return,
+                    };
+                    if out.send(msg).await.is_err() {
+                        return;
+                    }
+                }
+            }))
+        }
+        dto::Topic::Estop => {
+            let machine = Arc::clone(&state.machine);
+            let mut rx = machine.estop_events();
+            Ok(tokio::spawn(async move {
+                let mut status = convert::estop_status(&machine.estop());
+                status.history.clear();
+                if out.send(dto::ServerMessage::Estop { id, status }).await.is_err() {
+                    return;
+                }
+                loop {
+                    let status = match rx.recv().await {
+                        Ok(change) => dto::EstopStatus {
+                            engaged: change.engaged,
+                            engaged_by: change.engaged.then_some(change),
+                            history: Vec::new(),
+                        },
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            let mut s = convert::estop_status(&machine.estop());
+                            s.history.clear();
+                            s
+                        }
+                        Err(_) => return,
+                    };
+                    if out.send(dto::ServerMessage::Estop { id, status }).await.is_err() {
+                        return;
                     }
                 }
             }))

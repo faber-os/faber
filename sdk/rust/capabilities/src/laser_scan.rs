@@ -38,6 +38,16 @@ pub struct Reading {
     pub intensities: Option<Vec<f32>>,
 }
 
+/// What a scanner can see, reported once.
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS), ts(export))]
+#[cfg_attr(feature = "typescript", ts(rename = "LaserScanInfo"))]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Info {
+    pub range_min_m: f32,
+    pub range_max_m: f32,
+}
+
 /// Why a reading is not well-formed.
 #[derive(Debug, PartialEq)]
 pub enum Invalid {

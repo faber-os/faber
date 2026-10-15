@@ -29,7 +29,14 @@ fn real_capture_gives_whole_revolutions_at_about_10_hz() {
     assert!(ctx.health.iter().all(|h| !matches!(h, Health::Failed(_))), "{:?}", ctx.health);
     assert_eq!(ctx.last_health(), Some(&Health::Running));
 
-    let scans: Vec<_> = ctx.published.iter().map(|(_, Reading::LaserScan(r))| r).collect();
+    let scans: Vec<_> = ctx
+        .published
+        .iter()
+        .map(|(_, reading)| match reading {
+            Reading::LaserScan(r) => r,
+            other => panic!("an LD19 publishes only laser scans: {other:?}"),
+        })
+        .collect();
     let expected = duration_s * 10.0;
     assert!(
         (scans.len() as f64 - expected).abs() < expected * 0.1,

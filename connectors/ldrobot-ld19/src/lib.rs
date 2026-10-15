@@ -7,7 +7,7 @@ mod clock;
 mod protocol;
 mod revolution;
 
-use faber_capabilities::{Capability, Reading, Timestamp};
+use faber_capabilities::{Capability, Info, Reading, Timestamp, laser_scan};
 use faber_connector::{
     Connector, Context, Definition, Health, Manifest, PortRequirement, Problem, Provide, Settings,
     SettingsError, UsbHint,
@@ -31,7 +31,11 @@ pub fn manifest() -> Manifest {
         name: "LDROBOT LD19 / STL-19P LiDAR".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         port: PortRequirement::Serial { baud: BAUD },
-        provides: vec![Provide::default_for(Capability::LaserScan)],
+        // Range from the LD19 datasheet: 0.02–12 m (docs/simulation.md, section 7).
+        provides: vec![Provide::with_info(Info::LaserScan(laser_scan::Info {
+            range_min_m: 0.02,
+            range_max_m: 12.0,
+        }))],
         usb_hints: vec![UsbHint {
             vid: 0x10c4,
             pid: 0xea60,
@@ -44,7 +48,7 @@ pub fn manifest() -> Manifest {
 }
 
 pub fn definition() -> Definition {
-    Definition { manifest: manifest(), create }
+    Definition::new(manifest(), create)
 }
 
 fn create(settings: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
@@ -198,7 +202,9 @@ mod tests {
         assert!(ctx.published.len() >= 2);
         for (name, reading) in &ctx.published {
             assert_eq!(name, "laser-scan");
-            let Reading::LaserScan(r) = reading;
+            let Reading::LaserScan(r) = reading else {
+                panic!("an LD19 publishes only laser scans: {reading:?}")
+            };
             assert!(r.validate().is_ok());
         }
     }
