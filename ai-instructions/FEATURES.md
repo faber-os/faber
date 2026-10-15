@@ -33,7 +33,8 @@ Phase 1 is built (see `docs/roadmap.md`).
 | Wasm connectors (Phase 3a) | Implemented | Wasmtime 49 sandbox (32 MB, 20 ms per call), `faber:connector` WIT, guest macro (`faber-connector-wasm`), LD19 as wasm gives identical readings (232/232); `GET /connectors/problems` | 2026-10-15 | — | — |
 | Packages and faber CLI (Phase 3b) | Implemented | `.faberpkg` checked fully before install, live install/uninstall, Install window, Settings → Connectors, `position@1` viewer, `faber new/check/pack`, templates, first-connector guide and its end-to-end test | 2026-10-15 | 3a, 3c | — |
 | Phase 3 polish | Implemented | backups include installed connectors (re-checked on restore, all or nothing), `packages` WS topic, install errors name the package file, reproducible package bytes | 2026-10-15 | 3b | — |
-| FaberLink protocol (Phase 4a) | In progress | Rust crate + portable C++ library, interop tests on the PC | — | — | — |
+| FaberLink protocol (Phase 4a) | Implemented | `sdk/rust/faberlink` (COBS, CRC-16, every message, per-capability layouts, core session); `firmware/faberlink` C++11 Arduino library enforcing the board safety rules; interop tests compile the C++ via `cc` (MSVC/g++); CI compiles the examples for Uno and Mega | 2026-10-15 | — | — |
+| faber-bridge connector (Phase 4b) | In progress | sub-parts, leases to the board, hardware e-stop, detect-then-suggest, shell | — | 4a | — |
 | Restart / shut down | Planned | Power items exist in the start menu but are disabled until the machine image (Phase 6) | — | Image | Phase 6 |
 | Copy / paste, multi-select in Files | Planned | Also unlocks moving between disks and home | — | Files | — |
 | Real LD19 on the PC | Planned | Mikkel plugs in the LD19 and adds it via its USB port | — | Phase 1 | Mikkel |
