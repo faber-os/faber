@@ -2,6 +2,7 @@
 //! logic of its own. Machine calls that may block (starting or stopping parts) run on the
 //! blocking pool so they never stall the async runtime.
 
+mod apps;
 mod convert;
 mod driving;
 pub mod dto;
@@ -43,6 +44,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/ws", get(ws::upgrade))
         .merge(files::routes())
         .merge(packages::routes())
+        .merge(apps::routes())
         .merge(driving::routes())
         .merge(translations::routes())
         .merge(world::routes())

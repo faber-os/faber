@@ -61,7 +61,10 @@ async fn install(
     let (preview_of, installed) =
         blocking(move || s.machine.install_package(&bytes, &source, preview)).await??;
     Ok(match installed {
-        None => Json(convert::package_preview(&preview_of)).into_response(),
+        None => match convert::package_preview(&preview_of) {
+            Ok(connector) => Json(connector).into_response(),
+            Err(app) => Json(app).into_response(),
+        },
         Some(view) => (StatusCode::CREATED, Json(convert::package(&view))).into_response(),
     })
 }

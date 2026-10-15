@@ -53,6 +53,11 @@ impl StatusBoard {
         }
     }
 
+    /// Says "something changed" without a status changing (an app's parts or switch).
+    pub fn touch(&self) {
+        self.changed.send_modify(|n| *n += 1);
+    }
+
     pub fn remove(&self, app: &str) {
         if self.statuses.lock().expect("app status lock").remove(app).is_some() {
             self.changed.send_modify(|n| *n += 1);

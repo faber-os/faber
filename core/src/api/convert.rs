@@ -1,6 +1,7 @@
 //! Machine types → wire types (docs/api.md). The only place that knows both.
 
 use super::dto;
+use crate::apps::AppStatus;
 use crate::bridge::{BoardView, LinkState};
 use crate::config::Simulate;
 use crate::connectors::LoadProblem;
@@ -9,7 +10,10 @@ use crate::leases::{EndReason, Lease};
 use crate::logs;
 use crate::machine::EstopView;
 use crate::machine::WorldView;
-use crate::machine::{BoardCheck, MachineError, PartView, PortView};
+use crate::machine::{
+    AppView, BoardCheck, MachineError, PackagePreview, PackagePreviewOf, PartView, PortView,
+};
+use crate::names::SignalAddress;
 use crate::ports::{PortKind, PortProblem};
 use crate::runtime::PartStatus;
 use crate::simparts::WorldState;
@@ -208,15 +212,90 @@ pub fn connector_problem(p: &LoadProblem) -> dto::ConnectorProblem {
     }
 }
 
-pub fn package_preview(p: &crate::machine::PackagePreview) -> dto::PackagePreview {
-    let kind = if p.header.kind == "wasm" { ConnectorKind::Wasm } else { ConnectorKind::Declarative };
-    dto::PackagePreview {
-        connector: connector(&p.manifest, kind),
-        publisher: p.header.publisher.clone(),
-        readme: p.readme.clone(),
-        captures: p.captures.clone(),
-        replaces: p.replaces.clone(),
-        checked: false,
+/// A connector's package answers a `PackagePreview`, an app's an `AppPackagePreview`.
+pub fn package_preview(p: &PackagePreview) -> Result<dto::PackagePreview, Box<dto::AppPackagePreview>> {
+    match &p.of {
+        PackagePreviewOf::Connector(m) => {
+            let kind = if p.header.kind == "wasm" { ConnectorKind::Wasm } else { ConnectorKind::Declarative };
+            Ok(dto::PackagePreview {
+                connector: connector(m, kind),
+                publisher: p.header.publisher.clone(),
+                readme: p.readme.clone(),
+                captures: p.captures.clone(),
+                replaces: p.replaces.clone(),
+                checked: false,
+            })
+        }
+        PackagePreviewOf::App(m) => Err(Box::new(dto::AppPackagePreview {
+            app: app_info(&AppView {
+                manifest: m.clone(),
+                status: AppStatus::Stopped(Problem::new("The app is turned off.", "Turn it on to start it.")),
+                enabled: false,
+                bindings: Default::default(),
+            }),
+            readme: p.readme.clone(),
+            replaces: p.replaces.clone(),
+            checked: false,
+        })),
+    }
+}
+
+pub fn app_state(s: &AppStatus) -> dto::PartState {
+    use dto::PartStateKind as K;
+    match s {
+        AppStatus::Invalid(p) => state(K::Invalid, Some(p)),
+        AppStatus::Conflict(p) => state(K::Conflict, Some(p)),
+        AppStatus::Starting => state(K::Starting, None),
+        AppStatus::Running => state(K::Running, None),
+        AppStatus::Failed(p) => state(K::Failed, Some(p)),
+        AppStatus::Stopped(p) => state(K::Stopped, Some(p)),
+    }
+}
+
+pub fn app_info(a: &AppView) -> dto::AppInfo {
+    let m = &a.manifest;
+    let ui_url = |rel: &str| format!("/apps/{}/{rel}", m.id);
+    dto::AppInfo {
+        id: m.id.clone(),
+        name: m.name.clone(),
+        version: m.version.clone(),
+        publisher: m.publisher.clone(),
+        enabled: a.enabled,
+        state: app_state(&a.status),
+        logic: m.module.is_some(),
+        tick_hz: m.module.as_ref().map(|_| m.tick_hz),
+        roles: m
+            .requires
+            .iter()
+            .map(|r| dto::AppRole {
+                role: r.role.clone(),
+                capability: r.capability,
+                command: r.command,
+                count: r.count.id().to_string(),
+                parts: a
+                    .bindings
+                    .get(&r.role)
+                    .map(|ps| ps.iter().map(|p| p.to_string()).collect())
+                    .unwrap_or_default(),
+            })
+            .collect(),
+        publishes: m
+            .publishes
+            .iter()
+            .map(|p| dto::AppSignal {
+                name: p.name.clone(),
+                capability: p.capability,
+                address: SignalAddress::derived(&m.id, p.name.clone()).to_string(),
+            })
+            .collect(),
+        ui: m.ui.then(|| ui_url("ui/index.html")),
+        window: m.window.as_ref().map(|w| dto::AppWindow {
+            title: w.title.clone(),
+            icon: w.icon.as_deref().filter(|i| i.starts_with("ui/")).map(ui_url),
+            width: w.width,
+            height: w.height,
+            pinned: w.pinned,
+        }),
     }
 }
 

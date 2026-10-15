@@ -1,0 +1,16 @@
+[package]
+name = "wall-follower"
+version = "0.1.0"
+description = "An example Faber app: drives a planar base along a wall on its right, 0.3 m from it, using a LiDAR."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+faber-app-wasm = { version = "0.1.0", path = "../../../sdk/rust/app-wasm" }
+faber-capabilities = { version = "0.1.0", path = "../../../sdk/rust/capabilities" }

@@ -15,6 +15,11 @@ enum Rule {
 
 fn rule_for(name: &str, manifest_path: &str) -> Option<Rule> {
     let path = manifest_path.replace('\\', "/");
+    // Apps (the examples, and the core's test apps): the capability types and the app SDK, no
+    // I/O. They see the machine only through their roles.
+    if path.contains("/examples/apps/") || path.contains("/wasm-guests/app-") {
+        return Some(Rule::Only(&["faber-app-wasm", "faber-capabilities"]));
+    }
     // Connectors, and the core's misbehaving test connectors: bytes in, readings out, no I/O. The
     // wasm glue is only compiled for the wasm build of the same code.
     if path.contains("/connectors/") || path.contains("/wasm-guests/") {
@@ -164,6 +169,22 @@ mod tests {
             pkg("test-guest", "/r/core/tests/wasm-guests/x/Cargo.toml", &[("serialport", None)]),
         ]});
         assert_eq!(violations(&m).len(), 2);
+    }
+
+    #[test]
+    fn apps_use_only_the_app_sdk_and_the_capability_types() {
+        let m = json!({"packages": [
+            pkg("faber-app-wasm", "/r/sdk/rust/app-wasm/Cargo.toml", &[("faber-capabilities", None), ("wit-bindgen", None)]),
+            pkg("wall-follower", "/r/examples/apps/wall-follower/Cargo.toml", &[("faber-app-wasm", None)]),
+            pkg("faber-test-app", "/r/core/tests/wasm-guests/app-trap/Cargo.toml", &[("faber-app-wasm", None)]),
+        ]});
+        assert!(violations(&m).is_empty(), "{:?}", violations(&m));
+        let m = json!({"packages": [
+            pkg("faber-app-wasm", "/r/sdk/rust/app-wasm/Cargo.toml", &[("faber-core", None)]),
+            pkg("wall-follower", "/r/examples/apps/wall-follower/Cargo.toml", &[("tokio", None)]),
+            pkg("faber-test-app", "/r/core/tests/wasm-guests/app-trap/Cargo.toml", &[("faber-connector", None)]),
+        ]});
+        assert_eq!(violations(&m).len(), 3);
     }
 
     #[test]

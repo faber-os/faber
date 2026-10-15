@@ -1,0 +1,515 @@
+//! Apps (docs/apps.md), through the API. The proof of Phase 5a: the wall-follower example, built
+//! as a component and packed, is installed on a running core, its roles are bound to a simulated
+//! SENNEP in the apartment, and it drives the base along a wall without bumping while publishing
+//! its derived signal. Turning it off, a part leaving a role, an operator taking over and a trap
+//! all end its lease and stop the base.
+//!
+//! The components are built here from the workspace's own crates, as in `tests/wasm.rs`. Without
+//! the `wasm32-unknown-unknown` target the tests say so and pass; CI sets `FABER_REQUIRE_WASM=1`.
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use faber_capabilities::{Reading, planar_base};
+use faber_core::api;
+use faber_core::clock::MonotonicClock;
+use faber_core::disks::{Disk, DiskDiscovery};
+use faber_core::logs::LogBook;
+use faber_core::machine::{Machine, MachineOptions};
+use faber_core::names::SignalAddress;
+use faber_core::packages;
+use faber_core::ports::{
+    Discovered, FailedUsb, ReplayLibrary, SerialDiscovery, SystemOpener, UsbProblemDiscovery,
+};
+use faber_core::router::Subscription;
+use faber_core::runtime::Timing;
+use futures_util::{SinkExt, StreamExt};
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
+use std::process::Command as Process;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tokio_tungstenite::tungstenite::Message;
+use tower::ServiceExt;
+
+const TARGET: &str = "wasm32-unknown-unknown";
+
+fn workspace() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+}
+
+fn have_target() -> bool {
+    let rustc = Path::new(env!("CARGO")).with_file_name(format!("rustc{}", std::env::consts::EXE_SUFFIX));
+    let rustc = if rustc.exists() { rustc } else { PathBuf::from("rustc") };
+    let Ok(out) = Process::new(rustc).args(["--print", "target-libdir", "--target", TARGET]).output() else {
+        return false;
+    };
+    let dir = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    out.status.success() && std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some())
+}
+
+/// The component built from a workspace crate, or `None` (with a message) without the target.
+fn component(package: &str) -> Option<Vec<u8>> {
+    static BUILT: Mutex<Option<HashMap<String, Vec<u8>>>> = Mutex::new(None);
+    let mut built = BUILT.lock().unwrap_or_else(|e| e.into_inner());
+    let built = built.get_or_insert_with(HashMap::new);
+    if let Some(c) = built.get(package) {
+        return Some(c.clone());
+    }
+    if !have_target() {
+        assert!(
+            std::env::var_os("FABER_REQUIRE_WASM").is_none(),
+            "FABER_REQUIRE_WASM is set, but the {TARGET} target is missing"
+        );
+        eprintln!(
+            "skipping the app tests: the {TARGET} target is not installed (rustup target add {TARGET})."
+        );
+        return None;
+    }
+    let target_dir = workspace()
+        .join(std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from).unwrap_or_else(|| "target".into()))
+        .join("wasm-guests");
+    let status = Process::new(env!("CARGO"))
+        .current_dir(workspace())
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .args(["rustc", "-p", package, "--lib", "--release", "--target", TARGET, "--crate-type", "cdylib"])
+        .status()
+        .expect("run cargo");
+    assert!(status.success(), "building {package} for {TARGET} failed");
+    let file = target_dir.join(TARGET).join("release").join(format!("{}.wasm", package.replace('-', "_")));
+    let module = std::fs::read(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+    let component = wit_component::ComponentEncoder::default()
+        .module(&module)
+        .expect("a module with component type information")
+        .validate(true)
+        .encode()
+        .expect("wrap the module as a component");
+    built.insert(package.into(), component.clone());
+    Some(component)
+}
+
+/// The wall-follower example, packed as `faber pack` packs it.
+fn wall_follower_package(wasm: &[u8]) -> Vec<u8> {
+    let dir = workspace().join("examples/apps/wall-follower");
+    let mut files = BTreeMap::new();
+    for f in ["faber.toml", "README.md", "LICENSE", "ui/index.html", "ui/style.css"] {
+        files.insert(f.to_string(), std::fs::read(dir.join(f)).unwrap());
+    }
+    files.insert("app.wasm".to_string(), wasm.to_vec());
+    packages::pack(&files).unwrap()
+}
+
+const TRAPPER: &str = "faber-manifest = 1\n[package]\nid = \"trapper\"\ntype = \"app\"\nversion = \"0.1.0\"\n\
+    name = \"Trapper\"\nmodule = \"app.wasm\"\ntick-hz = 50\n\
+    [[requires]]\nrole = \"base\"\ncapability = \"planar-base@1\"\ncommand = true\n";
+
+fn trapper_package(wasm: &[u8]) -> Vec<u8> {
+    let files: BTreeMap<String, Vec<u8>> = [
+        ("faber.toml", TRAPPER.as_bytes()),
+        ("README.md", b"# Trapper".as_slice()),
+        ("LICENSE", b"MIT".as_slice()),
+        ("app.wasm", wasm),
+    ]
+    .into_iter()
+    .map(|(n, d)| (n.to_string(), d.to_vec()))
+    .collect();
+    packages::pack(&files).unwrap()
+}
+
+struct NoPorts;
+impl SerialDiscovery for NoPorts {
+    fn list(&self) -> Vec<Discovered> {
+        Vec::new()
+    }
+}
+impl UsbProblemDiscovery for NoPorts {
+    fn list(&self) -> Vec<FailedUsb> {
+        Vec::new()
+    }
+}
+impl DiskDiscovery for NoPorts {
+    fn list(&self) -> Vec<Disk> {
+        Vec::new()
+    }
+}
+
+struct TestCore {
+    app: axum::Router,
+    machine: Arc<Machine>,
+    dir: tempfile::TempDir,
+}
+
+impl Drop for TestCore {
+    fn drop(&mut self) {
+        self.machine.shutdown();
+    }
+}
+
+fn core() -> TestCore {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = Arc::new(MonotonicClock::new());
+    let replays = ReplayLibrary::default();
+    let machine = Machine::start(MachineOptions {
+        data_dir: dir.path().to_path_buf(),
+        clock: clock.clone(),
+        discovery: Arc::new(NoPorts),
+        usb_problems: Arc::new(NoPorts),
+        disks: Arc::new(NoPorts),
+        opener: Arc::new(SystemOpener::new(replays.clone())),
+        replays,
+        connectors: faber_core::connectors::built_in(),
+        timing: Timing::default(),
+        port_scan: None,
+        world: Arc::new(faber_core::simparts::SimWorld::new()),
+    })
+    .unwrap();
+    let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+    TestCore { app, machine, dir }
+}
+
+async fn call(app: &axum::Router, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+    let mut req = Request::builder().method(method).uri(path);
+    let body = match body {
+        Some(b) => {
+            req = req.header("content-type", "application/json");
+            Body::from(b.to_string())
+        }
+        None => Body::empty(),
+    };
+    let res = app.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+async fn install(c: &TestCore, bytes: Vec<u8>, name: &str) -> (StatusCode, Value) {
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v0/packages?name={name}"))
+        .header("content-type", "application/octet-stream")
+        .body(Body::from(bytes))
+        .unwrap();
+    let res = c.app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
+
+fn latest(c: &TestCore, address: &str) -> Option<Reading> {
+    match c.machine.router().subscribe(&SignalAddress::parse(address).unwrap())? {
+        Subscription::Latest(rx) => rx.borrow().as_deref().cloned(),
+        Subscription::Every(_) => panic!("{address} is a latest-value signal"),
+    }
+}
+
+fn base(c: &TestCore) -> planar_base::Reading {
+    match latest(c, "base/planar-base") {
+        Some(Reading::PlanarBase(r)) => r,
+        other => panic!("no base reading: {other:?}"),
+    }
+}
+
+fn pose(c: &TestCore) -> (f32, f32) {
+    match latest(c, "world/pose") {
+        Some(Reading::Pose(p)) => (p.position.x, p.position.y),
+        other => panic!("no world/pose: {other:?}"),
+    }
+}
+
+/// Who holds the lease on `part`, if anyone.
+fn holder(c: &TestCore, part: &str) -> Option<String> {
+    c.machine.leases().into_iter().find(|l| l.part.as_str() == part).map(|l| l.holder)
+}
+
+async fn wait_for<T>(what: &str, secs: f32, mut f: impl FnMut() -> Option<T>) -> T {
+    let until = Instant::now() + Duration::from_secs_f32(secs);
+    loop {
+        if let Some(v) = f() {
+            return v;
+        }
+        assert!(Instant::now() < until, "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+/// The app's state as `GET /api/v0/apps/{id}` reports it, polled until `ok` accepts it.
+async fn app_state_where(c: &TestCore, id: &str, what: &str, ok: impl Fn(&Value) -> bool) -> Value {
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        let (s, app) = call(&c.app, "GET", &format!("/api/v0/apps/{id}"), None).await;
+        assert_eq!(s, StatusCode::OK, "{app}");
+        if ok(&app["state"]) {
+            return app;
+        }
+        assert!(Instant::now() < until, "timed out waiting for {what}: {app}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+fn kind_is(kind: &'static str) -> impl Fn(&Value) -> bool {
+    move |s| s["kind"] == kind
+}
+
+/// SENNEP's base and LiDAR, simulated in the apartment's living room, 0.8 m north of its south
+/// wall and facing east along it.
+async fn sennep_by_a_wall() -> TestCore {
+    let c = core();
+    let world = json!({"name": "apartment", "start": {"x": 7.0, "y": 0.8, "yaw": 0.0}});
+    assert_eq!(call(&c.app, "PUT", "/api/v0/world", Some(world)).await.0, StatusCode::OK);
+    for p in [
+        json!({"name": "base", "connector": "generic-planar-base", "simulate": "world",
+               "settings": {"length": 0.8, "width": 0.65, "max-vx": 0.6, "max-vy": 0.6, "max-omega": 1.5, "max-accel": 1.0}}),
+        json!({"name": "lidar", "connector": "ldrobot-ld19", "simulate": "world", "mount": {"x": 0.2, "z": 0.3}}),
+    ] {
+        let (s, body) = call(&c.app, "POST", "/api/v0/parts", Some(p)).await;
+        assert_eq!(s, StatusCode::CREATED, "{body}");
+    }
+    wait_for("the first scan and pose", 5.0, || {
+        let scan = matches!(latest(&c, "lidar/laser-scan"), Some(Reading::LaserScan(_)));
+        let pose = matches!(latest(&c, "world/pose"), Some(Reading::Pose(_)));
+        (scan && pose).then_some(())
+    })
+    .await;
+    c
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_wall_follower_drives_along_a_wall_and_stops_when_turned_off() {
+    let Some(wasm) = component("wall-follower") else { return };
+    let c = sennep_by_a_wall().await;
+
+    // A preview says what it is; installing it lists it, off and with no parts picked.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v0/packages?mode=preview")
+        .body(Body::from(wall_follower_package(&wasm)))
+        .unwrap();
+    let res = c.app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let preview: Value =
+        serde_json::from_slice(&axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(preview["app"]["id"], "wall-follower", "{preview}");
+    assert_eq!(
+        preview["app"]["roles"][1],
+        json!({"role": "base", "capability": "planar-base@1", "command": true, "count": "1", "parts": []})
+    );
+    let (s, installed) = install(&c, wall_follower_package(&wasm), "wall-follower-0.1.0.faberpkg").await;
+    assert_eq!(s, StatusCode::CREATED, "{installed}");
+    assert_eq!(installed["kind"], "app");
+    let (_, apps) = call(&c.app, "GET", "/api/v0/apps", None).await;
+    let a = &apps[0];
+    assert_eq!((a["id"].as_str(), a["enabled"].as_bool()), (Some("wall-follower"), Some(false)), "{apps}");
+    assert_eq!(a["state"]["kind"], "stopped");
+    assert_eq!(a["ui"], "/apps/wall-follower/ui/index.html");
+    assert_eq!(a["tickHz"], 20);
+    assert_eq!(
+        a["publishes"],
+        json!([{"name": "wall-distance", "capability": "distance@1", "address": "app:wall-follower/wall-distance"}])
+    );
+
+    // The apps topic follows it.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = c.app.clone();
+    tokio::spawn(async move { axum::serve(listener, server).await.unwrap() });
+    let (mut ws, _) =
+        tokio_tungstenite::connect_async(format!("ws://{addr}/api/v0/ws?format=json")).await.unwrap();
+    let sub = json!({"type": "subscribe", "id": 9, "topic": {"kind": "apps"}});
+    ws.send(Message::Text(sub.to_string().into())).await.unwrap();
+
+    // On, but a role has no part: it says so, and nothing moves.
+    let (s, a) = call(&c.app, "POST", "/api/v0/apps/wall-follower/enable", None).await;
+    assert_eq!((s, a["enabled"].as_bool()), (StatusCode::OK, Some(true)), "{a}");
+    let a = app_state_where(&c, "wall-follower", "unfilled roles", kind_is("invalid")).await;
+    assert!(a["state"]["message"].as_str().unwrap().contains("role \"lidar\" has no part"), "{a}");
+
+    // Parts are checked against the roles.
+    for (roles, status, code) in [
+        (json!({"lidar": "base", "base": "base"}), StatusCode::UNPROCESSABLE_ENTITY, "role-mismatch"),
+        (json!({"lidar": "lidar", "camera": "lidar"}), StatusCode::BAD_REQUEST, "unknown-role"),
+        (json!({"lidar": ["lidar", "base"]}), StatusCode::BAD_REQUEST, "too-many-parts"),
+        (json!({"lidar": "nope"}), StatusCode::UNPROCESSABLE_ENTITY, "unknown-part"),
+    ] {
+        let (s, e) =
+            call(&c.app, "PUT", "/api/v0/apps/wall-follower/roles", Some(json!({"roles": roles}))).await;
+        assert_eq!((s, e["error"]["code"].as_str()), (status, Some(code)), "{e}");
+        assert!(!e["error"]["hint"].as_str().unwrap().is_empty());
+    }
+    let (s, a) = call(
+        &c.app,
+        "PUT",
+        "/api/v0/apps/wall-follower/roles",
+        Some(json!({"roles": {"lidar": "lidar", "base": ["base"]}})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{a}");
+    assert_eq!(a["roles"][0]["parts"], json!(["lidar"]));
+    let apps_toml = std::fs::read_to_string(c.dir.path().join("config/apps.toml")).unwrap();
+    assert!(
+        apps_toml.contains("[apps.wall-follower.roles]\nbase = \"base\"\nlidar = \"lidar\""),
+        "{apps_toml}"
+    );
+    app_state_where(&c, "wall-follower", "it runs", kind_is("running")).await;
+    let mut topic_saw_running = false;
+    let until = Instant::now() + Duration::from_secs(5);
+    while !topic_saw_running {
+        assert!(Instant::now() < until, "the apps topic never said it runs");
+        let m = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
+        if let Message::Text(t) = m {
+            let v: Value = serde_json::from_str(&t).unwrap();
+            assert_eq!((v["type"].as_str(), v["id"].as_u64()), (Some("apps"), Some(9)), "{v}");
+            topic_saw_running = v["apps"][0]["state"]["kind"] == "running";
+        }
+    }
+
+    // It drives the base, as app:wall-follower, along the wall for five seconds without bumping.
+    wait_for("the app's lease", 3.0, || {
+        (holder(&c, "base").as_deref() == Some("app:wall-follower")).then_some(())
+    })
+    .await;
+    let (x0, _) = pose(&c);
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(5) {
+        assert!(!base(&c).bumped, "the base bumped into something at {:?}", pose(&c));
+        assert_eq!(holder(&c, "base").as_deref(), Some("app:wall-follower"), "it keeps its lease");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let (x, y) = pose(&c);
+    assert!(x - x0 > 0.6, "it drove east along the wall: from x {x0} to {x}");
+    let centre = 0.325 + 0.3;
+    assert!((y - centre).abs() < 0.08, "its side is 0.3 m from the wall: centre at y {y}, want {centre}");
+    let (s, v) = call(&c.app, "GET", "/api/v0/signals/app:wall-follower/wall-distance", None).await;
+    assert_eq!((s, v["capability"].as_str()), (StatusCode::OK, Some("distance@1")), "{v}");
+    let gap = v["reading"]["reading"]["meters"].as_f64().unwrap_or_else(|| panic!("{v}"));
+    assert!((gap - 0.3).abs() < 0.08, "the derived signal says the gap: {gap}");
+    // Derived signals are read-only: nobody can lease or command them.
+    let (s, e) =
+        call(&c.app, "POST", "/api/v0/parts/app:wall-follower/lease", Some(json!({"holder": "x"}))).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("unknown-part")), "{e}");
+
+    // Its UI is served with a policy that forbids the network.
+    let res = c
+        .app
+        .clone()
+        .oneshot(Request::builder().uri("/apps/wall-follower/ui/index.html").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let h = res.headers();
+    assert_eq!(h["content-type"], "text/html; charset=utf-8");
+    assert!(h["content-security-policy"].to_str().unwrap().contains("connect-src 'none'"));
+    assert_eq!(h["x-content-type-options"], "nosniff");
+    for path in [
+        "/apps/wall-follower/ui/nope.html",
+        "/apps/wall-follower/ui/../faber.toml",
+        "/apps/other/ui/index.html",
+    ] {
+        let res =
+            c.app.clone().oneshot(Request::builder().uri(path).body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND, "{path}");
+    }
+
+    // It can't be uninstalled while it is on.
+    let (s, e) = call(&c.app, "DELETE", "/api/v0/packages/wall-follower", None).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::CONFLICT, Some("app-enabled")), "{e}");
+
+    // An operator takes over: the app loses the base and waits; when they let go, it drives on.
+    let (s, lease) = call(
+        &c.app,
+        "POST",
+        "/api/v0/parts/base/lease",
+        Some(json!({"holder": "Drive window", "takeOver": true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{lease}");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(holder(&c, "base").as_deref(), Some("Drive window"), "the app can't take it back");
+    let id = lease["lease"].as_str().unwrap();
+    let (s, _) = call(&c.app, "DELETE", &format!("/api/v0/parts/base/lease?lease={id}"), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    wait_for("the app to drive again", 3.0, || {
+        (holder(&c, "base").as_deref() == Some("app:wall-follower")).then_some(())
+    })
+    .await;
+
+    // Off: the lease ends at once and the base stops.
+    let (s, a) = call(&c.app, "POST", "/api/v0/apps/wall-follower/disable", None).await;
+    assert_eq!((s, a["state"]["kind"].as_str()), (StatusCode::OK, Some("stopped")), "{a}");
+    assert_eq!(holder(&c, "base"), None, "turning it off ended its lease");
+    assert_eq!(base(&c).commanded, faber_capabilities::Twist2d::ZERO, "and the base got its safe state");
+
+    // On again, then a part leaves a role: it stops, saying which.
+    call(&c.app, "POST", "/api/v0/apps/wall-follower/enable", None).await;
+    wait_for("the app's lease", 3.0, || {
+        (holder(&c, "base").as_deref() == Some("app:wall-follower")).then_some(())
+    })
+    .await;
+    let (s, _) = call(&c.app, "DELETE", "/api/v0/parts/lidar", None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let a = app_state_where(&c, "wall-follower", "the part to be missed", kind_is("conflict")).await;
+    assert!(
+        a["state"]["message"].as_str().unwrap().contains("\"lidar\" filling the role \"lidar\" was removed"),
+        "{a}"
+    );
+    wait_for("its lease to end", 2.0, || holder(&c, "base").is_none().then_some(())).await;
+    assert_eq!(base(&c).commanded, faber_capabilities::Twist2d::ZERO);
+
+    // Off, it uninstalls, and its line in apps.toml goes with it.
+    call(&c.app, "POST", "/api/v0/apps/wall-follower/disable", None).await;
+    let (s, _) = call(&c.app, "DELETE", "/api/v0/packages/wall-follower", None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert_eq!(call(&c.app, "GET", "/api/v0/apps", None).await.1, json!([]));
+    let apps_toml = std::fs::read_to_string(c.dir.path().join("config/apps.toml")).unwrap();
+    assert!(!apps_toml.contains("wall-follower"), "{apps_toml}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_trap_ends_the_lease_and_stops_the_base() {
+    let Some(wasm) = component("faber-test-app") else { return };
+    let c = sennep_by_a_wall().await;
+    let (s, e) = install(&c, trapper_package(&wasm), "trapper.faberpkg").await;
+    assert_eq!(s, StatusCode::CREATED, "{e}");
+    // The debug hook: trap on the 25th tick (half a second in, at 50 Hz).
+    std::fs::write(c.dir.path().join("apps/trapper/state.toml"), "trap-after = \"25\"\n").unwrap();
+    call(&c.app, "PUT", "/api/v0/apps/trapper/roles", Some(json!({"roles": {"base": "base"}}))).await;
+    call(&c.app, "POST", "/api/v0/apps/trapper/enable", None).await;
+    wait_for("the app to drive", 3.0, || {
+        (holder(&c, "base").as_deref() == Some("app:trapper") && base(&c).commanded.vx > 0.1).then_some(())
+    })
+    .await;
+    let a = app_state_where(&c, "trapper", "the trap", kind_is("failed")).await;
+    let message = a["state"]["message"].as_str().unwrap();
+    assert!(message.contains("panicked (trap requested after 25 ticks)"), "{message}");
+    assert_eq!(holder(&c, "base"), None, "the trap ended its lease");
+    assert_eq!(base(&c).commanded, faber_capabilities::Twist2d::ZERO, "and the base stopped");
+
+    // A limit is a crash too, and says which.
+    call(&c.app, "POST", "/api/v0/apps/trapper/disable", None).await;
+    std::fs::write(c.dir.path().join("apps/trapper/state.toml"), "hog = \"yes\"\n").unwrap();
+    call(&c.app, "POST", "/api/v0/apps/trapper/enable", None).await;
+    let a = app_state_where(&c, "trapper", "the memory limit", kind_is("failed")).await;
+    assert!(a["state"]["message"].as_str().unwrap().contains("needed more than 32 MB"), "{a}");
+    assert_eq!(holder(&c, "base"), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_connector_is_not_an_app() {
+    let Some(wasm) = component("faber-test-guest") else { return };
+    let c = core();
+    let files: BTreeMap<String, Vec<u8>> = [
+        ("faber.toml", TRAPPER.as_bytes()),
+        ("README.md", b"# Not an app".as_slice()),
+        ("LICENSE", b"MIT".as_slice()),
+        ("app.wasm", wasm.as_slice()),
+    ]
+    .into_iter()
+    .map(|(n, d)| (n.to_string(), d.to_vec()))
+    .collect();
+    let (s, e) = install(&c, packages::pack(&files).unwrap(), "x.faberpkg").await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{e}");
+    assert!(
+        e["error"]["message"].as_str().unwrap().contains("Trapper asks for faber:connector/context"),
+        "{e}"
+    );
+    assert!(!c.dir.path().join("apps/trapper").exists(), "nothing installed");
+}

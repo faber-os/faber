@@ -10,13 +10,15 @@
 //! as installing its package, before anything changes.
 
 use super::{ErrorKind, Machine, MachineError, State};
+use crate::apps::AppDefinition;
+use crate::apps::manifest::AppManifest;
 use crate::backup::Archive;
 use crate::connectors::{LoadProblem, ShownAs};
 use crate::leases::EndReason;
 use crate::names::PartName;
 use crate::packages::{self, Installed, PackageError, Prepared, Store, Swapped};
 use crate::{declarative, wasm};
-use faber_connector::manifest_file::PackageHeader;
+use faber_connector::manifest_file::{APP_TYPE, PackageHeader};
 use faber_connector::{Definition, Manifest, Problem};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -72,12 +74,18 @@ pub fn installed_connectors(base: Vec<Definition>, folder: &Path) -> (Vec<Defini
     (defs, problems)
 }
 
+/// What a package holds, as the core loaded it from the package.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PackagePreviewOf {
+    Connector(Manifest),
+    App(AppManifest),
+}
+
 /// What a package would install, read from its file and checked, before it is installed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PackagePreview {
     pub header: PackageHeader,
-    /// The connector as the core loaded it from the package.
-    pub manifest: Manifest,
+    pub of: PackagePreviewOf,
     pub readme: String,
     /// The recordings in its `captures/`.
     pub captures: Vec<String>,
@@ -107,12 +115,27 @@ impl From<PackageError> for MachineError {
     }
 }
 
-/// Loads a staged package's folder with the engine for its kind, exactly as the core will.
-/// `shown` is how its files are named in a problem: the folder is only a staging copy.
+/// Loads a staged connector package's folder with the engine for its kind, exactly as the core
+/// will. `shown` is how its files are named in a problem: the folder is only a staging copy.
 fn load(kind: &str, folder: &Path, shown: &ShownAs) -> Result<Definition, Problem> {
     match kind {
         "wasm" => wasm::load_folder(folder, shown, wasm::Limits::default()),
         _ => declarative::installed::load_folder(folder, shown),
+    }
+}
+
+/// A staged package, loaded: a connector or an app.
+enum Loaded {
+    Connector(Definition),
+    App(AppDefinition),
+}
+
+fn load_any(kind: &str, folder: &Path, shown: &ShownAs) -> Result<Loaded, Problem> {
+    match kind {
+        APP_TYPE => {
+            crate::apps::load_folder(folder, shown, crate::sandbox::Limits::default()).map(Loaded::App)
+        }
+        _ => load(kind, folder, shown).map(Loaded::Connector),
     }
 }
 
@@ -149,6 +172,11 @@ impl Machine {
     }
 
     fn package_view(&self, st: &State, installed: Installed) -> PackageView {
+        if installed.kind == APP_TYPE {
+            let problem =
+                self.app_problems().into_iter().find(|p| p.folder == installed.id).map(|p| p.problem);
+            return PackageView { installed, used_by: Vec::new(), problem };
+        }
         let used_by = parts_using(st, &installed.id);
         let problem = self
             .connector_problems()
@@ -186,14 +214,31 @@ impl Machine {
         }
         let _one_at_a_time = self.package_lock.lock().expect("package lock");
         let store = self.package_store();
-        let replaces = store.get(&id).ok().flatten().map(|p| p.version);
         let kind = opened.header.kind.clone();
+        let installed_now = store.get(&id).ok().flatten();
+        if let Some(other) = installed_now.as_ref().filter(|p| (p.kind == APP_TYPE) != (kind == APP_TYPE)) {
+            let what = |k: &str| if k == APP_TYPE { "an app" } else { "a connector" };
+            return Err(MachineError::new(
+                ErrorKind::Conflict,
+                "package-id-taken",
+                format!(
+                    "This package is {} called \"{id}\", but {} with that id is installed.",
+                    what(&kind),
+                    what(&other.kind)
+                ),
+                "Apps and connectors share ids. Uninstall the other one first, or ask the author to rename this one.",
+            ));
+        }
+        let replaces = installed_now.map(|p| p.version);
         let shown = ShownAs::package(source);
-        let prepared = store.prepare(opened, |folder| load(&kind, folder, &shown))?;
+        let prepared = store.prepare(opened, |folder| load_any(&kind, folder, &shown))?;
         let opened = prepared.opened();
         let preview_of = PackagePreview {
             header: opened.header.clone(),
-            manifest: prepared.loaded.manifest.clone(),
+            of: match &prepared.loaded {
+                Loaded::Connector(d) => PackagePreviewOf::Connector(d.manifest.clone()),
+                Loaded::App(a) => PackagePreviewOf::App(a.manifest.clone()),
+            },
             readme: opened.readme.clone(),
             captures: opened.captures.clone(),
             replaces,
@@ -201,6 +246,9 @@ impl Machine {
         if preview {
             prepared.discard();
             return Ok((preview_of, None));
+        }
+        if kind == APP_TYPE {
+            return self.install_app(prepared, preview_of, source);
         }
 
         let mut st = self.state.lock().expect("machine lock");
@@ -235,9 +283,57 @@ impl Machine {
         Ok((preview_of, Some(view)))
     }
 
-    /// Uninstalls a package. Refused while a part uses its connector, naming the parts.
+    /// Puts a checked app package in place and loads it; an app that is on restarts with it.
+    fn install_app(
+        &self,
+        prepared: Prepared<Loaded>,
+        preview_of: PackagePreview,
+        source: &str,
+    ) -> Result<(PackagePreview, Option<PackageView>), MachineError> {
+        let id = preview_of.header.id.clone();
+        let swapped = prepared.swap_in()?;
+        let problems = self.reload_apps();
+        if let Some(p) = problems.into_iter().find(|p| p.folder == id) {
+            tracing::error!(target: "core::machine", "installing {id} failed: {} {}", p.problem.message, p.problem.hint);
+            let rolled_back = swapped.roll_back();
+            self.reload_apps();
+            rolled_back?;
+            return Err(MachineError::new(
+                ErrorKind::Unprocessable,
+                "package-not-loadable",
+                p.problem.message,
+                p.problem.hint,
+            ));
+        }
+        let installed = swapped.keep(&now_rfc3339(), source)?;
+        tracing::info!(target: "core::machine", "installed the app {id} {} from {source}", installed.version);
+        self.announce_packages();
+        self.app_status.touch();
+        let st = self.state.lock().expect("machine lock");
+        let view = self.package_view(&st, installed);
+        Ok((preview_of, Some(view)))
+    }
+
+    /// Uninstalls a package. Refused while a part uses its connector (naming the parts), or
+    /// while an app is turned on: turn it off first, so nothing it drives stops by surprise.
     pub fn uninstall_package(&self, id: &str) -> Result<(), MachineError> {
         let _one_at_a_time = self.package_lock.lock().expect("package lock");
+        if self.package_store().get(id)?.is_some_and(|p| p.kind == APP_TYPE) {
+            if self.app_enabled(id) {
+                return Err(MachineError::new(
+                    ErrorKind::Conflict,
+                    "app-enabled",
+                    format!("The app \"{id}\" is turned on."),
+                    format!("Turn it off first (POST /api/v0/apps/{id}/disable), then uninstall it."),
+                ));
+            }
+            self.package_store().uninstall(id)?;
+            tracing::info!(target: "core::machine", "uninstalled the app {id}");
+            self.forget_app(id);
+            self.reload_apps();
+            self.announce_packages();
+            return Ok(());
+        }
         let mut st = self.state.lock().expect("machine lock");
         let users = parts_using(&st, id);
         if !users.is_empty() {

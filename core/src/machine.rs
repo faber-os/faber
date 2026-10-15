@@ -3,13 +3,15 @@
 //! the source of truth**. Changes are written to the file first, then `reconcile` makes the
 //! running parts match it.
 
+mod apps;
 #[cfg(test)]
 mod bridge_tests;
 mod packages;
 mod safety;
 mod world;
 
-pub use packages::{PackagePreview, PackageView, installed_connectors};
+pub use apps::AppView;
+pub use packages::{PackagePreview, PackagePreviewOf, PackageView, installed_connectors};
 pub use safety::{CommandReply, EstopView, LeaseEvent};
 pub use world::{DEFAULT_WORLD, WorldChanged, WorldView};
 
@@ -50,7 +52,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
@@ -293,6 +295,11 @@ pub struct Machine {
     bridge_inbox: Mutex<mpsc::Receiver<BridgeEvent>>,
     stop_sweeping: Arc<AtomicBool>,
     sweeper: Mutex<Option<JoinHandle<()>>>,
+    /// The installed apps and the running ones (docs/apps.md). Locked before `state`, never after.
+    apps: Mutex<apps::Apps>,
+    app_status: Arc<crate::apps::StatusBoard>,
+    /// This machine, for what it hands out that must not keep it alive (apps' lease driver).
+    me: OnceLock<Weak<Machine>>,
 }
 
 impl Machine {
@@ -366,8 +373,13 @@ impl Machine {
             bridge_inbox: Mutex::new(bridge_inbox),
             stop_sweeping: Arc::new(AtomicBool::new(false)),
             sweeper: Mutex::new(None),
+            apps: Mutex::new(apps::Apps::default()),
+            app_status: Arc::new(crate::apps::StatusBoard::default()),
+            me: OnceLock::new(),
         });
+        let _ = machine.me.set(Arc::downgrade(&machine));
         machine.refresh_ports();
+        machine.reload_apps();
         let weak = Arc::downgrade(&machine);
         let stop = Arc::clone(&machine.stop_sweeping);
         let sweeper = std::thread::Builder::new()
@@ -387,8 +399,8 @@ impl Machine {
         Ok(machine)
     }
 
-    /// Ends every lease (sending the safe states), then stops every part, the port scanner and
-    /// the lease sweeper.
+    /// Stops the apps, ends every lease (sending the safe states), then stops every part, the
+    /// port scanner and the lease sweeper.
     pub fn shutdown(&self) {
         self.stop_scanning.store(true, Ordering::Relaxed);
         self.stop_sweeping.store(true, Ordering::Relaxed);
@@ -397,6 +409,8 @@ impl Machine {
                 let _ = h.join();
             }
         }
+        // The sweeper is gone, so nothing starts them again; their leases end as they stop.
+        self.stop_apps();
         let mut st = self.state.lock().expect("machine lock");
         self.revoke_all(&mut st, EndReason::Shutdown);
         let names: Vec<_> = st.running.keys().cloned().collect();

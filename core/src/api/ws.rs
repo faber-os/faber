@@ -387,6 +387,23 @@ fn subscribe(
                 }
             }))
         }
+        dto::Topic::Apps => {
+            let machine = Arc::clone(&state.machine);
+            let mut changes = machine.apps_changed();
+            Ok(tokio::spawn(async move {
+                loop {
+                    let list = {
+                        let m = Arc::clone(&machine);
+                        tokio::task::spawn_blocking(move || m.apps()).await.unwrap_or_default()
+                    };
+                    let msg =
+                        dto::ServerMessage::Apps { id, apps: list.iter().map(convert::app_info).collect() };
+                    if out.send(msg).await.is_err() || changes.changed().await.is_err() {
+                        return;
+                    }
+                }
+            }))
+        }
         dto::Topic::Files => {
             let mut rx = state.machine.files_changed();
             Ok(tokio::spawn(async move {

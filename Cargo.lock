@@ -808,6 +808,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "faber-test-app"
+version = "0.1.0"
+dependencies = [
+ "faber-app-wasm",
+ "faber-capabilities",
+]
+
+[[package]]
 name = "faber-test-guest"
 version = "0.1.0"
 dependencies = [
@@ -2459,6 +2467,14 @@ checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
 dependencies = [
  "same-file",
  "winapi-util",
+]
+
+[[package]]
+name = "wall-follower"
+version = "0.1.0"
+dependencies = [
+ "faber-app-wasm",
+ "faber-capabilities",
 ]
 
 [[package]]
