@@ -28,6 +28,8 @@ sdk/rust/connector-wasm/  faber-connector-wasm: builds a connector as a WebAssem
 connectors/ldrobot-ld19/  first connector: built in, and the same code as a WebAssembly component
 shell/                    the web desktop (Svelte 5 + Vite + TypeScript)
 tools/arch-check/         enforces the crate dependency rules below
+tools/faber-cli/          the `faber` command: new connector from a template, check, pack
+templates/                the connector templates `faber new connector` copies (Rust/wasm, declarative)
 wit/                      capability interfaces, and the connector world (wit/connector)
 fixtures/                 test data, e.g. a real LD19 capture
 ```
@@ -49,6 +51,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | `faber-connector-wasm` | `faber-connector`, `faber-capabilities`, `toml`, `wit-bindgen` (the component glue; its generated code is the only `unsafe` allowed outside the core's dependencies) | I/O, `faber-core` |
 | connectors (`connectors/*`, and the core's test guests in `core/tests/wasm-guests/*`) | `faber-connector`, `faber-capabilities`, `toml`, and `faber-connector-wasm` for their wasm build | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
 | `faber-core` | everything above, plus I/O crates | — |
+| `faber-cli` (the `faber` command) | `faber-core` (its package checks and its sandbox, so `faber check` accepts exactly what a machine runs), `faber-connector`, `faber-capabilities`, `clap`, `toml`, `wit-component` | anything else |
 
 **Inside `faber-core`**, the modules form layers. A module may only use the layers below it:
 

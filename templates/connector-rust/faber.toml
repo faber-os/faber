@@ -1,0 +1,21 @@
+faber-manifest = 1
+
+# What this connector is and what it provides (docs/your-first-connector.md). The Rust code reads
+# this file too, so it is the one place to change.
+
+[package]
+id = "my-sensor"
+type = "connector"
+kind = "wasm"
+version = "0.1.0"
+name = "My sensor"
+publisher = "Your name"
+
+[ports]
+# The baud rate your device talks at (Serial.begin(9600) on an Arduino).
+serial = { baud = 9600 }
+
+# What it measures. Range and kind from your sensor's datasheet.
+[[provides]]
+capability = "distance@1"
+info = { min-m = 0.02, max-m = 4.0, field-of-view-rad = 0.26, kind = "ultrasonic" }

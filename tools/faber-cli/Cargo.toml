@@ -1,0 +1,34 @@
+[package]
+name = "faber-cli"
+version = "0.1.0"
+description = "The faber command: start a connector from a template, check it against its captures, and pack it as a .faberpkg."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "faber"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+faber-capabilities = { version = "0.1.0", path = "../../sdk/rust/capabilities" }
+faber-connector = { version = "0.1.0", path = "../../sdk/rust/connector" }
+# The same checks and the same sandbox as the core: what faber check accepts, the core runs.
+faber-core = { version = "0.1.0", path = "../../core" }
+# Reads the project's Cargo.toml.
+toml = "1.1.8"
+# Wraps the compiled wasm module as a component (docs/packages.md §3).
+wit-component = "0.262.0"
+
+[dev-dependencies]
+axum = "0.8.9"
+serde_json = "1.0.154"
+tempfile = "3.27.0"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time"] }
+tower = "0.5.3"

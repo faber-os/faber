@@ -683,6 +683,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "faber-cli"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "faber-capabilities",
+ "faber-connector",
+ "faber-core",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tower",
+ "wit-component 0.262.0",
+]
+
+[[package]]
 name = "faber-connector"
 version = "0.1.0"
 dependencies = [
