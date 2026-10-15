@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Drive a 1 m square with a Faber drive base, over plain HTTP.
+
+What you need
+    A Faber core running on this computer, with a drive base part. No hardware: add a
+    simulated one in the shell (Add part → Generic drive base → tick Simulated), or put this in
+    parts.toml:
+
+        [parts.base]
+        connector = "generic-planar-base"
+        simulate = "manual"
+
+    Python 3.8 or newer. Nothing to install: only the standard library is used.
+
+Steps
+    python examples/drive-square.py                 # the part called "base" on 127.0.0.1:7878
+    python examples/drive-square.py my-base http://127.0.0.1:7878
+
+What you should see
+    "Driving base." then one line per side and per turn, then "Done; base is stopped." Watch the
+    base's viewer in the shell: its commanded velocity follows the program.
+
+If it doesn't work
+    "Is the Faber core running?"  Start it, or check the address.
+    "… is driving base."          Someone else holds the lease (the Drive window?). Let go there.
+    "The e-stop is engaged …"     Release it in the shell when it is safe.
+
+How it works
+    Anything that moves needs a *lease*: the right to drive it, for 250 ms at a time. Every
+    command renews it, so a program sends its velocity about 10 times a second even while it
+    stays the same. If the program stops (it crashes, you press Ctrl+C, the network drops), the
+    lease runs out and Faber stops the base by itself. That is the lease's whole point.
+"""
+
+import json
+import math
+import sys
+import time
+import urllib.error
+import urllib.request
+
+PART = sys.argv[1] if len(sys.argv) > 1 else "base"
+CORE = (sys.argv[2] if len(sys.argv) > 2 else "http://127.0.0.1:7878").rstrip("/")
+
+SPEED = 0.25  # m/s along each side
+TURN = 0.8  # rad/s when turning on the spot
+EVERY = 0.1  # s between commands: well inside the 250 ms lease
+CLAMPED = []  # non-empty once a clamp has been reported
+
+
+class FaberError(Exception):
+    """An error from the core: what happened, and what to try (docs/api.md)."""
+
+    def __init__(self, status, code, message, hint):
+        super().__init__(message)
+        self.status, self.code, self.message, self.hint = status, code, message, hint
+
+
+def call(method, path, body=None):
+    """One request to the core. Returns the JSON answer, or raises FaberError."""
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(CORE + path, data=data, method=method)
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=2) as res:
+            text = res.read()
+            return json.loads(text) if text else None
+    except urllib.error.HTTPError as e:
+        # Every error from the core has a code, a message and a hint.
+        error = json.loads(e.read() or b"{}").get("error", {})
+        raise FaberError(e.code, error.get("code", "?"), error.get("message", str(e)), error.get("hint", ""))
+
+
+def drive_for(lease, seconds, vx=0.0, omega=0.0):
+    """Sends one velocity again and again for `seconds`. Each command renews the lease."""
+    command = {"capability": "planar-base@1", "command": {"kind": "set-velocity", "vx": vx, "vy": 0.0, "omega": omega}}
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        reply = call("POST", f"/api/v0/parts/{PART}/command", {"lease": lease, "command": command})
+        if reply["clamped"] and not CLAMPED:
+            # Faber clamps to the base's limits rather than refusing. Say so once.
+            CLAMPED.append(True)
+            print(f"  (the base's limits clamped this to {reply['applied']['command']})")
+        time.sleep(EVERY)
+
+
+def main():
+    try:
+        grant = call("POST", f"/api/v0/parts/{PART}/lease", {"holder": "drive-square.py"})
+    except urllib.error.URLError:
+        print(f"Couldn't reach {CORE}. Is the Faber core running?")
+        return 1
+    except FaberError as e:
+        print(f"{e.message}\n{e.hint}")
+        return 1
+
+    lease = grant["lease"]
+    print(f"Driving {PART}.")
+    try:
+        for side in range(1, 5):
+            print(f"Side {side}: 1 m forward")
+            drive_for(lease, 1.0 / SPEED, vx=SPEED)
+            print(f"Turn {side}: a quarter turn left")
+            drive_for(lease, (math.pi / 2) / TURN, omega=TURN)
+    except FaberError as e:
+        # 423: the e-stop was pressed. 403: the lease ended (someone took over, or it expired).
+        # Either way the base is already stopped; tell the user why and stop driving.
+        print(f"Stopped: {e.message}\n{e.hint}")
+        return 1
+    except KeyboardInterrupt:
+        print("Interrupted.")
+    except urllib.error.URLError as e:
+        print(f"Lost the connection to the core ({e.reason}). The lease runs out and the base stops by itself.")
+        return 1
+    finally:
+        # Release the lease: the base stops now instead of in 250 ms. If it already ended (the
+        # e-stop, say), releasing fails harmlessly.
+        try:
+            call("DELETE", f"/api/v0/parts/{PART}/lease?lease={lease}")
+        except (FaberError, urllib.error.URLError):
+            pass
+    print(f"Done; {PART} is stopped.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
