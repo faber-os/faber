@@ -110,14 +110,20 @@ impl Default for Timing {
 pub struct RunSpec {
     pub name: PartName,
     pub manifest: Manifest,
-    pub create: fn(&Settings) -> Result<Box<dyn Connector>, faber_connector::SettingsError>,
+    pub create: faber_connector::CreateFn,
     pub settings: Settings,
     pub port: PortEntry,
 }
 
 impl RunSpec {
     pub fn new(name: PartName, definition: &Definition, settings: Settings, port: PortEntry) -> RunSpec {
-        RunSpec { name, manifest: definition.manifest.clone(), create: definition.create, settings, port }
+        RunSpec {
+            name,
+            manifest: definition.manifest.clone(),
+            create: Arc::clone(&definition.create),
+            settings,
+            port,
+        }
     }
 }
 
@@ -581,7 +587,7 @@ mod tests {
                 settings: vec![],
                 usb_hints: vec![],
             },
-            create: create_echo,
+            create: Arc::new(create_echo),
             settings,
             port: PortEntry {
                 id: PortId::Serial("FAKE".into()),
@@ -683,7 +689,7 @@ mod tests {
     fn commands_reach_the_connector_on_its_own_thread() {
         let d = deps(Arc::new(FakeOpener::new(vec![vec![1]])));
         let mut sp = spec(Settings::new());
-        sp.create = create_driver;
+        sp.create = Arc::new(create_driver);
         let h = start(sp, d.clone());
         wait_for(&d.status, |s| *s == PartStatus::Running);
         assert_eq!(
@@ -701,7 +707,7 @@ mod tests {
         let opener = Arc::new(FakeOpener::new(vec![vec![1]]));
         let d = deps(Arc::clone(&opener));
         let mut sp = spec(Settings::new());
-        sp.create = create_driver;
+        sp.create = Arc::new(create_driver);
         let h = start(sp, d.clone());
         wait_for(&d.status, |s| *s == PartStatus::Running);
         assert!(matches!(h.command(duty(1.0)), Err(CommandError::NotReady(_))));
@@ -718,7 +724,7 @@ mod tests {
         o.fail_to_open = true;
         let d = deps(Arc::new(o));
         let mut sp = spec(Settings::new());
-        sp.create = create_driver;
+        sp.create = Arc::new(create_driver);
         let h = start(sp, d.clone());
         wait_for(&d.status, |s| matches!(s, PartStatus::Failed(_)));
         let t = Instant::now();
