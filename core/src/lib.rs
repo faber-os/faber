@@ -17,6 +17,7 @@ pub mod leases;
 pub mod logs;
 pub mod packages;
 pub mod ports;
+pub mod roles;
 pub mod router;
 pub mod sandbox;
 
