@@ -598,7 +598,7 @@ impl Machine {
                 Source::Port(port.id.to_string())
             }
         };
-        let cfg = PartConfig { connector: new.connector, source, mount: new.mount, settings: new.settings };
+        let cfg = PartConfig::new(new.connector, source, new.mount, new.settings);
         let text = config::add_part(&st.text, &name, &cfg).map_err(config_write_error)?;
         self.save(&mut st, text)?;
         self.reconcile(&mut st);

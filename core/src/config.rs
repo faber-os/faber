@@ -11,6 +11,10 @@ use std::ops::Range;
 
 pub const FILE_NAME: &str = "parts.toml";
 
+/// The connector of a bridge: a microcontroller running FaberLink (docs/faberlink.md). It is the
+/// only part with parts of its own, `[parts.<bridge>.parts.<name>]`.
+pub const BRIDGE_CONNECTOR: &str = "faber-bridge";
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PartConfig {
     pub connector: String,
@@ -18,6 +22,33 @@ pub struct PartConfig {
     pub source: Source,
     pub mount: Mount,
     pub settings: toml::Table,
+    /// A bridge's sub-parts that parts.toml says something about, by the board's name for them
+    /// (`left` in `[parts.mega.parts.left]`). The board says which parts it has; this only sets
+    /// where they sit. Empty for every other part.
+    pub parts: BTreeMap<String, SubPartConfig>,
+}
+
+impl PartConfig {
+    /// A part with no sub-parts.
+    pub fn new(connector: impl Into<String>, source: Source, mount: Mount, settings: toml::Table) -> Self {
+        PartConfig { connector: connector.into(), source, mount, settings, parts: BTreeMap::new() }
+    }
+
+    /// True when `other` runs the same way: everything but the sub-parts' mounts, which change
+    /// without restarting the bridge (and so without ending its leases).
+    pub fn runs_like(&self, other: &PartConfig) -> bool {
+        self.connector == other.connector
+            && self.source == other.source
+            && self.mount == other.mount
+            && self.settings == other.settings
+    }
+}
+
+/// `[parts.<bridge>.parts.<name>]`: what parts.toml sets for one part on a bridge's board.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SubPartConfig {
+    pub mount: Mount,
 }
 
 /// `port = "…"` or `simulate = "…"`: exactly one of them (docs/simulation.md, section 4).
@@ -137,6 +168,8 @@ struct RawPart {
     mount: Mount,
     #[serde(default)]
     settings: toml::Table,
+    #[serde(default)]
+    parts: BTreeMap<String, SubPartConfig>,
 }
 
 /// 1-based line and column of a byte offset.
@@ -155,6 +188,14 @@ fn part_key_span(text: &str, name: &str) -> Option<Range<usize>> {
     key.span()
 }
 
+/// Where the key of `[parts.<bridge>.parts.<name>]` sits in the file.
+fn sub_part_key_span(text: &str, bridge: &str, name: &str) -> Option<Range<usize>> {
+    let doc = toml_edit::Document::parse(text).ok()?;
+    let subs = doc.get("parts")?.get(bridge)?.get("parts")?.as_table_like()?;
+    let (key, _) = subs.get_key_value(name)?;
+    key.span()
+}
+
 pub fn parse(text: &str) -> Result<PartsConfig, ConfigError> {
     let raw: RawFile = toml::from_str(text)
         .map_err(|e| ConfigError::at(text, e.span(), e.message().trim().to_string(), FIX_HINT))?;
@@ -165,9 +206,32 @@ pub fn parse(text: &str) -> Result<PartsConfig, ConfigError> {
             ..ConfigError::at(text, part_key_span(text, &name), bad.message, "")
         })?;
         let source = source(text, &name, p.port, p.simulate)?;
+        for sub in p.parts.keys() {
+            let span = || sub_part_key_span(text, &name, sub).or_else(|| part_key_span(text, &name));
+            if p.connector != BRIDGE_CONNECTOR {
+                return Err(ConfigError::at(
+                    text,
+                    span(),
+                    format!("The part \"{name}\" has parts of its own, but only a bridge can."),
+                    &format!(
+                        "Remove [parts.{name}.parts.{sub}]. Parts on a FaberLink board go under the board's part, which has connector = \"{BRIDGE_CONNECTOR}\"."
+                    ),
+                ));
+            }
+            PartName::sub(&part_name, sub).map_err(|bad| ConfigError {
+                hint: format!("Use the name the board gives the part (Parts shows it). {}", bad.hint),
+                ..ConfigError::at(text, span(), bad.message, "")
+            })?;
+        }
         parts.insert(
             part_name,
-            PartConfig { connector: p.connector, source, mount: p.mount, settings: p.settings },
+            PartConfig {
+                connector: p.connector,
+                source,
+                mount: p.mount,
+                settings: p.settings,
+                parts: p.parts,
+            },
         );
     }
     Ok(PartsConfig { parts, world: raw.world })
@@ -367,6 +431,27 @@ pub fn remove_part(text: &str, name: &PartName) -> Result<String, ConfigError> {
     Ok(doc.to_string())
 }
 
+/// Removes `[parts.<bridge>.parts.<name>]` (what parts.toml said about one part on a board),
+/// keeping everything else, the comments too.
+pub fn remove_sub_part(text: &str, bridge: &PartName, name: &str) -> Result<String, ConfigError> {
+    let mut doc = edit_doc(text)?;
+    let Some(bridge_table) =
+        doc.get_mut("parts").and_then(|p| p.get_mut(bridge.as_str())).and_then(|b| b.as_table_like_mut())
+    else {
+        return Ok(text.to_string());
+    };
+    let Some(subs) = bridge_table.get_mut("parts").and_then(|s| s.as_table_like_mut()) else {
+        return Ok(text.to_string());
+    };
+    if subs.remove(name).is_none() {
+        return Ok(text.to_string());
+    }
+    if subs.is_empty() {
+        bridge_table.remove("parts");
+    }
+    Ok(doc.to_string())
+}
+
 /// The table that comes first in the file after document position `after`.
 fn next_table_after(root: &mut toml_edit::Table, after: isize) -> Option<&mut toml_edit::Table> {
     fn best_position(t: &toml_edit::Table, after: isize) -> Option<isize> {
@@ -393,12 +478,12 @@ mod tests {
     }
 
     fn lidar() -> PartConfig {
-        PartConfig {
-            connector: "ldrobot-ld19".into(),
-            source: Source::Port("usb:10c4:ea60".into()),
-            mount: Mount::default(),
-            settings: toml::Table::new(),
-        }
+        PartConfig::new(
+            "ldrobot-ld19",
+            Source::Port("usb:10c4:ea60".into()),
+            Mount::default(),
+            toml::Table::new(),
+        )
     }
 
     #[test]
@@ -629,12 +714,12 @@ port = \"usb:10c4:ea60\"
 ";
         let mut settings = toml::Table::new();
         settings.insert("max-vx".into(), 0.6.into());
-        let cfg = PartConfig {
-            connector: "generic-planar-base".into(),
-            source: Source::Simulated(Simulate::Manual),
-            mount: Mount::default(),
+        let cfg = PartConfig::new(
+            "generic-planar-base",
+            Source::Simulated(Simulate::Manual),
+            Mount::default(),
             settings,
-        };
+        );
         let out = add_part(text, &name("base"), &cfg).unwrap();
         assert!(out.contains("# My robot") && out.contains("# real"), "{out}");
         assert!(out.contains("simulate = \"manual\""), "{out}");
@@ -678,6 +763,96 @@ port = \"usb:10c4:ea60\"
         let inline = "world = { name = \"empty\" }\n";
         let out = set_world(inline, &WorldConfig { name: "maze".into(), start: None }).unwrap();
         assert_eq!(parse(&out).unwrap().world.unwrap().name, "maze");
+    }
+
+    const BRIDGE: &str = r#"# My robot
+
+# the Mega, on the left USB port
+[parts.mega]
+connector = "faber-bridge"
+port = "usb:2341:0042"
+
+# the left wheel's motor
+[parts.mega.parts.left]
+mount = { x = 0.1, y = 0.3 }
+
+[parts.mega.parts.front] # the IR sensor
+mount = { x = 0.4 }
+
+[parts.lidar] # keep me
+connector = "ldrobot-ld19"
+port = "usb:10c4:ea60"
+"#;
+
+    #[test]
+    fn a_bridge_nests_what_it_says_about_its_board_parts() {
+        let c = parse(BRIDGE).unwrap();
+        let mega = &c.parts[&name("mega")];
+        assert_eq!(mega.connector, BRIDGE_CONNECTOR);
+        let subs: Vec<_> = mega.parts.keys().map(String::as_str).collect();
+        assert_eq!(subs, ["front", "left"]);
+        assert_eq!(mega.parts["left"].mount, Mount { x: 0.1, y: 0.3, ..Mount::default() });
+        assert!(c.parts[&name("lidar")].parts.is_empty());
+        assert_eq!(c.parts.len(), 2, "sub-parts are not parts of their own in the file");
+    }
+
+    #[test]
+    fn only_a_bridge_has_parts_and_only_a_mount_is_set_for_them() {
+        let text = "[parts.lidar]\nconnector = \"ldrobot-ld19\"\nport = \"p\"\n\n[parts.lidar.parts.left]\nmount = { x = 1.0 }\n";
+        let e = parse(text).unwrap_err();
+        assert_eq!(e.line, Some(5), "{e:?}");
+        assert!(e.message.contains("only a bridge"), "{e:?}");
+        let text = "[parts.mega]\nconnector = \"faber-bridge\"\nport = \"p\"\n\n[parts.mega.parts.left]\nspeed = 3\n";
+        let e = parse(text).unwrap_err();
+        assert!(e.message.contains("speed"), "{e:?}");
+        assert_eq!(e.line, Some(6), "{e:?}");
+        let text = "[parts.mega]\nconnector = \"faber-bridge\"\nport = \"p\"\n\n[parts.mega.parts.Left]\n";
+        let e = parse(text).unwrap_err();
+        assert_eq!(e.line, Some(5), "{e:?}");
+        assert!(e.hint.contains("name the board gives"), "{e:?}");
+    }
+
+    #[test]
+    fn a_sub_parts_mount_changes_without_restarting_its_bridge() {
+        let a = parse(BRIDGE).unwrap().parts[&name("mega")].clone();
+        let mut b = a.clone();
+        b.parts.get_mut("left").unwrap().mount.x = 0.2;
+        assert!(a.runs_like(&b) && a != b);
+        b.source = Source::Port("usb:2341:0043".into());
+        assert!(!a.runs_like(&b));
+    }
+
+    #[test]
+    fn removing_a_bridge_removes_its_board_parts_and_keeps_the_rest() {
+        let out = remove_part(BRIDGE, &name("mega")).unwrap();
+        assert!(out.starts_with("# My robot\n"), "{out}");
+        assert!(out.contains("# keep me"), "{out}");
+        for gone in ["[parts.mega", "# the left wheel", "# the IR sensor", "# the Mega"] {
+            assert!(!out.contains(gone), "{gone} is still there:\n{out}");
+        }
+        assert_eq!(parse(&out).unwrap().parts.len(), 1);
+    }
+
+    #[test]
+    fn adding_a_part_next_to_a_bridge_keeps_its_board_parts() {
+        let out = add_part(BRIDGE, &name("gps"), &lidar()).unwrap();
+        assert!(out.contains("# the left wheel's motor") && out.contains("# the IR sensor"), "{out}");
+        let c = parse(&out).unwrap();
+        assert_eq!(c.parts[&name("mega")], parse(BRIDGE).unwrap().parts[&name("mega")]);
+        assert_eq!(c.parts.len(), 3);
+    }
+
+    #[test]
+    fn removing_one_board_part_keeps_the_others_and_the_comments() {
+        let out = remove_sub_part(BRIDGE, &name("mega"), "left").unwrap();
+        assert!(!out.contains("[parts.mega.parts.left]"), "{out}");
+        assert!(out.contains("# the IR sensor") && out.contains("# the Mega, on the left USB port"), "{out}");
+        let c = parse(&out).unwrap();
+        assert_eq!(c.parts[&name("mega")].parts.keys().collect::<Vec<_>>(), ["front"]);
+        let out = remove_sub_part(&out, &name("mega"), "front").unwrap();
+        assert!(parse(&out).unwrap().parts[&name("mega")].parts.is_empty(), "{out}");
+        assert!(!out.contains("parts.mega.parts"), "{out}");
+        assert_eq!(remove_sub_part(&out, &name("mega"), "nope").unwrap(), out);
     }
 
     #[test]

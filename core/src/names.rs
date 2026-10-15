@@ -4,7 +4,15 @@ use std::fmt;
 
 const MAX_PART_NAME: usize = 32;
 
-/// A part's name, chosen by the user: lowercase letters, digits and `_`, starting with a letter.
+/// Joins a bridge's name and the name of a part on its board: `mega.left` (docs/faberlink.md §9).
+/// A part name the user picks can't contain it, and a signal name never does, so
+/// `mega.left/motor` can only mean "the `motor` signal of the sub-part `mega.left`", and
+/// `mega/left` only "the `left` signal of the part `mega`".
+pub const SUB_PART_SEPARATOR: char = '.';
+
+/// A part's name. A part the user adds has a name they chose: lowercase letters, digits and `_`,
+/// starting with a letter. A part on a bridge's board (a sub-part) is named after the bridge and
+/// the board's own name for it, `<bridge>.<name>`, e.g. `mega.left`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PartName(String);
 
@@ -15,26 +23,78 @@ pub struct BadName {
     pub hint: String,
 }
 
+const NAME_HINT: &str = "Use lowercase letters, digits and _, starting with a letter, e.g. front_lidar.";
+
+/// One name without a separator; `whole` is what the user wrote, for the message.
+fn check_segment(s: &str, whole: &str) -> Result<(), BadName> {
+    let bad = |message: String| BadName { message, hint: NAME_HINT.into() };
+    if whole.is_empty() {
+        return Err(bad("The part needs a name.".into()));
+    }
+    if s.len() > MAX_PART_NAME {
+        return Err(bad(format!("\"{s}\" is longer than {MAX_PART_NAME} characters.")));
+    }
+    let mut chars = s.chars();
+    let first_ok = chars.next().is_some_and(|c| c.is_ascii_lowercase());
+    if !first_ok || !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+        return Err(bad(format!("\"{whole}\" isn't a valid part name.")));
+    }
+    Ok(())
+}
+
 impl PartName {
+    /// A name the user picks for a part they add. Never a sub-part's: those come from the board.
     pub fn parse(s: &str) -> Result<PartName, BadName> {
-        let hint = "Use lowercase letters, digits and _, starting with a letter, e.g. front_lidar.";
-        let bad = |message: String| BadName { message, hint: hint.into() };
-        if s.is_empty() {
-            return Err(bad("The part needs a name.".into()));
+        if s.contains(SUB_PART_SEPARATOR) {
+            return Err(BadName {
+                message: format!(
+                    "\"{s}\" isn't a valid part name: a . only joins a board's name and the name of a part on it."
+                ),
+                hint: NAME_HINT.into(),
+            });
         }
-        if s.len() > MAX_PART_NAME {
-            return Err(bad(format!("\"{s}\" is longer than {MAX_PART_NAME} characters.")));
-        }
-        let mut chars = s.chars();
-        let first_ok = chars.next().is_some_and(|c| c.is_ascii_lowercase());
-        if !first_ok || !chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-            return Err(bad(format!("\"{s}\" isn't a valid part name.")));
-        }
+        check_segment(s, s)?;
         Ok(PartName(s.to_string()))
+    }
+
+    /// Any part's name: one the user picked, or a sub-part's `<bridge>.<name>`.
+    pub fn parse_any(s: &str) -> Result<PartName, BadName> {
+        match s.split_once(SUB_PART_SEPARATOR) {
+            None => PartName::parse(s),
+            Some((bridge, name)) => PartName::sub(&PartName::parse(bridge)?, name),
+        }
+    }
+
+    /// The sub-part `name` on the bridge `bridge`: `mega` and `left` give `mega.left`.
+    pub fn sub(bridge: &PartName, name: &str) -> Result<PartName, BadName> {
+        let whole = format!("{bridge}{SUB_PART_SEPARATOR}{name}");
+        if bridge.is_sub() || name.contains(SUB_PART_SEPARATOR) {
+            return Err(BadName {
+                message: format!("\"{whole}\" isn't a valid part name: only a bridge has parts of its own."),
+                hint: NAME_HINT.into(),
+            });
+        }
+        check_segment(name, &whole)?;
+        Ok(PartName(whole))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// True for a part on a bridge's board.
+    pub fn is_sub(&self) -> bool {
+        self.0.contains(SUB_PART_SEPARATOR)
+    }
+
+    /// The bridge a sub-part is on (`mega` for `mega.left`); `None` for any other part.
+    pub fn bridge(&self) -> Option<PartName> {
+        self.0.split_once(SUB_PART_SEPARATOR).map(|(b, _)| PartName(b.to_string()))
+    }
+
+    /// The name without its bridge: `left` for `mega.left`, the whole name otherwise.
+    pub fn local(&self) -> &str {
+        self.0.split_once(SUB_PART_SEPARATOR).map_or(&self.0, |(_, n)| n)
     }
 }
 
@@ -42,6 +102,22 @@ impl fmt::Display for PartName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
+}
+
+/// A board's own name for one of its parts (whatever text its sketch used) as the name of a
+/// sub-part: lowercase, with every run of other characters turned into one `_`. `None` if nothing
+/// usable is left.
+pub fn board_part_name(raw: &str) -> Option<String> {
+    let mut out = String::new();
+    for c in raw.trim().chars().map(|c| c.to_ascii_lowercase()) {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            out.push(c);
+        } else if !out.is_empty() && !out.ends_with('_') {
+            out.push('_');
+        }
+    }
+    let out = out.trim_end_matches('_');
+    check_segment(out, out).ok().map(|()| out.to_string())
 }
 
 /// `part/name`: where a part's signal is published.
@@ -56,9 +132,10 @@ impl SignalAddress {
         SignalAddress { part, signal: signal.into() }
     }
 
+    /// `part/name`; the part may be a sub-part (`mega.left/motor`).
     pub fn parse(s: &str) -> Option<SignalAddress> {
         let (part, signal) = s.split_once('/')?;
-        let part = PartName::parse(part).ok()?;
+        let part = PartName::parse_any(part).ok()?;
         faber_connector::is_kebab_name(signal).then(|| SignalAddress::new(part, signal))
     }
 }
@@ -94,7 +171,7 @@ mod tests {
 
     #[test]
     fn bad_part_names_explain_the_rule() {
-        for bad in ["", "Lidar", "1lidar", "front-lidar", "front lidar", "_x", &"a".repeat(33)] {
+        for bad in ["", "Lidar", "1lidar", "front-lidar", "front lidar", "_x", &"a".repeat(33), "mega.left"] {
             let e = PartName::parse(bad).unwrap_err();
             assert!(e.hint.contains("lowercase"), "{bad}");
         }
@@ -108,6 +185,50 @@ mod tests {
         assert_eq!(a.to_string(), "front_lidar/laser-scan");
         for bad in ["lidar", "lidar/", "/laser-scan", "Lidar/laser-scan", "lidar/laser_scan"] {
             assert_eq!(SignalAddress::parse(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn sub_parts_are_named_after_their_bridge() {
+        let mega = PartName::parse("mega").unwrap();
+        let left = PartName::sub(&mega, "left").unwrap();
+        assert_eq!(left.as_str(), "mega.left");
+        assert!(left.is_sub() && !mega.is_sub());
+        assert_eq!(left.bridge(), Some(mega.clone()));
+        assert_eq!((left.local(), mega.local()), ("left", "mega"));
+        assert_eq!(mega.bridge(), None);
+        assert_eq!(PartName::parse_any("mega.left").unwrap(), left);
+        assert_eq!(PartName::parse_any("mega").unwrap(), mega);
+        for bad in ["mega.", ".left", "mega.left.x", "Mega.left", "mega.Left", "mega.1x", ""] {
+            assert!(PartName::parse_any(bad).is_err(), "{bad}");
+        }
+        assert!(PartName::sub(&left, "x").is_err(), "a sub-part hosts nothing");
+    }
+
+    #[test]
+    fn a_name_the_user_picks_never_looks_like_a_sub_part() {
+        let e = PartName::parse("mega.left").unwrap_err();
+        assert!(e.message.contains("board"), "{e:?}");
+    }
+
+    #[test]
+    fn sub_part_addresses_are_never_ambiguous() {
+        // The `left` signal of the part `mega`, and the `motor` signal of the sub-part `mega.left`.
+        let of_bridge = SignalAddress::parse("mega/left").unwrap();
+        assert_eq!((of_bridge.part.as_str(), of_bridge.signal.as_str()), ("mega", "left"));
+        let of_sub = SignalAddress::parse("mega.left/motor").unwrap();
+        assert_eq!((of_sub.part.as_str(), of_sub.signal.as_str()), ("mega.left", "motor"));
+        assert_eq!(of_sub.to_string(), "mega.left/motor");
+        assert_eq!(SignalAddress::parse("mega/left/motor"), None, "a / never joins parts");
+    }
+
+    #[test]
+    fn board_names_become_sub_part_names() {
+        assert_eq!(board_part_name("left").as_deref(), Some("left"));
+        assert_eq!(board_part_name("Left Motor").as_deref(), Some("left_motor"));
+        assert_eq!(board_part_name("front-IR #2").as_deref(), Some("front_ir_2"));
+        for unusable in ["", "  ", "2nd", "ø", &"a".repeat(33)] {
+            assert_eq!(board_part_name(unusable), None, "{unusable}");
         }
     }
 }
