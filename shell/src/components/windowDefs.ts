@@ -12,7 +12,9 @@ export interface WindowDef extends WindowKind {
   icon: IconName;
   component: Component<WindowProps>;
   /** Where the start menu lists it; null for windows opened from elsewhere (viewers). */
-  menu: 'parts' | 'tools' | 'faber' | null;
+  menu: 'parts' | 'tools' | 'accessories' | 'faber' | null;
+  /** Its desktop icon key (`tool:<id>` or `accessory:<id>`, docs/api.md), if it has one. */
+  pin?: string;
   /** One line for the start menu. */
   description: string;
 }

@@ -80,7 +80,7 @@ describe('Desktop', () => {
       {
         name: 'demo',
         connector: 'ldrobot-ld19',
-        port: 'replay:demo-ld19',
+        port: 'replay:ld19-sample',
         state: { kind: 'running' },
         signals: [{ address: 'demo/laser-scan', capability: 'laser-scan@1' }],
         mount: { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0 },
@@ -91,11 +91,15 @@ describe('Desktop', () => {
     expect(await screen.findByRole('dialog', { name: 'demo · scan' })).toBeInTheDocument();
   });
 
-  it('switches the theme from the taskbar', async () => {
+  it('draws the wallpaper from the settings', async () => {
     const shell = setup();
-    await userEvent.click(screen.getByRole('button', { name: 'Theme: follows the system' }));
-    expect(shell.theme.resolved).toBe('light');
-    await userEvent.click(screen.getByRole('button', { name: 'Theme: light' }));
-    expect(shell.theme.resolved).toBe('dark');
+    const wall = document.querySelector('.wall')!;
+    expect(wall.getAttribute('data-wallpaper')).toBe('aluminium');
+    shell.pushSettings({
+      appearance: { theme: 'dark', wallpaper: 'cutting-mat' },
+      desktop: { icons: [] },
+      developer: { fullMachineFiles: false },
+    });
+    await expect.poll(() => wall.getAttribute('data-wallpaper')).toBe('cutting-mat');
   });
 });

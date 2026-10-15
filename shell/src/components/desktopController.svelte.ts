@@ -1,4 +1,4 @@
-import { getContext, setContext } from 'svelte';
+import { getContext, setContext, untrack } from 'svelte';
 import { loadGeometry, saveGeometry, type StorageLike } from '../lib/desktop/geometryStore';
 import {
   closeWindow,
@@ -10,6 +10,7 @@ import {
   refit,
   setRect,
   toggleMaximise,
+  updateWindow,
   type Area,
   type DesktopState,
   type Rect,
@@ -17,7 +18,7 @@ import {
   type WindowState,
 } from '../lib/desktop/windows';
 
-export const TASKBAR_HEIGHT = 56;
+export const TASKBAR_HEIGHT = 52;
 const SAVE_DELAY_MS = 300;
 
 export interface OpenOptions {
@@ -44,6 +45,7 @@ export class DesktopController {
   private readonly storage: StorageLike | null;
   private geometry: Record<string, Rect>;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly closeGuards = new Map<string, () => boolean>();
 
   constructor(kinds: Record<string, WindowKind>, storage: StorageLike | null, viewport: Area) {
     this.kinds = kinds;
@@ -90,8 +92,50 @@ export class DesktopController {
     this.state = toggleMaximise(this.state, id);
   }
 
+  /** Close at once, skipping any guard (the guard itself uses this after asking). */
   close(id: string): void {
+    this.closeGuards.delete(id);
     this.state = closeWindow(this.state, id);
+  }
+
+  /**
+   * What the close button and menu use: a window with unsaved work can say no (its guard returns
+   * false and asks the user itself, then calls `close`).
+   */
+  requestClose(id: string): void {
+    const guard = this.closeGuards.get(id);
+    if (guard && !guard()) {
+      this.focus(id);
+      return;
+    }
+    this.close(id);
+  }
+
+  /** Returns the function that removes the guard again. */
+  setCloseGuard(id: string, guard: () => boolean): () => void {
+    this.closeGuards.set(id, guard);
+    return () => {
+      if (this.closeGuards.get(id) === guard) this.closeGuards.delete(id);
+    };
+  }
+
+  /**
+   * Change a window's title, key or params. Windows call this from effects (a title that follows
+   * the document), so it reads the state untracked and only writes when something changed.
+   */
+  update(
+    id: string,
+    patch: { title?: string; key?: string; params?: Record<string, string> },
+  ): void {
+    untrack(() => {
+      const w = this.state.windows.find((x) => x.id === id);
+      if (!w) return;
+      const same =
+        (patch.title === undefined || patch.title === w.title) &&
+        (patch.key === undefined || patch.key === w.key) &&
+        (patch.params === undefined || sameParams(patch.params, w.params));
+      if (!same) this.state = updateWindow(this.state, id, patch);
+    });
   }
 
   /** Taskbar button: bring a window forward, or minimise it if it already is in front. */
@@ -130,6 +174,11 @@ export class DesktopController {
     if (this.saveTimer !== null) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.flush(), SAVE_DELAY_MS);
   }
+}
+
+function sameParams(a: Record<string, string>, b: Record<string, string>): boolean {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k]);
 }
 
 function geometryKey(kind: WindowKind, key: string): string {

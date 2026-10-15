@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatCoreTime, formatLogTime, formatRate } from './format';
+import { formatBytes, formatCoreTime, formatLogTime, formatModified, formatRate } from './format';
 
 describe('format', () => {
   it('formats log times with milliseconds', () => {
@@ -20,5 +20,11 @@ describe('format', () => {
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(2048)).toBe('2.0 KiB');
     expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 MiB');
+  });
+
+  it('formats a file date, or nothing when unknown', () => {
+    const ms = new Date(2026, 9, 15, 10, 30).getTime();
+    expect(formatModified(ms, 'en-GB')).toBe('15 Oct 2026, 10:30');
+    expect(formatModified(undefined)).toBe('');
   });
 });

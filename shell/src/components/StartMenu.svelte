@@ -14,6 +14,7 @@
   const GROUPS = [
     { id: 'parts', label: 'Parts' },
     { id: 'tools', label: 'Tools' },
+    { id: 'accessories', label: 'Accessories' },
     { id: 'faber', label: 'Faber' },
   ] as const;
 
@@ -81,7 +82,7 @@
   {onkeydown}
 >
   <div class="head">
-    <Wordmark size={22} />
+    <Wordmark size={20} />
     <span class="tag">{core.system ? `v${core.system.version}` : ''}</span>
   </div>
   {#each GROUPS as g (g.id)}
@@ -128,8 +129,6 @@
     padding: var(--space-3) var(--space-2) var(--space-2);
     border-radius: var(--radius-lg);
     background: var(--menu);
-    backdrop-filter: var(--chrome-blur);
-    -webkit-backdrop-filter: var(--chrome-blur);
     box-shadow: var(--shadow-pop), var(--highlight);
     animation: rise var(--dur-med) var(--ease-out);
     z-index: 100000;

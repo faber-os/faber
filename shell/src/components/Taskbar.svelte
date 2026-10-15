@@ -4,26 +4,21 @@
   import ConnectionIndicator from './ConnectionIndicator.svelte';
   import { useDesktop } from './desktopController.svelte';
   import Icon from './Icon.svelte';
+  import { item, separator } from '../lib/desktop/contextMenu';
+  import Logo from './Logo.svelte';
+  import { menuTrigger, useMenu } from './menuController.svelte';
   import StartMenu from './StartMenu.svelte';
-  import { useTheme } from './theme.svelte';
   import type { WindowDef } from './windowDefs';
-  import Wordmark from './Wordmark.svelte';
 
   let { defs }: { defs: WindowDef[] } = $props();
 
   const core = useCore();
   const desktop = useDesktop();
-  const theme = useTheme();
+  const menu = useMenu();
 
   let menuOpen = $state(false);
   let startButton: HTMLButtonElement | undefined = $state();
   let root: HTMLDivElement | undefined = $state();
-
-  const THEME_LABEL = {
-    system: 'Theme: follows the system',
-    light: 'Theme: light',
-    dark: 'Theme: dark',
-  } as const;
 
   function closeMenu(returnFocus: boolean) {
     menuOpen = false;
@@ -32,6 +27,27 @@
 
   function iconFor(kind: string) {
     return defs.find((d) => d.kind === kind)?.icon ?? 'info';
+  }
+
+  function taskMenu(target: HTMLElement) {
+    const id = target.closest<HTMLElement>('[data-window]')?.dataset.window;
+    const w = desktop.state.windows.find((x) => x.id === id);
+    if (!w) return null;
+    return {
+      label: w.title,
+      entries: [
+        w.minimised ? item('show', 'Show') : item('minimise', 'Minimise'),
+        item('maximise', w.maximised ? 'Restore size' : 'Maximise'),
+        separator(),
+        item('close', 'Close'),
+      ],
+      onSelect: (choice: string) => {
+        if (choice === 'show') desktop.focus(w.id);
+        else if (choice === 'minimise') desktop.minimise(w.id);
+        else if (choice === 'maximise') desktop.toggleMaximise(w.id);
+        else if (choice === 'close') desktop.requestClose(w.id);
+      },
+    };
   }
 
   function onWindowPointer(e: PointerEvent) {
@@ -55,9 +71,9 @@
       aria-label="Start"
       onclick={() => (menuOpen = !menuOpen)}
     >
-      <Wordmark size={19} />
+      <span class="nut"><Logo size={24} /></span>
     </button>
-    <ul class="tasks" aria-label="Open windows">
+    <ul class="tasks" aria-label="Open windows" use:menuTrigger={{ menu, build: taskMenu }}>
       {#each desktop.state.windows as w (w.id)}
         {@const active = desktop.state.focusedId === w.id && !w.minimised}
         <li>
@@ -67,6 +83,7 @@
             class:minimised={w.minimised}
             aria-pressed={active}
             title={w.title}
+            data-window={w.id}
             onclick={() => desktop.activate(w.id)}
           >
             <Icon name={iconFor(w.kind)} size={17} />
@@ -78,20 +95,6 @@
 
     <div class="tray">
       <ConnectionIndicator status={core.connection} />
-      <button
-        class="tray-btn"
-        aria-label={THEME_LABEL[theme.preference]}
-        title={THEME_LABEL[theme.preference]}
-        onclick={() => theme.cycle()}
-      >
-        <Icon
-          name={theme.preference === 'system'
-            ? 'auto'
-            : theme.preference === 'light'
-              ? 'sun'
-              : 'moon'}
-        />
-      </button>
       <Clock />
     </div>
   </nav>
@@ -115,21 +118,28 @@
     gap: var(--space-2);
     padding: 0 var(--space-2);
     background: var(--taskbar);
-    backdrop-filter: var(--chrome-blur);
-    -webkit-backdrop-filter: var(--chrome-blur);
     border-top: 1px solid var(--line);
-    box-shadow: var(--highlight);
     z-index: 99999;
   }
   .start {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
+    width: 48px;
     height: var(--touch);
-    padding: 0 var(--space-4) 0 var(--space-3);
+    padding: 0;
     border: 0;
     border-radius: var(--radius-md);
     background: transparent;
     transition: background var(--dur-fast);
+  }
+  .nut {
+    color: var(--accent);
+    transition: transform var(--dur-med) var(--ease-out);
+  }
+  /* A quarter-turn of a nut is 60°: the start button turns one flat when its menu opens. */
+  .start.open .nut {
+    transform: rotate(60deg);
   }
   .start:hover,
   .start.open {
@@ -179,8 +189,8 @@
     background: var(--surface);
     color: var(--text);
     box-shadow:
-      0 1px 2px oklch(0.2 0.02 255 / 0.14),
-      var(--highlight);
+      0 0 0 1px var(--line),
+      0 1px 2px oklch(0.2 0.01 250 / 0.1);
   }
   .task::after {
     content: '';
@@ -213,21 +223,6 @@
     display: flex;
     align-items: center;
     gap: var(--space-1);
-  }
-  .tray-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--touch);
-    height: var(--touch);
-    border: 0;
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--text-muted);
-  }
-  .tray-btn:hover {
-    background: var(--hover);
-    color: var(--text);
   }
   @media (max-width: 640px) {
     .task-title {

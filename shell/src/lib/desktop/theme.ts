@@ -6,10 +6,6 @@ export function resolveTheme(pref: ThemePreference, systemDark: boolean): Theme 
   return pref;
 }
 
-export function nextThemePreference(pref: ThemePreference): ThemePreference {
-  return pref === 'system' ? 'light' : pref === 'light' ? 'dark' : 'system';
-}
-
 export function parseThemePreference(stored: string | null): ThemePreference {
   return stored === 'light' || stored === 'dark' ? stored : 'system';
 }

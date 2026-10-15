@@ -66,7 +66,7 @@ points up or sideways. Every module that does I/O does it behind a trait, so its
 |---|---|---|
 | `src/lib/api/` | The only code that talks to the core (REST + WebSocket, MessagePack). Generated types live in `generated/`. | nothing from the UI |
 | `src/lib/state/` | App state as Svelte 5 runes (parts, ports, windows) | `api` |
-| `src/lib/desktop/` | Window manager logic, as plain TypeScript with no Svelte | nothing |
+| `src/lib/desktop/` | Plain TypeScript logic for the desktop and its accessories (windows, icons, menus, file paths, the Notes document), no Svelte | nothing |
 | `src/lib/viewers/` | Canvas drawing for capability viewers, as pure functions | nothing |
 | `src/components/`, `src/windows/` | Svelte UI | `state`, `desktop`, `viewers`, never `api` directly |
 

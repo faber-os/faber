@@ -80,4 +80,30 @@ describe('DesktopController', () => {
     expect(r.x + r.w).toBeLessThanOrEqual(1200);
     expect(r.y + r.h).toBeLessThanOrEqual(800 - TASKBAR_HEIGHT);
   });
+
+  it('lets a window with unsaved work refuse to close, and close later', () => {
+    const d = new DesktopController(kinds, null, { width: 1600, height: 1000 });
+    const id = d.open('parts');
+    let allow = false;
+    const asked: string[] = [];
+    d.setCloseGuard(id, () => {
+      asked.push(id);
+      return allow;
+    });
+    d.requestClose(id);
+    expect(asked).toEqual([id]);
+    expect(d.state.windows).toHaveLength(1);
+    allow = true;
+    d.requestClose(id);
+    expect(d.state.windows).toHaveLength(0);
+  });
+
+  it('closes without asking once the guard is removed', () => {
+    const d = new DesktopController(kinds, null, { width: 1600, height: 1000 });
+    const id = d.open('parts');
+    const remove = d.setCloseGuard(id, () => false);
+    remove();
+    d.requestClose(id);
+    expect(d.state.windows).toHaveLength(0);
+  });
 });

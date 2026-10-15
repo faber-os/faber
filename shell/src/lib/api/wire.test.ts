@@ -55,6 +55,22 @@ describe('encodeClientMessage', () => {
 });
 
 describe('decodeServerMessage', () => {
+  it('reads the settings, files and recording messages', () => {
+    const settings = {
+      appearance: { theme: 'dark', wallpaper: 'graphite' },
+      desktop: { icons: [{ key: 'tool:parts', x: 16, y: 16 }] },
+      developer: { fullMachineFiles: false },
+    };
+    for (const m of [
+      { type: 'settings', id: 1, settings },
+      { type: 'files-changed', id: 2, folders: ['home:/Desktop'] },
+      { type: 'serial-recording', id: 3, path: 'home:/Recordings/a.fbcap' },
+      { type: 'serial-recording-stopped', id: 3, path: 'home:/Recordings/a.fbcap', bytes: 9 },
+    ]) {
+      expect(decodeServerMessage(JSON.stringify(m), 'json')).toEqual(m);
+    }
+  });
+
   it('turns JSON null ranges back into Infinity', () => {
     const msg = decodeServerMessage(JSON.stringify(scanJson), 'json');
     expect(msg.type).toBe('signal');

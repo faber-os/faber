@@ -1,15 +1,13 @@
 import { getContext, setContext } from 'svelte';
 import type { StorageLike } from '../lib/desktop/geometryStore';
-import {
-  nextThemePreference,
-  parseThemePreference,
-  resolveTheme,
-  type ThemePreference,
-} from '../lib/desktop/theme';
+import { parseThemePreference, resolveTheme, type ThemePreference } from '../lib/desktop/theme';
 
 const STORAGE_KEY = 'faber.theme';
 
-/** Light/dark: follows the system until the user picks one with the taskbar toggle. */
+/**
+ * Light or dark. The choice lives in the core's settings (shared by every screen); this keeps a
+ * copy in the browser only so index.html can pick the right colours before the first paint.
+ */
 export class ThemeController {
   preference = $state<ThemePreference>('system');
   systemDark = $state(false);
@@ -30,12 +28,14 @@ export class ThemeController {
     }
   }
 
-  cycle(): void {
-    this.preference = nextThemePreference(this.preference);
+  /** Follow the settings (called whenever they arrive or change). */
+  setPreference(pref: ThemePreference): void {
+    if (pref === this.preference) return;
+    this.preference = pref;
     try {
-      this.storage?.setItem(STORAGE_KEY, this.preference);
+      this.storage?.setItem(STORAGE_KEY, pref);
     } catch {
-      // Not remembered, but the theme still changes for this visit.
+      // Only the first paint of the next visit may use the old colours.
     }
   }
 }

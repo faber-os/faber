@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { DEMO_PORT, USB_PORT, fakeShell, part } from '../test/fakeShell';
+import { SAMPLE_PORT, USB_PORT, fakeShell, part } from '../test/fakeShell';
 import PartsWindow from './PartsWindow.svelte';
 
 function setup(routes: Parameters<typeof fakeShell>[0] = []) {
@@ -27,16 +27,20 @@ describe('Parts window', () => {
     expect(screen.getByText('Loading parts…')).toBeInTheDocument();
   });
 
-  it('shows an empty state that points to the demo port', async () => {
+  it('shows an honest empty state that points to the sample recordings', async () => {
     const shell = setup();
     shell.pushParts([]);
     expect(await screen.findByText('No parts yet')).toBeInTheDocument();
-    expect(screen.getByText('replay:demo-ld19')).toBeInTheDocument();
+    expect(screen.getByText(/appears here by itself/)).toBeInTheDocument();
+    expect(screen.queryByText(/replay:/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Files → Recordings' }));
+    const files = shell.desktop.state.windows.find((w) => w.kind === 'files');
+    expect(files?.params).toEqual({ path: 'home:/Recordings' });
   });
 
   it('lists parts with live state badges, messages and hints', async () => {
     const shell = setup();
-    shell.pushPorts([DEMO_PORT, USB_PORT]);
+    shell.pushPorts([SAMPLE_PORT, USB_PORT]);
     shell.pushParts([
       part('demo'),
       part('lidar', {
@@ -53,7 +57,7 @@ describe('Parts window', () => {
     expect(within(demo).getByText('Running')).toBeInTheDocument();
     // The connector's name arrives with GET /connectors, a moment after the parts topic.
     expect(await within(demo).findByText('LD19 LiDAR')).toBeInTheDocument();
-    expect(within(demo).getByText('replay:demo-ld19')).toBeInTheDocument();
+    expect(within(demo).getByText('replay:ld19-sample')).toBeInTheDocument();
 
     const lidar = screen.getByText('lidar').closest('li')!;
     expect(within(lidar).getByText('Failed')).toBeInTheDocument();
@@ -105,7 +109,7 @@ describe('Parts window', () => {
 describe('Add part flow', () => {
   async function openForm() {
     const shell = setup();
-    shell.pushPorts([DEMO_PORT, USB_PORT]);
+    shell.pushPorts([SAMPLE_PORT, USB_PORT]);
     shell.pushParts([]);
     await userEvent.click(await screen.findByRole('button', { name: /^Add the first part$/ }));
     return shell;
@@ -120,13 +124,13 @@ describe('Add part flow', () => {
 
   it('picks the suggested connector when a port is picked', async () => {
     await openForm();
-    await userEvent.click(screen.getByRole('radio', { name: /replay:demo-ld19/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /replay:ld19-sample/ }));
     expect(screen.getByRole('radio', { name: /ldrobot-ld19/ })).toBeChecked();
   });
 
   it('explains an invalid name before sending anything', async () => {
     const shell = await openForm();
-    await userEvent.click(screen.getByRole('radio', { name: /replay:demo-ld19/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /replay:ld19-sample/ }));
     await userEvent.type(screen.getByLabelText('Name'), 'Front-Lidar');
     await userEvent.click(screen.getByRole('button', { name: 'Add part' }));
     expect(screen.getByText(/"Front-Lidar" isn't a valid part name\./)).toBeInTheDocument();
@@ -143,7 +147,7 @@ describe('Add part flow', () => {
     };
     shell.fetch.route({ method: 'POST', path: '/api/v0/parts', status: 409, body: { error } });
 
-    await userEvent.click(screen.getByRole('radio', { name: /replay:demo-ld19/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /replay:ld19-sample/ }));
     await userEvent.type(screen.getByLabelText('Name'), 'demo');
     await userEvent.click(screen.getByRole('button', { name: 'Add part' }));
 
@@ -154,7 +158,7 @@ describe('Add part flow', () => {
     expect(shell.fetch.calls.find((c) => c.method === 'POST')?.body).toEqual({
       name: 'demo',
       connector: 'ldrobot-ld19',
-      port: 'replay:demo-ld19',
+      port: 'replay:ld19-sample',
     });
   });
 
@@ -166,11 +170,80 @@ describe('Add part flow', () => {
       status: 201,
       body: part('demo', { state: { kind: 'starting' } }),
     });
-    await userEvent.click(screen.getByRole('radio', { name: /replay:demo-ld19/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /replay:ld19-sample/ }));
     await userEvent.type(screen.getByLabelText('Name'), 'demo');
     await userEvent.click(screen.getByRole('button', { name: 'Add part' }));
     shell.pushParts([part('demo', { state: { kind: 'starting' } })]);
     expect(await screen.findByText('Starting')).toBeInTheDocument();
     expect(screen.queryByRole('form', { name: 'Add part' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Parts menus and recordings', () => {
+  it('has a right-click menu that says why the port cannot open in the serial monitor', async () => {
+    const shell = setup();
+    shell.pushPorts([{ ...SAMPLE_PORT, claimedBy: 'lidar' }]);
+    shell.pushParts([part('lidar')]);
+    const row = (await screen.findByText('lidar')).closest('li')!;
+    await fireEvent.contextMenu(row, { clientX: 20, clientY: 20 });
+    const menu = shell.menu.current!;
+    const items = menu.entries.flatMap((e) => (e.kind === 'item' ? [e] : []));
+    expect(items.map((i) => i.label)).toEqual([
+      'Open viewer',
+      'Open recording port in serial monitor',
+      'Remove',
+    ]);
+    expect(items[1]!.disabledReason).toContain('"lidar" is using this port');
+    shell.menu.choose('view');
+    expect(shell.desktop.state.windows.some((w) => w.kind === 'laser-scan')).toBe(true);
+  });
+
+  it('starts the add form on a recording when asked to', async () => {
+    const shell = fakeShell();
+    const id = shell.desktop.open('parts');
+    shell.desktop.update(id, { params: { addPort: 'replay:ld19-sample' } });
+    const win = shell.desktop.state.windows[0]!;
+    render(PartsWindow, { props: { win, visible: true }, context: shell.context });
+    shell.pushPorts([SAMPLE_PORT]);
+    shell.pushParts([]);
+    const form = await screen.findByRole('form', { name: 'Add part' });
+    await waitFor(() =>
+      expect(within(form).getByRole('radio', { name: /replay:ld19-sample/ })).toBeChecked(),
+    );
+    expect(within(form).getByRole('radio', { name: /ldrobot-ld19/ })).toBeChecked();
+  });
+});
+
+describe('Port problems', () => {
+  it('explains hardware that is plugged in but never became a port, grouped by kind', async () => {
+    const shell = setup();
+    const problem = {
+      code: 'usb-no-answer',
+      label: "Plugged in, but the computer can't talk to it",
+      detail: "Something is plugged in over USB, but it didn't answer.",
+      hint: 'Try another USB cable; some only carry power.',
+    };
+    shell.receive({
+      type: 'ports',
+      id: shell.subscriptionId('ports'),
+      ports: [],
+      problems: [problem, problem],
+    });
+    shell.pushParts([]);
+    const notice = await screen.findByText(problem.label);
+    const box = notice.closest('[data-code]')!;
+    expect(box).toHaveTextContent('(2 times)');
+    expect(within(box as HTMLElement).getByText(problem.detail)).toBeInTheDocument();
+    expect(within(box as HTMLElement).getByText(problem.hint)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/device/i);
+
+    // The add form shows it too, next to the empty port list.
+    await userEvent.click(screen.getByRole('button', { name: /^Add the first part$/ }));
+    const form = screen.getByRole('form', { name: 'Add part' });
+    expect(within(form).getByText(problem.label)).toBeInTheDocument();
+
+    // Gone when the core stops reporting it (the field is left out when there are none).
+    shell.pushPorts([]);
+    await waitFor(() => expect(screen.queryByText(problem.label)).not.toBeInTheDocument());
   });
 });

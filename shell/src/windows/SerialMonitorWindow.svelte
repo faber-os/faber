@@ -1,6 +1,7 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
   import { portAvailability } from '../lib/state/portHints';
+  import { defaultRecordingName, validateRecordingName } from '../lib/state/recordingName';
   import {
     ByteLog,
     bytesToText,
@@ -8,19 +9,23 @@
     hexLines,
     type LineEnding,
   } from '../lib/state/serialFormat';
-  import type { ErrorBody } from '../lib/state/types';
+  import type { ErrorBody, SerialSession } from '../lib/state/types';
+  import { useDesktop } from '../components/desktopController.svelte';
+  import { openFolder } from '../components/fileOps';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import { formatBytes } from '../components/format';
   import Icon from '../components/Icon.svelte';
+  import PortProblems from '../components/PortProblems.svelte';
   import type { WindowProps } from '../components/windowDefs';
 
-  let { visible }: WindowProps = $props();
+  let { win, visible }: WindowProps = $props();
 
   const BAUDS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
   const KEEP_BYTES = 64 * 1024;
   const HEX_LINES_SHOWN = 2000;
 
   const core = useCore();
+  const desktop = useDesktop();
 
   let port = $state('');
   let baud = $state(115200);
@@ -36,12 +41,29 @@
   let received = $state(0);
   let follow = $state(true);
 
-  let session: { send(d: Uint8Array): void; close(): void } | null = null;
+  let session: SerialSession | null = null;
+
+  // Recording (docs/api.md, "Recordings"): idle → naming → starting → recording → idle.
+  let rec = $state<'idle' | 'naming' | 'starting' | 'recording'>('idle');
+  let recName = $state('');
+  let recPath = $state<string | null>(null);
+  let recBytes = $state(0);
+  let recTouched = $state(false);
+  let lastRecording = $state<{ path: string; bytes: number } | null>(null);
+  const recProblem = $derived(validateRecordingName(recName));
   const log = new ByteLog(KEEP_BYTES);
   let renderQueued = false;
   let pre: HTMLPreElement | undefined = $state();
 
   const ports = $derived(core.ports ?? []);
+
+  // Opened for one port (Parts → "Open port in serial monitor"): pick it, if nothing is open.
+  $effect(() => {
+    const wanted = win.params.port;
+    if (!wanted) return;
+    if (status === 'closed') port = wanted;
+    desktop.update(win.id, { params: {} });
+  });
 
   // Pick the first free port once the list arrives, so Open is one click away.
   $effect(() => {
@@ -63,18 +85,57 @@
       onOpened: () => (status = 'open'),
       onData: (data) => {
         log.append(data);
+        if (rec === 'recording') recBytes += data.length;
         queueRender();
       },
       onClosed: (reason) => {
         session = null;
         status = 'closed';
+        if (rec !== 'idle') rec = 'idle';
         if (reason) closedReason = reason;
       },
-      onError: (e) => (error = e),
+      onError: (e) => {
+        error = e;
+        // The core answers a record request with either serial-recording or an error.
+        if (rec === 'starting') rec = 'naming';
+      },
+      onRecording: (path) => {
+        rec = 'recording';
+        recPath = path;
+        recBytes = 0;
+        lastRecording = null;
+      },
+      onRecordingStopped: (path, bytes) => {
+        rec = 'idle';
+        recPath = null;
+        lastRecording = { path, bytes };
+      },
     });
   }
 
+  function startNaming() {
+    recName = defaultRecordingName(new Date());
+    recTouched = false;
+    rec = 'naming';
+  }
+
+  function startRecording(e: SubmitEvent) {
+    e.preventDefault();
+    recTouched = true;
+    if (recProblem || !session) return;
+    error = null;
+    rec = 'starting';
+    session.startRecording(recName);
+  }
+
+  function stopRecording() {
+    session?.stopRecording();
+  }
+
   function close() {
+    // Closing ends a recording too; the core's own confirmation can't reach a closed session,
+    // so say what was saved from what this window counted.
+    if (rec === 'recording' && recPath) lastRecording = { path: recPath, bytes: recBytes };
     session?.close();
     session = null;
     status = 'closed';
@@ -130,7 +191,11 @@
         {#if ports.length === 0}<option value="">No ports found</option>{/if}
         {#each ports as p (p.id)}
           {@const a = portAvailability(p)}
-          <option value={p.id}>{p.label} ({p.id}){a.free ? '' : ` · ${a.text}`}</option>
+          <option value={p.id}
+            >{p.kind === 'bluetooth' ? 'Bluetooth: ' : ''}{p.label} ({p.id}){a.free
+              ? ''
+              : ` · ${a.text}`}</option
+          >
         {/each}
       </select>
     </label>
@@ -149,8 +214,65 @@
     {/if}
   </div>
 
+  {#if core.portProblems.length && status === 'closed'}
+    <div class="pad problems"><PortProblems /></div>
+  {/if}
+
   {#if error}
     <div class="pad"><ErrorNotice {error} /></div>
+  {/if}
+
+  {#if status === 'open' && rec === 'naming'}
+    <form class="record" onsubmit={startRecording} aria-label="Record">
+      <label class="field grow">
+        <span class="label">Recording name</span>
+        <input
+          class="input mono"
+          bind:value={recName}
+          aria-invalid={recTouched && !!recProblem}
+          aria-describedby="{win.id}-rec-help"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </label>
+      <button class="btn primary" type="submit"><Icon name="record" size={16} /> Start</button>
+      <button class="btn quiet" type="button" onclick={() => (rec = 'idle')}>Cancel</button>
+      <p id="{win.id}-rec-help" class="help" class:bad={recTouched && !!recProblem}>
+        {#if recTouched && recProblem}{recProblem.message} {recProblem.hint}{:else}Saved in
+          Recordings as <code>{recName || '…'}.fbcap</code>, and usable as a replay port at once.{/if}
+      </p>
+    </form>
+  {:else if rec === 'starting' || rec === 'recording'}
+    <div class="record live-rec" role="status">
+      <span class="rec-dot" aria-hidden="true"></span>
+      {#if rec === 'starting'}
+        <span>Starting the recording…</span>
+      {:else}
+        <span
+          >Recording to <code>{recPath}</code> (<span class="num">{formatBytes(recBytes)}</span
+          >)</span
+        >
+      {/if}
+      <span class="grow"></span>
+      <button class="btn" onclick={stopRecording} disabled={rec !== 'recording'}>
+        <Icon name="stop" size={15} /> Stop
+      </button>
+    </div>
+  {:else if lastRecording}
+    <div class="record done" role="status">
+      <span
+        >Saved <code>{lastRecording.path}</code> (<span class="num"
+          >{formatBytes(lastRecording.bytes)}</span
+        >).</span
+      >
+      <span class="grow"></span>
+      <button class="btn quiet" onclick={() => openFolder(desktop, 'home:/Recordings')}
+        >Show in Files</button
+      >
+      <button class="btn quiet icon" aria-label="Dismiss" onclick={() => (lastRecording = null)}
+        ><Icon name="close" /></button
+      >
+    </div>
   {/if}
 
   <div class="bar">
@@ -167,6 +289,9 @@
       {/if}
       <span class="count num">{formatBytes(received)} received</span>
     </p>
+    {#if status === 'open' && rec === 'idle'}
+      <button class="btn" onclick={startNaming}><Icon name="record" size={16} /> Record</button>
+    {/if}
     <div class="segmented" role="radiogroup" aria-label="Show as">
       <label><input type="radio" name="serial-mode" value="text" bind:group={mode} />Text</label>
       <label><input type="radio" name="serial-mode" value="hex" bind:group={mode} />Hex</label>
@@ -287,6 +412,50 @@
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-all;
+  }
+  .problems {
+    display: grid;
+    gap: var(--space-2);
+  }
+  .record {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--line);
+    font-size: var(--text-sm);
+  }
+  .record .grow {
+    flex: 1;
+    min-width: 0;
+  }
+  .record .help {
+    flex-basis: 100%;
+    color: var(--text-muted);
+  }
+  .record .help.bad {
+    color: var(--danger);
+    font-weight: 600;
+  }
+  .live-rec,
+  .done {
+    align-items: center;
+  }
+  .live-rec {
+    background: var(--danger-soft);
+  }
+  .rec-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--danger);
+    animation: rec 1.2s ease-in-out infinite;
+  }
+  @keyframes rec {
+    50% {
+      opacity: 0.35;
+    }
   }
   .send {
     display: flex;

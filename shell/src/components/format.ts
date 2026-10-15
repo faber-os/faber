@@ -19,3 +19,15 @@ export function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
   return `${(n / 1024 / 1024).toFixed(1)} MiB`;
 }
+
+/** "15 Oct 2026, 10:30" in the browser's language; '' when the core didn't say. */
+export function formatModified(ms: number | undefined, locale?: string): string {
+  if (ms === undefined) return '';
+  return new Intl.DateTimeFormat(locale, {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(ms));
+}

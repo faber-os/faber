@@ -347,5 +347,59 @@ describe('CoreSocket', () => {
       expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'not-connected' }));
       expect(onClosed).toHaveBeenCalled();
     });
+
+    it('records an open session and reports where to and how much', () => {
+      const s = make();
+      s.connect();
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      const onRecording = vi.fn();
+      const onRecordingStopped = vi.fn();
+      const session = s.openSerial('serial:COM3', 9600, {
+        onOpened: () => {},
+        onData: () => {},
+        onClosed: () => {},
+        onError: () => {},
+        onRecording,
+        onRecordingStopped,
+      });
+      ws.receive(bin({ type: 'serial-opened', id: 1, port: 'serial:COM3' }));
+      session.startRecording('bench_test');
+      expect(sentMsgpack(ws).at(-1)).toEqual({
+        type: 'serial-record-start',
+        id: 1,
+        name: 'bench_test',
+      });
+      ws.receive(
+        bin({ type: 'serial-recording', id: 1, path: 'home:/Recordings/bench_test.fbcap' }),
+      );
+      expect(onRecording).toHaveBeenCalledWith('home:/Recordings/bench_test.fbcap');
+      session.stopRecording();
+      expect(sentMsgpack(ws).at(-1)).toEqual({ type: 'serial-record-stop', id: 1 });
+      ws.receive(
+        bin({
+          type: 'serial-recording-stopped',
+          id: 1,
+          path: 'home:/Recordings/bench_test.fbcap',
+          bytes: 4096,
+        }),
+      );
+      expect(onRecordingStopped).toHaveBeenCalledWith('home:/Recordings/bench_test.fbcap', 4096);
+    });
+
+    it('does not ask to record before the port is open', () => {
+      const s = make();
+      s.connect();
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      const session = s.openSerial('serial:COM3', 9600, {
+        onOpened: () => {},
+        onData: () => {},
+        onClosed: () => {},
+        onError: () => {},
+      });
+      session.startRecording('x');
+      expect(sentMsgpack(ws).map((m) => (m as { type: string }).type)).toEqual(['serial-open']);
+    });
   });
 });

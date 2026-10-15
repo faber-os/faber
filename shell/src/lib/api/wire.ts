@@ -1,7 +1,7 @@
 import { decode, encode } from '@msgpack/msgpack';
-import type { ClientMessage } from './generated/ClientMessage';
 import type { ErrorBody } from './generated/ErrorBody';
 import type { Reading } from './generated/Reading';
+import type { ClientMessage } from './generated/ClientMessage';
 import type { ServerMessage } from './generated/ServerMessage';
 
 /** MessagePack is the default; JSON is for debugging (D26, docs/api.md). */
@@ -31,6 +31,10 @@ const SERVER_TYPE_LIST: Record<ServerMessage['type'], true> = {
   'serial-opened': true,
   'serial-data': true,
   'serial-closed': true,
+  'serial-recording': true,
+  'serial-recording-stopped': true,
+  settings: true,
+  'files-changed': true,
   error: true,
 };
 const SERVER_TYPES = new Set<string>(Object.keys(SERVER_TYPE_LIST));

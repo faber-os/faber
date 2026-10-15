@@ -4,7 +4,8 @@ import { createHttp } from '../lib/api/http';
 import { CoreSocket } from '../lib/api/socket';
 import { CoreState } from '../lib/state/core.svelte';
 import { CORE_CONTEXT_KEY } from '../lib/state/context';
-import type { ConnectorInfo, PartInfo, PortInfo } from '../lib/state/types';
+import type { ConnectorInfo, PartInfo, PortInfo, Settings } from '../lib/state/types';
+import { MENU_CONTEXT_KEY, MenuController } from '../components/menuController.svelte';
 import { DESKTOP_CONTEXT_KEY, DesktopController } from '../components/desktopController.svelte';
 import { THEME_CONTEXT_KEY, ThemeController } from '../components/theme.svelte';
 import { WINDOW_KINDS } from '../windows/registry';
@@ -20,10 +21,10 @@ export const LD19: ConnectorInfo = {
   provides: [{ name: 'laser-scan', capability: 'laser-scan@1' }],
 };
 
-export const DEMO_PORT: PortInfo = {
-  id: 'replay:demo-ld19',
+export const SAMPLE_PORT: PortInfo = {
+  id: 'replay:ld19-sample',
   kind: 'replay',
-  label: 'Demo recording (LD19)',
+  label: 'Recording ld19-sample',
   suggestions: [{ connector: 'ldrobot-ld19', reason: 'This is a recording of a LD19 LiDAR.' }],
 };
 
@@ -40,11 +41,33 @@ export function part(name: string, overrides: Partial<PartInfo> = {}): PartInfo 
   return {
     name,
     connector: 'ldrobot-ld19',
-    port: 'replay:demo-ld19',
+    port: 'replay:ld19-sample',
     state: { kind: 'running' },
     signals: [{ address: `${name}/laser-scan`, capability: 'laser-scan@1' }],
     mount: { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0 },
     ...overrides,
+  };
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  appearance: { theme: 'system', wallpaper: 'aluminium' },
+  desktop: { icons: [] },
+  developer: { fullMachineFiles: false },
+};
+
+/** A folder listing answer for the fake fetch. */
+export function listing(path: string, entries: Partial<import('../lib/state/types').FileEntry>[]) {
+  return {
+    path: `/api/v0/files/list?path=${encodeURIComponent(path)}`,
+    body: {
+      path,
+      entries: entries.map((e) => ({
+        kind: 'file',
+        size: 0,
+        path: `${path}/${e.name}`,
+        ...e,
+      })),
+    },
   };
 }
 
@@ -80,10 +103,12 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
   ws.open();
   const desktop = new DesktopController(WINDOW_KINDS, null, viewport);
   const theme = new ThemeController(null, null);
+  const menu = new MenuController();
   const context = new Map<unknown, unknown>([
     [CORE_CONTEXT_KEY, core],
     [DESKTOP_CONTEXT_KEY, desktop],
     [THEME_CONTEXT_KEY, theme],
+    [MENU_CONTEXT_KEY, menu],
   ]);
 
   type Sent = { type: string; id: number; topic?: { kind: string; address?: string } };
@@ -108,6 +133,7 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
     fetch,
     desktop,
     theme,
+    menu,
     context,
     sent,
     subscriptionId,
@@ -116,5 +142,9 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
       ws.receive(bin({ type: 'parts', id: subscriptionId('parts'), parts })),
     pushPorts: (ports: PortInfo[]) =>
       ws.receive(bin({ type: 'ports', id: subscriptionId('ports'), ports })),
+    pushSettings: (settings: Settings = DEFAULT_SETTINGS) =>
+      ws.receive(bin({ type: 'settings', id: subscriptionId('settings'), settings })),
+    filesChanged: (folders: string[]) =>
+      ws.receive(bin({ type: 'files-changed', id: subscriptionId('files'), folders })),
   };
 }

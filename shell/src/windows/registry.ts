@@ -1,9 +1,13 @@
 import type { WindowDef } from '../components/windowDefs';
 import AboutWindow from './AboutWindow.svelte';
+import FilesWindow from './FilesWindow.svelte';
 import LaserScanWindow from './LaserScanWindow.svelte';
 import LogsWindow from './LogsWindow.svelte';
+import NotesWindow from './NotesWindow.svelte';
 import PartsWindow from './PartsWindow.svelte';
+import PropertiesWindow from './PropertiesWindow.svelte';
 import SerialMonitorWindow from './SerialMonitorWindow.svelte';
+import SettingsWindow from './SettingsWindow.svelte';
 
 /** Every kind of window the shell can open. */
 export const WINDOW_DEFS: WindowDef[] = [
@@ -13,6 +17,7 @@ export const WINDOW_DEFS: WindowDef[] = [
     description: 'Add, watch and remove the hardware on this machine',
     icon: 'parts',
     menu: 'parts',
+    pin: 'tool:parts',
     multiple: false,
     defaultSize: { w: 680, h: 520 },
     minSize: { w: 360, h: 300 },
@@ -32,12 +37,13 @@ export const WINDOW_DEFS: WindowDef[] = [
   {
     kind: 'serial-monitor',
     title: 'Serial monitor',
-    description: 'Read and write a serial port directly',
+    description: 'Read, write and record a serial port directly',
     icon: 'serial',
     menu: 'tools',
+    pin: 'tool:serial-monitor',
     multiple: false,
-    defaultSize: { w: 680, h: 480 },
-    minSize: { w: 380, h: 300 },
+    defaultSize: { w: 680, h: 500 },
+    minSize: { w: 380, h: 320 },
     component: SerialMonitorWindow,
   },
   {
@@ -52,13 +58,60 @@ export const WINDOW_DEFS: WindowDef[] = [
     component: LogsWindow,
   },
   {
+    kind: 'files',
+    title: 'Files',
+    description: 'Your desktop, documents, recordings and machine config',
+    icon: 'folder',
+    menu: 'accessories',
+    pin: 'accessory:files',
+    multiple: true,
+    defaultSize: { w: 780, h: 520 },
+    minSize: { w: 360, h: 300 },
+    component: FilesWindow,
+  },
+  {
+    kind: 'notes',
+    title: 'Notes',
+    description: 'A plain text editor',
+    icon: 'notes',
+    menu: 'accessories',
+    pin: 'accessory:notes',
+    multiple: true,
+    defaultSize: { w: 680, h: 520 },
+    minSize: { w: 340, h: 260 },
+    component: NotesWindow,
+  },
+  {
+    kind: 'settings',
+    title: 'Settings',
+    description: 'Theme, wallpaper and developer settings',
+    icon: 'settings',
+    menu: 'accessories',
+    pin: 'accessory:settings',
+    multiple: false,
+    defaultSize: { w: 620, h: 560 },
+    minSize: { w: 340, h: 320 },
+    component: SettingsWindow,
+  },
+  {
+    kind: 'properties',
+    title: 'Properties',
+    description: 'Details of one file or folder',
+    icon: 'info',
+    menu: null,
+    multiple: true,
+    defaultSize: { w: 440, h: 400 },
+    minSize: { w: 320, h: 280 },
+    component: PropertiesWindow,
+  },
+  {
     kind: 'about',
     title: 'About Faber',
     description: 'Versions and connection details',
     icon: 'info',
     menu: 'faber',
     multiple: false,
-    defaultSize: { w: 440, h: 420 },
+    defaultSize: { w: 440, h: 440 },
     minSize: { w: 320, h: 300 },
     component: AboutWindow,
   },

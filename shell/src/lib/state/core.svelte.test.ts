@@ -10,7 +10,7 @@ import type { PartInfo } from './types';
 const demo: PartInfo = {
   name: 'demo',
   connector: 'ldrobot-ld19',
-  port: 'replay:demo-ld19',
+  port: 'replay:ld19-sample',
   state: { kind: 'running' },
   signals: [{ address: 'demo/laser-scan', capability: 'laser-scan@1' }],
   mount: { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0 },
@@ -20,6 +20,12 @@ function bin(msg: unknown): ArrayBuffer {
   const b = encode(msg);
   return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
 }
+
+const SETTINGS = {
+  appearance: { theme: 'system' as const, wallpaper: 'aluminium' },
+  desktop: { icons: [] },
+  developer: { fullMachineFiles: false },
+};
 
 let f: FakeFetch;
 
@@ -62,9 +68,58 @@ describe('CoreState', () => {
     expect(core.connection).toBe('reconnecting');
   });
 
-  it('subscribes to parts, ports and logs on start', () => {
+  it('subscribes to parts, ports, logs, settings and files on start', () => {
     const { ws } = setup();
-    expect(sentTopics(ws).map((m) => m.topic?.kind)).toEqual(['parts', 'ports', 'logs']);
+    expect(sentTopics(ws).map((m) => m.topic?.kind)).toEqual([
+      'parts',
+      'ports',
+      'logs',
+      'settings',
+      'files',
+    ]);
+  });
+
+  it('keeps the settings from their topic', () => {
+    const { core, ws } = setup();
+    expect(core.settings).toBeNull();
+    const sub = sentTopics(ws).find((m) => m.topic?.kind === 'settings')!;
+    ws.receive(bin({ type: 'settings', id: sub.id, settings: SETTINGS }));
+    expect(core.settings).toEqual(SETTINGS);
+  });
+
+  it('saves settings and keeps what the core answered', async () => {
+    const { core } = setup();
+    const answer = { ...SETTINGS, appearance: { theme: 'dark', wallpaper: 'graphite' } };
+    f.route({ method: 'PUT', path: '/api/v0/settings', body: answer });
+    const r = await core.saveSettings(answer as typeof SETTINGS);
+    expect(r.ok).toBe(true);
+    expect(core.settings).toEqual(answer);
+  });
+
+  it('tells file watchers which folders changed', () => {
+    const { core, ws } = setup();
+    const a = vi.fn();
+    const b = vi.fn();
+    const stopA = core.watchFiles(a);
+    core.watchFiles(b);
+    const sub = sentTopics(ws).find((m) => m.topic?.kind === 'files')!;
+    ws.receive(bin({ type: 'files-changed', id: sub.id, folders: ['home:/Desktop'] }));
+    expect(a).toHaveBeenCalledWith(['home:/Desktop']);
+    stopA();
+    ws.receive(bin({ type: 'files-changed', id: sub.id, folders: ['home:/Trash'] }));
+    expect(a).toHaveBeenCalledTimes(1);
+    expect(b).toHaveBeenCalledWith(['home:/Trash']);
+  });
+
+  it('wraps file requests in results with the core error', async () => {
+    const { core } = setup();
+    const error = {
+      code: 'protected',
+      message: 'Desktop is a fixed folder.',
+      hint: 'Pick another.',
+    };
+    f.route({ method: 'POST', path: '/api/v0/files/trash', status: 409, body: { error } });
+    expect(await core.trash(['home:/Desktop'])).toEqual({ ok: false, error });
   });
 
   it('keeps parts and ports from their topics', () => {
@@ -139,7 +194,7 @@ describe('CoreState', () => {
     const r = await core.addPart({
       name: 'demo',
       connector: 'ldrobot-ld19',
-      port: 'replay:demo-ld19',
+      port: 'replay:ld19-sample',
     });
     expect(r).toEqual({ ok: true, value: demo });
   });
@@ -155,7 +210,7 @@ describe('CoreState', () => {
     const r = await core.addPart({
       name: 'demo',
       connector: 'ldrobot-ld19',
-      port: 'replay:demo-ld19',
+      port: 'replay:ld19-sample',
     });
     expect(r).toEqual({ ok: false, error });
   });

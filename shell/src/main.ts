@@ -1,7 +1,8 @@
-import '@fontsource-variable/hanken-grotesk';
-import '@fontsource-variable/red-hat-mono';
+import '@fontsource-variable/atkinson-hyperlegible-next';
+import '@fontsource-variable/atkinson-hyperlegible-mono';
 import './styles/tokens.css';
 import './styles/base.css';
+import './styles/wallpapers.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 

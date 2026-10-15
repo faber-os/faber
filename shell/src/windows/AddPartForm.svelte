@@ -5,8 +5,17 @@
   import type { ErrorBody } from '../lib/state/types';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
+  import PortProblems from '../components/PortProblems.svelte';
 
-  let { onadded, oncancel }: { onadded: (name: string) => void; oncancel: () => void } = $props();
+  let {
+    onadded,
+    oncancel,
+    initialPort = null,
+  }: {
+    onadded: (name: string) => void;
+    oncancel: () => void;
+    initialPort?: string | null;
+  } = $props();
 
   const core = useCore();
 
@@ -41,6 +50,14 @@
     }
   }
 
+  // Started from a recording: pick its port (and the suggested connector) once both lists are in.
+  let started = false;
+  $effect(() => {
+    if (started || !initialPort || !ports || !connectors) return;
+    started = true;
+    if (ports.some((p) => p.id === initialPort)) pickPort(initialPort);
+  });
+
   async function submit(e: SubmitEvent) {
     e.preventDefault();
     nameTouched = true;
@@ -65,6 +82,7 @@
   <div class="scroll">
     <fieldset class="step" class:flag={errorField === 'port'}>
       <legend><span class="n">1</span> Pick the port it is plugged into</legend>
+      <div class="problems"><PortProblems /></div>
       {#if ports === null}
         <p class="muted">Looking for ports…</p>
       {:else if ports.length === 0}
@@ -86,7 +104,10 @@
                 onchange={() => pickPort(p.id)}
               />
               <span class="choice-body">
-                <span class="choice-title">{p.label}</span>
+                <span class="choice-title"
+                  >{#if p.kind === 'bluetooth'}<span class="kind">Bluetooth</span
+                    >{/if}{p.label}</span
+                >
                 <span class="choice-meta">
                   <code>{p.id}</code>
                   <span class="pill" class:busy={!avail.free}>{avail.text}</span>
@@ -250,6 +271,11 @@
     background: var(--danger);
     color: var(--surface);
   }
+  .problems:not(:empty) {
+    display: grid;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
   .choices {
     display: grid;
     gap: var(--space-2);
@@ -322,6 +348,15 @@
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--accent-ink);
+  }
+  .kind {
+    margin-right: var(--space-2);
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--info-soft);
+    color: var(--info);
+    font-size: var(--text-xs);
+    font-weight: 700;
   }
   .provides {
     font-size: var(--text-sm);

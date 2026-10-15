@@ -1,5 +1,5 @@
-import type { ClientMessage } from './generated/ClientMessage';
 import type { ErrorBody } from './generated/ErrorBody';
+import type { ClientMessage } from './generated/ClientMessage';
 import type { ServerMessage } from './generated/ServerMessage';
 import type { Topic } from './generated/Topic';
 import { decodeServerMessage, encodeClientMessage, WireError, type WireFormat } from './wire';
@@ -38,11 +38,17 @@ export interface SerialHandlers {
   /** The session is over: closed by us, by the core (with its reason) or by a lost connection. */
   onClosed(reason?: string): void;
   onError(error: ErrorBody): void;
+  /** Recording started (docs/api.md, "Recordings"). Failures arrive as `onError`. */
+  onRecording?(path: string): void;
+  onRecordingStopped?(path: string, bytes: number): void;
 }
 
 export interface SerialSession {
   send(data: Uint8Array): void;
   close(): void;
+  /** Save everything received from now on to `home:/Recordings/<name>.fbcap`. */
+  startRecording(name: string): void;
+  stopRecording(): void;
 }
 
 const OPEN = 1;
@@ -138,14 +144,18 @@ export class CoreSocket {
         hint: 'Wait until the taskbar says Connected, then open the port again.',
       });
       handlers.onClosed();
-      return { send: () => {}, close: () => {} };
+      return { send: () => {}, close: () => {}, startRecording: () => {}, stopRecording: () => {} };
     }
     this.serials.set(id, { handlers, opened: false });
     this.send({ type: 'serial-open', id, port, baud });
+    const whileOpen = (fn: () => void) => {
+      if (this.serials.get(id)?.opened) fn();
+    };
     return {
-      send: (data) => {
-        if (this.serials.get(id)?.opened) this.send({ type: 'serial-send', id, data });
-      },
+      send: (data) => whileOpen(() => this.send({ type: 'serial-send', id, data })),
+      startRecording: (name) =>
+        whileOpen(() => this.send({ type: 'serial-record-start', id, name })),
+      stopRecording: () => whileOpen(() => this.send({ type: 'serial-record-stop', id })),
       close: () => {
         const s = this.serials.get(id);
         if (!s) return;
@@ -210,6 +220,8 @@ export class CoreSocket {
         serial.opened = true;
         h.onOpened(msg.port);
       } else if (msg.type === 'serial-data') h.onData(msg.data, msg.tUs);
+      else if (msg.type === 'serial-recording') h.onRecording?.(msg.path);
+      else if (msg.type === 'serial-recording-stopped') h.onRecordingStopped?.(msg.path, msg.bytes);
       else if (msg.type === 'serial-closed') {
         this.serials.delete(id);
         h.onClosed(msg.reason);

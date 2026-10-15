@@ -1,27 +1,30 @@
 <script lang="ts">
-  let { size = 18 }: { size?: number } = $props();
+  import Logo from './Logo.svelte';
+
+  /** `size` is the cap height area in px; the nut is drawn a little taller than the letters. */
+  let { size = 18, mark = true }: { size?: number; mark?: boolean } = $props();
 </script>
 
-<!-- No logo exists yet: a lowercase wordmark with one ember spark, like a struck hot iron. -->
 <span class="wordmark" style:font-size="{size}px" role="img" aria-label="Faber">
-  <span aria-hidden="true">faber</span><span class="spark" aria-hidden="true"></span>
+  {#if mark}<span class="nut"><Logo size={Math.round(size * 1.25)} /></span>{/if}
+  <span class="name" aria-hidden="true">Faber</span>
 </span>
 
 <style>
   .wordmark {
     display: inline-flex;
-    align-items: baseline;
-    font-weight: 760;
-    letter-spacing: -0.045em;
+    align-items: center;
+    gap: 0.38em;
     line-height: 1;
     color: var(--text);
   }
-  .spark {
-    width: 0.26em;
-    height: 0.26em;
-    margin-left: 0.08em;
-    border-radius: 0.06em;
-    background: var(--accent);
-    transform: rotate(45deg) translateY(-0.02em);
+  .nut {
+    color: var(--accent);
+  }
+  .name {
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    /* Optical alignment: the cap height, not the em box, should sit centred on the nut. */
+    padding-top: 0.06em;
   }
 </style>

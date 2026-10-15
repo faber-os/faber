@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { RingBuffer } from './ringBuffer';
 import { validatePartName } from './partName';
-import { portHints, portAvailability } from './portHints';
+import { groupPortProblems, portHints, portAvailability, portKindLabel } from './portHints';
+import { defaultRecordingName, validateRecordingName } from './recordingName';
 import { filterLogs, LOG_LEVELS } from './logFilter';
 import type { ConnectorInfo, LogEntry, PortInfo } from './types';
 
@@ -55,7 +56,7 @@ const ld19: ConnectorInfo = {
 };
 
 const replay: PortInfo = {
-  id: 'replay:demo-ld19',
+  id: 'replay:ld19-sample',
   kind: 'replay',
   label: 'Demo recording (LD19)',
   suggestions: [{ connector: 'ldrobot-ld19', reason: 'This is a recording of a LD19 LiDAR.' }],
@@ -114,5 +115,40 @@ describe('filterLogs', () => {
   it('matches text in the source or the message, ignoring case', () => {
     expect(filterLogs(entries, 'debug', 'LIDAR').map((e) => e.tUs)).toEqual([2, 3]);
     expect(filterLogs(entries, 'debug', 'toml').map((e) => e.tUs)).toEqual([4]);
+  });
+});
+
+describe('portKindLabel', () => {
+  it('names Bluetooth links as Bluetooth, not as a bare serial port', () => {
+    expect(portKindLabel({ kind: 'bluetooth' })).toBe('Bluetooth');
+    expect(portKindLabel({ kind: 'usb-serial' })).toBe('USB serial');
+    expect(portKindLabel({ kind: 'serial' })).toBe('Serial');
+    expect(portKindLabel({ kind: 'replay' })).toBe('Recording');
+  });
+});
+
+describe('recording names', () => {
+  it('defaults to the date and time, valid under the part-name rule', () => {
+    const name = defaultRecordingName(new Date(2026, 9, 15, 10, 30));
+    expect(name).toBe('recording_2026_10_15_1030');
+    expect(validateRecordingName(name)).toBeNull();
+  });
+
+  it('explains a bad name in recording words', () => {
+    expect(validateRecordingName('')!.message).toBe('The recording needs a name.');
+    expect(validateRecordingName('Bench Test')!.message).toContain('valid recording name');
+    expect(validateRecordingName('Bench Test')!.hint).toContain('bench_test');
+  });
+});
+
+describe('groupPortProblems', () => {
+  it('shows identical problems once, with a count', () => {
+    const noAnswer = { code: 'usb-no-answer', label: 'L', detail: 'D', hint: 'H' };
+    const other = { code: 'usb-other', label: 'L2', detail: 'D2', hint: 'H2' };
+    expect(groupPortProblems([noAnswer, other, noAnswer])).toEqual([
+      { ...noAnswer, count: 2 },
+      { ...other, count: 1 },
+    ]);
+    expect(groupPortProblems([])).toEqual([]);
   });
 });

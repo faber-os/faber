@@ -1,5 +1,8 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
+  import { resolveWallpaper } from '../lib/desktop/wallpapers';
+  import ContextMenu from './ContextMenu.svelte';
+  import DesktopIcons from './DesktopIcons.svelte';
   import { useDesktop } from './desktopController.svelte';
   import ErrorNotice from './ErrorNotice.svelte';
   import Taskbar from './Taskbar.svelte';
@@ -11,14 +14,15 @@
   const core = useCore();
   const desktop = useDesktop();
   const byKind = $derived(new Map(defs.map((d) => [d.kind, d])));
+  const wallpaper = $derived(resolveWallpaper(core.settings?.appearance.wallpaper));
 </script>
 
 <div class="desktop">
-  <div class="wall" aria-hidden="true">
-    <span class="mark">faber</span>
-  </div>
+  <div class="wall wallpaper" data-wallpaper={wallpaper} aria-hidden="true"></div>
 
-  <main class="windows" aria-label="Desktop" style:height="{desktop.area.height}px">
+  <DesktopIcons {defs} />
+
+  <main class="windows" aria-label="Windows" style:height="{desktop.area.height}px">
     {#each desktop.state.windows as win (win.id)}
       {@const def = byKind.get(win.kind)}
       {#if def}
@@ -41,6 +45,7 @@
   {/if}
 
   <Taskbar {defs} />
+  <ContextMenu />
 </div>
 
 <style>
@@ -49,29 +54,20 @@
     height: 100%;
     overflow: hidden;
   }
-  /* A forge at dusk: steel-grey air, with the glow of hot iron along the bottom edge. */
   .wall {
     position: absolute;
     inset: 0;
-    background:
-      radial-gradient(120% 60% at 30% 118%, var(--wall-glow), transparent 62%),
-      linear-gradient(180deg, var(--wall-top), var(--wall-bottom));
   }
-  .mark {
-    position: absolute;
-    right: 4vw;
-    bottom: calc(var(--taskbar-h) + 3vh);
-    font-size: clamp(5rem, 14vw, 13rem);
-    font-weight: 780;
-    letter-spacing: -0.06em;
-    line-height: 0.8;
-    color: var(--wall-mark);
-  }
+  /* The windows layer spans the desktop but lets clicks through to the icons between windows. */
   .windows {
     position: absolute;
     left: 0;
     right: 0;
     top: 0;
+    pointer-events: none;
+  }
+  .windows > :global(*) {
+    pointer-events: auto;
   }
   .toast {
     position: absolute;

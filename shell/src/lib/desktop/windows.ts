@@ -187,6 +187,16 @@ export function closeWindow(state: DesktopState, id: string): DesktopState {
   return { ...next, focusedId: topWindow(next)?.id ?? null };
 }
 
+/** Rename a window or point it at something else (a document saved under a new name). */
+export function updateWindow(
+  state: DesktopState,
+  id: string,
+  patch: Partial<Pick<WindowState, 'title' | 'key' | 'params'>>,
+): DesktopState {
+  if (!find(state, id)) return state;
+  return replace(state, id, patch);
+}
+
 export function setRect(state: DesktopState, id: string, rect: Rect): DesktopState {
   if (!find(state, id)) return state;
   return replace(state, id, { rect });

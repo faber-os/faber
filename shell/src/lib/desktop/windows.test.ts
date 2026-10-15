@@ -14,6 +14,7 @@ import {
   stackOrder,
   toggleMaximise,
   topWindow,
+  updateWindow,
   type Area,
   type WindowKind,
 } from './windows';
@@ -255,5 +256,20 @@ describe('refit', () => {
     const smaller: Area = { width: 1200, height: 700 };
     s = { ...s, state: refit(s.state, smaller, () => parts.minSize) };
     expect(s.state.windows[0]!.rect).toEqual({ x: 600, y: 300, w: 600, h: 400 });
+  });
+});
+
+describe('updateWindow', () => {
+  it('changes the title, key and params, e.g. after Save as', () => {
+    const { state, id } = openWindow(emptyDesktop(), { kind: viewer, key: 'a' }, area);
+    const s = updateWindow(state, id, { title: '*b.txt', key: 'home:/b.txt', params: { p: '1' } });
+    expect(s.windows[0]).toMatchObject({ title: '*b.txt', key: 'home:/b.txt', params: { p: '1' } });
+    expect(updateWindow(s, 'nope', { title: 'x' })).toBe(s);
+  });
+
+  it('then finds the window by its new key', () => {
+    const { state, id } = openWindow(emptyDesktop(), { kind: viewer, key: 'a' }, area);
+    const s = updateWindow(state, id, { key: 'b' });
+    expect(openWindow(s, { kind: viewer, key: 'b' }, area).id).toBe(id);
   });
 });

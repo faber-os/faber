@@ -3,10 +3,13 @@
   import { moveRect, resizeRect, type Edge, type WindowState } from '../lib/desktop/windows';
   import { useDesktop } from './desktopController.svelte';
   import Icon, { type IconName } from './Icon.svelte';
+  import { item, separator } from '../lib/desktop/contextMenu';
+  import { menuTrigger, useMenu } from './menuController.svelte';
 
   let { win, icon, children }: { win: WindowState; icon: IconName; children: Snippet } = $props();
 
   const desktop = useDesktop();
+  const menu = useMenu();
   const KEY_STEP = 16;
   const EDGES: Edge[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
 
@@ -62,6 +65,23 @@
     );
   }
 
+  function titleMenu() {
+    return {
+      label: win.title,
+      entries: [
+        item('minimise', 'Minimise'),
+        item('maximise', win.maximised ? 'Restore size' : 'Maximise'),
+        separator(),
+        item('close', 'Close'),
+      ],
+      onSelect: (id: string) => {
+        if (id === 'minimise') desktop.minimise(win.id);
+        else if (id === 'maximise') desktop.toggleMaximise(win.id);
+        else if (id === 'close') desktop.requestClose(win.id);
+      },
+    };
+  }
+
   function titleKey(e: KeyboardEvent) {
     const d: Record<string, [number, number]> = {
       ArrowLeft: [-KEY_STEP, 0],
@@ -114,6 +134,7 @@
       if (!(e.target as Element).closest('button')) desktop.toggleMaximise(win.id);
     }}
     onkeydown={titleKey}
+    use:menuTrigger={{ menu, build: titleMenu }}
   >
     <span class="title-icon"><Icon name={icon} size={16} /></span>
     <h2 id={titleId} class="title">{win.title}</h2>
@@ -135,7 +156,7 @@
       <button
         class="ctl close"
         aria-label="Close {win.title}"
-        onclick={() => desktop.close(win.id)}
+        onclick={() => desktop.requestClose(win.id)}
       >
         <Icon name="close" size={16} />
       </button>
@@ -172,7 +193,7 @@
     border-radius: 0;
   }
   /* The window itself only receives focus so keyboard users land in it; the focused window is
-     already marked by its deeper shadow and ember title icon. */
+     already marked by its deeper shadow and teal title icon. */
   .window:focus-visible {
     outline: none;
   }
@@ -195,10 +216,7 @@
     padding-left: var(--space-4);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     background: var(--chrome);
-    backdrop-filter: var(--chrome-blur);
-    -webkit-backdrop-filter: var(--chrome-blur);
     border-bottom: 1px solid var(--line);
-    box-shadow: var(--highlight);
     cursor: default;
     touch-action: none;
   }

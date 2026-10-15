@@ -364,8 +364,6 @@
     padding: 3px;
     border-radius: var(--radius-md);
     background: var(--chrome);
-    backdrop-filter: var(--chrome-blur);
-    -webkit-backdrop-filter: var(--chrome-blur);
     box-shadow: var(--shadow-pop);
   }
   .zbtn {

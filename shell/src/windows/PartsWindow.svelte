@@ -1,20 +1,34 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
+  import { portKindLabel } from '../lib/state/portHints';
   import type { ErrorBody, PartInfo, SignalInfo } from '../lib/state/types';
+  import { item, separator } from '../lib/desktop/contextMenu';
+  import { menuTrigger, useMenu } from '../components/menuController.svelte';
   import { useDesktop } from '../components/desktopController.svelte';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
+  import PortProblems from '../components/PortProblems.svelte';
   import StateBadge from '../components/StateBadge.svelte';
   import type { WindowProps } from '../components/windowDefs';
   import AddPartForm from './AddPartForm.svelte';
 
-  // Every window gets these; the parts list does not need them.
-  let props: WindowProps = $props();
+  let { win }: WindowProps = $props();
 
   const core = useCore();
   const desktop = useDesktop();
+  const menu = useMenu();
 
   let adding = $state(false);
+  let addPort = $state<string | null>(null);
+
+  // Opened from a recording's Properties ("Add a part on this recording"): start the form there.
+  $effect(() => {
+    const port = win.params.addPort;
+    if (!port) return;
+    addPort = port;
+    adding = true;
+    desktop.update(win.id, { params: {} });
+  });
   let confirming = $state<string | null>(null);
   let removing = $state<string | null>(null);
   let removeError = $state<{ part: string; error: ErrorBody } | null>(null);
@@ -27,7 +41,54 @@
   }
 
   function portLabel(id: string): string | null {
-    return core.ports?.find((p) => p.id === id)?.label ?? null;
+    const port = core.ports?.find((p) => p.id === id);
+    if (!port) return null;
+    return port.kind === 'bluetooth' ? `Bluetooth: ${port.label}` : port.label;
+  }
+
+  function openInMonitor(port: string) {
+    const id = desktop.open('serial-monitor');
+    desktop.update(id, { params: { port } });
+  }
+
+  function partMenu(target: HTMLElement) {
+    const row = target.closest<HTMLElement>('[data-part]');
+    const p = parts?.find((x) => x.name === row?.dataset.part);
+    if (!p) return null;
+    const signals = viewable(p);
+    const port = core.ports?.find((x) => x.id === p.port);
+    const busy =
+      port?.claimedBy === p.name
+        ? `"${p.name}" is using this port, and a port can only be open once. Remove the part to talk to the port directly.`
+        : port?.claimedBy
+          ? `The port is in use by ${port.claimedBy}.`
+          : !port
+            ? `${p.port} isn't connected right now.`
+            : undefined;
+    return {
+      label: p.name,
+      entries: [
+        item('view', 'Open viewer', {
+          disabledReason: signals.length
+            ? undefined
+            : 'This part has no signal Faber can draw yet.',
+        }),
+        item(
+          'monitor',
+          `Open ${port ? portKindLabel(port).toLowerCase() + ' port' : 'port'} in serial monitor`,
+          {
+            disabledReason: busy,
+          },
+        ),
+        separator(),
+        item('remove', 'Remove', { danger: true }),
+      ],
+      onSelect: (id: string) => {
+        if (id === 'view' && signals[0]) openViewer(p, signals[0]);
+        else if (id === 'monitor') openInMonitor(p.port);
+        else if (id === 'remove') confirming = p.name;
+      },
+    };
   }
 
   function viewable(p: PartInfo): SignalInfo[] {
@@ -51,14 +112,30 @@
     if (!r.ok) removeError = { part: name, error: r.error };
   }
 
+  function openRecordings() {
+    desktop.open('files', {
+      key: 'files:home:/Recordings',
+      title: 'Recordings · Files',
+      params: { path: 'home:/Recordings' },
+    });
+  }
+
   function added(name: string) {
     adding = false;
+    addPort = null;
     justAdded = name;
   }
 </script>
 
 {#if adding}
-  <AddPartForm onadded={added} oncancel={() => (adding = false)} />
+  <AddPartForm
+    initialPort={addPort}
+    onadded={added}
+    oncancel={() => {
+      adding = false;
+      addPort = null;
+    }}
+  />
 {:else}
   <div class="parts">
     <div class="toolbar">
@@ -95,9 +172,17 @@
     {#if parts !== null && parts.length === 0}
       <div class="empty">
         <h3>No parts yet</h3>
+        <PortProblems />
         <p>
-          A part is one piece of hardware you add, like a LiDAR on a USB adapter. No hardware
-          plugged in? Add one on the port <code>replay:demo-ld19</code> to watch a recorded LD19 scan.
+          A part is one piece of hardware you add, like a LiDAR on a USB adapter. Plug it in: its
+          port appears here by itself, and Faber suggests what it might be.
+        </p>
+        <p>
+          No hardware yet? Open <button class="inline-link" onclick={() => openRecordings()}
+            >Files → Recordings</button
+          >
+          and choose <em>Add sample recordings</em>. The sample then shows up as a port you can add
+          a part on.
         </p>
         <button
           class="btn primary"
@@ -108,11 +193,11 @@
         </button>
       </div>
     {:else if parts !== null}
-      <ul class="list" aria-label="Parts">
+      <ul class="list" aria-label="Parts" use:menuTrigger={{ menu, build: partMenu }}>
         {#each parts as p (p.name)}
           {@const signals = viewable(p)}
           {@const label = portLabel(p.port)}
-          <li class="part" class:fresh={justAdded === p.name} data-part={p.name}>
+          <li class="part" class:fresh={justAdded === p.name} data-part={p.name} tabindex="-1">
             <div class="main">
               <div class="title-row">
                 {#if signals[0]}
@@ -228,6 +313,20 @@
   }
   .empty p {
     color: var(--text-muted);
+  }
+  .empty em {
+    font-style: normal;
+    font-weight: 650;
+    color: var(--text);
+  }
+  .inline-link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent-ink);
+    font-weight: 650;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
   .list {
     flex: 1;

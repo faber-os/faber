@@ -5,7 +5,7 @@ import { CoreError, createHttp } from './http';
 const part = {
   name: 'demo',
   connector: 'ldrobot-ld19',
-  port: 'replay:demo-ld19',
+  port: 'replay:ld19-sample',
   state: { kind: 'starting' },
   signals: [],
   mount: { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0 },
@@ -27,7 +27,7 @@ describe('createHttp', () => {
   it('lists connectors, ports and parts', async () => {
     const f = fakeFetch([
       { path: '/api/v0/connectors', body: [{ id: 'ldrobot-ld19' }] },
-      { path: '/api/v0/ports', body: [{ id: 'replay:demo-ld19' }] },
+      { path: '/api/v0/ports', body: [{ id: 'replay:ld19-sample' }] },
       { path: '/api/v0/parts', body: [part] },
     ]);
     const http = createHttp(f.fetch);
@@ -50,13 +50,13 @@ describe('createHttp', () => {
     const created = await http.addPart({
       name: 'demo',
       connector: 'ldrobot-ld19',
-      port: 'replay:demo-ld19',
+      port: 'replay:ld19-sample',
     });
     expect(created.name).toBe('demo');
     expect(f.calls[0]).toEqual({
       method: 'POST',
       path: '/api/v0/parts',
-      body: { name: 'demo', connector: 'ldrobot-ld19', port: 'replay:demo-ld19' },
+      body: { name: 'demo', connector: 'ldrobot-ld19', port: 'replay:ld19-sample' },
     });
   });
 
@@ -97,5 +97,130 @@ describe('createHttp', () => {
     expect((err as CoreError).body.code).toBe('bad-response');
     expect((err as CoreError).body.message).toContain('502');
     expect((err as CoreError).body.hint).not.toBe('');
+  });
+});
+
+describe('files', () => {
+  const listing = {
+    path: 'home:/Desktop',
+    parent: 'home:/',
+    entries: [{ name: 'a.txt', path: 'home:/Desktop/a.txt', kind: 'file', size: 3 }],
+  };
+
+  it('lists a folder, with the path in the query', async () => {
+    const f = fakeFetch([{ path: '/api/v0/files/list?path=home%3A%2FDesktop', body: listing }]);
+    expect(await createHttp(f.fetch).listFolder('home:/Desktop')).toEqual(listing);
+  });
+
+  it('gets the roots', async () => {
+    const roots = [{ id: 'home', label: 'Home', path: 'home:/' }];
+    const f = fakeFetch([{ path: '/api/v0/files/roots', body: roots }]);
+    expect(await createHttp(f.fetch).getRoots()).toEqual(roots);
+  });
+
+  it('reads a file as bytes', async () => {
+    const f = fakeFetch([
+      { path: '/api/v0/files/content?path=home%3A%2Fa.txt', bytes: new Uint8Array([104, 105]) },
+    ]);
+    const bytes = await createHttp(f.fetch).readFile('home:/a.txt');
+    expect([...bytes]).toEqual([104, 105]);
+  });
+
+  it('writes a file as raw bytes', async () => {
+    const f = fakeFetch([
+      { method: 'PUT', path: '/api/v0/files/content?path=home%3A%2Fa.txt', status: 204 },
+    ]);
+    await createHttp(f.fetch).writeFile('home:/a.txt', new Uint8Array([1, 2]));
+    const call = f.calls[0]!;
+    expect(call.method).toBe('PUT');
+    expect([...(call.raw as Uint8Array)]).toEqual([1, 2]);
+  });
+
+  it('turns a refused config into a CoreError with the line in the message', async () => {
+    const error = {
+      code: 'config-invalid',
+      message: 'parts.toml line 3: expected `=`.',
+      hint: 'Fix line 3.',
+    };
+    const f = fakeFetch([
+      {
+        method: 'PUT',
+        path: '/api/v0/files/content?path=home%3A%2FSystem%2Fparts.toml',
+        status: 422,
+        body: { error },
+      },
+    ]);
+    const p = createHttp(f.fetch).writeFile('home:/System/parts.toml', new Uint8Array());
+    await expect(p).rejects.toMatchObject({ status: 422, body: error });
+  });
+
+  it('sends the folder, move, trash, restore, delete, empty and samples requests', async () => {
+    const f = fakeFetch([
+      { method: 'POST', path: '/api/v0/files/folder', status: 201 },
+      { method: 'POST', path: '/api/v0/files/move', status: 204 },
+      { method: 'POST', path: '/api/v0/files/trash', status: 204 },
+      { method: 'POST', path: '/api/v0/files/restore', status: 204 },
+      { method: 'POST', path: '/api/v0/files/delete', status: 204 },
+      { method: 'POST', path: '/api/v0/files/empty-trash', status: 204 },
+      {
+        method: 'POST',
+        path: '/api/v0/files/samples',
+        status: 201,
+        body: { path: 'home:/Recordings/ld19-sample.fbcap' },
+      },
+    ]);
+    const http = createHttp(f.fetch);
+    await http.createFolder('home:/Desktop/New folder');
+    await http.move('home:/a', 'home:/b');
+    await http.trash(['home:/a']);
+    await http.restore(['home:/Trash/a']);
+    await http.deleteForGood(['home:/Trash/a']);
+    await http.emptyTrash();
+    await http.addSamples();
+    expect(f.calls.map((c) => [c.path.replace('/api/v0/files/', ''), c.body])).toEqual([
+      ['folder', { path: 'home:/Desktop/New folder' }],
+      ['move', { from: 'home:/a', to: 'home:/b' }],
+      ['trash', { paths: ['home:/a'] }],
+      ['restore', { paths: ['home:/Trash/a'] }],
+      ['delete', { paths: ['home:/Trash/a'] }],
+      ['empty-trash', undefined],
+      ['samples', undefined],
+    ]);
+  });
+
+  it('accepts an empty 201 answer', async () => {
+    const f = fakeFetch([{ method: 'POST', path: '/api/v0/files/folder', status: 201, text: '' }]);
+    await expect(createHttp(f.fetch).createFolder('home:/x')).resolves.toBeUndefined();
+  });
+
+  it('builds the download address', () => {
+    expect(createHttp(fakeFetch().fetch).downloadUrl('home:/Desktop/a b.txt')).toBe(
+      '/api/v0/files/content?path=home%3A%2FDesktop%2Fa%20b.txt&download=1',
+    );
+  });
+});
+
+describe('settings', () => {
+  const settings = {
+    appearance: { theme: 'system', wallpaper: 'aluminium' },
+    desktop: { icons: [] },
+    developer: { fullMachineFiles: false },
+  };
+
+  it('gets and puts the settings', async () => {
+    const f = fakeFetch([
+      { path: '/api/v0/settings', body: settings },
+      { method: 'PUT', path: '/api/v0/settings', body: settings },
+    ]);
+    const http = createHttp(f.fetch);
+    expect(await http.getSettings()).toEqual(settings);
+    expect(await http.putSettings(settings as never)).toEqual(settings);
+    expect(f.calls[1]!.body).toEqual(settings);
+  });
+
+  it('changes developer settings through their own endpoint', async () => {
+    const f = fakeFetch([{ method: 'POST', path: '/api/v0/settings/developer', body: settings }]);
+    await createHttp(f.fetch).setDeveloper({ fullMachineFiles: true, acknowledgedRisk: true });
+    expect(f.calls[0]!.body).toEqual({ fullMachineFiles: true, acknowledgedRisk: true });
   });
 });

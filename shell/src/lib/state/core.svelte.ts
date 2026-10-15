@@ -9,9 +9,14 @@ import type {
   NewPart,
   PartInfo,
   PortInfo,
+  PortProblem,
   Reading,
+  Settings,
   SystemInfo,
   WireFormat,
+  DeveloperChange,
+  FileRoot,
+  FolderListing,
 } from './types';
 
 export const LOG_CAPACITY = 1000;
@@ -42,11 +47,15 @@ export class CoreState {
   connection = $state<ConnectionStatus>('closed');
   parts = $state.raw<PartInfo[] | null>(null);
   ports = $state.raw<PortInfo[] | null>(null);
+  /** Things plugged in that never became a port (docs/api.md, "Port problems"). */
+  portProblems = $state.raw<PortProblem[]>([]);
   connectors = $state.raw<ConnectorInfo[] | null>(null);
   connectorsError = $state.raw<ErrorBody | null>(null);
   system = $state.raw<SystemInfo | null>(null);
   systemError = $state.raw<ErrorBody | null>(null);
   logs = $state.raw<LogEntry[]>([]);
+  /** Shared by every browser and the attached screen; `null` until the core has sent them. */
+  settings = $state.raw<Settings | null>(null);
   /** The newest error that belonged to no window. */
   lastError = $state.raw<ErrorBody | null>(null);
 
@@ -60,6 +69,7 @@ export class CoreState {
   private logFlushPending = false;
   private clockOffsetMs: number | null = null;
   private stops: (() => void)[] = [];
+  private readonly fileWatchers = new Set<(folders: string[]) => void>();
 
   constructor(deps: CoreDeps) {
     this.http = deps.http;
@@ -91,7 +101,9 @@ export class CoreState {
         { kind: 'ports' },
         {
           onMessage: (m) => {
-            if (m.type === 'ports') this.ports = m.ports;
+            if (m.type !== 'ports') return;
+            this.ports = m.ports;
+            this.portProblems = m.problems ?? [];
           },
         },
       ),
@@ -100,6 +112,23 @@ export class CoreState {
         {
           onMessage: (m) => {
             if (m.type === 'log') this.pushLog(m.entry);
+          },
+        },
+      ),
+      s.subscribe(
+        { kind: 'settings' },
+        {
+          onMessage: (m) => {
+            if (m.type === 'settings') this.settings = m.settings;
+          },
+        },
+      ),
+      s.subscribe(
+        { kind: 'files' },
+        {
+          onMessage: (m) => {
+            if (m.type !== 'files-changed') return;
+            for (const w of [...this.fileWatchers]) w(m.folders);
           },
         },
       ),
@@ -136,6 +165,62 @@ export class CoreState {
 
   removePart(name: string): Promise<Result<void>> {
     return this.call(() => this.http.removePart(name));
+  }
+
+  /** Replace the settings. `developer` must be unchanged; use `setDeveloper` for that. */
+  async saveSettings(settings: Settings): Promise<Result<Settings>> {
+    const r = await this.call(() => this.http.putSettings(settings));
+    if (r.ok) this.settings = r.value;
+    return r;
+  }
+
+  async setDeveloper(change: DeveloperChange): Promise<Result<Settings>> {
+    const r = await this.call(() => this.http.setDeveloper(change));
+    if (r.ok) this.settings = r.value;
+    return r;
+  }
+
+  /** Called with the folders whose contents changed through the core. Returns a stop function. */
+  watchFiles(onChange: (folders: string[]) => void): () => void {
+    this.fileWatchers.add(onChange);
+    return () => this.fileWatchers.delete(onChange);
+  }
+
+  getRoots(): Promise<Result<FileRoot[]>> {
+    return this.call(() => this.http.getRoots());
+  }
+  listFolder(path: string): Promise<Result<FolderListing>> {
+    return this.call(() => this.http.listFolder(path));
+  }
+  readFile(path: string): Promise<Result<Uint8Array>> {
+    return this.call(() => this.http.readFile(path));
+  }
+  writeFile(path: string, bytes: Uint8Array | Blob): Promise<Result<void>> {
+    return this.call(() => this.http.writeFile(path, bytes));
+  }
+  createFolder(path: string): Promise<Result<void>> {
+    return this.call(() => this.http.createFolder(path));
+  }
+  move(from: string, to: string): Promise<Result<void>> {
+    return this.call(() => this.http.move(from, to));
+  }
+  trash(paths: string[]): Promise<Result<void>> {
+    return this.call(() => this.http.trash(paths));
+  }
+  restore(paths: string[]): Promise<Result<void>> {
+    return this.call(() => this.http.restore(paths));
+  }
+  deleteForGood(paths: string[]): Promise<Result<void>> {
+    return this.call(() => this.http.deleteForGood(paths));
+  }
+  emptyTrash(): Promise<Result<void>> {
+    return this.call(() => this.http.emptyTrash());
+  }
+  addSamples(): Promise<Result<{ path: string }>> {
+    return this.call(() => this.http.addSamples());
+  }
+  downloadUrl(path: string): string {
+    return this.http.downloadUrl(path);
   }
 
   /** Live readings of one signal, at most `maxHz` per second (latest-value delivery). */

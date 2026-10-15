@@ -1,0 +1,76 @@
+/*
+ * The built-in wallpapers (src/lib/desktop/wallpapers.ts), drawn in CSS so the kiosk needs no
+ * network and no image files. Each sets `--wall-ink`, the colour for desktop icon labels on it.
+ *
+ * The brushed texture is SVG noise stretched sideways (baseFrequency 0.002 × 0.9): long, thin
+ * streaks like aluminium that has been brushed in one direction.
+ */
+:root {
+  --brushed: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='640'%3E%3Cfilter id='b'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.0025 0.85' numOctaves='2' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0.55 0 0 0 -0.18'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23b)'/%3E%3C/svg%3E");
+}
+
+.wallpaper {
+  background-color: oklch(0.86 0.004 250);
+  --wall-ink: oklch(0.2 0.008 250);
+  --wall-ink-shadow: 0 1px 0 oklch(1 0 0 / 0.5);
+}
+
+.wallpaper[data-wallpaper='aluminium'] {
+  background-color: oklch(0.855 0.004 250);
+  background-image: var(--brushed);
+}
+
+.wallpaper[data-wallpaper='anodised'] {
+  background-color: oklch(0.42 0.065 192);
+  background-image: var(--brushed);
+  --wall-ink: oklch(0.97 0.01 190);
+  --wall-ink-shadow: 0 1px 2px oklch(0.15 0.03 200 / 0.7);
+}
+
+/* A self-healing cutting mat: 1 cm grid with a stronger line every 5 cm (here 24 px and 120 px). */
+.wallpaper[data-wallpaper='cutting-mat'] {
+  background-color: oklch(0.42 0.05 158);
+  background-image:
+    linear-gradient(oklch(0.92 0.03 150 / 0.22) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.92 0.03 150 / 0.22) 1px, transparent 1px),
+    linear-gradient(oklch(0.92 0.03 150 / 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(0.92 0.03 150 / 0.09) 1px, transparent 1px);
+  background-size:
+    120px 120px,
+    120px 120px,
+    24px 24px,
+    24px 24px;
+  background-position: -1px -1px;
+  --wall-ink: oklch(0.97 0.01 150);
+  --wall-ink-shadow: 0 1px 2px oklch(0.15 0.03 160 / 0.7);
+}
+
+.wallpaper[data-wallpaper='graphite'] {
+  background-color: oklch(0.32 0.004 250);
+  background-image: none;
+  --wall-ink: oklch(0.96 0.003 250);
+  --wall-ink-shadow: 0 1px 2px oklch(0 0 0 / 0.6);
+}
+
+:root[data-theme='dark'] .wallpaper[data-wallpaper='aluminium'] {
+  background-color: oklch(0.3 0.004 250);
+  /* The same brushing, softened: a flat veil of the base colour over the streaks. */
+  background-image:
+    linear-gradient(oklch(0.3 0.004 250 / 0.72), oklch(0.3 0.004 250 / 0.72)), var(--brushed);
+  --wall-ink: oklch(0.95 0.003 250);
+  --wall-ink-shadow: 0 1px 2px oklch(0 0 0 / 0.6);
+}
+
+:root[data-theme='dark'] .wallpaper[data-wallpaper='anodised'] {
+  background-color: oklch(0.27 0.045 196);
+  background-image:
+    linear-gradient(oklch(0.27 0.045 196 / 0.72), oklch(0.27 0.045 196 / 0.72)), var(--brushed);
+}
+
+:root[data-theme='dark'] .wallpaper[data-wallpaper='cutting-mat'] {
+  background-color: oklch(0.27 0.035 160);
+}
+
+:root[data-theme='dark'] .wallpaper[data-wallpaper='graphite'] {
+  background-color: oklch(0.19 0.003 250);
+}

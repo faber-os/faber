@@ -1,4 +1,4 @@
-import type { ConnectorInfo, PortInfo } from './types';
+import type { ConnectorInfo, PortInfo, PortProblem } from './types';
 
 export interface PortHint {
   connector: string;
@@ -22,4 +22,36 @@ export function portAvailability(port: PortInfo): { free: boolean; text: string 
   if (by.startsWith('tool:'))
     return { free: false, text: `Used by the ${by.slice(5).replace(/-/g, ' ')}` };
   return { free: false, text: `Used by the part "${by}"` };
+}
+
+/**
+ * What kind of link a port is, in plain words, so a Bluetooth link is never mistaken for a
+ * cable just because the system gave it a COM number.
+ */
+export function portKindLabel(port: Pick<PortInfo, 'kind'>): string {
+  switch (port.kind) {
+    case 'usb-serial':
+      return 'USB serial';
+    case 'serial':
+      return 'Serial';
+    case 'bluetooth':
+      return 'Bluetooth';
+    case 'replay':
+      return 'Recording';
+    default:
+      return port.kind;
+  }
+}
+
+/** Port problems with the same code shown once, with how many there are. */
+export function groupPortProblems(
+  problems: readonly PortProblem[],
+): (PortProblem & { count: number })[] {
+  const out = new Map<string, PortProblem & { count: number }>();
+  for (const p of problems) {
+    const seen = out.get(p.code);
+    if (seen) seen.count++;
+    else out.set(p.code, { ...p, count: 1 });
+  }
+  return [...out.values()];
 }

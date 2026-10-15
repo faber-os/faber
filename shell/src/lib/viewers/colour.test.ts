@@ -17,15 +17,21 @@ describe('intensityBucket', () => {
 });
 
 describe('intensityRamp', () => {
-  it('gives one colour per bucket, getting lighter with intensity', () => {
-    for (const theme of ['light', 'dark'] as const) {
-      const ramp = intensityRamp(INTENSITY_BUCKETS, theme);
-      expect(ramp).toHaveLength(INTENSITY_BUCKETS);
-      const lightness = ramp.map((c) => Number(/oklch\(([\d.]+)/.exec(c)?.[1]));
-      for (let i = 1; i < lightness.length; i++) {
-        expect(lightness[i]).toBeGreaterThanOrEqual(lightness[i - 1]!);
-      }
-      expect(lightness.at(-1)!).toBeGreaterThan(lightness[0]!);
-    }
+  function lightness(theme: 'light' | 'dark') {
+    const ramp = intensityRamp(INTENSITY_BUCKETS, theme);
+    expect(ramp).toHaveLength(INTENSITY_BUCKETS);
+    return ramp.map((c) => Number(/oklch\(([\d.]+)/.exec(c)?.[1]));
+  }
+
+  it('gets brighter with intensity on the dark theme', () => {
+    const l = lightness('dark');
+    for (let i = 1; i < l.length; i++) expect(l[i]).toBeGreaterThanOrEqual(l[i - 1]!);
+    expect(l.at(-1)!).toBeGreaterThan(l[0]!);
+  });
+
+  it('gets darker with intensity on the light theme, so strong returns stand out', () => {
+    const l = lightness('light');
+    for (let i = 1; i < l.length; i++) expect(l[i]).toBeLessThanOrEqual(l[i - 1]!);
+    expect(l.at(-1)!).toBeLessThan(l[0]!);
   });
 });
