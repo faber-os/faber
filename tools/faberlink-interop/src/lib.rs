@@ -1,8 +1,11 @@
 //! A fake FaberLink board for tests on the PC: the Arduino library's real protocol core
 //! (`firmware/faberlink/src/FaberLinkCore.cpp`), compiled by `build.rs`, hosting a simulated motor
 //! (part 0, `left`, max 10 rad/s) and a simulated distance sensor (part 1, `front`, 0.1–0.8 m).
+//! [`FakeBoard::mega`] hosts two of each: motors `left` and `right` (parts 0 and 1), distance
+//! sensors `front` and `rear` (parts 2 and 3), the way a robot's Mega would.
 //!
-//! The tests in `tests/` drive it from the Rust session in `faberlink`.
+//! The tests in `tests/` drive it from the Rust session in `faberlink`; the core's own tests use
+//! it as the board behind a fake serial port.
 
 /// The C ABI of `harness/harness.cpp`. This module is the only `unsafe` code in the crate.
 #[allow(unsafe_code)]
@@ -11,6 +14,9 @@ mod ffi {
 
     unsafe extern "C" {
         pub fn flh_new(heartbeat_timeout_ms: u16) -> *mut c_void;
+        pub fn flh_new_mega(heartbeat_timeout_ms: u16) -> *mut c_void;
+        pub fn flh_motor_output_at(h: *mut c_void, i: i32) -> f32;
+        pub fn flh_set_distance_at(h: *mut c_void, i: i32, meters: f32);
         pub fn flh_free(h: *mut c_void);
         pub fn flh_feed(h: *mut c_void, data: *const u8, len: usize, now_ms: u32);
         pub fn flh_tick(h: *mut c_void, now_ms: u32);
@@ -31,10 +37,29 @@ mod ffi {
     /// `Drop`; the harness copies what it is given and keeps no pointer into Rust memory.
     pub struct Handle(*mut c_void);
 
+    // SAFETY: the harness is plain C++ data with no thread affinity, and `&mut self` (or the
+    // owner's own lock) makes every call exclusive, so it may move to another thread.
+    unsafe impl Send for Handle {}
+
     impl Handle {
         pub fn new(heartbeat_timeout_ms: u16) -> Handle {
             // SAFETY: flh_new allocates a harness and returns a valid pointer to it.
             Handle(unsafe { flh_new(heartbeat_timeout_ms) })
+        }
+
+        pub fn new_mega(heartbeat_timeout_ms: u16) -> Handle {
+            // SAFETY: flh_new_mega allocates a harness and returns a valid pointer to it.
+            Handle(unsafe { flh_new_mega(heartbeat_timeout_ms) })
+        }
+
+        pub fn motor_output_at(&self, i: i32) -> f32 {
+            // SAFETY: self.0 is a live harness; the harness picks motor 0 for anything but 1.
+            unsafe { flh_motor_output_at(self.0, i) }
+        }
+
+        pub fn set_distance_at(&mut self, i: i32, meters: f32) {
+            // SAFETY: self.0 is a live harness; the harness picks sensor 0 for anything but 1.
+            unsafe { flh_set_distance_at(self.0, i, meters) }
         }
 
         pub fn feed(&mut self, bytes: &[u8], now_ms: u32) {
@@ -115,6 +140,20 @@ mod ffi {
     }
 }
 
+/// A motor on [`FakeBoard::mega`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Motor {
+    Left = 0,
+    Right = 1,
+}
+
+/// A distance sensor on [`FakeBoard::mega`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sensor {
+    Front = 0,
+    Rear = 1,
+}
+
 /// The C++ board with its simulated parts. Time is a fake `millis()` passed to every call.
 pub struct FakeBoard {
     handle: ffi::Handle,
@@ -124,6 +163,23 @@ impl FakeBoard {
     /// A board with this heartbeat timeout (the library clamps it to 100..1000 ms).
     pub fn new(heartbeat_timeout_ms: u16) -> FakeBoard {
         FakeBoard { handle: ffi::Handle::new(heartbeat_timeout_ms) }
+    }
+
+    /// A board called `sim-mega` with motors `left` and `right` and distance sensors `front` and
+    /// `rear`.
+    pub fn mega(heartbeat_timeout_ms: u16) -> FakeBoard {
+        FakeBoard { handle: ffi::Handle::new_mega(heartbeat_timeout_ms) }
+    }
+
+    /// What one motor of a [`FakeBoard::mega`] is driven at now: [`Motor::Left`] or
+    /// [`Motor::Right`].
+    pub fn output_of(&self, motor: Motor) -> f32 {
+        self.handle.motor_output_at(motor as i32)
+    }
+
+    /// Sets what one distance sensor of a [`FakeBoard::mega`] measures.
+    pub fn set_distance_of(&mut self, sensor: Sensor, meters: f32) {
+        self.handle.set_distance_at(sensor as i32, meters);
     }
 
     /// Bytes from the core.

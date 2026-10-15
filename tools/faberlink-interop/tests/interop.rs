@@ -592,3 +592,34 @@ proptest::proptest! {
         proptest::prop_assert!(kinds.contains(&kind::HELLO_ACK), "{:?}", kinds);
     }
 }
+
+#[test]
+fn the_mega_hosts_two_motors_and_two_distance_sensors_each_on_its_own() {
+    use faberlink_interop::{Motor, Sensor};
+    let mut l = Link::new(250);
+    l.board = FakeBoard::mega(250);
+    l.run(20);
+    assert_eq!(l.session.board().unwrap().board, "sim-mega");
+    let parts: Vec<_> =
+        l.session.parts().iter().map(|p| (p.id, p.name.as_str(), p.capability.as_str())).collect();
+    assert_eq!(
+        parts,
+        [
+            (0, "left", "motor@1"),
+            (1, "right", "motor@1"),
+            (2, "front", "distance@1"),
+            (3, "rear", "distance@1")
+        ]
+    );
+    l.session.command(1, Command::Motor(motor::Command::SetDuty { duty: 0.5 }), true).unwrap();
+    l.flush();
+    assert_eq!((l.board.output_of(Motor::Left), l.board.output_of(Motor::Right)), (0.0, 0.5));
+    l.board.set_distance_of(Sensor::Rear, 0.3);
+    l.events.clear();
+    l.run(60);
+    let rear = l.events.iter().rev().find_map(|e| match e {
+        Event::Reading { part: 3, reading: Reading::Distance(r) } => Some(r.meters),
+        _ => None,
+    });
+    assert_eq!(rear, Some(0.3));
+}
