@@ -1,4 +1,5 @@
 import { t } from '../i18n';
+import { BRIDGE_CONNECTOR } from './bridges';
 import type { ConnectorInfo, PortInfo, PortProblem } from './types';
 
 export interface PortHint {
@@ -14,7 +15,11 @@ export function portHints(port: PortInfo, connectors: ConnectorInfo[]): PortHint
     const name = connectors.find((c) => c.id === s.connector)?.name ?? s.connector;
     return {
       connector: s.connector,
-      text: t('addPart.port.oftenUsedFor', { name }),
+      // Only a board that answered is suggested as one, so this one can say so plainly.
+      text:
+        s.connector === BRIDGE_CONNECTOR
+          ? t('addPart.port.faberlinkBoard')
+          : t('addPart.port.oftenUsedFor', { name }),
       reason: s.reason,
     };
   });

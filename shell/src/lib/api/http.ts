@@ -1,5 +1,6 @@
 import { t } from '../i18n';
 import type { ApiError } from './generated/ApiError';
+import type { BoardCheck } from './generated/BoardCheck';
 import type { ConnectorInfo } from './generated/ConnectorInfo';
 import type { ConnectorProblem } from './generated/ConnectorProblem';
 import type { PackageInfo } from './generated/PackageInfo';
@@ -56,6 +57,11 @@ export interface CoreHttp {
   /** `409 package-in-use` while a part uses its connector (the message names them). */
   uninstallPackage(id: string): Promise<void>;
   getPorts(): Promise<PortInfo[]>;
+  /**
+   * Asks a free port whether a FaberLink board is on it (a few seconds). Only when the user asks:
+   * opening a port restarts most Arduino boards. `409 port-claimed` for a port in use.
+   */
+  checkBoard(port: string): Promise<BoardCheck>;
   getParts(): Promise<PartInfo[]>;
   addPart(part: NewPart): Promise<PartInfo>;
   removePart(name: string): Promise<void>;
@@ -225,6 +231,7 @@ export function createHttp(
     installPackage: (file, name) => answer('POST', `/packages?${named(name)}`, { raw: file }),
     uninstallPackage: (id) => request('DELETE', `/packages/${encodeURIComponent(id)}`),
     getPorts: () => request('GET', '/ports'),
+    checkBoard: (port) => request('POST', '/ports/check-board', { port }),
     getParts: () => request('GET', '/parts'),
     addPart: (part) => request('POST', '/parts', part),
     removePart: (name) => request('DELETE', `/parts/${encodeURIComponent(name)}`),

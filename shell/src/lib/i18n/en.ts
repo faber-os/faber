@@ -256,6 +256,21 @@ export const en = {
   'parts.portKind.bluetooth': 'Bluetooth',
   'parts.portKind.replay': 'Recording',
 
+  // Parts: a FaberLink board (a bridge) and the parts on it (sub-parts, `mega.left`).
+  // `{bridge}` is the board's part name, e.g. "mega".
+  'parts.list.onBoard': 'On the board {bridge}',
+  'parts.list.subParts': 'Parts on {bridge}',
+  'parts.board.link.connecting': 'Saying hello to the board…',
+  'parts.board.link.describing': 'Asking the board for its parts…',
+  'parts.board.link.ready': 'Connected',
+  'parts.board.link.noAnswer': 'No answer from the board',
+  'parts.board.link.lost': 'Board not reachable',
+  'parts.board.link.incompatible': 'Board speaks another FaberLink version',
+  'parts.board.firmware': '{board}, firmware {firmware} {version}',
+  'parts.board.protocol': 'FaberLink {version}',
+  'parts.board.hardwareEstop': 'Stop button pressed',
+  'parts.board.hardwareEstop.hint': 'Reset it on the board, then release the e-stop.',
+
   // Add part form
   'addPart.form.label': 'Add part',
   'addPart.back': 'Parts',
@@ -271,6 +286,15 @@ export const en = {
   'addPart.port.free': 'Free',
   'addPart.port.usedByTool': 'Used by the {tool}',
   'addPart.port.usedByPart': 'Used by the part "{part}"',
+  // Checking a port for a FaberLink board (detect, then suggest; only when asked).
+  'addPart.port.faberlinkBoard': 'A FaberLink board answered here',
+  'addPart.port.check': 'Check for a FaberLink board',
+  'addPart.port.checking': 'Checking…',
+  'addPart.port.check.help':
+    'Opening a port restarts most Arduino boards, so Faber only checks a port when you ask.',
+  'addPart.port.check.found': 'FaberLink board: {board} ({firmware} {version})',
+  'addPart.port.check.nothing': 'No FaberLink board answered on this port.',
+  'addPart.port.check.otherVersion': 'A FaberLink board answered, but it speaks another version.',
 
   // Add part form: step 2, the connector
   'addPart.connector.legend': 'Pick the connector that talks to it',
@@ -278,7 +302,8 @@ export const en = {
   'addPart.connector.loading': 'Loading connectors…',
   'addPart.connector.version': 'v{version}',
   'addPart.connector.serial': 'serial, {baud} baud',
-  'addPart.connector.bridge': 'needs a bridge (Phase 4); simulated for now',
+  'addPart.connector.onBoard': 'real ones sit on a FaberLink board; simulated here',
+  'addPart.connector.boardParts': 'Its motors and sensors appear as parts by themselves',
   'addPart.connector.provides': 'Provides {capabilities}',
   // Installed connectors that couldn't be loaded (GET /api/v0/connectors/problems)
   'addPart.connector.problems': {
@@ -292,8 +317,10 @@ export const en = {
   'addPart.source.simulated': 'Simulated',
   'addPart.source.simulated.help':
     'No hardware needed. The part gets the same name and capability as the real one, so switching to the real part later is one line in parts.toml.',
-  'addPart.source.locked':
-    '{connector} needs a FaberLink bridge to be real, which comes in Phase 4. Until then it can only be simulated.',
+  'addPart.source.lockedOnBoard':
+    'A real {connector} sits on a FaberLink board: add the board on its port and the part appears by itself. Added here, it can only be simulated.',
+  'addPart.source.board':
+    'A FaberLink board is real hardware: pick the port it is plugged into. Simulate its parts with the generic connectors instead.',
   'addPart.source.mode': 'Where its values come from',
   'addPart.source.manual': 'Manual',
   'addPart.source.manual.help': 'You set its value in Parts, by hand or as a pattern.',

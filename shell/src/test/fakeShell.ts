@@ -144,6 +144,71 @@ export const GENERIC_DISTANCE: ConnectorInfo = {
   ],
 };
 
+/** The FaberLink board connector, as the core describes it (core/src/connectors/bridge.rs). */
+export const BRIDGE: ConnectorInfo = {
+  id: 'faber-bridge',
+  name: 'FaberLink board',
+  version: '0.1.0',
+  kind: 'built-in',
+  port: { kind: 'serial', baud: 115200 },
+  provides: [
+    {
+      name: 'estop',
+      capability: 'estop@1',
+      info: { capability: 'estop@1', info: { hardwareLatching: true } },
+    },
+  ],
+  settings: [],
+};
+
+/** An Arduino Mega on USB that nobody uses yet. */
+export const MEGA_PORT: PortInfo = {
+  id: 'usb:2341:0042',
+  kind: 'usb-serial',
+  label: 'Arduino Mega 2560 (COM5)',
+  usb: { vid: 0x2341, pid: 0x0042 },
+  suggestions: [],
+};
+
+/** A FaberLink board, connected, as the parts topic shows it. */
+export function bridgePart(
+  name = 'mega',
+  board: Partial<NonNullable<PartInfo['board']>> = {},
+): PartInfo {
+  return part(name, {
+    connector: 'faber-bridge',
+    port: MEGA_PORT.id,
+    signals: [{ address: `${name}/estop`, capability: 'estop@1' }],
+    board: {
+      link: 'ready',
+      board: 'sim-mega',
+      firmware: 'faberlink-harness',
+      firmwareVersion: '0.1.0',
+      protocol: 1,
+      heartbeatTimeoutMs: 250,
+      hardwareEstop: false,
+      failsafe: false,
+      ...board,
+    },
+  });
+}
+
+/** A motor on a board: the sub-part `<bridge>.<local>`. */
+export function boardMotor(
+  bridge: string,
+  local: string,
+  overrides: Partial<PartInfo> = {},
+): PartInfo {
+  const name = `${bridge}.${local}`;
+  return part(name, {
+    connector: 'faber-bridge',
+    port: MEGA_PORT.id,
+    bridge,
+    signals: [{ address: `${name}/motor`, capability: 'motor@1' }],
+    ...overrides,
+  });
+}
+
 /** A simulated drive base, as the parts topic shows it. */
 export function simBase(name = 'base', overrides: Partial<PartInfo> = {}): PartInfo {
   return part(name, {
