@@ -124,6 +124,8 @@ screen. More in [docs/architecture.md](docs/architecture.md).
 | [docs/decisions.md](docs/decisions.md) | Why things are the way they are, plus open questions |
 | [docs/roadmap.md](docs/roadmap.md) | Phases, from "runs on a PC" to "public store" |
 | [docs/your-first-connector.md](docs/your-first-connector.md) | Write a connector, check it, pack it and install it |
+| [docs/connect-an-arduino.md](docs/connect-an-arduino.md) | Turn an Arduino into a bridge: its motors and sensors become parts |
+| [docs/faberlink.md](docs/faberlink.md) | FaberLink, the protocol and library a bridge runs, and the `faber-bridge` connector |
 | [docs/packages.md](docs/packages.md) | Packages and the sandbox: how connectors are built, checked and installed |
 | [docs/api.md](docs/api.md) | The core's REST and WebSocket API |
 | [docs/research/](docs/research/) | What HA, ESPHome, Viam, CasaOS, Umbrel, balena and others do, and what they miss |
