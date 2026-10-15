@@ -1,0 +1,17 @@
+[package]
+name = "ldrobot-ld19"
+version = "0.1.0"
+description = "Faber connector for the LDROBOT LD19 / STL-19P LiDAR."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+faber-capabilities = { version = "0.1.0", path = "../../sdk/rust/capabilities" }
+faber-connector = { version = "0.1.0", path = "../../sdk/rust/connector" }
+toml = "1.1.8"

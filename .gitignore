@@ -3,3 +3,6 @@ private/
 
 # Rust build output
 /target/
+
+# Local machine data from running faber-core during development
+/data/

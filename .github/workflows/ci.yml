@@ -1,0 +1,43 @@
+# Everything must pass before a change lands (docs/development.md, ground rule 4).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries (serial port discovery)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: Crate dependency rules
+        run: cargo run -p faber-arch-check
+      - name: Generated shell types are up to date
+        shell: bash
+        run: git diff --exit-code -- shell/src/lib/api/generated || (echo "Run cargo test and commit the regenerated types." && exit 1)
+
+  wit:
+    name: WIT interfaces
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-tools
+      - run: wasm-tools component wit wit/capabilities > /dev/null

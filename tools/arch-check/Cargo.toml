@@ -1,0 +1,15 @@
+[package]
+name = "faber-arch-check"
+version = "0.1.0"
+description = "Checks that Faber crates only depend on what docs/development.md allows."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = "1.0.154"

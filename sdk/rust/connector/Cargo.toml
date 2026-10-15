@@ -1,0 +1,17 @@
+[package]
+name = "faber-connector"
+version = "0.1.0"
+description = "The Faber connector interface: manifests, health and the bytes-in, readings-out trait."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+faber-capabilities = { version = "0.1.0", path = "../capabilities" }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"

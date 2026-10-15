@@ -1,0 +1,5 @@
+# Normalise line endings; Windows and Linux contributors see the same files.
+* text=auto eol=lf
+
+# Raw captures from serial ports.
+*.fbcap binary

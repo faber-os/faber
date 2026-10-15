@@ -1,0 +1,182 @@
+//! Layer 2: the router. Moves signals from parts to whoever subscribes (docs/architecture.md §9).
+//!
+//! Each signal address has one channel, chosen by its capability's delivery mode:
+//! latest-value (a slow subscriber gets the newest reading and skips the rest, so it can never
+//! slow a fast part down) or every-message (events; none may be lost).
+
+use crate::names::SignalAddress;
+use faber_capabilities::{Capability, Delivery, Reading};
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+use tokio::sync::{broadcast, watch};
+
+/// How many events an every-message subscriber may fall behind before it loses some.
+const EVENT_BACKLOG: usize = 256;
+
+enum Channel {
+    Latest(watch::Sender<Option<Arc<Reading>>>),
+    Every(broadcast::Sender<Arc<Reading>>),
+}
+
+struct Signal {
+    capability: Capability,
+    channel: Channel,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum PublishError {
+    /// Nobody declared this address (a bug in the runtime, not in a connector).
+    Undeclared,
+    /// The reading's capability doesn't match the declared one (a connector bug).
+    WrongCapability { declared: Capability, got: Capability },
+}
+
+#[derive(Default)]
+pub struct Router {
+    signals: Mutex<BTreeMap<SignalAddress, Signal>>,
+}
+
+pub enum Subscription {
+    Latest(watch::Receiver<Option<Arc<Reading>>>),
+    Every(broadcast::Receiver<Arc<Reading>>),
+}
+
+impl Subscription {
+    /// The next reading, or `None` once the signal is gone (its part was removed or stopped).
+    pub async fn next(&mut self) -> Option<Arc<Reading>> {
+        match self {
+            Subscription::Latest(rx) => loop {
+                rx.changed().await.ok()?;
+                if let Some(r) = rx.borrow_and_update().clone() {
+                    return Some(r);
+                }
+            },
+            Subscription::Every(rx) => loop {
+                match rx.recv().await {
+                    Ok(r) => return Some(r),
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(target: "core::router", "a subscriber fell behind and missed {n} events");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
+            },
+        }
+    }
+}
+
+impl Router {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates the channel for `address`. Declaring an address again replaces it, which ends
+    /// the old subscriptions.
+    pub fn declare(&self, address: SignalAddress, capability: Capability) {
+        let channel = match capability.delivery() {
+            Delivery::LatestValue => Channel::Latest(watch::channel(None).0),
+            Delivery::EveryMessage => Channel::Every(broadcast::channel(EVENT_BACKLOG).0),
+        };
+        self.signals.lock().expect("router lock").insert(address, Signal { capability, channel });
+    }
+
+    /// Removes `address`. Its subscribers get `None` from `next()`.
+    pub fn remove(&self, address: &SignalAddress) {
+        self.signals.lock().expect("router lock").remove(address);
+    }
+
+    pub fn publish(&self, address: &SignalAddress, reading: Reading) -> Result<(), PublishError> {
+        let signals = self.signals.lock().expect("router lock");
+        let signal = signals.get(address).ok_or(PublishError::Undeclared)?;
+        if reading.capability() != signal.capability {
+            return Err(PublishError::WrongCapability {
+                declared: signal.capability,
+                got: reading.capability(),
+            });
+        }
+        let reading = Arc::new(reading);
+        match &signal.channel {
+            Channel::Latest(tx) => {
+                tx.send_replace(Some(reading));
+            }
+            Channel::Every(tx) => {
+                let _ = tx.send(reading); // no subscribers is fine
+            }
+        }
+        Ok(())
+    }
+
+    /// Subscribes to `address`, or `None` if no such signal exists right now.
+    pub fn subscribe(&self, address: &SignalAddress) -> Option<Subscription> {
+        let signals = self.signals.lock().expect("router lock");
+        Some(match &signals.get(address)?.channel {
+            Channel::Latest(tx) => {
+                let mut rx = tx.subscribe();
+                rx.mark_changed(); // deliver the current value (if any) right away
+                Subscription::Latest(rx)
+            }
+            Channel::Every(tx) => Subscription::Every(tx.subscribe()),
+        })
+    }
+
+    /// Every declared signal and its capability.
+    pub fn signals(&self) -> Vec<(SignalAddress, Capability)> {
+        self.signals.lock().expect("router lock").iter().map(|(a, s)| (a.clone(), s.capability)).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use faber_capabilities::laser_scan;
+    use std::time::Duration;
+
+    fn addr() -> SignalAddress {
+        SignalAddress::parse("lidar/laser-scan").unwrap()
+    }
+
+    fn scan(t: u64) -> Reading {
+        Reading::LaserScan(laser_scan::Reading::even_bins(t, 0.0, 0.1, 0.1, vec![1.0]))
+    }
+
+    async fn next_t(sub: &mut Subscription) -> Option<u64> {
+        tokio::time::timeout(Duration::from_secs(1), sub.next()).await.expect("no hang").map(|r| r.t_us())
+    }
+
+    #[tokio::test]
+    async fn latest_value_skips_what_a_slow_subscriber_missed() {
+        let router = Router::new();
+        router.declare(addr(), Capability::LaserScan);
+        let mut sub = router.subscribe(&addr()).unwrap();
+        for t in 1..=5 {
+            router.publish(&addr(), scan(t)).unwrap();
+        }
+        assert_eq!(next_t(&mut sub).await, Some(5), "only the newest reading");
+    }
+
+    #[tokio::test]
+    async fn a_new_subscriber_gets_the_current_value() {
+        let router = Router::new();
+        router.declare(addr(), Capability::LaserScan);
+        router.publish(&addr(), scan(7)).unwrap();
+        let mut sub = router.subscribe(&addr()).unwrap();
+        assert_eq!(next_t(&mut sub).await, Some(7));
+    }
+
+    #[tokio::test]
+    async fn removing_a_signal_ends_its_subscriptions() {
+        let router = Router::new();
+        router.declare(addr(), Capability::LaserScan);
+        let mut sub = router.subscribe(&addr()).unwrap();
+        router.remove(&addr());
+        assert_eq!(next_t(&mut sub).await, None);
+        assert!(router.subscribe(&addr()).is_none());
+        assert_eq!(router.publish(&addr(), scan(1)), Err(PublishError::Undeclared));
+    }
+
+    #[test]
+    fn signals_lists_what_is_declared() {
+        let router = Router::new();
+        router.declare(addr(), Capability::LaserScan);
+        assert_eq!(router.signals(), vec![(addr(), Capability::LaserScan)]);
+    }
+}

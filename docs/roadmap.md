@@ -21,13 +21,19 @@ started" as of 2026-10-15.
 
 Goal: `faber-core` runs on Windows and shows live data from real hardware over USB.
 
-- Core skeleton: config loading (TOML), lifecycle states, logging
-- Router with latest-value and every-message signals
-- Port manager for **USB serial** only (works on Windows)
-- Shell v0: a desktop, windows, a Parts window, a viewer for `distance` and `laser-scan`
-- Built-in tools: **Serial monitor**, **Logs**
-- First connector, written as built-in Rust first (no WASM yet): `ldrobot-ld19` (the LD19 is the one part with working code today, in `SENNEP V2/lidar/`)
-- Mock port for tests
+- [x] Core skeleton: config (`parts.toml`, comment-preserving edits, errors with line numbers), lifecycle states, logging
+- [x] Router with latest-value and every-message signals
+- [x] Port manager for serial ports (USB ids, claims and conflicts) plus replay ports, with the LD19 demo recording built in
+- [x] First connector, built-in Rust (no WASM yet): `ldrobot-ld19`, tested against a real capture
+- [x] Supervisor: port failures retried, connector crashes restarted with backoff, then stopped
+- [x] API v0: REST + WebSocket (MessagePack, JSON debug mode), generated TypeScript types
+- [x] Architecture enforced in tests: crate rules (`faber-arch-check`) and core module layers
+- [ ] Shell v0: desktop, windows, Parts window with Add part, laser-scan viewer, Serial monitor, Logs
+- [ ] End-to-end test in a real browser
+- [ ] Tested with the real LD19 on Mikkel's PC
+
+A `distance` viewer moves to Phase 3, together with the first distance connector (no viewer
+without something to view).
 
 **Done when:** you plug the LD19 into the PC, add it as a part, and see the scan live in a
 browser window at `localhost`.
