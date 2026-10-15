@@ -59,7 +59,7 @@ connector = "generic-planar-base"
 simulate = "manual"
 ```
 
-Then let a program drive it in a 1 m square. It needs only Python's standard library:
+Then let a program drive it in a 0.8 m square. It needs only Python's standard library:
 
 ```bash
 python examples/drive-square.py
@@ -68,6 +68,10 @@ python examples/drive-square.py
 It takes the base's *lease*, the right to drive it, and renews it with every command. If the
 program stops, the lease runs out within 250 ms and Faber stops the base by itself. `POST
 /api/v0/estop` (the e-stop) stops everything at once. See [docs/api.md](docs/api.md#driving-leases-commands-and-the-e-stop).
+
+With `simulate = "world"` instead, the base really moves, in a simulated world: add `[world]`
+with `name = "apartment"` and it drives its square in the living room, bumping into whatever
+is in the way. See [docs/api.md](docs/api.md#the-simulated-world).
 
 ## The building blocks
 
