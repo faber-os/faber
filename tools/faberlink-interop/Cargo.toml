@@ -1,0 +1,25 @@
+[package]
+name = "faberlink-interop"
+version = "0.1.0"
+description = "Tests the Rust FaberLink session against the C++ Arduino library's protocol core, compiled for the PC."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# Not `workspace = true`: calling the C++ harness needs `unsafe` (the FFI module only), which
+# the workspace forbids everywhere else.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[build-dependencies]
+cc = "1.2"
+
+[dev-dependencies]
+faberlink = { version = "0.1.0", path = "../../sdk/rust/faberlink" }
+faber-capabilities = { version = "0.1.0", path = "../../sdk/rust/capabilities" }
+proptest = "1"

@@ -1,0 +1,316 @@
+// FaberLink protocol core: plain, portable C++11.
+//
+// No Arduino headers, no dynamic allocation, no exceptions, no RTTI. The same file is compiled
+// for the board (by the Arduino IDE) and on the PC (by the Rust interop tests), so what runs on
+// the board is exactly what was tested. The wire format is in docs/faberlink.md.
+//
+// The board-side safety rules live here, not in the sketch (docs/faberlink.md §5):
+//   1. No HEARTBEAT for the heartbeat timeout: every actuator goes to its safe state.
+//      Only a new COMMAND starts it again; a heartbeat alone never does.
+//   2. An actuator that gets no COMMAND for its own lease time (250 ms) stops by itself.
+//   3. A latched hardware e-stop wins until it is reset on the board AND released in Faber.
+//   4. Commands are only applied while the heartbeat is alive and no e-stop is engaged.
+
+#ifndef FABERLINK_CORE_H
+#define FABERLINK_CORE_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+// The largest payload this board accepts and sends. Boards with 2-2.5 KB of RAM (Uno, Nano,
+// Leonardo) default to 64 bytes, enough for every message a few parts need; others take the full
+// 250. A sketch may set it before including FaberLink.h, but only through the build flags
+// (-DFABERLINK_MAX_PAYLOAD=...), so that every file sees the same value.
+#ifndef FABERLINK_MAX_PAYLOAD
+#if defined(__AVR_ATmega328P__) || defined(__AVR_ATmega328__) || defined(__AVR_ATmega168__) || \
+    defined(__AVR_ATmega32U4__)
+#define FABERLINK_MAX_PAYLOAD 64
+#else
+#define FABERLINK_MAX_PAYLOAD 250
+#endif
+#endif
+
+#if FABERLINK_MAX_PAYLOAD < 32 || FABERLINK_MAX_PAYLOAD > 250
+#error "FABERLINK_MAX_PAYLOAD must be 32..250"
+#endif
+
+namespace faberlink {
+
+const uint8_t PROTOCOL_VERSION = 1;
+const uint8_t MIN_VERSION = 1;
+const uint8_t MAX_VERSION = 1;
+const uint16_t DEFAULT_HEARTBEAT_TIMEOUT_MS = 250;
+const uint16_t MIN_HEARTBEAT_TIMEOUT_MS = 100;
+const uint16_t MAX_HEARTBEAT_TIMEOUT_MS = 1000;
+const uint16_t DEFAULT_LEASE_MS = 250;
+const uint16_t STATUS_PERIOD_MS = 100;
+const size_t MAX_RAW = FABERLINK_MAX_PAYLOAD + 4;  // type, seq, payload, CRC
+
+// Message types.
+namespace kind {
+const uint8_t HELLO = 0x01;
+const uint8_t HELLO_ACK = 0x02;
+const uint8_t DESCRIBE = 0x03;
+const uint8_t PART = 0x04;
+const uint8_t HEARTBEAT = 0x10;
+const uint8_t STATUS = 0x11;
+const uint8_t READING = 0x20;
+const uint8_t COMMAND = 0x21;
+const uint8_t APPLIED = 0x22;
+const uint8_t SAFE = 0x23;
+const uint8_t ESTOP = 0x30;
+const uint8_t LOG = 0x40;
+}  // namespace kind
+
+// Capability codes in READING, COMMAND and APPLIED.
+enum Capability : uint8_t { DISTANCE = 1, MOTOR = 2, PLANAR_BASE = 3, ESTOP_CAP = 4 };
+
+// Why an actuator's output changed (APPLIED.cause).
+enum Cause : uint8_t {
+  CAUSE_COMMAND = 0,
+  CAUSE_REFUSED = 1,
+  CAUSE_HEARTBEAT_LOST = 2,
+  CAUSE_LEASE_EXPIRED = 3,
+  CAUSE_SAFE = 4,
+  CAUSE_ESTOP = 5,
+  CAUSE_NO_HEARTBEAT = 6,
+};
+
+enum Fault : uint8_t {
+  FAULT_NONE = 0,
+  FAULT_HEARTBEAT_LOST = 1,
+  FAULT_LEASE_EXPIRED = 2,
+  FAULT_BAD_FRAMES = 3,
+  FAULT_REFUSED_COMMAND = 4,
+  FAULT_ESTOP = 5,
+};
+
+enum LogLevel : uint8_t { LOG_INFO = 0, LOG_WARN = 1, LOG_ERROR = 2 };
+
+// CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF).
+uint16_t crc16(const uint8_t* data, size_t len, uint16_t crc = 0xFFFF);
+
+// COBS-decodes buf[0..len) in place. Returns the decoded length, or -1 if it isn't valid COBS.
+int cobsDecode(uint8_t* buf, size_t len);
+
+// True for a float that is neither NaN nor infinite (without <math.h>, so it is portable).
+bool isFinite(float f);
+
+// Little-endian helpers.
+void putU16(uint8_t* p, uint16_t v);
+void putU32(uint8_t* p, uint32_t v);
+void putF32(uint8_t* p, float v);
+uint16_t getU16(const uint8_t* p);
+uint32_t getU32(const uint8_t* p);
+float getF32(const uint8_t* p);
+
+// Where frames go: a serial port on the board, a buffer in the tests.
+class Output {
+ public:
+  virtual void write(const uint8_t* data, size_t len) = 0;
+
+ protected:
+  ~Output() {}
+};
+
+// Finds frames in a byte stream with a fixed buffer.
+class FrameDecoder {
+ public:
+  enum Result { NONE, FRAME, BAD };
+  FrameDecoder() : len_(0), overflowed_(false) {}
+  // Takes one byte. On FRAME, kind/seq/payload/payloadLen describe it until the next push.
+  Result push(uint8_t byte);
+  uint8_t kind() const { return buf_[0]; }
+  uint8_t seq() const { return buf_[1]; }
+  const uint8_t* payload() const { return buf_ + 2; }
+  size_t payloadLen() const { return payloadLen_; }
+
+ private:
+  uint8_t buf_[MAX_RAW + 1];
+  size_t len_;
+  size_t payloadLen_;
+  bool overflowed_;
+};
+
+class Board;
+
+// One part the board hosts. Subclasses fill in the capability's layouts.
+class Part {
+ public:
+  // leaseMs > 0 makes the part an actuator: the board stops it when no command arrives in time.
+  Part(const char* name, Capability capability, uint16_t leaseMs, uint16_t readingPeriodMs);
+
+  const char* name() const { return name_; }
+  Capability capability() const { return capability_; }
+  bool isActuator() const { return leaseMs_ != 0; }
+  // True while an actuator runs on a command (not in its safe state).
+  bool active() const { return active_; }
+  uint8_t id() const { return id_; }
+
+  // Called once when the board starts (set pins up here, not in the constructor).
+  virtual void begin() {}
+  // The capability's info layout. Returns its length.
+  virtual uint8_t writeInfo(uint8_t* out) const = 0;
+  // The capability's reading layout, or 0 for "nothing to report".
+  virtual uint8_t writeReading(uint8_t* out, uint32_t nowMs) = 0;
+  // Actuators: apply a command layout. Writes what was really done (a command layout) to `out`
+  // and returns its length; 0 refuses the command. `clamped` says a limit changed it.
+  virtual uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped);
+  // Actuators: go to the safe state now. Writes the safe command's layout and returns its length.
+  virtual uint8_t enterSafeState(uint8_t* out);
+
+ protected:
+  ~Part() {}
+  // How often the board asks for a reading; 0 = never (e.g. a motor without an encoder).
+  void setReadingPeriod(uint16_t ms) { readingPeriodMs_ = ms; }
+
+ private:
+  friend class Board;
+  const char* name_;
+  Part* next_;
+  uint32_t lastCommandMs_;
+  uint32_t lastReadingMs_;
+  uint16_t leaseMs_;
+  uint16_t readingPeriodMs_;
+  Capability capability_;
+  uint8_t id_;
+  bool active_;
+  bool added_;
+};
+
+enum MotorKind : uint8_t { MOTOR_DC = 0, MOTOR_STEPPER = 1, MOTOR_BLDC = 2, MOTOR_CONTINUOUS_SERVO = 3 };
+
+// motor@1, open loop: set-duty always, set-velocity when a maximum velocity is given (it then
+// maps to duty = velocity / max). The safe state is set-velocity 0. It sends no readings; a
+// motor with an encoder overrides writeReading() and calls setReadingPeriod().
+class Motor : public Part {
+ public:
+  Motor(const char* name, float maxVelocityRadS = 0, MotorKind kind = MOTOR_DC,
+        uint16_t leaseMs = DEFAULT_LEASE_MS);
+  // The output now, -1..1.
+  float duty() const { return duty_; }
+
+  uint8_t writeInfo(uint8_t* out) const override;
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+  uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped) override;
+  uint8_t enterSafeState(uint8_t* out) override;
+
+ protected:
+  ~Motor() {}
+  // Drives the hardware at `duty` (-1..1, the sign is the direction).
+  virtual void drive(float duty) = 0;
+  float maxVelocity_;
+
+ private:
+  float duty_;
+  MotorKind kind_;
+};
+
+enum DistanceKind : uint8_t { DISTANCE_ULTRASONIC = 0, DISTANCE_LASER_TOF = 1, DISTANCE_INFRARED = 2, DISTANCE_RADAR = 3 };
+
+// distance@1. measure() returns metres; a negative or non-finite value means "no target".
+class Distance : public Part {
+ public:
+  Distance(const char* name, DistanceKind kind, float minM, float maxM, float fieldOfViewRad,
+           uint16_t readingPeriodMs = 50);
+
+  uint8_t writeInfo(uint8_t* out) const override;
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+
+ protected:
+  ~Distance() {}
+  virtual float measure() = 0;
+
+ private:
+  float minM_, maxM_, fov_;
+  DistanceKind kind_;
+};
+
+// The board's side of the protocol.
+class Board {
+ public:
+  explicit Board(Output& out);
+
+  void setIdentity(const char* board, const char* firmware, const char* firmwareVersion);
+  // Clamped to 100..1000 ms.
+  void setHeartbeatTimeout(uint16_t ms);
+  // For tests: answer HELLO as if this library spoke only versions lo..hi.
+  void speakVersions(uint8_t lo, uint8_t hi) {
+    minVersion_ = lo;
+    maxVersion_ = hi;
+  }
+  uint16_t heartbeatTimeout() const { return heartbeatTimeoutMs_; }
+  // Adds a part; its id is the order it was added in. False once 254 parts are added, or if the
+  // part already belongs to a board.
+  bool add(Part& part);
+  // Calls begin() on every part.
+  void begin();
+
+  // Feed every received byte, and call tick() often (every loop()).
+  void feed(uint8_t byte, uint32_t nowMs);
+  void tick(uint32_t nowMs);
+
+  // A hardware stop button: latches until resetHardwareEstop() AND a release from Faber.
+  void engageHardwareEstop();
+  void resetHardwareEstop();
+  void log(LogLevel level, const char* text);
+
+  bool connected() const { return version_ != 0; }
+  bool heartbeatAlive(uint32_t nowMs) const;
+  bool estopEngaged() const { return hwLatched_ || releasePending_ || coreEstop_; }
+  bool failsafe() const { return failsafe_; }
+  uint16_t rxBad() const { return rxBad_; }
+  uint16_t rxGaps() const { return rxGaps_; }
+  uint8_t partCount() const { return count_; }
+
+ private:
+  void handle(uint8_t kind, const uint8_t* p, size_t len, uint32_t nowMs);
+  void onHello(const uint8_t* p, size_t len, uint32_t nowMs);
+  void onCommand(const uint8_t* p, size_t len, uint32_t nowMs);
+  void checkSafety(uint32_t nowMs);
+  void safeAll(Cause cause);
+  void safe(Part& part, Cause cause);
+  void sendApplied(Part& part, Cause cause, bool clamped, const uint8_t* cmd, uint8_t len);
+  void sendStatus(uint32_t nowMs);
+  void sendPart(Part& part);
+  void sendEstop(bool engaged);
+  Part* find(uint8_t id);
+  // Builds a frame in tx_ and writes it COBS-encoded.
+  void send(uint8_t kind, size_t payloadLen);
+  uint8_t* payload() { return tx_ + 2; }
+  size_t maxPayload() const { return txMaxPayload_; }
+  uint8_t putStr(uint8_t* at, const char* s, size_t room);
+
+  Output& out_;
+  FrameDecoder decoder_;
+  uint8_t tx_[MAX_RAW];
+  Part* first_;
+  Part* last_;
+  const char* board_;
+  const char* firmware_;
+  const char* firmwareVersion_;
+  uint32_t lastHeartbeatMs_;
+  uint32_t lastStatusMs_;
+  uint16_t heartbeatTimeoutMs_;
+  uint16_t rxBad_;
+  uint16_t rxGaps_;
+  uint8_t txMaxPayload_;
+  uint8_t count_;
+  uint8_t version_;
+  uint8_t txSeq_;
+  uint8_t rxSeq_;
+  uint8_t lastFault_;
+  uint8_t minVersion_;
+  uint8_t maxVersion_;
+  bool rxSeqKnown_;
+  bool haveHeartbeat_;
+  bool failsafe_;
+  bool coreEstop_;
+  bool hwLatched_;
+  bool releasePending_;
+  bool started_;
+};
+
+}  // namespace faberlink
+
+#endif
