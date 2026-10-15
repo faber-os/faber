@@ -1,7 +1,10 @@
 # Phase 5 design: apps
 
-Status: **design v1, proposed** (2026-10-15). Builds on D03, D04, D24, D29 and architecture.md
-§7. Nothing here is built yet.
+Status: **design v1; Phase 5a (apps in the core) built** (2026-10-15). Builds on D03, D04, D24,
+D29 and architecture.md §7. §8 says what was built and how it differs; the shell side (app
+windows, the role picker, `@faber-os/shell`) is Phase 5b and not built yet. The open questions in
+§7 were answered with their recommendations while Mikkel was away: both wasm logic and UI-only
+apps; SENNEP's app in the SENNEP V2 repo, with a small example app here.
 
 An **app** uses capabilities to do a job (drive SENNEP, log a temperature, follow a wall). It
 never talks to hardware or connectors: it asks for **roles** ("a laser-scan", "a planar-base I
@@ -74,3 +77,73 @@ SENNEP through FaberLink (Phase 4).
 3. **Machine-config export/import** (roadmap): parts.toml + apps.toml + settings as one file.
    The backup zip already holds all of it; is a separate "share my setup" file still wanted?
    Recommendation: a "Share setup" that makes a backup without your files.
+
+## 8. As built (Phase 5a: apps in the core)
+
+**The app world** (`wit/app/app.wit`, `faber:app@0.1.0`). An app's logic exports
+`start(now-us)`, `tick(now-us)` and `stop()`, and imports only:
+
+| Interface | Functions |
+|---|---|
+| `roles` | `all()` (name, capability, command, how many parts), `latest(role, index)`, `poll(role, index)`: the newest reading only if this app hasn't polled it before ("subscribe by polling") |
+| `drive` | `acquire`, `renew`, `release`, `send(role, index, command) -> result<command, drive-error>`. The core holds the lease for the app as `app:<id>`; the app never sees a lease id. Errors: `no-such-role`, `held(who)`, `lease-required`, `lease-ended(reason)`, `estop-engaged`, `bad-command`, `part-not-ready` |
+| `publish` | `publish(name, reading)`: only `[[publishes]]` names, with their capability; anything else stops the app as a bug |
+| `state` | `get`, `set` (fails past 64 KB of keys and values), `remove`, `keys`; saved in `<data>/apps/<id>/state.toml` at most once a second and when a run ends, kept across updates, removed on uninstall |
+| `log` | `log(level, message)`, as `app:<id>` in the log, 50 lines a second |
+
+Readings and commands are the connector world's own types (`faber:connector/types`), so an app
+reads exactly what a connector published. `start` gets the time too, unlike the first sketch.
+
+**Guest SDK** (`sdk/rust/app-wasm`, `faber-app-wasm`): an app is a type implementing `App`
+(`start`, `tick`, `stop`) against a `Host` trait, plus `faber_app_wasm::export!(MyApp);`.
+`testing::TestHost` plays the core, so the logic is tested on the PC (`cargo test`).
+
+**Manifest** (`core/src/apps/manifest.rs`): strict like the declarative reader, every mistake with
+its line. `[package]` has `type = "app"`, `module` (a `.wasm` next to `faber.toml`), `ui`
+(`"ui/"`), `tick-hz` (1–100, default 10, only with a module); at least one of `module` and `ui`.
+`[window]` (`title`, `icon`, `width`, `height` 100–4000 px, `pinned`) only with a UI.
+`[[requires]]`: `role`, `capability`, `command` (only for a capability that takes commands),
+`count` (`"1"` or `"1.."`). `[[suggests]]`: `connector`, `for-role` (a role above).
+`[[publishes]]`: `name`, `capability` (not one that takes commands: derived signals are
+read-only). `accept = ["part", "derived"]` (a role filled by another app's derived signal) is
+**not built**: roles take parts only.
+
+**Packages**: the same `.faberpkg` and installer (api.md, "Packages"). An app's package holds its
+component and `ui/**` (limits and allowed types in api.md), installs into `<data>/apps/<id>/`, and
+is refused (`409 app-enabled`) to uninstall while the app is on: the simplest safe rule, so
+nothing it drives stops by surprise.
+
+**Roles**: `config/apps.toml` (`core/src/roles.rs`, layer 2), edited keeping comments.
+`PUT /api/v0/apps/{id}/roles` checks that each part exists and provides the role's capability.
+
+**The host** (`core/src/apps/`, layer 3): one component instance per run, under the connectors'
+limits (32 MB, 20 ms per call) and import check, on its own thread `app:<id>` ticked at
+`tick-hz`. A trap, a limit or a broken rule ends the run, its leases end (the parts get their safe
+state), and it restarts after 1, 2, 4, … s; after 5 crashes in a row it stays stopped. The
+machine (`core/src/machine/apps.rs`) runs an app when it is on and every role has a part
+providing the role's capability; it checks again whenever something changes and every 200 ms,
+so an app stops when a part leaves its role (`conflict`, naming the part) and starts again when
+the part is back. Statuses use the parts' states (api.md, "Apps"). The shared Wasmtime engine,
+limits, import check and WIT bindings moved from `wasm` into `sandbox` (layer 2), since `apps`
+and `wasm` are both layer 3 and may not import each other.
+
+**Derived signals**: `app:<id>/<name>` in the router while the app runs, read-only (no leases or
+commands: those are by part name, and a part's name never holds a `:`). They are read like a
+part's: `GET /api/v0/signals/app:<id>/<name>` and the `signal` topic.
+
+**The example** (`examples/apps/wall-follower`): roles `lidar` (`laser-scan@1`) and `base`
+(`planar-base@1`, `command = true`). It keeps the base's right side 0.3 m from a wall (sliding
+sideways, so it needs a holonomic base like SENNEP), turns left at corners, and publishes the gap
+as `app:wall-follower/wall-distance`, a **`distance@1`** (apps.md's sketch said `distance@1` too:
+it is the capability that fits a single measured distance, with `no-target` when there is no
+wall). `core/tests/apps.rs` proves it in the apartment world.
+
+**The `faber` command**: `faber new app <name>` (template `templates/app-rust`: a nearest-distance
+app over a `count = "1.."` role, with a UI), `faber check` (manifest, UI files, build, load in the
+sandbox, then start, 20 ticks and stop with no parts picked) and `faber pack`.
+
+**Not built in 5a**: the shell (app windows in a sandboxed iframe, the message channel and
+`@faber-os/shell`, the role picker in the Install window, the "app" badge), roles filled by
+derived signals (`accept`), and apps in backups: a backup holds neither `config/apps.toml` nor
+`<data>/apps/` yet, though its `packages.toml` lists installed apps.
+
