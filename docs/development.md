@@ -57,7 +57,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | 5 | `api` | HTTP + WebSocket. Translates between the wire and the machine. No logic of its own. |
 | 4 | `machine` | Ties everything together. The only place that changes what runs: it writes `parts.toml` first, then reconciles. |
 | 3 | `declarative`, `runtime`, `simparts`, `suggest`, `wasm` | Supervising parts, the declarative connector engine (connectors that are only a `faber.toml`), the world engine that runs `simulate = "world"` parts, detect-then-suggest, and running wasm connectors in their sandbox (docs/packages.md). Built on layer 2. |
-| 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `ports`, `router`, `settings`, `sim`, `simulation`, `translations` | One job each. They don't know about HTTP or each other. |
+| 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `packages`, `ports`, `router`, `settings`, `sim`, `simulation`, `translations` | One job each. They don't know about HTTP or each other. |
 | 1 | `clock`, `names` | Small pure building blocks. |
 
 This is enforced by `core/tests/layers.rs`, which fails with the file and line of any import that
