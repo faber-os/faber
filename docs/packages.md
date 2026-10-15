@@ -83,9 +83,12 @@ captures/*.fbcap    optional: recordings, used by `faber check` and offered as s
 
 ## 6. The declarative engine (first cut)
 
-For serial devices that send text lines (a lot of hobby sensors and GPS modules):
+For serial devices that send text lines (a lot of hobby sensors and GPS modules). **Built** in
+Phase 3c; the guide is [connectors-declarative.md](connectors-declarative.md).
 
 ```toml
+faber-manifest = 1              # the faber.toml format version
+
 [package]
 id = "example-line-sensor"
 type = "connector"
@@ -101,8 +104,10 @@ capability = "distance@1"
 line = { pattern = "D:{meters:f32}", scale = 0.01 }   # "D:123" → 1.23 m
 ```
 
-Patterns with typed fields cover most line protocols; NMEA (`position@1`) gets a built-in
-parser. Register maps for I2C/SPI follow the TMP102 example in architecture.md §4 once Phase 6
+Patterns with typed fields (`f32`, `i32`, `u32`, `hex`, `{_}`) cover most line protocols; NMEA
+(`position@1`) gets a built-in parser (GGA, RMC, GSA, checksums checked). The engine lives in
+`core/src/declarative/` and loads `<data>/connectors/<id>/faber.toml` at start; examples with
+recorded captures, tested on every build, are in `examples/connectors/`. Register maps for I2C/SPI follow the TMP102 example in architecture.md §4 once Phase 6
 brings the buses; until then they are tested against a fake bus.
 
 ## 7. Tools

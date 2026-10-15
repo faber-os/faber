@@ -121,7 +121,8 @@ Viewer for all three: the value plus a plot.
 
 **`position`** (ROS NavSatFix)
 - **Signal (L):** `latitude-deg`, `longitude-deg`, `altitude-m?`,
-  `fix` (none / 2d / 3d / dgps / rtk-float / rtk-fixed), `satellites`, `horizontal-accuracy-m?`,
+  `fix` (none / fix2d / fix3d / dgps / rtk-float / rtk-fixed, as the WIT names them), `satellites`,
+  `horizontal-accuracy-m?`,
   `vertical-accuracy-m?`, `speed-m-s?`, `course-rad?`.
 - **Viewer:** coordinates and fix quality, plus a map when the machine is online.
 
