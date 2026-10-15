@@ -14,11 +14,11 @@
         try {
           pref = localStorage.getItem('faber.theme');
         } catch (e) {
-          // Storage blocked: follow the system.
+          // Storage blocked: light, the default.
         }
         var dark =
           pref === 'dark' ||
-          (pref !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
         var root = document.documentElement;
         root.dataset.theme = dark ? 'dark' : 'light';
         // The colours of the style chosen last time (Settings → Appearance → Style).

@@ -10,7 +10,9 @@
 - **Signing keys (D27):** the Faber maintainer (Mikkel) holds the offline OS-image key and the registry-index key. Plan key rotation before the first signed release. No trust is based on GitHub accounts.
 - **The first-chat idea "start with an install script" was replaced by D17** (develop on a PC, ship a real A/B image at the first public release).
 - **The name:** only `Faber` / `faber` / `FABER` (CLAUDE.md rule 10). The GitHub org and npm scope are `faber-os`, because the bare names are taken.
-- **Default theme is System**, not Light. The shell agent suggested making Light the default; left as System since Mikkel picked "system/light/dark" as the switch. Change in `core/src/settings.rs` if he wants light first.
+- **Light is the default theme** (Mikkel, 2026-10-15), as D31 said. An explicit `theme = "system"` in settings.toml still follows the screen.
+- **Shell/core mismatch:** a debug core used to read `shell/dist` from disk live, so an old running core served a new shell → 404s everywhere. Now `embed-shell` always embeds (`debug-embed`), and an API fingerprint makes any remaining mismatch (Vite dev + old core) show "Restart the Faber core".
+- **Settings proposal:** a separate session is researching what Settings should offer → `private/settings-proposal.md`.
 - **Signal style's red accent** sits close to the danger red used for delete. Kept for now; move it to orange if it confuses.
 - **Start menu shows all programs** (not its own pins): one pin system, the taskbar's (principle "one obvious way").
 - **Disks:** a move between roots is refused (`bad-path`) until copy exists. Disk ids come from the drive letter on Windows (`disk-e`) and the mount label on Linux; two Linux sticks with the same label would collide (not handled yet).

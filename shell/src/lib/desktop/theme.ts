@@ -7,5 +7,6 @@ export function resolveTheme(pref: ThemePreference, systemDark: boolean): Theme 
 }
 
 export function parseThemePreference(stored: string | null): ThemePreference {
-  return stored === 'light' || stored === 'dark' ? stored : 'system';
+  // Light is the default (core/src/settings.rs); only an explicit choice changes it.
+  return stored === 'system' || stored === 'dark' ? stored : 'light';
 }

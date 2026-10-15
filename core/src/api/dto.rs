@@ -14,6 +14,9 @@ use ts_rs::TS;
 pub struct SystemInfo {
     pub name: String,
     pub version: String,
+    /// Fingerprint of the API types this core was built with. The shell compares it with its own
+    /// and asks for a restart when they differ (docs/api.md).
+    pub api: String,
     /// The core's monotonic clock right now (µs). Readings use the same clock.
     #[ts(type = "number")]
     pub time_us: u64,

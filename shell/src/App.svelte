@@ -83,6 +83,8 @@
 />
 
 <Desktop defs={WINDOW_DEFS} />
-{#if !ready}
+{#if core.apiMismatch}
+  <Boot status={core.connection} mismatch={{ shell: FABER_API, core: core.system?.api }} />
+{:else if !ready}
   <Boot status={core.connection} />
 {/if}

@@ -2,11 +2,12 @@
  * The built-in wallpapers (src/lib/desktop/wallpapers.ts), drawn in CSS so the kiosk needs no
  * network and no image files. Each sets `--wall-ink`, the colour for desktop icon labels on it.
  *
- * The brushed texture is SVG noise stretched sideways (baseFrequency 0.002 × 0.9): long, thin
- * streaks like aluminium that has been brushed in one direction.
+ * The brushed texture is SVG noise stretched sideways (baseFrequency 0.0025 × 0.85): long, thin
+ * streaks like aluminium that has been brushed in one direction. It is drawn once at screen size
+ * (1920 × 1080, covering and centred), never tiled: noise doesn't wrap, so tiles showed seams.
  */
 :root {
-  --brushed: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='640'%3E%3Cfilter id='b'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.0025 0.85' numOctaves='2' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0.55 0 0 0 -0.18'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23b)'/%3E%3C/svg%3E");
+  --brushed: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080' viewBox='0 0 1920 1080' preserveAspectRatio='xMidYMid slice'%3E%3Cfilter id='b'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.0025 0.85' numOctaves='2' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0.55 0 0 0 -0.18'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23b)'/%3E%3C/svg%3E");
 }
 
 .wallpaper {
@@ -18,6 +19,14 @@
 .wallpaper[data-wallpaper='aluminium'] {
   background-color: oklch(0.855 0.004 250);
   background-image: var(--brushed);
+}
+
+/* One copy of the brushing, covering the screen (see the top of this file). */
+.wallpaper[data-wallpaper='aluminium'],
+.wallpaper[data-wallpaper='anodised'] {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 .wallpaper[data-wallpaper='anodised'] {

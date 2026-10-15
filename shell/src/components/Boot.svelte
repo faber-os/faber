@@ -2,8 +2,15 @@
   import type { ConnectionStatus } from '../lib/state/types';
   import Wordmark from './Wordmark.svelte';
 
-  /** The loading screen: shown until the core has answered, so nobody sees a half-built desktop. */
-  let { status }: { status: ConnectionStatus } = $props();
+  /**
+   * The loading screen: shown until the core has answered, so nobody sees a half-built desktop.
+   * With `mismatch` it stays, because this shell and the core were built from different APIs.
+   */
+  let {
+    status,
+    mismatch,
+  }: { status: ConnectionStatus; mismatch?: { shell: string; core: string | undefined } } =
+    $props();
   let slow = $state(false);
 
   $effect(() => {
@@ -14,14 +21,24 @@
 
 <div class="boot" role="status" aria-live="polite">
   <div class="mark"><Wordmark size={56} os /></div>
-  <p class="line">
-    {#if status === 'reconnecting' || slow}
-      Still waiting for the Faber core. It may be starting up; if this stays, check that faber-core
-      is running.
-    {:else}
-      Connecting to the core…
-    {/if}
-  </p>
+  {#if mismatch}
+    <h1 class="title">Restart the Faber core</h1>
+    <p class="line">
+      This desktop was built for a different version of the Faber core than the one running. Stop
+      faber-core and start it again (build it first if you changed the code). This page connects by
+      itself once the core is back.
+    </p>
+    <p class="ids">desktop {mismatch.shell} · core {mismatch.core ?? 'too old to say'}</p>
+  {:else}
+    <p class="line">
+      {#if status === 'reconnecting' || slow}
+        Still waiting for the Faber core. It may be starting up; if this stays, check that
+        faber-core is running.
+      {:else}
+        Connecting to the core…
+      {/if}
+    </p>
+  {/if}
 </div>
 
 <style>
@@ -49,6 +66,15 @@
   }
   .line {
     max-width: 42ch;
+    color: var(--text-muted);
+  }
+  .title {
+    margin: 0;
+    font-size: var(--text-xl, 1.4rem);
+  }
+  .ids {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm, 0.85rem);
     color: var(--text-muted);
   }
 </style>

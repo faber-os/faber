@@ -30,9 +30,11 @@ const SETTINGS: Settings = {
 
 let f: FakeFetch;
 
-function setup() {
+const SYSTEM = { name: 'Faber', version: '0.1.0', api: FABER_API, timeUs: 5_000_000 };
+
+function setup(system: object = SYSTEM) {
   f = fakeFetch([
-    { path: '/api/v0/system', body: { name: 'Faber', version: '0.1.0', timeUs: 5_000_000 } },
+    { path: '/api/v0/system', body: system },
     { path: '/api/v0/connectors', body: [] },
   ]);
   const socket = new CoreSocket({
@@ -62,6 +64,39 @@ function sentTopics(ws: FakeWebSocket) {
 beforeEach(() => FakeWebSocket.reset());
 
 describe('CoreState', () => {
+  it('accepts a core built from the same API', async () => {
+    const { core } = setup();
+    await vi.waitFor(() => expect(core.system).not.toBeNull());
+    expect(core.apiMismatch).toBe(false);
+  });
+
+  it('notices a core built from a different API, or one too old to say', async () => {
+    for (const system of [
+      { ...SYSTEM, api: '0000000000000000' },
+      { name: 'Faber', timeUs: 1 },
+    ]) {
+      FakeWebSocket.reset();
+      const { core } = setup(system);
+      await vi.waitFor(() => expect(core.system).not.toBeNull());
+      expect(core.apiMismatch).toBe(true);
+    }
+  });
+
+  it('asks the core about itself again on every connection, as it may have been restarted', async () => {
+    vi.useFakeTimers();
+    try {
+      const { ws } = setup();
+      ws.drop();
+      vi.advanceTimersByTime(10_000);
+      FakeWebSocket.latest().open();
+      await vi.waitFor(() =>
+        expect(f.calls.filter((c) => c.path === '/api/v0/system')).toHaveLength(2),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('tracks the connection status', () => {
     const { core, ws } = setup();
     expect(core.connection).toBe('connected');

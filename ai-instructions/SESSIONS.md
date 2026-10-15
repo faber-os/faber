@@ -27,3 +27,4 @@
 **Issues:** none open; the shell build was reviewed in the browser in light and dark.
 **Tests:** Rust workspace + clippy + arch check, shell check/test (435)/arch/format/build, e2e at both sizes — all green.
 **Next:** Phase 2 (simulation, D36/D37). Open small items in WORKING_NOTES (default theme, Signal accent).
+- (cont.) Mikkel's Files/Settings showed 404s: his core (built 10:34, before those APIs) was serving the new shell, because a debug `embed-shell` build reads `shell/dist` from disk. Root fix: `debug-embed`, plus an API fingerprint (core `build.rs` + `shell/apiFingerprint.ts`, shared fixture) that shows "Restart the Faber core" on a mismatch; the shell re-reads `/system` on every reconnect. Light is now the default theme. The brushed wallpaper is drawn once at screen size instead of a 640 px tile (the noise didn't wrap, so tiles showed seams). Started a separate session to research Settings. **Mikkel must restart his core** to get the new APIs.

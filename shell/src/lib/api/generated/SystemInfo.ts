@@ -3,6 +3,11 @@ import type { ErrorBody } from "./ErrorBody";
 
 export type SystemInfo = { name: string, version: string, 
 /**
+ * Fingerprint of the API types this core was built with. The shell compares it with its own
+ * and asks for a restart when they differ (docs/api.md).
+ */
+api: string, 
+/**
  * The core's monotonic clock right now (µs). Readings use the same clock.
  */
 timeUs: number, 

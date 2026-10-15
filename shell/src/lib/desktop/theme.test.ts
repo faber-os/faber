@@ -11,7 +11,8 @@ describe('theme', () => {
 
   it('reads a stored preference and falls back to system', () => {
     expect(parseThemePreference('dark')).toBe('dark');
-    expect(parseThemePreference(null)).toBe('system');
-    expect(parseThemePreference('purple')).toBe('system');
+    expect(parseThemePreference('system')).toBe('system');
+    expect(parseThemePreference(null)).toBe('light');
+    expect(parseThemePreference('purple')).toBe('light');
   });
 });

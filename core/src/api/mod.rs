@@ -106,6 +106,7 @@ async fn system(State(s): State<AppState>) -> Json<dto::SystemInfo> {
     Json(dto::SystemInfo {
         name: "Faber".into(),
         version: env!("CARGO_PKG_VERSION").into(),
+        api: env!("FABER_API").into(),
         time_us: s.machine.clock().now_us(),
         config_problem: s.machine.config_problem().map(|e| dto::ErrorBody {
             code: "config-broken".into(),

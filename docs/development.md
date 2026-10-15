@@ -104,4 +104,11 @@ npm --prefix shell run dev
 Open the address Vite prints. During development Vite forwards `/api` to the core. Add `?wire=json`
 to the page address to switch the WebSocket to JSON and read every message in the browser's dev tools. A release
 build (`cargo build --release -p faber-core --features embed-shell`) compiles the shell into
-the core binary, so the machine only runs one file and no Node.js.
+the core binary, so the machine only runs one file and no Node.js. Debug builds with `embed-shell`
+compile it in too (`debug-embed`), so a running core always serves the shell it was built with.
+After changing the shell, rebuild and restart the core, or use the Vite dev server.
+
+The shell and the core each carry a fingerprint of the generated API types. If a shell meets a
+core built from a different API (an old core still running, say), it shows "Restart the Faber
+core" instead of failing with 404s. Both sides compute it the same way: `core/build/api_fingerprint.rs`
+and `shell/apiFingerprint.ts`, tested against one fixture (`fixtures/api-fingerprint`).

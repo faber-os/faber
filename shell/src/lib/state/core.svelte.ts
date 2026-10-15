@@ -53,6 +53,11 @@ export class CoreState {
   connectorsError = $state.raw<ErrorBody | null>(null);
   system = $state.raw<SystemInfo | null>(null);
   systemError = $state.raw<ErrorBody | null>(null);
+  /**
+   * True when the core was built from a different API than this shell (docs/api.md, "System").
+   * Every request may then fail in confusing ways, so the shell asks for a restart instead.
+   */
+  apiMismatch = $derived(this.system !== null && this.system.api !== FABER_API);
   logs = $state.raw<LogEntry[]>([]);
   /** Shared by every browser and the attached screen; `null` until the core has sent them. */
   settings = $state.raw<Settings | null>(null);
@@ -86,7 +91,8 @@ export class CoreState {
         // The logs topic replays recent entries on every new connection; start from them.
         if (status === 'connected') this.clearLogs();
         this.connection = status;
-        if (status === 'connected' && this.system === null) void this.loadSystem();
+        // Every connection may be a different core (restarted, rebuilt), so ask again each time.
+        if (status === 'connected') void this.loadSystem();
       }),
       s.onError((e) => (this.lastError = e)),
       s.subscribe(

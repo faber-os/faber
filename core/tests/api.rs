@@ -542,7 +542,7 @@ async fn settings_and_the_developer_guard() {
     let (_, mut settings) = call(&c.app, "GET", "/api/v0/settings", None).await;
     assert_eq!(
         settings["appearance"],
-        json!({"theme": "system", "style": "aluminium", "wallpaper": "aluminium"})
+        json!({"theme": "light", "style": "aluminium", "wallpaper": "aluminium"})
     );
     assert_eq!(settings["taskbar"]["size"], "small");
     settings["appearance"]["theme"] = json!("dark");

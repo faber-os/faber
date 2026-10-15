@@ -13,7 +13,7 @@ export const TOKENS_KEY = 'faber.tokens';
  * before the first paint.
  */
 export class ThemeController {
-  preference = $state<ThemePreference>('system');
+  preference = $state<ThemePreference>('light');
   systemDark = $state(false);
   /** '' until the settings have said; the colours are Aluminium's meanwhile. */
   style = $state('');
@@ -28,7 +28,7 @@ export class ThemeController {
     try {
       this.preference = parseThemePreference(storage?.getItem(STORAGE_KEY) ?? null);
     } catch {
-      this.preference = 'system';
+      this.preference = 'light';
     }
     if (media) {
       this.systemDark = media.matches;

@@ -8,7 +8,14 @@
     "strict": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "noEmit": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["vite.config.ts", "playwright.config.ts", "e2e/**/*.ts"]
+  "include": [
+    "vite.config.ts",
+    "apiFingerprint.ts",
+    "apiFingerprint.test.ts",
+    "playwright.config.ts",
+    "e2e/**/*.ts"
+  ]
 }

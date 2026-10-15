@@ -17,8 +17,9 @@ pub const FILE_NAME: &str = "settings.toml";
 #[ts(export)]
 pub enum Theme {
     /// Follow the browser or screen's light/dark preference.
-    #[default]
     System,
+    /// The default: Faber looks the same on every screen until someone picks otherwise.
+    #[default]
     Light,
     Dark,
 }
@@ -37,7 +38,7 @@ pub struct Appearance {
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: Theme::System, style: "aluminium".into(), wallpaper: "aluminium".into() }
+        Appearance { theme: Theme::Light, style: "aluminium".into(), wallpaper: "aluminium".into() }
     }
 }
 

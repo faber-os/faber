@@ -23,7 +23,7 @@ access, in Phase 6).
 
 | Method and path | Body / result |
 |---|---|
-| `GET /api/v0/system` | `SystemInfo` |
+| `GET /api/v0/system` | `SystemInfo`. Its `api` is a fingerprint of the API types the core was built with (`core/build.rs`); the shell computes its own the same way and, when they differ, asks for the core to be restarted instead of failing request by request. |
 | `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run |
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
