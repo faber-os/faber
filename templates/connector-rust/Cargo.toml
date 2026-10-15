@@ -1,0 +1,18 @@
+[package]
+name = "my-sensor"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# The Faber connector SDK, from your Faber checkout for now (faber new wrote these paths). Once
+# the SDK is on crates.io these become plain version numbers.
+faber-capabilities = { path = "../../sdk/rust/capabilities" }
+faber-connector = { path = "../../sdk/rust/connector" }
+
+# The component glue, only when building for WebAssembly (faber check and faber pack do that).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+faber-connector-wasm = { path = "../../sdk/rust/connector-wasm" }
+
+# A project of its own, not part of any other Cargo workspace.
+[workspace]

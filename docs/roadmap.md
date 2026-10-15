@@ -70,12 +70,23 @@ the e-stop stops the base.
 
 ## Phase 3: Packages and sandboxing
 
-- WIT interfaces for the starter capabilities and the port API
-- Wasmtime runtime: load, limit, restart, permissions
-- Move `ldrobot-ld19` to a `.wasm` connector, and prove it behaves identically
-- Declarative connector engine, plus `ti-tmp102`-style examples
-- Package format (`.faberpkg`), local install from a file
-- Rust connector template + `faber pack` CLI
+Design: [packages.md](packages.md). Guide: [your-first-connector.md](your-first-connector.md).
+
+- [x] WIT interfaces for the starter capabilities and the port API
+- [x] Wasmtime runtime: load, limit, restart, permissions
+- [x] Move `ldrobot-ld19` to a `.wasm` connector, and prove it behaves identically
+- [x] Declarative connector engine, plus examples for serial line devices (`line-distance`,
+  `nmea-gps`). The `ti-tmp102`-style register maps wait for the I²C bus (Phase 6)
+- [x] Package format (`.faberpkg`), local install from a file (Files, a drop, or the API), live,
+  with no restart; uninstall in Settings → Connectors
+- [x] Rust connector template + `faber` CLI (`faber new connector`, `faber check`, `faber pack`)
+- [x] A `position@1` viewer (coordinates, fix, satellites; a map link when online)
+
+**Status (2026-10-15):** done. `tools/faber-cli/tests/first_connector.rs` proves the "done when"
+below: a connector made from the template in a fresh folder is tested, checked, packed,
+installed on a running core, gives readings from inside the sandbox, and is uninstalled. It was
+also run by hand against a separate core, and `shell/e2e/packages.spec.ts` installs a package
+through the shell.
 
 **Done when:** a third party could write a connector from the template, and the core runs it sandboxed.
 

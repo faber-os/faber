@@ -66,6 +66,7 @@ still reads format 1; an older Faber refuses a newer format and says so.
 | `kind` | `"declarative"`. (`"wasm"` files are read by the wasm engine instead.) |
 | `version` | Three numbers: `"0.1.0"`. |
 | `name` | What people see in Add part. |
+| `publisher` | Optional: who made it, e.g. `"Ada Lovelace"`. Shown in the install dialog. |
 
 ### `[ports]`
 

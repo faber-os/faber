@@ -28,6 +28,8 @@ sdk/rust/connector-wasm/  faber-connector-wasm: builds a connector as a WebAssem
 connectors/ldrobot-ld19/  first connector: built in, and the same code as a WebAssembly component
 shell/                    the web desktop (Svelte 5 + Vite + TypeScript)
 tools/arch-check/         enforces the crate dependency rules below
+tools/faber-cli/          the `faber` command: new connector from a template, check, pack
+templates/                the connector templates `faber new connector` copies (Rust/wasm, declarative)
 wit/                      capability interfaces, and the connector world (wit/connector)
 fixtures/                 test data, e.g. a real LD19 capture
 ```
@@ -49,6 +51,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | `faber-connector-wasm` | `faber-connector`, `faber-capabilities`, `toml`, `wit-bindgen` (the component glue; its generated code is the only `unsafe` allowed outside the core's dependencies) | I/O, `faber-core` |
 | connectors (`connectors/*`, and the core's test guests in `core/tests/wasm-guests/*`) | `faber-connector`, `faber-capabilities`, `toml`, and `faber-connector-wasm` for their wasm build | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
 | `faber-core` | everything above, plus I/O crates | — |
+| `faber-cli` (the `faber` command) | `faber-core` (its package checks and its sandbox, so `faber check` accepts exactly what a machine runs), `faber-connector`, `faber-capabilities`, `clap`, `toml`, `wit-component` | anything else |
 
 **Inside `faber-core`**, the modules form layers. A module may only use the layers below it:
 
@@ -57,7 +60,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | 5 | `api` | HTTP + WebSocket. Translates between the wire and the machine. No logic of its own. |
 | 4 | `machine` | Ties everything together. The only place that changes what runs: it writes `parts.toml` first, then reconciles. |
 | 3 | `declarative`, `runtime`, `simparts`, `suggest`, `wasm` | Supervising parts, the declarative connector engine (connectors that are only a `faber.toml`), the world engine that runs `simulate = "world"` parts, detect-then-suggest, and running wasm connectors in their sandbox (docs/packages.md). Built on layer 2. |
-| 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `ports`, `router`, `settings`, `sim`, `simulation`, `translations` | One job each. They don't know about HTTP or each other. |
+| 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `packages`, `ports`, `router`, `settings`, `sim`, `simulation`, `translations` | One job each. They don't know about HTTP or each other. |
 | 1 | `clock`, `names` | Small pure building blocks. |
 
 This is enforced by `core/tests/layers.rs`, which fails with the file and line of any import that
@@ -88,6 +91,8 @@ that isn't. How translations work, and `npm run i18n:check`: [translations.md](t
 | Shell units | Vitest + Testing Library | `shell/src/**/*.test.ts` |
 | End-to-end | Playwright | `shell/e2e/`. Builds the shell, starts the real core with it compiled in (`embed-shell`), adds a part on the demo recording and checks that a scan is drawn, at desktop and 7" sizes |
 | Wasm connectors | `cargo test` | `core/tests/wasm.rs` builds the LD19 and a misbehaving test guest for `wasm32-unknown-unknown` and runs them in the sandbox. Without that target the tests are skipped with a message (`rustup target add wasm32-unknown-unknown`); CI sets `FABER_REQUIRE_WASM=1` so they always run there |
+| The `faber` CLI and its templates | `cargo test` | `tools/faber-cli`: `tests/first_connector.rs` is the Phase 3 proof (a new connector from the template, tested, checked, packed, installed through the API on a test core, run on a recording and uninstalled), skipped like the wasm tests without the target; the unit tests check and pack the declarative template and write the fixtures the templates and the e2e test use |
+| Packages | `cargo test` | `core/tests/packages.rs`: preview, install while the core runs, parts restarting on an update, uninstall refused while used, and every refusal with its hint |
 | Interfaces | `wasm-tools component wit wit/capabilities`, and the connector world (see [wit/connector](../wit/connector/README.md)) | CI |
 
 ## End-to-end tests

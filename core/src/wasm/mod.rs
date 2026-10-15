@@ -17,7 +17,7 @@
 mod convert;
 mod installed;
 
-pub use installed::load_installed;
+pub use installed::{load_folder, load_installed};
 
 use faber_capabilities::{Command, Reading, Timestamp};
 use faber_connector::{

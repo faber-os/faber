@@ -1,6 +1,9 @@
 import { t } from '../i18n';
 import type { ApiError } from './generated/ApiError';
 import type { ConnectorInfo } from './generated/ConnectorInfo';
+import type { ConnectorProblem } from './generated/ConnectorProblem';
+import type { PackageInfo } from './generated/PackageInfo';
+import type { PackagePreview } from './generated/PackagePreview';
 import type { ErrorBody } from './generated/ErrorBody';
 import type { NewPart } from './generated/NewPart';
 import type { PartInfo } from './generated/PartInfo';
@@ -42,6 +45,16 @@ export interface CoreHttp {
   getSystem(): Promise<SystemInfo>;
   getAbout(): Promise<AboutInfo>;
   getConnectors(): Promise<ConnectorInfo[]>;
+  /** Installed connectors the core couldn't load, each with why and what to do. */
+  getConnectorProblems(): Promise<ConnectorProblem[]>;
+  /** Installed connector packages (docs/api.md, "Packages"). */
+  getPackages(): Promise<PackageInfo[]>;
+  /** Checks a package file in full and says what it would install, installing nothing. */
+  previewPackage(file: Uint8Array | Blob, name: string): Promise<PackagePreview>;
+  /** Installs a package file; `name` is remembered as where it came from. */
+  installPackage(file: Uint8Array | Blob, name: string): Promise<PackageInfo>;
+  /** `409 package-in-use` while a part uses its connector (the message names them). */
+  uninstallPackage(id: string): Promise<void>;
   getPorts(): Promise<PortInfo[]>;
   getParts(): Promise<PartInfo[]>;
   addPart(part: NewPart): Promise<PartInfo>;
@@ -50,6 +63,8 @@ export interface CoreHttp {
   getRoots(): Promise<FileRoot[]>;
   listFolder(path: string): Promise<FolderListing>;
   readFile(path: string): Promise<Uint8Array>;
+  /** The whole file, of any size (`readFile` stops at 16 MB), e.g. a package to install. */
+  downloadFile(path: string): Promise<Blob>;
   /**
    * Writes the file (at most 16 MB). `replace` (the default) creates or overwrites it; `create`
    * only creates it, and is refused with `409 already-exists` when it is already there.
@@ -146,8 +161,12 @@ export function createHttp(
   }
 
   /** A JSON answer, or `undefined` for an empty success (204, or a 201 without a body). */
-  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await send(method, path, body === undefined ? undefined : { json: body });
+  function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    return answer<T>(method, path, body === undefined ? undefined : { json: body });
+  }
+
+  async function answer<T>(method: string, path: string, body: Body): Promise<T> {
+    const res = await send(method, path, body);
     if (res.status === 204) return undefined as T;
     const text = await res.text();
     if (!res.ok) throw failure(res, method, path, text);
@@ -192,12 +211,19 @@ export function createHttp(
   }
 
   const q = (path: string) => `?path=${encodeURIComponent(path)}`;
+  const named = (name: string) => `name=${encodeURIComponent(name)}`;
   const partPath = (name: string) => `/parts/${encodeURIComponent(name)}`;
 
   return {
     getSystem: () => request('GET', '/system'),
     getAbout: () => request('GET', '/about'),
     getConnectors: () => request('GET', '/connectors'),
+    getConnectorProblems: () => request('GET', '/connectors/problems'),
+    getPackages: () => request('GET', '/packages'),
+    previewPackage: (file, name) =>
+      answer('POST', `/packages?mode=preview&${named(name)}`, { raw: file }),
+    installPackage: (file, name) => answer('POST', `/packages?${named(name)}`, { raw: file }),
+    uninstallPackage: (id) => request('DELETE', `/packages/${encodeURIComponent(id)}`),
     getPorts: () => request('GET', '/ports'),
     getParts: () => request('GET', '/parts'),
     addPart: (part) => request('POST', '/parts', part),
@@ -206,6 +232,11 @@ export function createHttp(
     getRoots: () => request('GET', '/files/roots'),
     listFolder: (path) => request('GET', `/files/list${q(path)}`),
     readFile: (path) => requestBytes('GET', `/files/content${q(path)}`),
+    downloadFile: async (path) => {
+      const res = await send('GET', `/files/content${q(path)}&download=1`, undefined);
+      if (!res.ok) throw failure(res, 'GET', '/files/content', await res.text());
+      return res.blob();
+    },
     writeFile: async (path, bytes, mode = 'replace') => {
       const m = mode === 'create' ? '&mode=create' : '';
       await requestBytes('PUT', `/files/content${q(path)}${m}`, { raw: bytes });

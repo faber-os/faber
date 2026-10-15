@@ -139,6 +139,33 @@ describe('Add part flow', () => {
     expect(screen.getByRole('radio', { name: /ldrobot-ld19/ })).toBeChecked();
   });
 
+  it('says when installed connectors could not be loaded, and where to read why', async () => {
+    const shell = setup();
+    shell.fetch.route({
+      path: '/api/v0/connectors/problems',
+      body: [{ folder: 'broken', message: 'It broke.', hint: 'Fix it.' }],
+    });
+    shell.pushPorts([SAMPLE_PORT]);
+    shell.pushParts([]);
+    await userEvent.click(await screen.findByRole('button', { name: /^Add the first part$/ }));
+    expect(
+      await screen.findByText(/One installed connector could not be loaded/),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
+    const settings = shell.desktop.state.windows.find((w) => w.kind === 'settings');
+    expect(settings?.params).toEqual({ section: 'connectors' });
+  });
+
+  it('offers a connector installed since the form was last opened', async () => {
+    const shell = setup();
+    shell.pushPorts([SAMPLE_PORT]);
+    shell.pushParts([]);
+    const acme = { ...LD19, id: 'acme-ranger', name: 'Acme ranger', kind: 'wasm' };
+    shell.fetch.route({ path: '/api/v0/connectors', body: [LD19, acme] });
+    await userEvent.click(await screen.findByRole('button', { name: /^Add the first part$/ }));
+    expect(await screen.findByRole('radio', { name: /Acme ranger/ })).toBeInTheDocument();
+  });
+
   it('explains an invalid name before sending anything', async () => {
     const shell = await openForm();
     await userEvent.click(screen.getByRole('radio', { name: /replay:ld19-sample/ }));

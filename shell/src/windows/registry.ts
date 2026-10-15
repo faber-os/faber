@@ -4,11 +4,13 @@ import AboutWindow from './AboutWindow.svelte';
 import DistanceWindow from './DistanceWindow.svelte';
 import DriveWindow from './DriveWindow.svelte';
 import FilesWindow from './FilesWindow.svelte';
+import InstallPackageWindow from './InstallPackageWindow.svelte';
 import LaserScanWindow from './LaserScanWindow.svelte';
 import LogsWindow from './LogsWindow.svelte';
 import NotesWindow from './NotesWindow.svelte';
 import PartsWindow from './PartsWindow.svelte';
 import PlanarBaseWindow from './PlanarBaseWindow.svelte';
+import PositionWindow from './PositionWindow.svelte';
 import PropertiesWindow from './PropertiesWindow.svelte';
 import SerialMonitorWindow from './SerialMonitorWindow.svelte';
 import SettingsWindow from './SettingsWindow.svelte';
@@ -65,6 +67,22 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 440, h: 360 },
     minSize: { w: 300, h: 280 },
     component: DistanceWindow,
+  },
+  {
+    kind: 'position',
+    get title() {
+      return t('programs.position.title');
+    },
+    get description() {
+      return t('programs.position.description');
+    },
+    icon: 'position',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 460, h: 380 },
+    minSize: { w: 300, h: 260 },
+    component: PositionWindow,
   },
   {
     kind: 'planar-base',
@@ -206,6 +224,23 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 620, h: 560 },
     minSize: { w: 340, h: 320 },
     component: SettingsWindow,
+  },
+  {
+    // A connector package to install (docs/packages.md §1), opened from Files or a drop.
+    kind: 'install-package',
+    get title() {
+      return t('programs.install.title');
+    },
+    get description() {
+      return t('programs.install.description');
+    },
+    icon: 'package',
+    menu: null,
+    colour: 'parts',
+    multiple: true,
+    defaultSize: { w: 560, h: 620 },
+    minSize: { w: 340, h: 360 },
+    component: InstallPackageWindow,
   },
   {
     kind: 'properties',

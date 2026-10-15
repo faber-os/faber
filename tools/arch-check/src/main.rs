@@ -27,6 +27,15 @@ fn rule_for(name: &str, manifest_path: &str) -> Option<Rule> {
             Some(Rule::Only(&["faber-connector", "faber-capabilities", "toml", "wit-bindgen"]))
         }
         "faber-core" => Some(Rule::Anything),
+        // The `faber` command: the core's own checks and sandbox, plus the component wrapper.
+        "faber-cli" => Some(Rule::Only(&[
+            "faber-core",
+            "faber-connector",
+            "faber-capabilities",
+            "clap",
+            "toml",
+            "wit-component",
+        ])),
         "faber-arch-check" => Some(Rule::Only(&["serde_json"])),
         _ => None,
     }
@@ -149,6 +158,17 @@ mod tests {
             pkg("test-guest", "/r/core/tests/wasm-guests/x/Cargo.toml", &[("serialport", None)]),
         ]});
         assert_eq!(violations(&m).len(), 2);
+    }
+
+    #[test]
+    fn the_cli_uses_the_core_and_nothing_with_its_own_io() {
+        let m = json!({"packages": [
+            pkg("faber-cli", "/r/tools/faber-cli/Cargo.toml", &[("faber-core", None), ("wit-component", None), ("axum", Some("dev"))]),
+        ]});
+        assert!(violations(&m).is_empty(), "{:?}", violations(&m));
+        let m =
+            json!({"packages": [pkg("faber-cli", "/r/tools/faber-cli/Cargo.toml", &[("reqwest", None)])]});
+        assert_eq!(violations(&m).len(), 1);
     }
 
     #[test]

@@ -31,7 +31,8 @@ access, in Phase 6).
 | `GET /api/v0/system` | `SystemInfo`. Its `api` is a fingerprint of the API types the core was built with (`core/build.rs`); the shell computes its own the same way and, when they differ, asks for the core to be restarted instead of failing request by request. `timeZone` is the machine's own IANA time zone (e.g. `Europe/Copenhagen`), read from its OS each time; `UTC` (with a log line) if the OS doesn't say. |
 | `GET /api/v0/about` | `AboutInfo`: `version`, `api` (the fingerprint), `dataFolder` (where config and files live on this computer), `uptimeS` (seconds since the core started), `os`, `timeZone` (the machine's own). |
 | `GET /api/v0/connectors` | `ConnectorInfo[]`: every connector the core can run: the built-in ones and those installed in `<data>/connectors/<id>/`. `kind` says how it runs: `built-in`, `declarative` (only a `faber.toml`, run by the core's engine; [connectors-declarative.md](connectors-declarative.md)) or `wasm`. Each `provides` entry carries its capability's `info` (limits, e.g. a distance sensor's range) with the default settings; a part's own limits are in its `signals` (below). `port` is `{"kind": "serial", "baud": …}` or `{"kind": "bridge"}` (needs a FaberLink bridge, Phase 4; until then only simulated). `settings` describes every setting a part of this kind takes, in form order: `key`, `label`, `description` (both in English for now), `unit?`, `advanced` (shown behind "Advanced"), and `kind` with its values: `number` (`default`, `min?`, `minExclusive?`, `max?`, `suggested?`: where a new part's form starts), `bool` (`default`), `choice` (`default`, `choices`: `value`, `label`), `string` (`default`) or `part-list` (other parts' names, empty by default). `default` is what a part gets when parts.toml leaves the setting out. |
-| `GET /api/v0/connectors/problems` | `ConnectorProblem[]`: installed connectors (wasm or declarative) the core couldn't load when it started, each with its `folder` in `<data>/connectors/`, a `message` and a `hint`. The core runs without them. |
+| `GET /api/v0/connectors/problems` | `ConnectorProblem[]`: installed connectors (wasm or declarative) the core couldn't load, when it started or since a package was installed or removed, each with its `folder` in `<data>/connectors/`, a `message` and a `hint`. The core runs without them. |
+| `GET /api/v0/packages`, `POST /api/v0/packages`, `DELETE /api/v0/packages/{id}` | Connector packages: see [Packages](#packages). |
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
 | `GET /api/v0/parts` | `PartInfo[]` |
@@ -335,6 +336,30 @@ English is built into the shell and is never listed. How to write one: [translat
 The core doesn't check the texts inside a file: the shell does, key by key, and shows English for
 anything it can't use. How complete a translation is (the percentage in Settings) is worked out by
 the shell too, since only the shell has the English catalogue.
+
+## Packages
+
+A connector package (`.faberpkg`, [packages.md](packages.md) §5) is a zip with `faber.toml` at its
+root, `connector.wasm` (wasm connectors only), `README.md`, `LICENSE`, and optionally `icon.svg` and
+`captures/*.fbcap`. Installing one needs no restart: the connector is offered by
+`GET /api/v0/connectors` at once, and parts already using that connector restart with the new
+version. Until the store exists (Phase 7), nothing is checked by the Faber registry: every package
+says `checked: false`, and the shell says so before installing.
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/packages` | `PackageInfo[]`, by id: `id`, `name`, `version`, `kind` (`wasm` or `declarative`), `publisher?`, `installedAt` (RFC 3339, UTC), `source` (the file it came from), `checked` (always `false` for now), `usedBy` (the parts using it), and `problem?` (a `ConnectorProblem`, when its connector isn't loaded). Read from `<data>/config/packages.toml`. Errors: `500 io-error` (that file can't be read; the hint says how to recover). |
+| `POST /api/v0/packages?mode=preview&name=<file name>` | The package file as the body (any content type). Checks it in full, exactly as installing would, and installs nothing: `200 PackagePreview`: `connector` (a `ConnectorInfo`, as `GET /api/v0/connectors` will list it; its `port` is what it can touch), `publisher?`, `readme` (the README as text: show it as text or safe Markdown, never as HTML), `captures` (its recordings), `replaces?` (the version installed now) and `checked`. |
+| `POST /api/v0/packages?name=<file name>` | The same, and installs it into `<data>/connectors/<id>/`: `201 PackageInfo`. `name` is remembered as `source` (default `upload.faberpkg`). The version it replaces is kept until the new one has loaded; if it doesn't load, the old one is put back. |
+| `DELETE /api/v0/packages/{id}` | `204`. Removes the folder and its line in `packages.toml`. Errors: `404 not-installed`, `409 package-in-use` (a part uses its connector: the message names the parts; remove them first). |
+
+Errors from `POST`, each with a hint: `400 bad-request` (a `mode` other than `preview`),
+`413 package-too-big` (over 50 MB, as a file or unpacked), `422 package-invalid` (not a zip, a path
+outside the package such as `../x` or `/etc/x`, a missing `faber.toml`, `README.md`, `LICENSE` or
+`.wasm`, a file a package may not hold, or a `[package]` header that can't be read),
+`422 package-not-loadable` (the connector itself doesn't load: a `faber.toml` mistake with its line,
+a rule that doesn't read, or a component that isn't one or asks for more than the connector world,
+such as WASI), `409 package-id-taken` (its id is a built-in connector's).
 
 ## Recordings
 

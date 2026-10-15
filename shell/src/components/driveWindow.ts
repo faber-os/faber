@@ -16,6 +16,7 @@ const VIEWERS: Partial<
   'laser-scan@1': { kind: 'laser-scan', title: (name) => t('parts.title.viewer', { name }) },
   'distance@1': { kind: 'distance', title: (name) => t('parts.title.distance', { name }) },
   'planar-base@1': { kind: 'planar-base', title: (name) => t('parts.title.base', { name }) },
+  'position@1': { kind: 'position', title: (name) => t('parts.title.position', { name }) },
 };
 
 /** The signals of a part that Faber can draw. */

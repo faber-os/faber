@@ -3,3 +3,6 @@
 
 # Raw captures from serial ports.
 *.fbcap binary
+
+# Connector packages (zip files), e.g. the shell's end-to-end fixture.
+*.faberpkg binary

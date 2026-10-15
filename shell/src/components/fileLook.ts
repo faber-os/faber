@@ -44,6 +44,8 @@ export function entryIcon(e: Pick<FileEntry, 'kind' | 'name' | 'special'>): Icon
       return 'folder';
     case 'recording':
       return 'recording';
+    case 'package':
+      return 'package';
     case 'text':
     case 'markdown':
     case 'config':

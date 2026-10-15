@@ -3,9 +3,11 @@
 //! the source of truth**. Changes are written to the file first, then `reconcile` makes the
 //! running parts match it.
 
+mod packages;
 mod safety;
 mod world;
 
+pub use packages::{PackagePreview, PackageView, installed_connectors};
 pub use safety::{CommandReply, EstopView, LeaseEvent};
 pub use world::{DEFAULT_WORLD, WorldChanged, WorldView};
 
@@ -42,7 +44,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tokio::sync::{broadcast, watch};
@@ -60,6 +62,9 @@ pub struct MachineOptions {
     pub disks: Arc<dyn DiskDiscovery>,
     pub opener: Arc<dyn PortOpener>,
     pub replays: ReplayLibrary,
+    /// The connectors that come with the core (built-in). Those installed in
+    /// `<data>/connectors/` are added by the machine itself, and reloaded when a package is
+    /// installed or removed.
     pub connectors: Vec<Definition>,
     pub timing: Timing,
     /// How often to look for new or removed ports. `None` = only when asked (tests).
@@ -94,6 +99,8 @@ pub enum ErrorKind {
     Locked,
     /// The disk is too full for it.
     InsufficientStorage,
+    /// The request is larger than the core accepts (a package file).
+    TooLarge,
 }
 
 impl From<FileError> for MachineError {
@@ -224,9 +231,15 @@ pub struct Machine {
     disks: Arc<dyn DiskDiscovery>,
     opener: Arc<dyn PortOpener>,
     replays: ReplayLibrary,
-    connectors: Vec<Definition>,
-    /// Installed connectors that couldn't be loaded, and why ([`Machine::report_connector_problems`]).
+    /// The connectors that come with the core ([`MachineOptions::connectors`]).
+    base_connectors: Vec<Definition>,
+    /// Those plus the installed ones. Replaced when a package is installed or removed; taken
+    /// after the state lock, never before it.
+    connectors: RwLock<Vec<Definition>>,
+    /// Installed connectors that couldn't be loaded, and why.
     connector_problems: Mutex<Vec<LoadProblem>>,
+    /// One package install or removal at a time.
+    package_lock: Mutex<()>,
     timing: Timing,
     data_dir: PathBuf,
     config_path: PathBuf,
@@ -268,6 +281,8 @@ impl Machine {
         let translations = Translations::open(&config_dir);
         let router = Arc::new(Router::new());
         opts.world.attach(Arc::clone(&router));
+        let (connectors, connector_problems) =
+            installed_connectors(opts.connectors.clone(), &opts.data_dir.join("connectors"));
         let machine = Arc::new(Machine {
             clock: opts.clock,
             router,
@@ -277,8 +292,10 @@ impl Machine {
             disks: opts.disks,
             opener: opts.opener,
             replays: opts.replays,
-            connectors: opts.connectors,
-            connector_problems: Mutex::new(Vec::new()),
+            base_connectors: opts.connectors,
+            connectors: RwLock::new(connectors),
+            connector_problems: Mutex::new(connector_problems),
+            package_lock: Mutex::new(()),
             timing: opts.timing,
             data_dir: opts.data_dir.clone(),
             config_path,
@@ -371,26 +388,27 @@ impl Machine {
     }
 
     pub fn connectors(&self) -> Vec<Manifest> {
-        self.connectors.iter().map(|d| d.manifest.clone()).collect()
+        self.connectors.read().expect("connectors lock").iter().map(|d| d.manifest.clone()).collect()
     }
 
     /// Every connector with how it runs (built-in, declarative, …).
     pub fn connector_kinds(&self) -> Vec<(ConnectorKind, Manifest)> {
-        self.connectors.iter().map(|d| (d.kind, d.manifest.clone())).collect()
+        self.connectors
+            .read()
+            .expect("connectors lock")
+            .iter()
+            .map(|d| (d.kind, d.manifest.clone()))
+            .collect()
     }
 
     /// Installed connectors that couldn't be loaded ([`crate::connectors::LoadProblem`]), so the
-    /// API can say why one is missing. Set once, by whoever loaded them (`all_connectors`).
-    pub fn report_connector_problems(&self, problems: Vec<LoadProblem>) {
-        *self.connector_problems.lock().expect("connector problems lock") = problems;
-    }
-
+    /// API can say why one is missing.
     pub fn connector_problems(&self) -> Vec<LoadProblem> {
         self.connector_problems.lock().expect("connector problems lock").clone()
     }
 
-    fn definition(&self, id: &str) -> Option<&Definition> {
-        self.connectors.iter().find(|d| d.manifest.id == id)
+    fn definition(&self, id: &str) -> Option<Definition> {
+        self.connectors.read().expect("connectors lock").iter().find(|d| d.manifest.id == id).cloned()
     }
 
     pub fn parts(&self) -> Vec<PartView> {
@@ -699,7 +717,7 @@ impl Machine {
         };
         let runner = match cfg.source {
             Source::Simulated(mode) => self.start_simulated(st, name, cfg, mode, &provides),
-            Source::Port(_) => self.start_real(st, name, cfg, definition).map(Runner::Real),
+            Source::Port(_) => self.start_real(st, name, cfg, &definition).map(Runner::Real),
         };
         (runner, provides)
     }

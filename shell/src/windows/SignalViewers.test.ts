@@ -12,6 +12,7 @@ import {
 import type { WindowState } from '../lib/desktop/windows';
 import DistanceWindow from './DistanceWindow.svelte';
 import PlanarBaseWindow from './PlanarBaseWindow.svelte';
+import PositionWindow from './PositionWindow.svelte';
 
 function win(kind: string, address: string, part: string): WindowState {
   return {
@@ -28,7 +29,10 @@ function win(kind: string, address: string, part: string): WindowState {
   };
 }
 
-function setup(component: typeof DistanceWindow | typeof PlanarBaseWindow, w: WindowState) {
+function setup(
+  component: typeof DistanceWindow | typeof PlanarBaseWindow | typeof PositionWindow,
+  w: WindowState,
+) {
   const shell = fakeShell([{ path: '/api/v0/connectors', body: [GENERIC_BASE, GENERIC_DISTANCE] }]);
   render(component, { props: { win: w, visible: true }, context: shell.context });
   return shell;
@@ -108,5 +112,52 @@ describe('Drive base viewer', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Drive' }));
     const drive = shell.desktop.state.windows.find((x) => x.kind === 'drive');
     expect(drive?.params).toEqual({ part: 'base' });
+  });
+});
+
+describe('Position viewer', () => {
+  const w = win('position', 'gps/position', 'gps');
+  const reading = {
+    tUs: 1,
+    latitudeDeg: 55.676098,
+    longitudeDeg: 12.568337,
+    altitudeM: 12.5,
+    fix: 'fix3d' as const,
+    satellites: 7,
+  };
+
+  it('shows the coordinates, fix and satellites, and links to a map when online', async () => {
+    const shell = setup(PositionWindow, w);
+    const sub = shell.sent().find((m) => m.topic?.kind === 'signal');
+    expect(sub?.topic).toEqual({ kind: 'signal', address: 'gps/position', maxHz: 5 });
+    shell.pushReading('gps/position', { capability: 'position@1', reading });
+    const facts = await screen.findByTestId('position');
+    expect(facts).toHaveTextContent('55.676098° N');
+    expect(facts).toHaveTextContent('12.568337° E');
+    expect(facts).toHaveTextContent('3D');
+    expect(facts).toHaveTextContent('7');
+    expect(facts).toHaveTextContent('12.5 m');
+    const map = screen.getByRole('link', { name: 'Open in OpenStreetMap' });
+    expect(map.getAttribute('href')).toContain('mlat=55.676098&mlon=12.568337');
+    expect(map).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('offers no map while offline, and says when there is no fix yet', async () => {
+    const online = Object.getOwnPropertyDescriptor(Navigator.prototype, 'onLine');
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false });
+    try {
+      const shell = setup(PositionWindow, w);
+      shell.pushReading('gps/position', { capability: 'position@1', reading });
+      expect(await screen.findByText(/Connect this computer to the internet/)).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Open in OpenStreetMap' })).toBeNull();
+      shell.pushReading('gps/position', {
+        capability: 'position@1',
+        reading: { ...reading, fix: 'none', satellites: 0 },
+      });
+      expect(await screen.findByText('No fix yet')).toBeInTheDocument();
+    } finally {
+      delete (navigator as unknown as Record<string, unknown>).onLine;
+      if (online) Object.defineProperty(Navigator.prototype, 'onLine', online);
+    }
   });
 });

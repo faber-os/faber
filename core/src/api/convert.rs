@@ -174,6 +174,38 @@ pub fn connector_problem(p: &LoadProblem) -> dto::ConnectorProblem {
     }
 }
 
+pub fn package_preview(p: &crate::machine::PackagePreview) -> dto::PackagePreview {
+    let kind = if p.header.kind == "wasm" { ConnectorKind::Wasm } else { ConnectorKind::Declarative };
+    dto::PackagePreview {
+        connector: connector(&p.manifest, kind),
+        publisher: p.header.publisher.clone(),
+        readme: p.readme.clone(),
+        captures: p.captures.clone(),
+        replaces: p.replaces.clone(),
+        checked: false,
+    }
+}
+
+pub fn package(p: &crate::machine::PackageView) -> dto::PackageInfo {
+    let i = &p.installed;
+    dto::PackageInfo {
+        id: i.id.clone(),
+        name: i.name.clone(),
+        version: i.version.clone(),
+        kind: i.kind.clone(),
+        publisher: i.publisher.clone(),
+        installed_at: i.installed_at.clone(),
+        source: i.source.clone(),
+        checked: i.checked,
+        used_by: p.used_by.iter().map(|n| n.to_string()).collect(),
+        problem: p.problem.as_ref().map(|pr| dto::ConnectorProblem {
+            folder: i.id.clone(),
+            message: pr.message.clone(),
+            hint: pr.hint.clone(),
+        }),
+    }
+}
+
 pub fn port_problem(p: &PortProblem) -> dto::PortProblem {
     dto::PortProblem {
         code: p.code.to_string(),

@@ -11,6 +11,9 @@ import {
 import type {
   ConnectionStatus,
   ConnectorInfo,
+  ConnectorProblem,
+  PackageInfo,
+  PackagePreview,
   ErrorBody,
   LogEntry,
   NewPart,
@@ -86,6 +89,10 @@ export class CoreState {
   portProblems = $state.raw<PortProblem[]>([]);
   connectors = $state.raw<ConnectorInfo[] | null>(null);
   connectorsError = $state.raw<ErrorBody | null>(null);
+  /** Installed connectors the core couldn't load, with why (docs/api.md). */
+  connectorProblems = $state.raw<ConnectorProblem[]>([]);
+  /** Installed connector packages; `null` until loaded (Settings → Connectors loads them). */
+  packages = $state.raw<PackageInfo[] | null>(null);
   system = $state.raw<SystemInfo | null>(null);
   systemError = $state.raw<ErrorBody | null>(null);
   /**
@@ -269,12 +276,42 @@ export class CoreState {
     locale.use(choice?.translation ? code : 'en', choice?.translation ?? null);
   }
 
+  /** The connectors, and the installed ones that couldn't be loaded. */
   async loadConnectors(): Promise<void> {
-    const r = await this.call(() => this.http.getConnectors());
+    const [r, problems] = await Promise.all([
+      this.call(() => this.http.getConnectors()),
+      this.call(() => this.http.getConnectorProblems()),
+    ]);
     if (r.ok) {
       this.connectors = r.value;
       this.connectorsError = null;
     } else this.connectorsError = r.error;
+    if (problems.ok) this.connectorProblems = problems.value;
+  }
+
+  async loadPackages(): Promise<Result<PackageInfo[]>> {
+    const r = await this.call(() => this.http.getPackages());
+    if (r.ok) this.packages = r.value;
+    return r;
+  }
+
+  /** What a package file would install, checked in full by the core; nothing is installed. */
+  previewPackage(file: Uint8Array | Blob, name: string): Promise<Result<PackagePreview>> {
+    return this.call(() => this.http.previewPackage(file, name));
+  }
+
+  /** Installs a package; its connector is offered in Add part as soon as this returns. */
+  async installPackage(file: Uint8Array | Blob, name: string): Promise<Result<PackageInfo>> {
+    const r = await this.call(() => this.http.installPackage(file, name));
+    if (r.ok) await Promise.all([this.loadConnectors(), this.loadPackages()]);
+    return r;
+  }
+
+  /** Refused (`package-in-use`, naming the parts) while a part uses its connector. */
+  async uninstallPackage(id: string): Promise<Result<void>> {
+    const r = await this.call(() => this.http.uninstallPackage(id));
+    if (r.ok) await Promise.all([this.loadConnectors(), this.loadPackages()]);
+    return r;
   }
 
   async loadSystem(): Promise<void> {
@@ -344,6 +381,10 @@ export class CoreState {
   }
   readFile(path: string): Promise<Result<Uint8Array>> {
     return this.call(() => this.http.readFile(path));
+  }
+  /** The whole file, of any size, e.g. a package to install. */
+  downloadFile(path: string): Promise<Result<Blob>> {
+    return this.call(() => this.http.downloadFile(path));
   }
   /** `create` never overwrites: an existing file is refused with `already-exists`. */
   writeFile(

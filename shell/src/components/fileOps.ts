@@ -13,19 +13,22 @@ import type { CoreState } from '../lib/state/core.svelte';
 import type { FileEntry } from '../lib/state/types';
 import type { DesktopController } from './desktopController.svelte';
 import { fileLook } from './fileLook';
+import { isPackageFile } from '../lib/desktop/packages';
+import { openPackage } from './installWindow';
 import { formatBytes } from './format';
 
 /**
  * What files and folders do when opened, the same on the desktop and in Files: folders open in
- * Files, recordings explain themselves, everything else opens in Notes (which says clearly when a
- * file isn't text).
+ * Files, recordings explain themselves, connector packages open the Install window, everything
+ * else opens in Notes (which says clearly when a file isn't text).
  */
 export function openEntry(desktop: DesktopController, entry: FileEntry): void {
   if (entry.kind === 'folder') openFolder(desktop, entry.path);
   else if (extension(entry.name) === 'fbcap') {
     desktop.noteRecent(entry.path);
     openProperties(desktop, entry);
-  } else openInNotes(desktop, entry.path);
+  } else if (isPackageFile(entry.name)) openPackage(desktop, entry.path);
+  else openInNotes(desktop, entry.path);
 }
 
 export function openFolder(desktop: DesktopController, path: string): void {

@@ -40,6 +40,18 @@ pub fn load_installed(dir: &Path, limits: Limits) -> (Vec<Definition>, Vec<LoadP
     (defs, problems)
 }
 
+/// Loads the one wasm connector in `folder`, which must be named after its id: what the
+/// package installer checks a package with before it installs it.
+pub fn load_folder(folder: &Path, limits: Limits) -> Result<Definition, Problem> {
+    let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    load_one(folder, &name, limits)?.ok_or_else(|| {
+        Problem::new(
+            format!("The connector in \"{name}\" isn't a wasm connector."),
+            "Use kind = \"wasm\" in its faber.toml.",
+        )
+    })
+}
+
 fn load_one(folder: &Path, name: &str, limits: Limits) -> Result<Option<Definition>, Problem> {
     // A folder without a readable faber.toml is the declarative engine's to report.
     let Ok(text) = std::fs::read_to_string(folder.join(manifest_file::FILE_NAME)) else { return Ok(None) };

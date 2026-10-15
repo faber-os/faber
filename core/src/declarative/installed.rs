@@ -41,6 +41,18 @@ pub fn load_installed(dir: &Path) -> (Vec<Definition>, Vec<LoadProblem>) {
     (defs, problems)
 }
 
+/// Loads the one declarative connector in `folder`, which must be named after its id: what the
+/// package installer checks a package with before it installs it.
+pub fn load_folder(folder: &Path) -> Result<Definition, Problem> {
+    let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    load_one(folder, &name)?.ok_or_else(|| {
+        Problem::new(
+            format!("The connector in \"{name}\" isn't a declarative connector."),
+            "Use kind = \"declarative\" in its faber.toml.",
+        )
+    })
+}
+
 /// Reads one folder and hands it to the reader for its `kind`. `Ok(None)`: another engine's.
 fn load_one(folder: &Path, name: &str) -> Result<Option<Definition>, Problem> {
     let text = std::fs::read_to_string(folder.join(FILE_NAME)).map_err(|e| {
@@ -119,6 +131,19 @@ line = { pattern = "D:{meters:f32}" }
         assert_eq!(problems, []);
         assert_eq!(defs.len(), 1);
         assert_eq!((defs[0].manifest.id.as_str(), defs[0].kind.id()), ("my-sensor", "declarative"));
+    }
+
+    #[test]
+    fn one_folder_loads_on_its_own() {
+        let root = tempfile::tempdir().unwrap();
+        folder(root.path(), "my-sensor", Some(TOML));
+        assert_eq!(load_folder(&root.path().join("my-sensor")).unwrap().manifest.id, "my-sensor");
+        folder(root.path(), "other", Some(TOML));
+        assert!(load_folder(&root.path().join("other")).unwrap_err().hint.contains("Rename"));
+        folder(root.path(), "a-wasm-one", Some(&TOML.replace("declarative", "wasm")));
+        assert!(
+            load_folder(&root.path().join("a-wasm-one")).unwrap_err().message.contains("isn't a declarative")
+        );
     }
 
     #[test]

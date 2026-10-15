@@ -1,0 +1,27 @@
+faber-manifest = 1
+
+# A declarative connector: no code, only this file. Faber's engine reads the lines your device
+# prints, like "D:123" for 123 cm. Every key: docs/connectors-declarative.md.
+
+[package]
+id = "my-sensor"
+type = "connector"
+kind = "declarative"
+version = "0.1.0"
+name = "My sensor"
+publisher = "Your name"
+
+[ports]
+# The baud rate your device talks at (Serial.begin(9600) on an Arduino).
+serial = { baud = 9600 }
+
+[lines]
+# Serial.println ends every line with "\r\n".
+ending = "\r\n"
+
+[[provides]]
+capability = "distance@1"
+# Range and kind from your sensor's datasheet.
+info = { min-m = 0.02, max-m = 4.0, field-of-view-rad = 0.26, kind = "ultrasonic" }
+# "D:123" is 123 cm: × 0.01 makes metres.
+line = { pattern = "D:{meters:u32}", scale = 0.01 }

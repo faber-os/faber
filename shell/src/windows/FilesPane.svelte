@@ -25,6 +25,8 @@
     type FileView,
   } from '../lib/desktop/fileZoom';
   import { fileTypeLabel } from '../lib/desktop/fileTypes';
+  import { isPackageFile } from '../lib/desktop/packages';
+  import { openDroppedPackage } from '../components/installWindow';
   import { afterConflict, uploadSummary, type ConflictAnswer } from '../lib/desktop/uploads';
   import Dialog from '../components/Dialog.svelte';
   import { useDesktop } from '../components/desktopController.svelte';
@@ -513,11 +515,14 @@
     dropping = true;
   }
 
+  /** Dropped connector packages open the Install window; other files are uploaded here. */
   function drop(e: DragEvent) {
     if (!dropping) return;
     e.preventDefault();
     dropping = false;
-    void upload(e.dataTransfer?.files);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    for (const f of files.filter((f) => isPackageFile(f.name))) openDroppedPackage(desktop, f);
+    void upload(files.filter((f) => !isPackageFile(f.name)));
   }
 
   const VIEW_ICONS: Record<FileView, IconName> = {

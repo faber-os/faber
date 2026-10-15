@@ -6,7 +6,15 @@ import { extension } from './filePaths';
  * name only: the shell never reads a file to choose its icon.
  */
 export type FileType =
-  'folder' | 'text' | 'markdown' | 'config' | 'code' | 'recording' | 'image' | 'generic';
+  | 'folder'
+  | 'text'
+  | 'markdown'
+  | 'config'
+  | 'code'
+  | 'recording'
+  | 'image'
+  | 'package'
+  | 'generic';
 
 const BY_EXTENSION: Record<string, FileType> = {
   txt: 'text',
@@ -31,6 +39,7 @@ const BY_EXTENSION: Record<string, FileType> = {
   js: 'code',
   ts: 'code',
   fbcap: 'recording',
+  faberpkg: 'package',
   png: 'image',
   jpg: 'image',
   jpeg: 'image',
@@ -69,6 +78,8 @@ export function fileTypeLabel(entry: { kind: string; name: string }): string {
       return t('files.type.recording');
     case 'image':
       return t('files.type.image', { ext });
+    case 'package':
+      return t('files.type.package');
     default:
       return ext ? t('files.type.other', { ext }) : t('files.type.file');
   }

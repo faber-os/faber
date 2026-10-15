@@ -234,6 +234,59 @@ pub struct ConnectorProblem {
     pub hint: String,
 }
 
+/// What a package file would install (`POST /api/v0/packages?mode=preview`), read from the file
+/// and checked in full: the connector as the core loaded it from the package.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PackagePreview {
+    /// The connector, as `GET /api/v0/connectors` will show it once installed. Its `port` says
+    /// what it can touch: the one port a user picks for each part.
+    pub connector: ConnectorInfo,
+    /// Who made it, from `[package] publisher`.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// Its README.md, as text (Markdown). Never HTML: show it as text or safe minimal Markdown.
+    pub readme: String,
+    /// The recordings in its `captures/`.
+    pub captures: Vec<String>,
+    /// The version installed now, which this would replace.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
+    /// Whether the Faber registry checked it. Always `false` until the store exists (Phase 7).
+    pub checked: bool,
+}
+
+/// A package installed on this machine (`GET /api/v0/packages`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PackageInfo {
+    /// The connector's id, also its folder in `<data>/connectors/`.
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    /// `wasm` or `declarative`.
+    pub kind: String,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// When it was installed (RFC 3339, UTC).
+    pub installed_at: String,
+    /// The file it was installed from.
+    pub source: String,
+    /// Whether the Faber registry checked it. Always `false` until the store exists (Phase 7).
+    pub checked: bool,
+    /// The parts that use its connector. It can't be uninstalled while there are any.
+    pub used_by: Vec<String>,
+    /// Why its connector isn't loaded, when it isn't.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<ConnectorProblem>,
+}
+
 /// Something plugged in over USB that the computer can't talk to, so it never became a port
 /// (e.g. a cable without data wires). Shown so an empty port list isn't a mystery.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
