@@ -154,11 +154,21 @@ async fn add_part(
     State(s): State<AppState>,
     ApiJson(body): ApiJson<dto::NewPart>,
 ) -> Result<(StatusCode, Json<dto::PartInfo>), Failure> {
+    let settings = convert::settings(body.settings.unwrap_or_default()).map_err(|e| {
+        Failure::new(
+            StatusCode::BAD_REQUEST,
+            "invalid-settings",
+            format!("The settings can't be saved in parts.toml: {e}"),
+            "Use numbers, text, true/false and lists; leave out null.",
+        )
+    })?;
     let req = NewPart {
         name: body.name,
         connector: body.connector,
         port: body.port,
+        simulate: body.simulate.map(convert::simulate_from),
         mount: body.mount.unwrap_or_default(),
+        settings,
     };
     let view = blocking(move || s.machine.add_part(req)).await??;
     Ok((StatusCode::CREATED, Json(convert::part(&view))))

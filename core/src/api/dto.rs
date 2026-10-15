@@ -206,23 +206,50 @@ pub struct SignalInfo {
 pub struct PartInfo {
     pub name: String,
     pub connector: String,
-    pub port: String,
+    /// The real part's port. Absent for a simulated part.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
+    /// Set for a simulated part (D36): where its values come from.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simulate: Option<Simulate>,
     pub state: PartState,
     pub signals: Vec<SignalInfo>,
     pub mount: Mount,
 }
 
-/// Body of `POST /api/v0/parts`.
+/// How a simulated part gets its values (docs/simulation.md, section 4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum Simulate {
+    /// A value or pattern set by hand; actuators report the commands they get.
+    Manual,
+    /// From the simulated world.
+    World,
+}
+
+/// Body of `POST /api/v0/parts`: a `port` for the real part, or `simulate`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct NewPart {
     pub name: String,
     pub connector: String,
-    pub port: String,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simulate: Option<Simulate>,
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mount: Option<Mount>,
+    /// The connector's settings, as in `[parts.<name>.settings]`, e.g. `{"max-vx": 0.6}`.
+    #[ts(optional, type = "Record<string, unknown>")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]

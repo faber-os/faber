@@ -2,5 +2,14 @@
 import type { Mount } from "./Mount";
 import type { PartState } from "./PartState";
 import type { SignalInfo } from "./SignalInfo";
+import type { Simulate } from "./Simulate";
 
-export type PartInfo = { name: string, connector: string, port: string, state: PartState, signals: Array<SignalInfo>, mount: Mount, };
+export type PartInfo = { name: string, connector: string, 
+/**
+ * The real part's port. Absent for a simulated part.
+ */
+port?: string, 
+/**
+ * Set for a simulated part (D36): where its values come from.
+ */
+simulate?: Simulate, state: PartState, signals: Array<SignalInfo>, mount: Mount, };

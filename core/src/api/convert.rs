@@ -1,6 +1,7 @@
 //! Machine types → wire types (docs/api.md). The only place that knows both.
 
 use super::dto;
+use crate::config::Simulate;
 use crate::files::{Entry, Kind, Special, VPath};
 use crate::logs;
 use crate::machine::{MachineError, PartView, PortView};
@@ -33,7 +34,8 @@ pub fn part(p: &PartView) -> dto::PartInfo {
     dto::PartInfo {
         name: p.name.to_string(),
         connector: p.connector.clone(),
-        port: p.port.clone(),
+        port: p.source.port().map(str::to_string),
+        simulate: p.source.simulate().map(simulate),
         state: part_state(&p.status),
         signals: p
             .signals
@@ -42,6 +44,25 @@ pub fn part(p: &PartView) -> dto::PartInfo {
             .collect(),
         mount: p.mount,
     }
+}
+
+pub fn simulate(s: Simulate) -> dto::Simulate {
+    match s {
+        Simulate::Manual => dto::Simulate::Manual,
+        Simulate::World => dto::Simulate::World,
+    }
+}
+
+pub fn simulate_from(s: dto::Simulate) -> Simulate {
+    match s {
+        dto::Simulate::Manual => Simulate::Manual,
+        dto::Simulate::World => Simulate::World,
+    }
+}
+
+/// JSON settings from the wire → a TOML table for parts.toml.
+pub fn settings(json: serde_json::Map<String, serde_json::Value>) -> Result<toml::Table, String> {
+    toml::Table::try_from(serde_json::Value::Object(json)).map_err(|e| e.to_string())
 }
 
 pub fn port(p: &PortView) -> dto::PortInfo {

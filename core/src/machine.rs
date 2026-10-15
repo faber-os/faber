@@ -5,7 +5,7 @@
 
 use crate::backup::{self, Archive, BackupError, Item};
 use crate::clock::SharedClock;
-use crate::config::{self, ConfigError, PartConfig, PartsConfig};
+use crate::config::{self, ConfigError, PartConfig, PartsConfig, Simulate, Source};
 use crate::disks::{Disk, DiskDiscovery};
 use crate::files::{self, Entry, FileError, Files, Special, VPath, WriteMode};
 use crate::host;
@@ -22,7 +22,7 @@ use crate::settings::{
 };
 use crate::suggest::{Suggestion, suggestions};
 use faber_capabilities::{Capability, Mount};
-use faber_connector::{Definition, Manifest, Problem, Settings};
+use faber_connector::{Definition, Manifest, PortRequirement, Problem, Settings};
 use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -113,7 +113,7 @@ impl MachineError {
 pub struct PartView {
     pub name: PartName,
     pub connector: String,
-    pub port: String,
+    pub source: Source,
     pub mount: Mount,
     pub status: PartStatus,
     pub signals: Vec<(SignalAddress, Capability)>,
@@ -154,8 +154,11 @@ pub struct About {
 pub struct NewPart {
     pub name: String,
     pub connector: String,
-    pub port: String,
+    /// The real part's port. Exactly one of `port` and `simulate`.
+    pub port: Option<String>,
+    pub simulate: Option<Simulate>,
     pub mount: Mount,
+    pub settings: Settings,
 }
 
 struct Running {
@@ -323,7 +326,7 @@ impl Machine {
                 PartView {
                     name: name.clone(),
                     connector: cfg.connector.clone(),
-                    port: cfg.port.clone(),
+                    source: cfg.source.clone(),
                     mount: cfg.mount,
                     status: self.status.get(name).unwrap_or(PartStatus::Starting),
                     signals,
@@ -418,33 +421,49 @@ impl Machine {
                 "Pick one of the connectors in the list.",
             )
         })?;
-        (definition.create)(&Settings::new()).map_err(|e| {
+        let invalid_settings = |e: faber_connector::SettingsError| {
             MachineError::new(
                 ErrorKind::BadRequest,
                 "invalid-settings",
                 format!("Setting \"{}\": {}", e.key, e.message),
                 e.hint,
             )
-        })?;
-        let port = PortId::parse(&new.port)
-            .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
-            .ok_or_else(|| {
-                MachineError::new(
-                    ErrorKind::BadRequest,
-                    "unknown-port",
-                    format!("There is no port called \"{}\" right now.", new.port),
-                    "Check that it is plugged in, then pick it from the list of ports.",
-                )
-            })?;
-        if let Some(holder) = st.claims.holder(&port.id) {
-            return Err(port_claimed(&port, &holder.to_string()));
-        }
-        let cfg = PartConfig {
-            connector: new.connector,
-            port: port.id.to_string(),
-            mount: new.mount,
-            settings: Settings::new(),
         };
+        (definition.create)(&new.settings).map_err(invalid_settings)?;
+        (definition.provides)(&definition.manifest, &new.settings).map_err(invalid_settings)?;
+        let source = match (new.port, new.simulate) {
+            (Some(_), Some(_)) => {
+                return Err(MachineError::new(
+                    ErrorKind::BadRequest,
+                    "port-and-simulate",
+                    "A part either has a port or is simulated, not both.",
+                    "Leave out the port to simulate the part, or leave out simulate to use the real part.",
+                ));
+            }
+            (None, Some(mode)) => Source::Simulated(mode),
+            (port, None) => {
+                if definition.manifest.port == PortRequirement::Bridge {
+                    let p = runtime::needs_bridge(&definition.manifest);
+                    return Err(MachineError::new(ErrorKind::BadRequest, "needs-bridge", p.message, p.hint));
+                }
+                let port_name = port.unwrap_or_default();
+                let port = PortId::parse(&port_name)
+                    .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
+                    .ok_or_else(|| {
+                        MachineError::new(
+                            ErrorKind::BadRequest,
+                            "unknown-port",
+                            format!("There is no port called \"{port_name}\" right now."),
+                            "Check that it is plugged in, then pick it from the list of ports. Or tick Simulated to try the part without hardware.",
+                        )
+                    })?;
+                if let Some(holder) = st.claims.holder(&port.id) {
+                    return Err(port_claimed(&port, &holder.to_string()));
+                }
+                Source::Port(port.id.to_string())
+            }
+        };
+        let cfg = PartConfig { connector: new.connector, source, mount: new.mount, settings: new.settings };
         let text = config::add_part(&st.text, &name, &cfg).map_err(config_write_error)?;
         self.save(&mut st, text)?;
         self.reconcile(&mut st);
@@ -527,11 +546,24 @@ impl Machine {
             );
             return None;
         };
-        let Some(port_id) = PortId::parse(&cfg.port) else {
+        let port_name = match &cfg.source {
+            Source::Port(p) => p.as_str(),
+            Source::Simulated(_) => {
+                self.status.set(
+                    name,
+                    PartStatus::Invalid(Problem::new(
+                        "This core can't simulate parts yet.",
+                        "Update Faber, or use the real part with port = \"…\" in parts.toml.",
+                    )),
+                );
+                return None;
+            }
+        };
+        let Some(port_id) = PortId::parse(port_name) else {
             self.status.set(
                 name,
                 PartStatus::Invalid(Problem::new(
-                    format!("\"{}\" is not a valid port.", cfg.port),
+                    format!("\"{port_name}\" is not a valid port."),
                     "Ports look like usb:10c4:ea60, serial:COM3 or replay:demo-ld19. Fix it in parts.toml.",
                 )),
             );
@@ -541,7 +573,7 @@ impl Machine {
             self.status.set(
                 name,
                 PartStatus::Conflict(Problem::new(
-                    format!("Its port {} is not connected.", cfg.port),
+                    format!("Its port {port_name} is not connected."),
                     "Plug it in. Faber starts the part as soon as the port appears.",
                 )),
             );
@@ -573,7 +605,7 @@ impl Machine {
             if let Some(h) = r.handle {
                 h.stop();
             }
-            if let Some(id) = PortId::parse(&r.config.port) {
+            if let Some(id) = r.config.source.port().and_then(PortId::parse) {
                 st.claims.release(&id, &Claimant::Part(name.clone()));
                 self.ports_changed.send_modify(|n| *n += 1);
             }
@@ -1470,8 +1502,10 @@ mod tests {
         NewPart {
             name: name.into(),
             connector: "ldrobot-ld19".into(),
-            port: "replay:demo-ld19".into(),
+            port: Some("replay:demo-ld19".into()),
+            simulate: None,
             mount: Mount::default(),
+            settings: Settings::new(),
         }
     }
 
@@ -1546,7 +1580,8 @@ mod tests {
             (demo("Bad Name"), "invalid-name"),
             (demo("lidar"), "name-taken"),
             (NewPart { connector: "nope".into(), ..demo("a") }, "unknown-connector"),
-            (NewPart { port: "serial:COM99".into(), ..demo("b") }, "unknown-port"),
+            (NewPart { port: Some("serial:COM99".into()), ..demo("b") }, "unknown-port"),
+            (NewPart { simulate: Some(Simulate::Manual), ..demo("c") }, "port-and-simulate"),
             (demo("second"), "port-claimed"),
         ];
         for (req, code) in cases {
@@ -1556,6 +1591,19 @@ mod tests {
         }
         let claimed = m.add_part(demo("second")).unwrap_err();
         assert!(claimed.message.contains("used by the part \"lidar\""), "{claimed:?}");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_simulated_part_is_written_with_simulate_and_claims_no_port() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        let view =
+            m.add_part(NewPart { port: None, simulate: Some(Simulate::Manual), ..demo("lidar") }).unwrap();
+        assert_eq!(view.source, Source::Simulated(Simulate::Manual));
+        let text = std::fs::read_to_string(dir.path().join("config/parts.toml")).unwrap();
+        assert!(text.contains("simulate = \"manual\"") && !text.contains("replay:demo-ld19"), "{text}");
+        assert!(m.ports().iter().all(|p| p.claimed_by.is_none()), "a simulated part claims no port");
         m.shutdown();
     }
 
