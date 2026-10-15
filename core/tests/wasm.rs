@@ -359,3 +359,152 @@ mod supervised {
         assert_eq!(port.opens.load(Ordering::SeqCst), 3, "a fresh instance each time, up to the limit");
     }
 }
+
+mod installed {
+    //! Connectors installed in `<data>/connectors/<id>/` (faber.toml + connector.wasm) are offered
+    //! next to the built-in ones, as `kind: "wasm"`, and run parts like them. Bad folders are
+    //! reported, never fatal.
+
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use faber_core::api;
+    use faber_core::clock::MonotonicClock;
+    use faber_core::disks::{Disk, DiskDiscovery};
+    use faber_core::logs::LogBook;
+    use faber_core::machine::{Machine, MachineOptions};
+    use faber_core::ports::{
+        Discovered, FailedUsb, ReplayLibrary, SerialDiscovery, SystemOpener, UsbProblemDiscovery,
+    };
+    use faber_core::runtime::Timing;
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    struct Nothing;
+    impl SerialDiscovery for Nothing {
+        fn list(&self) -> Vec<Discovered> {
+            Vec::new()
+        }
+    }
+    impl UsbProblemDiscovery for Nothing {
+        fn list(&self) -> Vec<FailedUsb> {
+            Vec::new()
+        }
+    }
+    impl DiskDiscovery for Nothing {
+        fn list(&self) -> Vec<Disk> {
+            Vec::new()
+        }
+    }
+
+    fn start(data: &Path) -> (Arc<Machine>, axum::Router) {
+        let clock = Arc::new(MonotonicClock::new());
+        let replays = ReplayLibrary::with_demo();
+        let machine = Machine::start(MachineOptions {
+            data_dir: data.to_path_buf(),
+            clock: clock.clone(),
+            discovery: Arc::new(Nothing),
+            usb_problems: Arc::new(Nothing),
+            disks: Arc::new(Nothing),
+            opener: Arc::new(SystemOpener::new(replays.clone())),
+            replays,
+            connectors: faber_core::connectors::built_in(),
+            timing: Timing::default(),
+            port_scan: None,
+            world: Arc::new(faber_core::simparts::SimWorld::new()),
+        })
+        .unwrap();
+        let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+        (machine, app)
+    }
+
+    async fn call(app: &axum::Router, method: &str, path: &str, body: Option<Value>) -> Value {
+        let mut req = Request::builder().method(method).uri(path);
+        let body = match body {
+            Some(b) => {
+                req = req.header("content-type", "application/json");
+                Body::from(b.to_string())
+            }
+            None => Body::empty(),
+        };
+        let res = app.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    }
+
+    /// Installs the LD19 component under another id, so it sits next to the built-in LD19.
+    fn install_ld19(data: &Path, id: &str, wasm: &[u8]) {
+        let dir = data.join("connectors").join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let toml = std::fs::read_to_string(workspace().join("connectors/ldrobot-ld19/faber.toml")).unwrap();
+        let toml = toml.replace("id = \"ldrobot-ld19\"", &format!("id = \"{id}\""));
+        std::fs::write(dir.join("faber.toml"), toml).unwrap();
+        std::fs::write(dir.join("connector.wasm"), wasm).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_installed_connector_is_offered_as_wasm_and_runs_a_part() {
+        let Some(wasm) = component("ldrobot-ld19") else { return };
+        let data = tempfile::tempdir().unwrap();
+        install_ld19(data.path(), "ld19-wasm", &wasm);
+        let (machine, app) = start(data.path());
+
+        let connectors = call(&app, "GET", "/api/v0/connectors", None).await;
+        let kinds: Vec<(&str, &str)> = connectors
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["id"].as_str().unwrap(), c["kind"].as_str().unwrap()))
+            .collect();
+        assert!(kinds.contains(&("ldrobot-ld19", "built-in")), "{kinds:?}");
+        assert!(kinds.contains(&("ld19-wasm", "wasm")), "{kinds:?}");
+        assert_eq!(call(&app, "GET", "/api/v0/connectors/problems", None).await, json!([]));
+
+        let part = json!({"name": "lidar", "connector": "ld19-wasm", "port": "replay:demo-ld19"});
+        call(&app, "POST", "/api/v0/parts", Some(part)).await;
+        let started = Instant::now();
+        loop {
+            let parts = call(&app, "GET", "/api/v0/parts", None).await;
+            if parts[0]["state"]["kind"] == "running" {
+                break;
+            }
+            assert!(started.elapsed() < Duration::from_secs(10), "never ran: {parts}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let scan = call(&app, "GET", "/api/v0/signals/lidar/laser-scan", None).await;
+        assert_eq!(scan["capability"], "laser-scan@1", "{scan}");
+        machine.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bad_connector_folders_are_reported_and_the_core_runs_without_them() {
+        let data = tempfile::tempdir().unwrap();
+        let broken = data.path().join("connectors/broken");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join("faber.toml"), "[package]\nid = 3").unwrap();
+        if let Some(wasm) = component("ldrobot-ld19") {
+            install_ld19(data.path(), "ldrobot-ld19", &wasm);
+        }
+        let (machine, app) = start(data.path());
+
+        let problems = call(&app, "GET", "/api/v0/connectors/problems", None).await;
+        let problems = problems.as_array().unwrap();
+        assert_eq!(problems[0]["folder"], "broken");
+        assert!(
+            problems[0]["message"].as_str().unwrap().contains("faber.toml can't be read"),
+            "{problems:?}"
+        );
+        assert!(!problems[0]["hint"].as_str().unwrap().is_empty());
+        if problems.len() > 1 {
+            assert_eq!(problems[1]["folder"], "ldrobot-ld19");
+            assert!(problems[1]["message"].as_str().unwrap().contains("built into Faber already"));
+        }
+        let connectors = call(&app, "GET", "/api/v0/connectors", None).await;
+        let ld19: Vec<_> =
+            connectors.as_array().unwrap().iter().filter(|c| c["id"] == "ldrobot-ld19").collect();
+        assert_eq!(ld19.len(), 1, "the built-in one stays, alone");
+        assert_eq!(ld19[0]["kind"], "built-in");
+        machine.shutdown();
+    }
+}

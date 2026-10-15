@@ -84,7 +84,8 @@ pub struct ConnectorInfo {
     pub id: String,
     pub name: String,
     pub version: String,
-    /// `built-in` in Phase 1; `declarative`, `wasm`, `native` later.
+    /// How it runs: `built-in` (part of Faber), `wasm` (a sandboxed WebAssembly component from
+    /// `<data>/connectors/`), later `declarative` and `native`.
     pub kind: String,
     pub port: PortRequirementInfo,
     pub provides: Vec<ProvideInfo>,
@@ -218,6 +219,20 @@ pub struct PortInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claimed_by: Option<String>,
     pub suggestions: Vec<Suggestion>,
+}
+
+/// A connector installed in `<data>/connectors/` that the core couldn't load. The core runs
+/// without it; this says why, so a missing connector isn't a mystery.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ConnectorProblem {
+    /// Its folder in `<data>/connectors/`, e.g. `my-sensor`.
+    pub folder: String,
+    /// What is wrong, in plain words.
+    pub message: String,
+    /// The next thing to try.
+    pub hint: String,
 }
 
 /// Something plugged in over USB that the computer can't talk to, so it never became a port
