@@ -6,6 +6,7 @@
 //! Wire conventions (docs/api.md): field names are camelCase, every reading carries `tUs`, and
 //! a [`Reading`], [`Command`] or [`Info`] is tagged with its capability id, e.g. `"laser-scan@1"`.
 
+pub mod battery;
 pub mod distance;
 pub mod estop;
 mod geometry;
@@ -61,6 +62,8 @@ pub enum Capability {
     Pose,
     #[serde(rename = "position@1")]
     Position,
+    #[serde(rename = "battery@1")]
+    Battery,
 }
 
 impl Capability {
@@ -72,6 +75,7 @@ impl Capability {
         Capability::Estop,
         Capability::Pose,
         Capability::Position,
+        Capability::Battery,
     ];
 
     /// The versioned id used in manifests, addresses and on the wire.
@@ -84,6 +88,7 @@ impl Capability {
             Capability::Estop => "estop@1",
             Capability::Pose => "pose@1",
             Capability::Position => "position@1",
+            Capability::Battery => "battery@1",
         }
     }
 
@@ -101,7 +106,8 @@ impl Capability {
             | Capability::Motor
             | Capability::PlanarBase
             | Capability::Pose
-            | Capability::Position => Delivery::LatestValue,
+            | Capability::Position
+            | Capability::Battery => Delivery::LatestValue,
         }
     }
 
@@ -119,7 +125,8 @@ impl Capability {
             | Capability::Distance
             | Capability::Estop
             | Capability::Pose
-            | Capability::Position => None,
+            | Capability::Position
+            | Capability::Battery => None,
         }
     }
 
@@ -147,6 +154,8 @@ pub enum Reading {
     Pose(pose::Reading),
     #[serde(rename = "position@1")]
     Position(position::Reading),
+    #[serde(rename = "battery@1")]
+    Battery(battery::Reading),
 }
 
 impl Reading {
@@ -159,6 +168,7 @@ impl Reading {
             Reading::Estop(_) => Capability::Estop,
             Reading::Pose(_) => Capability::Pose,
             Reading::Position(_) => Capability::Position,
+            Reading::Battery(_) => Capability::Battery,
         }
     }
 
@@ -171,6 +181,7 @@ impl Reading {
             Reading::Estop(r) => r.t_us,
             Reading::Pose(r) => r.t_us,
             Reading::Position(r) => r.t_us,
+            Reading::Battery(r) => r.t_us,
         }
     }
 }
@@ -229,6 +240,8 @@ pub enum Info {
     PlanarBase(planar_base::Info),
     #[serde(rename = "estop@1")]
     Estop(estop::Info),
+    #[serde(rename = "battery@1")]
+    Battery(battery::Info),
 }
 
 impl Info {
@@ -239,6 +252,7 @@ impl Info {
             Info::Motor(_) => Capability::Motor,
             Info::PlanarBase(_) => Capability::PlanarBase,
             Info::Estop(_) => Capability::Estop,
+            Info::Battery(_) => Capability::Battery,
         }
     }
 
@@ -322,6 +336,7 @@ mod tests {
             Capability::Estop,
             Capability::Pose,
             Capability::Position,
+            Capability::Battery,
         ] {
             assert!(c.lease().is_none(), "{c:?} is not leased");
         }
@@ -365,6 +380,7 @@ mod tests {
             }),
             Reading::Pose(pose::Reading::planar(5, "world", 1.0, 1.0, 0.0)),
             Reading::Position(position::Reading::no_fix(6, 3)),
+            Reading::Battery(battery::Reading::volts(7, 11.1, battery::Level::Ok)),
         ]
     }
 

@@ -495,6 +495,7 @@ fn set_t_us(r: &mut Reading, t: u64) {
         Reading::Estop(x) => x.t_us = t,
         Reading::Pose(x) => x.t_us = t,
         Reading::Position(x) => x.t_us = t,
+        Reading::Battery(x) => x.t_us = t,
     }
 }
 

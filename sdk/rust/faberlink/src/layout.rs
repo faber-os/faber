@@ -16,7 +16,7 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::Motor => 2,
         Capability::PlanarBase => 3,
         Capability::Estop => 4,
-        Capability::LaserScan | Capability::Pose | Capability::Position => return None,
+        Capability::LaserScan | Capability::Pose | Capability::Position | Capability::Battery => return None,
     })
 }
 

@@ -201,6 +201,7 @@ impl bindings::faber::capabilities::laser_scan::Host for Host {}
 impl bindings::faber::capabilities::distance::Host for Host {}
 impl bindings::faber::capabilities::pose::Host for Host {}
 impl bindings::faber::capabilities::position::Host for Host {}
+impl bindings::faber::capabilities::battery::Host for Host {}
 
 // These interfaces also declare commands for apps. A connector never gets them: `definition`
 // refuses any component that imports a function outside `context`. Refused here too, in case.

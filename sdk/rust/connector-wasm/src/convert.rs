@@ -4,7 +4,7 @@
 use crate::bindings::faber::capabilities as cap;
 use crate::bindings::faber::connector::types as wit;
 use faber_capabilities::{
-    Command, Quaternion, Reading, Twist2d, Vec3, distance, estop, motor, planar_base, position,
+    Command, Quaternion, Reading, Twist2d, Vec3, battery, distance, estop, motor, planar_base, position,
 };
 use faber_connector::{CommandError, Health, Problem, Settings, SettingsError};
 
@@ -95,6 +95,19 @@ pub fn reading_to_wit(r: Reading) -> wit::Reading {
             vertical_accuracy_m: r.vertical_accuracy_m,
             speed_m_s: r.speed_m_s,
             course_rad: r.course_rad,
+        }),
+        Reading::Battery(r) => wit::Reading::Battery(cap::battery::Reading {
+            t_us: r.t_us,
+            volts: r.volts,
+            amps: r.amps,
+            charge: r.charge,
+            celsius: r.celsius,
+            cell_volts: r.cell_volts,
+            level: match r.level {
+                battery::Level::Ok => cap::battery::Level::Ok,
+                battery::Level::Low => cap::battery::Level::Low,
+                battery::Level::Critical => cap::battery::Level::Critical,
+            },
         }),
     }
 }
@@ -242,6 +255,10 @@ mod tests {
                 speed_m_s: Some(0.4),
                 course_rad: None,
             }),
+            Reading::Battery(battery::Reading {
+                cell_volts: Some(vec![3.6, 3.61, 3.59]),
+                ..battery::Reading::volts(8, 10.8, battery::Level::Low)
+            }),
         ];
         let t: Vec<u64> = readings
             .into_iter()
@@ -257,8 +274,13 @@ mod tests {
                     assert!(matches!(r.fix, cap::position::Fix::Fix3d));
                     r.t_us
                 }
+                wit::Reading::Battery(r) => {
+                    assert!(matches!(r.level, cap::battery::Level::Low));
+                    assert_eq!(r.cell_volts.as_deref(), Some(&[3.6, 3.61, 3.59][..]));
+                    r.t_us
+                }
             })
             .collect();
-        assert_eq!(t, [1, 2, 3, 4, 5, 6, 7]);
+        assert_eq!(t, [1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }

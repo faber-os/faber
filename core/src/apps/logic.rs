@@ -289,6 +289,7 @@ impl sandbox::bindings::faber::capabilities::laser_scan::Host for AppHost {}
 impl sandbox::bindings::faber::capabilities::distance::Host for AppHost {}
 impl sandbox::bindings::faber::capabilities::pose::Host for AppHost {}
 impl sandbox::bindings::faber::capabilities::position::Host for AppHost {}
+impl sandbox::bindings::faber::capabilities::battery::Host for AppHost {}
 
 // The capability interfaces also declare commands with lease ids. Apps drive through `drive`
 // instead: `compile` refuses a component that imports these, and they refuse here too.
