@@ -7,6 +7,7 @@
 //! reader. Register maps for I²C/SPI follow when the buses arrive (Phase 6).
 
 pub mod engine;
+pub mod installed;
 pub mod lines;
 pub mod manifest;
 pub mod nmea;

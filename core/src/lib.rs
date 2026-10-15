@@ -56,6 +56,7 @@ impl Core {
     ) -> std::io::Result<Core> {
         // Replay ports come from home:/Recordings (D35); the machine keeps this in sync.
         let replays = ports::ReplayLibrary::default();
+        let connectors = all_connectors(&data_dir);
         let machine = machine::Machine::start(machine::MachineOptions {
             data_dir,
             clock,
@@ -64,7 +65,7 @@ impl Core {
             disks: Arc::new(disks::SystemDisks),
             opener: Arc::new(ports::SystemOpener::new(replays.clone())),
             replays,
-            connectors: connectors::built_in(),
+            connectors,
             timing: runtime::Timing::default(),
             port_scan: Some(Duration::from_secs(2)),
             world: Arc::new(simparts::SimWorld::new()),
@@ -93,4 +94,24 @@ impl Core {
     pub async fn bind(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
         tokio::net::TcpListener::bind(addr).await
     }
+}
+
+/// Every connector this core offers: the built-in ones, then those installed in
+/// `<data>/connectors/<id>/` (each folder read by the engine for its kind). An installed one can't
+/// replace a built-in one.
+pub fn all_connectors(data_dir: &std::path::Path) -> Vec<faber_connector::Definition> {
+    let mut defs = connectors::built_in();
+    let (installed, _problems) = declarative::installed::load_installed(&data_dir.join("connectors"));
+    for d in installed {
+        if defs.iter().any(|b| b.manifest.id == d.manifest.id) {
+            tracing::error!(
+                target: "core",
+                "the installed connector {} has the id of a connector that is already there; it is not loaded.                  Rename its id and its folder.",
+                d.manifest.id
+            );
+            continue;
+        }
+        defs.push(d);
+    }
+    defs
 }

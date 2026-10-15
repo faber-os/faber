@@ -33,7 +33,9 @@ use crate::simulation::{self, Outlet, PartSpec};
 use crate::suggest::{Suggestion, suggestions};
 use crate::translations::Translations;
 use faber_capabilities::{Capability, Info, Mount, Reading, estop};
-use faber_connector::{Definition, Health, Manifest, PortRequirement, Problem, Provide, Settings};
+use faber_connector::{
+    ConnectorKind, Definition, Health, Manifest, PortRequirement, Problem, Provide, Settings,
+};
 use safety::Runner;
 use std::collections::BTreeMap;
 use std::io;
@@ -366,6 +368,11 @@ impl Machine {
 
     pub fn connectors(&self) -> Vec<Manifest> {
         self.connectors.iter().map(|d| d.manifest.clone()).collect()
+    }
+
+    /// Every connector with how it runs (built-in, declarative, …).
+    pub fn connector_kinds(&self) -> Vec<(ConnectorKind, Manifest)> {
+        self.connectors.iter().map(|d| (d.kind, d.manifest.clone())).collect()
     }
 
     fn definition(&self, id: &str) -> Option<&Definition> {
