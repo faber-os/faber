@@ -244,6 +244,8 @@ struct RawPackage {
     kind: Spanned<String>,
     version: Spanned<String>,
     name: Spanned<String>,
+    /// Who made it; shown when the package is installed.
+    publisher: Option<Spanned<String>>,
 }
 
 #[derive(Deserialize)]
@@ -460,6 +462,15 @@ impl Builder<'_> {
                 p.name.span(),
                 "The connector has no name.",
                 "Give it one people recognise, like name = \"Acme range finder\".",
+            ));
+        }
+        if let Some(publisher) = &p.publisher
+            && publisher.get_ref().trim().is_empty()
+        {
+            return Err(self.err(
+                publisher.span(),
+                "publisher is empty.",
+                "Write who made it, like publisher = \"Your name\", or leave the line out.",
             ));
         }
         Ok(())
@@ -1050,6 +1061,12 @@ line = { pattern = "D:{meters:f32}", scale = 0.01 }   # "D:123" → 1.23 m
     }
 
     #[test]
+    fn a_publisher_may_be_named() {
+        let text = SENSOR.replace("version = \"0.1.0\"", "version = \"0.1.0\"\npublisher = \"Ada Lovelace\"");
+        assert!(parse(&text).is_ok());
+    }
+
+    #[test]
     fn everything_a_manifest_can_say() {
         let text = r#"faber-manifest = 1
 [package]
@@ -1149,6 +1166,7 @@ fields = { meters = { scale = 0.001 } }
             ("type = \"connector\"", "type = \"app\"", 5, "type = \"connector\""),
             ("kind = \"declarative\"", "kind = \"wasm\"", 6, "kind = \"declarative\""),
             ("version = \"0.1.0\"", "version = \"one\"", 7, "three numbers"),
+            ("version = \"0.1.0\"", "version = \"0.1.0\"\npublisher = \" \"", 8, "publisher = \"Your name\""),
             ("name = \"Example line sensor\"", "nmae = \"x\"", 8, "unknown field `nmae`"),
             ("baud = 9600", "baud = 0", 11, "baud rate"),
             ("serial = { baud = 9600 }", "i2c = { address = 0x48 }", 11, "Phase 6"),

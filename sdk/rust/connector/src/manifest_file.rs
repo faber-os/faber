@@ -24,6 +24,19 @@ pub struct PackageManifest {
     pub kind: ConnectorKind,
     /// The component file next to `faber.toml`, for a wasm connector.
     pub module: Option<String>,
+    /// Who made it, as `[package] publisher` says (shown when it is installed).
+    pub publisher: Option<String>,
+}
+
+/// `[package]` alone, read without the rest of the file: what an installer shows and checks
+/// before it hands the whole file to the reader for its kind.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackageHeader {
+    pub id: String,
+    pub kind: String,
+    pub version: String,
+    pub name: String,
+    pub publisher: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -51,6 +64,7 @@ struct Package {
     version: String,
     name: String,
     module: Option<String>,
+    publisher: Option<String>,
 }
 
 #[derive(Default, Deserialize)]
@@ -119,6 +133,81 @@ pub fn package_kind(text: &str) -> Option<String> {
     doc.get("package")?.get("kind")?.as_str().map(str::to_string)
 }
 
+/// Reads only `[package]` (and the format line), for an installer: the id, kind, version, name
+/// and publisher. Checks that they are there and usable; the reader for the kind checks the rest.
+pub fn header(text: &str) -> Result<PackageHeader, Problem> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    struct Head {
+        faber_manifest: Option<toml::Value>,
+        package: Option<toml::Table>,
+    }
+    let head: Head = toml::from_str(text).map_err(|e| {
+        problem(
+            format!("faber.toml can't be read: {}", e.message().trim()),
+            "Compare it with the example in docs/architecture.md, section 4.",
+        )
+    })?;
+    check_format(head.faber_manifest.as_ref())?;
+    let Some(package) = head.package else {
+        return Err(problem(
+            "faber.toml has no [package] table.",
+            "Add [package] with id, type, kind, version and name.",
+        ));
+    };
+    let text_of = |key: &str| -> Result<String, Problem> {
+        match package.get(key) {
+            Some(toml::Value::String(s)) if !s.trim().is_empty() => Ok(s.clone()),
+            Some(toml::Value::String(_)) => Err(problem(
+                format!("[package] {key} is empty."),
+                format!("Write it like {key} = \"{}\".", example(key)),
+            )),
+            Some(_) => Err(problem(
+                format!("[package] {key} must be a text in quotes."),
+                format!("Write it like {key} = \"{}\".", example(key)),
+            )),
+            None => {
+                Err(problem(format!("[package] has no {key}."), format!("Add {key} = \"{}\".", example(key))))
+            }
+        }
+    };
+    let id = text_of("id")?;
+    if !crate::is_kebab_name(&id) {
+        return Err(problem(
+            format!("id = \"{id}\" is not a valid connector id."),
+            "Use lowercase words joined by -, starting with a letter, like \"acme-range-finder\".",
+        ));
+    }
+    let version = text_of("version")?;
+    if !is_version(&version) {
+        return Err(problem(
+            format!("version = \"{version}\" is not a version number."),
+            "Use three numbers, like version = \"0.1.0\".",
+        ));
+    }
+    let publisher = match package.get("publisher") {
+        None => None,
+        Some(_) => Some(text_of("publisher")?),
+    };
+    Ok(PackageHeader { id, kind: text_of("kind")?, version, name: text_of("name")?, publisher })
+}
+
+fn example(key: &str) -> &'static str {
+    match key {
+        "id" => "acme-range-finder",
+        "version" => "0.1.0",
+        "kind" => "wasm",
+        "publisher" => "Your name",
+        _ => "Acme range finder",
+    }
+}
+
+/// Three dot-separated numbers, like `0.1.0`.
+pub fn is_version(v: &str) -> bool {
+    let parts: Vec<&str> = v.split('.').collect();
+    parts.len() == 3 && parts.iter().all(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Reads a `faber.toml`. Errors say what is wrong and how to fix it.
 pub fn parse(text: &str) -> Result<PackageManifest, Problem> {
     let file: File = toml::from_str(text).map_err(|e| {
@@ -163,12 +252,18 @@ pub fn parse(text: &str) -> Result<PackageManifest, Problem> {
         ConnectorKind::Wasm => Some(p.module.unwrap_or_else(|| "connector.wasm".into())),
         _ => p.module,
     };
+    if p.publisher.as_deref().is_some_and(|s| s.trim().is_empty()) {
+        return Err(problem(
+            "publisher = \"\" is empty.",
+            "Write who made it, like publisher = \"Your name\", or leave it out.",
+        ));
+    }
     let manifest =
         Manifest { id: p.id, name: p.name, version: p.version, port, provides, settings, usb_hints };
     manifest
         .validate()
         .map_err(|e| problem(format!("faber.toml isn't a valid connector: {}.", why(&e)), why_hint(&e)))?;
-    Ok(PackageManifest { manifest, kind, module })
+    Ok(PackageManifest { manifest, kind, module, publisher: p.publisher })
 }
 
 /// The same rule, and words, as the declarative reader: no line is refused, a newer one asks for
@@ -438,6 +533,46 @@ mod tests {
         ];
         for (text, words) in cases {
             let e = parse(text).err().unwrap_or_else(|| panic!("refused: {text}"));
+            assert!(e.message.contains(words), "{words}: {e:?}");
+            assert!(!e.hint.is_empty());
+        }
+    }
+
+    #[test]
+    fn the_publisher_is_optional_and_read() {
+        assert_eq!(parse(LD19).unwrap().publisher, None);
+        let with = LD19.replace("type = \"connector\"", "type = \"connector\"\npublisher = \"Mikkel\"");
+        assert_eq!(parse(&with).unwrap().publisher.as_deref(), Some("Mikkel"));
+        let empty = with.replace("\"Mikkel\"", "\"\"");
+        assert!(parse(&empty).unwrap_err().message.contains("publisher"));
+    }
+
+    #[test]
+    fn the_header_is_read_without_the_rest() {
+        let text = "faber-manifest = 1\n[package]\nid = \"my-sensor\"\ntype = \"connector\"\n\
+                    kind = \"declarative\"\nversion = \"0.2.0\"\nname = \"My sensor\"\n\
+                    publisher = \"Ada\"\n[[provides]]\nline = 3\n";
+        assert_eq!(
+            header(text).unwrap(),
+            PackageHeader {
+                id: "my-sensor".into(),
+                kind: "declarative".into(),
+                version: "0.2.0".into(),
+                name: "My sensor".into(),
+                publisher: Some("Ada".into()),
+            }
+        );
+        let cases = [
+            (text.replace("faber-manifest = 1\n", ""), "which manifest format"),
+            (text.replace("\"my-sensor\"", "\"My Sensor\""), "not a valid connector id"),
+            (text.replace("\"0.2.0\"", "\"1\""), "not a version number"),
+            (text.replace("name = \"My sensor\"\n", ""), "[package] has no name"),
+            (text.replace("\"Ada\"", "3"), "publisher must be a text"),
+            ("faber-manifest = 1\n".to_string(), "no [package]"),
+            ("[package".to_string(), "can't be read"),
+        ];
+        for (t, words) in cases {
+            let e = header(&t).unwrap_err();
             assert!(e.message.contains(words), "{words}: {e:?}");
             assert!(!e.hint.is_empty());
         }
