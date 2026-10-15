@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "core",
+    "sdk/rust/app-wasm",
     "sdk/rust/capabilities",
     "sdk/rust/connector",
     "sdk/rust/connector-wasm",

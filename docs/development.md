@@ -25,6 +25,7 @@ core/                     faber-core: the single Rust process (lib + binary)
 sdk/rust/capabilities/    faber-capabilities: capability data types (mirror of wit/)
 sdk/rust/connector/       faber-connector: the connector trait and manifest types (and faber.toml)
 sdk/rust/connector-wasm/  faber-connector-wasm: builds a connector as a WebAssembly component
+sdk/rust/app-wasm/        faber-app-wasm: builds an app's logic as a WebAssembly component (docs/apps.md)
 sdk/rust/faberlink/       faberlink: the FaberLink bridge protocol, core side (docs/faberlink.md)
 connectors/ldrobot-ld19/  first connector: built in, and the same code as a WebAssembly component
 shell/                    the web desktop (Svelte 5 + Vite + TypeScript)
@@ -33,7 +34,7 @@ tools/faber-cli/          the `faber` command: new connector from a template, ch
 tools/faberlink-interop/  tests the Rust FaberLink session against the C++ library, compiled for the PC
 firmware/faberlink/       the FaberLink Arduino library (C++): the board side of a bridge
 templates/                the connector templates `faber new connector` copies (Rust/wasm, declarative)
-wit/                      capability interfaces, and the connector world (wit/connector)
+wit/                      capability interfaces, the connector world (wit/connector) and the app world (wit/app)
 fixtures/                 test data, e.g. a real LD19 capture
 ```
 
@@ -53,6 +54,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | `faber-connector` | `faber-capabilities`, `serde`, `toml` | I/O, async runtimes, `faber-core` |
 | `faber-connector-wasm` | `faber-connector`, `faber-capabilities`, `toml`, `wit-bindgen` (the component glue; its generated code is the only `unsafe` allowed outside the core's dependencies) | I/O, `faber-core` |
 | connectors (`connectors/*`, and the core's test guests in `core/tests/wasm-guests/*`) | `faber-connector`, `faber-capabilities`, `toml`, and `faber-connector-wasm` for their wasm build | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
+| `faber-app-wasm` | `faber-capabilities`, `wit-bindgen` (the component glue, as for `faber-connector-wasm`) | I/O, `faber-core` |
 | `faberlink` (the bridge protocol, [faberlink.md](faberlink.md)) | `faber-capabilities` | any I/O crate. It turns bytes into messages and back; the clock is passed in. |
 | `faberlink-interop` (tests only) | `cc` (a build dependency: it compiles the Arduino library's C++ core and a fake-board harness). Its FFI module is the only other `unsafe` code in the workspace. The core's tests use its fake board (a dev-dependency). | anything else |
 | `faber-core` | everything above, plus I/O crates | — |
@@ -99,7 +101,7 @@ that isn't. How translations work, and `npm run i18n:check`: [translations.md](t
 | The `faber` CLI and its templates | `cargo test` | `tools/faber-cli`: `tests/first_connector.rs` is the Phase 3 proof (a new connector from the template, tested, checked, packed, installed through the API on a test core, run on a recording and uninstalled), skipped like the wasm tests without the target; the unit tests check and pack the declarative template and write the fixtures the templates and the e2e test use |
 | FaberLink | `cargo test` | `sdk/rust/faberlink`: property tests for the framing, every message and capability layout, and the session state machine. `tools/faberlink-interop`: the Rust session against the Arduino library's C++ core, compiled on the PC with the `cc` crate (MSVC on Windows, g++/clang elsewhere) and driven over an in-memory pipe with a fake clock: handshake, readings, commands, the board's safety rules, corruption and version mismatch. `core/tests/bridge.rs` is the Phase 4 proof: the same C++ board behind a fake serial port, driven through the HTTP API |
 | Packages | `cargo test` | `core/tests/packages.rs`: preview, install while the core runs, parts restarting on an update, uninstall refused while used, and every refusal with its hint |
-| Interfaces | `wasm-tools component wit wit/capabilities`, and the connector world (see [wit/connector](../wit/connector/README.md)) | CI |
+| Interfaces | `wasm-tools component wit wit/capabilities`, the connector world (see [wit/connector](../wit/connector/README.md)) and the app world (see [wit/app](../wit/app/README.md)) | CI |
 
 ## End-to-end tests
 

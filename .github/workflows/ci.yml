@@ -119,3 +119,10 @@ jobs:
           cp -r wit/capabilities "$RUNNER_TEMP/wit/deps/"
           cp wit/connector/*.wit "$RUNNER_TEMP/wit/"
           wasm-tools component wit "$RUNNER_TEMP/wit" > /dev/null
+      - name: The app world, with the connector and capability types it uses
+        run: |
+          mkdir -p "$RUNNER_TEMP/app/deps/connector"
+          cp -r wit/capabilities "$RUNNER_TEMP/app/deps/"
+          cp wit/connector/*.wit "$RUNNER_TEMP/app/deps/connector/"
+          cp wit/app/*.wit "$RUNNER_TEMP/app/"
+          wasm-tools component wit "$RUNNER_TEMP/app" > /dev/null

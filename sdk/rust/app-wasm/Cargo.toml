@@ -1,0 +1,21 @@
+[package]
+name = "faber-app-wasm"
+version = "0.1.0"
+description = "Builds a Faber app's logic as a sandboxed WebAssembly component: plain Rust implementing the App trait, plus one export! line."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# Not the workspace lints: the generated component glue (wit-bindgen) needs `unsafe`, so this
+# crate denies it everywhere except the `bindings` module instead of forbidding it.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dependencies]
+faber-capabilities = { version = "0.1.0", path = "../capabilities" }
+wit-bindgen = { version = "0.63.0", default-features = false, features = ["macros", "realloc", "std"] }

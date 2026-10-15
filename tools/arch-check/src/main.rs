@@ -23,6 +23,8 @@ fn rule_for(name: &str, manifest_path: &str) -> Option<Rule> {
     match name {
         "faber-capabilities" => Some(Rule::Only(&["serde", "ts-rs"])),
         "faber-connector" => Some(Rule::Only(&["faber-capabilities", "serde", "toml"])),
+        // An app's logic as a component: the capability types and the component glue, no I/O.
+        "faber-app-wasm" => Some(Rule::Only(&["faber-capabilities", "wit-bindgen"])),
         "faber-connector-wasm" => {
             Some(Rule::Only(&["faber-connector", "faber-capabilities", "toml", "wit-bindgen"]))
         }

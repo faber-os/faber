@@ -22,6 +22,27 @@ pub mod bindings {
     });
 }
 
+/// The app world (`wit/app`). Readings and commands are the connector world's own types, so a
+/// reading crosses into an app exactly as a connector published it.
+#[allow(clippy::all)]
+pub mod app_bindings {
+    wasmtime::component::bindgen!({
+        path: ["../wit/capabilities", "../wit/connector", "../wit/app"],
+        world: "faber:app/app@0.1.0",
+        with: {
+            "faber:capabilities/types@0.1.0": super::bindings::faber::capabilities::types,
+            "faber:capabilities/laser-scan@0.1.0": super::bindings::faber::capabilities::laser_scan,
+            "faber:capabilities/distance@0.1.0": super::bindings::faber::capabilities::distance,
+            "faber:capabilities/motor@0.1.0": super::bindings::faber::capabilities::motor,
+            "faber:capabilities/planar-base@0.1.0": super::bindings::faber::capabilities::planar_base,
+            "faber:capabilities/estop@0.1.0": super::bindings::faber::capabilities::estop,
+            "faber:capabilities/pose@0.1.0": super::bindings::faber::capabilities::pose,
+            "faber:capabilities/position@0.1.0": super::bindings::faber::capabilities::position,
+            "faber:connector/types@0.1.0": super::bindings::faber::connector::types,
+        },
+    });
+}
+
 /// What one instance may use (docs/packages.md §4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {

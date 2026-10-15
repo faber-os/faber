@@ -709,6 +709,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "faber-app-wasm"
+version = "0.1.0"
+dependencies = [
+ "faber-capabilities",
+ "wit-bindgen 0.63.0",
+]
+
+[[package]]
 name = "faber-arch-check"
 version = "0.1.0"
 dependencies = [
