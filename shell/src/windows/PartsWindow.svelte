@@ -3,6 +3,8 @@
   import { t } from '../lib/i18n';
   import { portKindLabel } from '../lib/state/portHints';
   import type { ErrorBody, PartInfo, SignalInfo } from '../lib/state/types';
+  import { canMove } from '../lib/state/driving';
+  import { isManualSensor } from '../lib/state/simulation';
   import { item, separator } from '../lib/desktop/contextMenu';
   import { menuTrigger, useMenu } from '../components/menuController.svelte';
   import { useDesktop } from '../components/desktopController.svelte';
@@ -12,7 +14,9 @@
   import RichText from '../components/RichText.svelte';
   import StateBadge from '../components/StateBadge.svelte';
   import type { WindowProps } from '../components/windowDefs';
+  import { openDrive, openViewer as showViewer, viewable } from '../components/driveWindow';
   import AddPartForm from './AddPartForm.svelte';
+  import ManualSimulation from './ManualSimulation.svelte';
 
   let { win }: WindowProps = $props();
 
@@ -77,6 +81,7 @@
         item('view', t('parts.menu.view'), {
           disabledReason: signals.length ? undefined : t('parts.menu.noSignal'),
         }),
+        canMove(p) && item('drive', t('parts.menu.drive'), { icon: 'drive' }),
         item(
           'monitor',
           port
@@ -91,23 +96,22 @@
       ],
       onSelect: (id: string) => {
         if (id === 'view' && signals[0]) openViewer(p, signals[0]);
+        else if (id === 'drive') openDrive(desktop, p.name);
         else if (id === 'monitor' && p.port) openInMonitor(p.port);
         else if (id === 'remove') confirming = p.name;
       },
     };
   }
 
-  function viewable(p: PartInfo): SignalInfo[] {
-    return p.signals.filter((s) => s.capability === 'laser-scan@1');
+  function openViewer(p: PartInfo, s: SignalInfo) {
+    showViewer(desktop, p, s);
   }
 
-  function openViewer(p: PartInfo, s: SignalInfo) {
-    desktop.open('laser-scan', {
-      key: s.address,
-      title: t('parts.title.viewer', { name: p.name }),
-      params: { address: s.address, part: p.name },
-    });
-  }
+  const VIEWER_ICONS = {
+    'laser-scan@1': 'scan',
+    'distance@1': 'distance',
+    'planar-base@1': 'base',
+  } as const;
 
   async function remove(name: string) {
     removing = name;
@@ -232,6 +236,7 @@
                   <span class="name">{p.name}</span>
                 {/if}
                 <StateBadge kind={p.state.kind} />
+                {#if p.simulate}<span class="badge">{t('parts.list.simulatedBadge')}</span>{/if}
               </div>
               <p class="meta">
                 <span>{connectorName(p.connector)}</span>
@@ -241,7 +246,17 @@
                 {:else}
                   <span>{label ?? t('parts.list.port')} <code>{p.port}</code></span>
                 {/if}
+                {#if canMove(p)}
+                  {@const lease = core.leaseOn(p.name)}
+                  <span class="sep" aria-hidden="true">·</span>
+                  <span class:driven={lease}
+                    >{lease
+                      ? t('parts.list.drivenBy', { holder: lease.holder })
+                      : t('parts.list.notDriven')}</span
+                  >
+                {/if}
               </p>
+              {#if isManualSensor(p)}<ManualSimulation part={p} />{/if}
               {#if p.state.message}
                 <div
                   class="state-msg"
@@ -270,13 +285,26 @@
                   >{t('parts.list.keep')}</button
                 >
               {:else}
+                {#if canMove(p)}
+                  <button
+                    class="btn"
+                    onclick={() => openDrive(desktop, p.name)}
+                    aria-label={t('parts.list.driveNamed', { name: p.name })}
+                  >
+                    <Icon name="drive" size={17} />
+                    {t('parts.list.drive')}
+                  </button>
+                {/if}
                 {#each signals as s (s.address)}
                   <button
                     class="btn"
                     onclick={() => openViewer(p, s)}
                     aria-label={t('parts.list.viewFor', { address: s.address })}
                   >
-                    <Icon name="scan" size={17} />
+                    <Icon
+                      name={VIEWER_ICONS[s.capability as keyof typeof VIEWER_ICONS] ?? 'scan'}
+                      size={17}
+                    />
                     {t('parts.list.view')}
                   </button>
                 {/each}
@@ -415,6 +443,18 @@
     gap: var(--space-1) var(--space-2);
     font-size: var(--text-sm);
     color: var(--text-muted);
+  }
+  .badge {
+    padding: 1px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--info-soft);
+    color: var(--info);
+    font-size: var(--text-xs);
+    font-weight: 700;
+  }
+  .driven {
+    color: var(--text);
+    font-weight: 600;
   }
   .meta code {
     color: var(--text);

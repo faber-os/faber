@@ -3,7 +3,13 @@
   import { t } from '../lib/i18n';
   import { validatePartName } from '../lib/state/partName';
   import { portAvailability, portHints } from '../lib/state/portHints';
-  import type { ErrorBody } from '../lib/state/types';
+  import {
+    defaultValues,
+    readSettings,
+    settingFields,
+    type SettingValues,
+  } from '../lib/state/connectorSettings';
+  import type { ErrorBody, NewPart, Simulate } from '../lib/state/types';
   import ErrorNotice from '../components/ErrorNotice.svelte';
   import Icon from '../components/Icon.svelte';
   import PortProblems from '../components/PortProblems.svelte';
@@ -28,18 +34,50 @@
   let nameTouched = $state(false);
   let submitting = $state(false);
   let error = $state<ErrorBody | null>(null);
+  /** The Simulated switch as the user left it; a generic connector turns it on regardless. */
+  let simulatedChoice = $state(false);
+  let mode = $state<Simulate>('manual');
+  let values = $state<SettingValues>({});
+  let settingsProblem = $state<{ key: string; message: string } | null>(null);
 
   const ports = $derived(core.ports);
   const connectors = $derived(core.connectors);
   const nameProblem = $derived(validatePartName(name));
   const showNameProblem = $derived(nameTouched && nameProblem !== null);
   const errorField = $derived(fieldFor(error?.code));
+  const chosen = $derived(connectors?.find((c) => c.id === connector) ?? null);
+  /** Generic connectors need a FaberLink bridge to be real (Phase 4): simulated only for now. */
+  const needsBridge = $derived(chosen?.port.kind === 'bridge');
+  const simulated = $derived(simulatedChoice || needsBridge);
+  const fields = $derived(settingFields(connector));
+  const modes = $derived([
+    {
+      id: 'manual' as Simulate,
+      title: t('addPart.source.manual'),
+      help: t('addPart.source.manual.help'),
+    },
+    {
+      id: 'world' as Simulate,
+      title: t('addPart.source.world'),
+      help: t('addPart.source.world.help'),
+    },
+  ]);
 
-  function fieldFor(code: string | undefined): 'name' | 'port' | 'connector' | null {
+  function fieldFor(code: string | undefined): 'name' | 'port' | 'connector' | 'settings' | null {
     if (code === 'invalid-name' || code === 'name-taken') return 'name';
     if (code === 'port-claimed' || code === 'unknown-port') return 'port';
+    // Where the values come from (step 1): a port, or simulated.
+    if (code === 'needs-bridge' || code === 'port-and-simulate' || code === 'world-has-a-base')
+      return 'port';
     if (code === 'unknown-connector') return 'connector';
+    if (code === 'invalid-settings') return 'settings';
     return null;
+  }
+
+  function chooseConnector(id: string) {
+    connector = id;
+    values = defaultValues(settingFields(id));
+    settingsProblem = null;
   }
 
   function pickPort(id: string) {
@@ -48,7 +86,7 @@
     // Detect, then suggest: pre-pick the connector the core thinks fits, unless one was chosen.
     const suggestion = ports?.find((p) => p.id === id)?.suggestions[0];
     if (!connectorTouched && suggestion && connectors?.some((c) => c.id === suggestion.connector)) {
-      connector = suggestion.connector;
+      chooseConnector(suggestion.connector);
     }
   }
 
@@ -63,10 +101,21 @@
   async function submit(e: SubmitEvent) {
     e.preventDefault();
     nameTouched = true;
-    if (nameProblem || !port || !connector) return;
+    if (nameProblem || !connector || (!simulated && !port)) return;
+    const part: NewPart = simulated
+      ? { name, connector, simulate: mode }
+      : { name, connector, port: port ?? undefined };
+    if (fields.length > 0) {
+      const read = readSettings(fields, values);
+      if (!read.ok) {
+        settingsProblem = read;
+        return;
+      }
+      part.settings = read.settings;
+    }
     submitting = true;
     error = null;
-    const r = await core.addPart({ name, connector, port });
+    const r = await core.addPart(part);
     submitting = false;
     if (r.ok) onadded(r.value.name);
     else error = r.error;
@@ -84,45 +133,92 @@
 
   <div class="scroll">
     <fieldset class="step" class:flag={errorField === 'port'}>
-      <legend><span class="n">1</span> {t('addPart.port.legend')}</legend>
-      <div class="problems"><PortProblems /></div>
-      {#if ports === null}
-        <p class="muted">{t('addPart.port.looking')}</p>
-      {:else if ports.length === 0}
-        <p class="muted">
-          {t('addPart.port.none')}
-        </p>
-      {:else}
-        <div class="choices">
-          {#each ports as p (p.id)}
-            {@const avail = portAvailability(p)}
-            {@const hints = portHints(p, connectors ?? [])}
-            <label class="choice" class:disabled={!avail.free}>
+      <legend
+        ><span class="n">1</span>
+        {simulated ? t('addPart.source.mode') : t('addPart.port.legend')}</legend
+      >
+      <!-- The help sits outside the label, so the switch is just called "Simulated". -->
+      <div class="switch-row" class:locked={needsBridge}>
+        <input
+          id="simulated"
+          class="switch"
+          type="checkbox"
+          role="switch"
+          checked={simulated}
+          disabled={needsBridge}
+          aria-describedby="simulated-help"
+          onchange={(e) => {
+            simulatedChoice = e.currentTarget.checked;
+            if (errorField === 'port') error = null;
+          }}
+        />
+        <span class="choice-body">
+          <label class="choice-title" for="simulated">{t('addPart.source.simulated')}</label>
+          <span class="help" id="simulated-help">
+            {needsBridge && chosen
+              ? t('addPart.source.locked', { connector: chosen.name })
+              : t('addPart.source.simulated.help')}
+          </span>
+        </span>
+      </div>
+      {#if simulated}
+        <div class="choices modes">
+          {#each modes as m (m.id)}
+            <label class="choice">
               <input
                 type="radio"
-                name="port"
-                value={p.id}
-                checked={port === p.id}
-                disabled={!avail.free}
-                onchange={() => pickPort(p.id)}
+                name="simulate"
+                value={m.id}
+                checked={mode === m.id}
+                onchange={() => (mode = m.id)}
               />
               <span class="choice-body">
-                <span class="choice-title"
-                  >{#if p.kind === 'bluetooth'}<span class="kind"
-                      >{t('addPart.port.bluetooth')}</span
-                    >{/if}{p.label}</span
-                >
-                <span class="choice-meta">
-                  <code>{p.id}</code>
-                  <span class="pill" class:busy={!avail.free}>{avail.text}</span>
-                </span>
-                {#each hints as h (h.connector)}
-                  <span class="suggest" title={h.reason}>{h.text}</span>
-                {/each}
+                <span class="choice-title">{m.title}</span>
+                <span class="provides">{m.help}</span>
               </span>
             </label>
           {/each}
         </div>
+      {:else}
+        <div class="problems"><PortProblems /></div>
+        {#if ports === null}
+          <p class="muted">{t('addPart.port.looking')}</p>
+        {:else if ports.length === 0}
+          <p class="muted">
+            {t('addPart.port.none')}
+          </p>
+        {:else}
+          <div class="choices">
+            {#each ports as p (p.id)}
+              {@const avail = portAvailability(p)}
+              {@const hints = portHints(p, connectors ?? [])}
+              <label class="choice" class:disabled={!avail.free}>
+                <input
+                  type="radio"
+                  name="port"
+                  value={p.id}
+                  checked={port === p.id}
+                  disabled={!avail.free}
+                  onchange={() => pickPort(p.id)}
+                />
+                <span class="choice-body">
+                  <span class="choice-title"
+                    >{#if p.kind === 'bluetooth'}<span class="kind"
+                        >{t('addPart.port.bluetooth')}</span
+                      >{/if}{p.label}</span
+                  >
+                  <span class="choice-meta">
+                    <code>{p.id}</code>
+                    <span class="pill" class:busy={!avail.free}>{avail.text}</span>
+                  </span>
+                  {#each hints as h (h.connector)}
+                    <span class="suggest" title={h.reason}>{h.text}</span>
+                  {/each}
+                </span>
+              </label>
+            {/each}
+          </div>
+        {/if}
       {/if}
     </fieldset>
 
@@ -148,7 +244,7 @@
                 value={c.id}
                 checked={connector === c.id}
                 onchange={() => {
-                  connector = c.id;
+                  chooseConnector(c.id);
                   connectorTouched = true;
                   if (errorField === 'connector') error = null;
                 }}
@@ -176,8 +272,64 @@
       {/if}
     </fieldset>
 
+    {#if fields.length > 0}
+      <fieldset class="step" class:flag={errorField === 'settings' || settingsProblem !== null}>
+        <legend><span class="n">3</span> {t('addPart.settings.legend')}</legend>
+        <p class="help settings-help">{t('addPart.settings.help')}</p>
+        <div class="settings">
+          {#each fields as f (f.key)}
+            {@const id = `setting-${f.key}`}
+            {@const bad = settingsProblem?.key === f.key}
+            {#if f.kind === 'boolean'}
+              <label class="check-row wide">
+                <input
+                  class="check"
+                  type="checkbox"
+                  checked={values[f.key] === true}
+                  onchange={(e) => (values = { ...values, [f.key]: e.currentTarget.checked })}
+                />
+                {f.label()}
+              </label>
+            {:else}
+              <label class="label" for={id}>{f.label()}</label>
+              <span class="value">
+                {#if f.kind === 'number'}
+                  <input
+                    {id}
+                    class="input num"
+                    type="number"
+                    step="any"
+                    inputmode="decimal"
+                    value={values[f.key]}
+                    aria-invalid={bad}
+                    oninput={(e) => {
+                      values = { ...values, [f.key]: e.currentTarget.value };
+                      if (bad) settingsProblem = null;
+                    }}
+                  />
+                  <span class="unit">{f.unit}</span>
+                {:else}
+                  <select
+                    {id}
+                    class="input"
+                    value={values[f.key]}
+                    onchange={(e) => (values = { ...values, [f.key]: e.currentTarget.value })}
+                  >
+                    {#each f.choices as c (c.value)}
+                      <option value={c.value}>{c.label()}</option>
+                    {/each}
+                  </select>
+                {/if}
+              </span>
+              {#if bad}<p class="help bad wide">{settingsProblem?.message}</p>{/if}
+            {/if}
+          {/each}
+        </div>
+      </fieldset>
+    {/if}
+
     <fieldset class="step" class:flag={errorField === 'name'}>
-      <legend><span class="n">3</span> {t('addPart.name.legend')}</legend>
+      <legend><span class="n">{fields.length > 0 ? 4 : 3}</span> {t('addPart.name.legend')}</legend>
       <div class="field">
         <label class="label" for="part-name">{t('addPart.name.label')}</label>
         <input
@@ -213,12 +365,16 @@
 
   <div class="footer">
     <p class="muted small">
-      {#if !port}{t('addPart.footer.pickPort')}{:else if !connector}{t(
+      {#if !port && !simulated}{t('addPart.footer.pickPort')}{:else if !connector}{t(
           'addPart.footer.pickConnector',
         )}{:else}<RichText text={t('addPart.footer.ready')} />{/if}
     </p>
     <button type="button" class="btn quiet" onclick={oncancel}>{t('addPart.footer.cancel')}</button>
-    <button type="submit" class="btn primary" disabled={submitting || !port || !connector}>
+    <button
+      type="submit"
+      class="btn primary"
+      disabled={submitting || (!port && !simulated) || !connector}
+    >
       {submitting ? t('addPart.footer.adding') : t('addPart.footer.submit')}
     </button>
   </div>
@@ -405,5 +561,60 @@
   }
   #part-name {
     max-width: 22rem;
+  }
+  .switch-row {
+    display: flex;
+    gap: var(--space-3);
+    align-items: flex-start;
+    margin-bottom: var(--space-3);
+  }
+  .switch-row label {
+    cursor: pointer;
+  }
+  .switch-row.locked label {
+    cursor: default;
+  }
+  .modes {
+    grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
+  }
+  .settings-help {
+    margin-bottom: var(--space-3);
+  }
+  .settings {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-2) var(--space-4);
+  }
+  .settings .wide {
+    grid-column: 1 / -1;
+  }
+  .settings .label {
+    font-size: var(--text-sm);
+  }
+  .value {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .input.num {
+    width: 8rem;
+    max-width: 100%;
+  }
+  .unit {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+  }
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+  }
+  @media (max-width: 480px) {
+    .settings {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 </style>

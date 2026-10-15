@@ -21,6 +21,69 @@ export const LD19: ConnectorInfo = {
   provides: [{ name: 'laser-scan', capability: 'laser-scan@1' }],
 };
 
+export const GENERIC_BASE: ConnectorInfo = {
+  id: 'generic-planar-base',
+  name: 'Generic drive base',
+  version: '0.1.0',
+  kind: 'built-in',
+  port: { kind: 'bridge' },
+  provides: [
+    {
+      name: 'planar-base',
+      capability: 'planar-base@1',
+      info: {
+        capability: 'planar-base@1',
+        info: {
+          holonomic: true,
+          maxVelocity: { vx: 0.5, vy: 0.5, omega: 1.5 },
+          maxAcceleration: { vx: 1, vy: 1, omega: 1.5 },
+          builtFrom: [],
+        },
+      },
+    },
+  ],
+};
+
+export const GENERIC_DISTANCE: ConnectorInfo = {
+  id: 'generic-distance',
+  name: 'Generic distance sensor',
+  version: '0.1.0',
+  kind: 'built-in',
+  port: { kind: 'bridge' },
+  provides: [
+    {
+      name: 'distance',
+      capability: 'distance@1',
+      info: {
+        capability: 'distance@1',
+        info: { minM: 0.02, maxM: 4, fieldOfViewRad: 0.26, kind: 'ultrasonic' },
+      },
+    },
+  ],
+};
+
+/** A simulated drive base, as the parts topic shows it. */
+export function simBase(name = 'base', overrides: Partial<PartInfo> = {}): PartInfo {
+  return part(name, {
+    connector: 'generic-planar-base',
+    port: undefined,
+    simulate: 'manual',
+    signals: [{ address: `${name}/planar-base`, capability: 'planar-base@1' }],
+    ...overrides,
+  });
+}
+
+/** A manual simulated distance sensor. */
+export function simDistance(name = 'front', overrides: Partial<PartInfo> = {}): PartInfo {
+  return part(name, {
+    connector: 'generic-distance',
+    port: undefined,
+    simulate: 'manual',
+    signals: [{ address: `${name}/distance`, capability: 'distance@1' }],
+    ...overrides,
+  });
+}
+
 export const SAMPLE_PORT: PortInfo = {
   id: 'replay:ld19-sample',
   kind: 'replay',
@@ -38,7 +101,7 @@ export const USB_PORT: PortInfo = {
 };
 
 export function part(name: string, overrides: Partial<PartInfo> = {}): PartInfo {
-  return {
+  const p: PartInfo = {
     name,
     connector: 'ldrobot-ld19',
     port: 'replay:ld19-sample',
@@ -47,6 +110,9 @@ export function part(name: string, overrides: Partial<PartInfo> = {}): PartInfo 
     mount: { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0 },
     ...overrides,
   };
+  // A simulated part has no port (absent, never undefined: that is how the wire has it).
+  if (p.port === undefined) delete p.port;
+  return p;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -179,6 +245,29 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
       ws.receive(bin({ type: 'ports', id: subscriptionId('ports'), ports })),
     pushSettings: (settings: Settings = DEFAULT_SETTINGS) =>
       ws.receive(bin({ type: 'settings', id: subscriptionId('settings'), settings })),
+    pushLeases: (
+      leases: { part: string; holder: string; deadlineUs?: number; locks?: string[] }[],
+    ) =>
+      ws.receive(
+        bin({
+          type: 'leases',
+          id: subscriptionId('leases'),
+          leases: leases.map((l) => ({ deadlineUs: 1, locks: [], ...l })),
+        }),
+      ),
+    pushEstop: (engaged: boolean, reason = 'Stop button') =>
+      ws.receive(
+        bin({
+          type: 'estop',
+          id: subscriptionId('estop'),
+          status: engaged
+            ? { engaged, engagedBy: { tUs: 1, engaged, source: 'shell', reason } }
+            : { engaged },
+        }),
+      ),
+    /** A reading of `address` to every subscription to it. */
+    pushReading: (address: string, reading: unknown) =>
+      ws.receive(bin({ type: 'signal', id: subscriptionId('signal', address), address, reading })),
     filesChanged: (folders: string[]) =>
       ws.receive(bin({ type: 'files-changed', id: subscriptionId('files'), folders })),
   };

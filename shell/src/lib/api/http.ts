@@ -14,6 +14,13 @@ import type { AboutInfo } from './generated/AboutInfo';
 import type { BackupInfo } from './generated/BackupInfo';
 import type { StorageInfo } from './generated/StorageInfo';
 import type { TranslationInfo } from './generated/TranslationInfo';
+import type { Command } from './generated/Command';
+import type { CommandResult } from './generated/CommandResult';
+import type { EstopStatus } from './generated/EstopStatus';
+import type { LeaseGrant } from './generated/LeaseGrant';
+import type { LeaseInfo } from './generated/LeaseInfo';
+import type { Pattern } from './generated/Pattern';
+import type { Simulation } from './generated/Simulation';
 import { dropNullFields } from './wire';
 
 /** Something the core (or the way to it) said no to, with what to try next. */
@@ -74,6 +81,24 @@ export interface CoreHttp {
   getTranslations(): Promise<TranslationInfo[]>;
   /** One translation file. `422 translation-invalid` (with the line) if it is broken. */
   getTranslation(code: string): Promise<Record<string, unknown>>;
+
+  // Driving (docs/api.md, "Driving"). Every lease and e-stop change also arrives on the
+  // `leases` and `estop` WebSocket topics.
+  /** `409 lease-held` (the message says who), `423 estop-engaged`, `400 not-leasable` … */
+  requestLease(part: string, holder: string, takeOver?: boolean): Promise<LeaseGrant>;
+  renewLease(part: string, lease: string): Promise<LeaseGrant>;
+  /** The part gets its safe state. */
+  releaseLease(part: string, lease: string): Promise<void>;
+  getLeases(): Promise<LeaseInfo[]>;
+  /** Renews the lease too. Values beyond the part's limits are clamped, not refused. */
+  command(part: string, lease: string, command: Command): Promise<CommandResult>;
+  getEstop(): Promise<EstopStatus>;
+  /** Always allowed and never refused. The shell says it was the shell. */
+  engageEstop(reason: string): Promise<EstopStatus>;
+  releaseEstop(): Promise<EstopStatus>;
+  /** A manual simulated sensor's value pattern. `409 not-manual`, `400 not-a-sensor` … */
+  getSimulation(part: string): Promise<Simulation>;
+  putSimulation(part: string, pattern: Pattern): Promise<Simulation>;
 }
 
 export type WriteMode = 'replace' | 'create';
@@ -156,6 +181,7 @@ export function createHttp(
   }
 
   const q = (path: string) => `?path=${encodeURIComponent(path)}`;
+  const partPath = (name: string) => `/parts/${encodeURIComponent(name)}`;
 
   return {
     getSystem: () => request('GET', '/system'),
@@ -193,6 +219,20 @@ export function createHttp(
 
     getTranslations: () => request('GET', '/translations'),
     getTranslation: (code) => request('GET', `/translations/${encodeURIComponent(code)}`),
+
+    requestLease: (part, holder, takeOver) =>
+      request('POST', `${partPath(part)}/lease`, takeOver ? { holder, takeOver } : { holder }),
+    renewLease: (part, lease) => request('POST', `${partPath(part)}/lease/renew`, { lease }),
+    releaseLease: (part, lease) =>
+      request('DELETE', `${partPath(part)}/lease?lease=${encodeURIComponent(lease)}`),
+    getLeases: () => request('GET', '/leases'),
+    command: (part, lease, command) =>
+      request('POST', `${partPath(part)}/command`, { lease, command }),
+    getEstop: () => request('GET', '/estop'),
+    engageEstop: (reason) => request('POST', '/estop', { reason, source: 'shell' }),
+    releaseEstop: () => request('POST', '/estop/release', { source: 'shell' }),
+    getSimulation: (part) => request('GET', `${partPath(part)}/simulation`),
+    putSimulation: (part, pattern) => request('PUT', `${partPath(part)}/simulation`, { pattern }),
   };
 }
 

@@ -5,6 +5,8 @@
   import { taskClick, taskbarItems, type TaskItem } from '../lib/desktop/taskbar';
   import AppIcon from './AppIcon.svelte';
   import Clock from './Clock.svelte';
+  import EstopButton from './EstopButton.svelte';
+  import EstopRelease from './EstopRelease.svelte';
   import ConnectionIndicator from './ConnectionIndicator.svelte';
   import { useDesktop } from './desktopController.svelte';
   import Logo from './Logo.svelte';
@@ -25,6 +27,7 @@
   const menu = useMenu();
 
   let menuOpen = $state(false);
+  let releasing = $state(false);
   let startButton: HTMLButtonElement | undefined = $state();
   let root: HTMLDivElement | undefined = $state();
 
@@ -214,12 +217,16 @@
     </ul>
 
     <div class="side right">
+      <EstopButton {large} onrelease={() => (releasing = true)} />
       <ConnectionIndicator status={core.connection} />
       <Clock withDate={large} />
     </div>
   </nav>
   {#if menuOpen}
     <StartMenu {defs} onclose={closeMenu} />
+  {/if}
+  {#if releasing}
+    <EstopRelease onclose={() => (releasing = false)} />
   {/if}
 </div>
 
