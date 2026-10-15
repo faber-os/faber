@@ -16,6 +16,29 @@ pub struct LoadProblem {
     pub problem: Problem,
 }
 
+/// How a connector folder's files are named in a message, so a problem points at the file the
+/// person has: `connectors/my-sensor/faber.toml` once installed, or
+/// `my-sensor-0.1.0.faberpkg: faber.toml` while a package is still being checked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShownAs(String);
+
+impl ShownAs {
+    /// An installed connector, in `<data>/connectors/<folder>/`.
+    pub fn installed(folder: &str) -> ShownAs {
+        ShownAs(format!("connectors/{folder}/"))
+    }
+
+    /// The files inside a package file, e.g. `my-sensor-0.1.0.faberpkg`.
+    pub fn package(file: &str) -> ShownAs {
+        ShownAs(format!("{file}: "))
+    }
+
+    /// One file in the folder, e.g. `faber.toml`.
+    pub fn file(&self, name: &str) -> String {
+        format!("{}{name}", self.0)
+    }
+}
+
 pub fn built_in() -> Vec<Definition> {
     let mut defs = vec![ldrobot_ld19::definition()];
     defs.extend(generic::definitions());
@@ -24,6 +47,18 @@ pub fn built_in() -> Vec<Definition> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn files_are_named_where_the_person_finds_them() {
+        assert_eq!(
+            super::ShownAs::installed("my-sensor").file("faber.toml"),
+            "connectors/my-sensor/faber.toml"
+        );
+        assert_eq!(
+            super::ShownAs::package("my-sensor-0.1.0.faberpkg").file("faber.toml"),
+            "my-sensor-0.1.0.faberpkg: faber.toml"
+        );
+    }
+
     #[test]
     fn every_built_in_manifest_is_valid_and_unique() {
         let defs = super::built_in();

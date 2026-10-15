@@ -358,6 +358,7 @@ Errors from `POST`, each with a hint: `400 bad-request` (a `mode` other than `pr
 outside the package such as `../x` or `/etc/x`, a missing `faber.toml`, `README.md`, `LICENSE` or
 `.wasm`, a file a package may not hold, or a `[package]` header that can't be read),
 `422 package-not-loadable` (the connector itself doesn't load: a `faber.toml` mistake with its line,
+named inside the package file, e.g. `my-sensor-0.1.0.faberpkg: faber.toml line 7: …`,
 a rule that doesn't read, or a component that isn't one or asks for more than the connector world,
 such as WASI), `409 package-id-taken` (its id is a built-in connector's).
 

@@ -3,7 +3,7 @@
 //! package installer writes these folders; until it exists they can be copied in by hand.
 
 use super::{FILE_NAME, definition, manifest};
-pub use crate::connectors::LoadProblem;
+pub use crate::connectors::{LoadProblem, ShownAs};
 use faber_connector::{Definition, Problem};
 use std::path::Path;
 
@@ -17,7 +17,7 @@ pub fn load_installed(dir: &Path) -> (Vec<Definition>, Vec<LoadProblem>) {
     folders.sort();
     for folder in folders {
         let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        match load_one(&folder, &name) {
+        match load_one(&folder, &name, &ShownAs::installed(&name)) {
             Ok(Some(d)) => {
                 tracing::info!(
                     target: "core::declarative",
@@ -42,10 +42,11 @@ pub fn load_installed(dir: &Path) -> (Vec<Definition>, Vec<LoadProblem>) {
 }
 
 /// Loads the one declarative connector in `folder`, which must be named after its id: what the
-/// package installer checks a package with before it installs it.
-pub fn load_folder(folder: &Path) -> Result<Definition, Problem> {
+/// package installer checks a package with before it installs it. Problems name its files as
+/// `shown` says (the package file, while it is still in staging).
+pub fn load_folder(folder: &Path, shown: &ShownAs) -> Result<Definition, Problem> {
     let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    load_one(folder, &name)?.ok_or_else(|| {
+    load_one(folder, &name, shown)?.ok_or_else(|| {
         Problem::new(
             format!("The connector in \"{name}\" isn't a declarative connector."),
             "Use kind = \"declarative\" in its faber.toml.",
@@ -54,7 +55,7 @@ pub fn load_folder(folder: &Path) -> Result<Definition, Problem> {
 }
 
 /// Reads one folder and hands it to the reader for its `kind`. `Ok(None)`: another engine's.
-fn load_one(folder: &Path, name: &str) -> Result<Option<Definition>, Problem> {
+fn load_one(folder: &Path, name: &str, shown: &ShownAs) -> Result<Option<Definition>, Problem> {
     let text = std::fs::read_to_string(folder.join(FILE_NAME)).map_err(|e| {
         Problem::new(
             format!("The connector folder \"{name}\" has no readable faber.toml ({e})."),
@@ -67,12 +68,12 @@ fn load_one(folder: &Path, name: &str) -> Result<Option<Definition>, Problem> {
         None => {
             // Not readable as any kind: let the declarative reader explain exactly what is wrong.
             if let Err(e) = manifest::parse(&text) {
-                return Err(problem(name, &e));
+                return Err(problem(shown, &e));
             }
             return Ok(None);
         }
     }
-    let d = definition(&text).map_err(|e| problem(name, &e))?;
+    let d = definition(&text).map_err(|e| problem(shown, &e))?;
     let id = &d.manifest.id;
     if id != name {
         return Err(Problem::new(
@@ -83,9 +84,9 @@ fn load_one(folder: &Path, name: &str) -> Result<Option<Definition>, Problem> {
     Ok(Some(d))
 }
 
-fn problem(name: &str, e: &manifest::ManifestError) -> Problem {
+fn problem(shown: &ShownAs, e: &manifest::ManifestError) -> Problem {
     let place = e.line.map(|l| format!(" line {l}")).unwrap_or_default();
-    Problem::new(format!("connectors/{name}/faber.toml{place}: {}", e.message), e.hint.clone())
+    Problem::new(format!("{}{place}: {}", shown.file(FILE_NAME), e.message), e.hint.clone())
 }
 
 #[cfg(test)]
@@ -137,12 +138,26 @@ line = { pattern = "D:{meters:f32}" }
     fn one_folder_loads_on_its_own() {
         let root = tempfile::tempdir().unwrap();
         folder(root.path(), "my-sensor", Some(TOML));
-        assert_eq!(load_folder(&root.path().join("my-sensor")).unwrap().manifest.id, "my-sensor");
+        assert_eq!(
+            load_folder(&root.path().join("my-sensor"), &ShownAs::installed("my-sensor"))
+                .unwrap()
+                .manifest
+                .id,
+            "my-sensor"
+        );
         folder(root.path(), "other", Some(TOML));
-        assert!(load_folder(&root.path().join("other")).unwrap_err().hint.contains("Rename"));
+        assert!(
+            load_folder(&root.path().join("other"), &ShownAs::installed("other"))
+                .unwrap_err()
+                .hint
+                .contains("Rename")
+        );
         folder(root.path(), "a-wasm-one", Some(&TOML.replace("declarative", "wasm")));
         assert!(
-            load_folder(&root.path().join("a-wasm-one")).unwrap_err().message.contains("isn't a declarative")
+            load_folder(&root.path().join("a-wasm-one"), &ShownAs::installed("a-wasm-one"))
+                .unwrap_err()
+                .message
+                .contains("isn't a declarative")
         );
     }
 

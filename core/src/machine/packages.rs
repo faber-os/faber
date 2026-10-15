@@ -6,7 +6,7 @@
 //! connector restarted with the new version. The core never restarts.
 
 use super::{ErrorKind, Machine, MachineError, State};
-use crate::connectors::LoadProblem;
+use crate::connectors::{LoadProblem, ShownAs};
 use crate::leases::EndReason;
 use crate::names::PartName;
 use crate::packages::{self, Installed, PackageError, Store};
@@ -81,10 +81,11 @@ impl From<PackageError> for MachineError {
 }
 
 /// Loads a staged package's folder with the engine for its kind, exactly as the core will.
-fn load(kind: &str, folder: &Path) -> Result<Definition, Problem> {
+/// `shown` is how its files are named in a problem: the folder is only a staging copy.
+fn load(kind: &str, folder: &Path, shown: &ShownAs) -> Result<Definition, Problem> {
     match kind {
-        "wasm" => wasm::load_folder(folder, wasm::Limits::default()),
-        _ => declarative::installed::load_folder(folder),
+        "wasm" => wasm::load_folder(folder, shown, wasm::Limits::default()),
+        _ => declarative::installed::load_folder(folder, shown),
     }
 }
 
@@ -150,7 +151,8 @@ impl Machine {
         let store = self.package_store();
         let replaces = store.get(&id).ok().flatten().map(|p| p.version);
         let kind = opened.header.kind.clone();
-        let prepared = store.prepare(opened, |folder| load(&kind, folder))?;
+        let shown = ShownAs::package(source);
+        let prepared = store.prepare(opened, |folder| load(&kind, folder, &shown))?;
         let opened = prepared.opened();
         let preview_of = PackagePreview {
             header: opened.header.clone(),

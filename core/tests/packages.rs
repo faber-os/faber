@@ -249,3 +249,38 @@ async fn a_package_that_would_not_load_is_refused_with_a_hint_and_changes_nothin
             || std::fs::read_dir(c.dir.path().join("connectors")).unwrap().next().is_none()
     );
 }
+
+/// Regression: a package that fails to load at install time is still in staging, so its problem
+/// names the package file and the file inside it, never `connectors/<id>/…`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_load_problem_names_the_package_file_and_the_file_inside_it() {
+    let c = core();
+    let broken = package(&SENSOR.replace("{meters:f32}", "{meters}"));
+    for mode in ["", "&mode=preview"] {
+        let path = format!("/api/v0/packages?name=my-sensor-0.1.0.faberpkg{mode}");
+        let (s, e) = call(&c.app, "POST", &path, Some(Body::from(broken.clone()))).await;
+        assert_eq!(
+            (s, e["error"]["code"].as_str()),
+            (StatusCode::UNPROCESSABLE_ENTITY, Some("package-not-loadable"))
+        );
+        let message = e["error"]["message"].as_str().unwrap();
+        assert!(message.starts_with("my-sensor-0.1.0.faberpkg: faber.toml line 13: "), "{mode}: {message}");
+        assert!(!message.contains("connectors/"), "{mode}: {message}");
+    }
+    // A wasm package whose faber.toml only the full reader refuses (the header reads fine).
+    let wasm = SENSOR.replace("declarative", "wasm").replace("type = \"connector\"", "type = \"app\"");
+    let files: BTreeMap<String, Vec<u8>> = [
+        ("faber.toml", wasm.as_bytes()),
+        ("README.md", b"# My sensor".as_slice()),
+        ("LICENSE", b"MIT".as_slice()),
+        ("connector.wasm", b"\0asm".as_slice()),
+    ]
+    .into_iter()
+    .map(|(n, d)| (n.to_string(), d.to_vec()))
+    .collect();
+    let bytes = packages::pack(&files).unwrap();
+    let (s, e) = call(&c.app, "POST", "/api/v0/packages?name=w.faberpkg", Some(Body::from(bytes))).await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{e}");
+    let message = e["error"]["message"].as_str().unwrap();
+    assert!(message.starts_with("w.faberpkg: faber.toml"), "{message}");
+}
