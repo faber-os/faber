@@ -28,6 +28,8 @@ fn rule_for(name: &str, manifest_path: &str) -> Option<Rule> {
         }
         // FaberLink, the bridge protocol: pure encode/decode and a clock-passed-in session.
         "faberlink" => Some(Rule::Only(&["faber-capabilities"])),
+        // The Arduino flasher's protocols (Intel HEX, STK500v1/v2): pure, the port is a trait.
+        "faber-flash" => Some(Rule::Only(&[])),
         // Compiles the Arduino library's C++ core for the interop tests; its tests use faberlink.
         "faberlink-interop" => Some(Rule::Only(&["cc"])),
         "faber-core" => Some(Rule::Anything),
@@ -184,6 +186,16 @@ mod tests {
         let m = json!({"packages": [
             pkg("faberlink", "/r/sdk/rust/faberlink/Cargo.toml", &[("serialport", None)]),
         ]});
+        assert_eq!(violations(&m).len(), 1);
+    }
+
+    #[test]
+    fn the_flasher_has_no_dependencies() {
+        let m = json!({"packages": [
+            pkg("faber-flash", "/r/sdk/rust/flash/Cargo.toml", &[("proptest", Some("dev"))]),
+        ]});
+        assert!(violations(&m).is_empty(), "{:?}", violations(&m));
+        let m = json!({"packages": [pkg("faber-flash", "/r/sdk/rust/flash/Cargo.toml", &[("serialport", None)])]});
         assert_eq!(violations(&m).len(), 1);
     }
 

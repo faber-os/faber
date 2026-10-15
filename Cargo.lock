@@ -800,6 +800,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "faber-flash"
+version = "0.1.0"
+
+[[package]]
 name = "faber-test-guest"
 version = "0.1.0"
 dependencies = [

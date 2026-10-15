@@ -26,6 +26,7 @@ sdk/rust/capabilities/    faber-capabilities: capability data types (mirror of w
 sdk/rust/connector/       faber-connector: the connector trait and manifest types (and faber.toml)
 sdk/rust/connector-wasm/  faber-connector-wasm: builds a connector as a WebAssembly component
 sdk/rust/faberlink/       faberlink: the FaberLink bridge protocol, core side (docs/faberlink.md)
+sdk/rust/flash/           faber-flash: the Arduino flasher's protocols (Intel HEX, STK500v1 and v2)
 connectors/ldrobot-ld19/  first connector: built in, and the same code as a WebAssembly component
 shell/                    the web desktop (Svelte 5 + Vite + TypeScript)
 tools/arch-check/         enforces the crate dependency rules below
@@ -54,6 +55,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 | `faber-connector-wasm` | `faber-connector`, `faber-capabilities`, `toml`, `wit-bindgen` (the component glue; its generated code is the only `unsafe` allowed outside the core's dependencies) | I/O, `faber-core` |
 | connectors (`connectors/*`, and the core's test guests in `core/tests/wasm-guests/*`) | `faber-connector`, `faber-capabilities`, `toml`, and `faber-connector-wasm` for their wasm build | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
 | `faberlink` (the bridge protocol, [faberlink.md](faberlink.md)) | `faber-capabilities` | any I/O crate. It turns bytes into messages and back; the clock is passed in. |
+| `faber-flash` (the Arduino flasher: Intel HEX, STK500v1 for Optiboot, STK500v2 for the Mega) | nothing | any I/O crate. The serial port, its reset line and the clock come in through a trait; its simulated bootloaders are the tests' boards. |
 | `faberlink-interop` (tests only) | `cc` (a build dependency: it compiles the Arduino library's C++ core and a fake-board harness). Its FFI module is the only other `unsafe` code in the workspace. The core's tests use its fake board (a dev-dependency). | anything else |
 | `faber-core` | everything above, plus I/O crates | — |
 | `faber-cli` (the `faber` command) | `faber-core` (its package checks and its sandbox, so `faber check` accepts exactly what a machine runs), `faber-connector`, `faber-capabilities`, `clap`, `toml`, `wit-component` | anything else |
@@ -97,6 +99,7 @@ that isn't. How translations work, and `npm run i18n:check`: [translations.md](t
 | End-to-end | Playwright | `shell/e2e/`. Builds the shell, starts the real core with it compiled in (`embed-shell`), adds a part on the demo recording and checks that a scan is drawn, at desktop and 7" sizes |
 | Wasm connectors | `cargo test` | `core/tests/wasm.rs` builds the LD19 and a misbehaving test guest for `wasm32-unknown-unknown` and runs them in the sandbox. Without that target the tests are skipped with a message (`rustup target add wasm32-unknown-unknown`); CI sets `FABER_REQUIRE_WASM=1` so they always run there |
 | The `faber` CLI and its templates | `cargo test` | `tools/faber-cli`: `tests/first_connector.rs` is the Phase 3 proof (a new connector from the template, tested, checked, packed, installed through the API on a test core, run on a recording and uninstalled), skipped like the wasm tests without the target; the unit tests check and pack the declarative template and write the fixtures the templates and the e2e test use |
+| The Arduino flasher | `cargo test` | `sdk/rust/flash`: Intel HEX (checksums, extended addresses, cut-off files) and both bootloader protocols against simulated bootloaders written from the specs (AVR061, AVR068): write, read back and compare a fake flash; no answer, a wrong chip, a board falling silent, a bad flash cell, damaged answers. `core/tests/flash.rs` flashes through the HTTP API behind a fake serial port. Never a real port |
 | FaberLink | `cargo test` | `sdk/rust/faberlink`: property tests for the framing, every message and capability layout, and the session state machine. `tools/faberlink-interop`: the Rust session against the Arduino library's C++ core, compiled on the PC with the `cc` crate (MSVC on Windows, g++/clang elsewhere) and driven over an in-memory pipe with a fake clock: handshake, readings, commands, the board's safety rules, corruption and version mismatch. `core/tests/bridge.rs` is the Phase 4 proof: the same C++ board behind a fake serial port, driven through the HTTP API |
 | Packages | `cargo test` | `core/tests/packages.rs`: preview, install while the core runs, parts restarting on an update, uninstall refused while used, and every refusal with its hint |
 | Interfaces | `wasm-tools component wit wit/capabilities`, and the connector world (see [wit/connector](../wit/connector/README.md)) | CI |
