@@ -14,6 +14,7 @@ use crate::machine::{
     AppView, BoardCheck, MachineError, PackagePreview, PackagePreviewOf, PartView, PortView,
 };
 use crate::names::SignalAddress;
+use crate::notices::Notice;
 use crate::ports::{PortKind, PortProblem};
 use crate::runtime::PartStatus;
 use crate::simparts::WorldState;
@@ -157,6 +158,18 @@ pub fn estop_status(v: &EstopView) -> dto::EstopStatus {
         engaged: v.engaged.is_some(),
         engaged_by: v.engaged.clone(),
         history: v.history.clone(),
+    }
+}
+
+pub fn notice(n: &Notice) -> dto::Notice {
+    match n {
+        Notice::BatteryLevel { t_us, address, level, previous, volts } => dto::Notice::BatteryLevel {
+            t_us: *t_us,
+            address: address.to_string(),
+            level: *level,
+            previous: *previous,
+            volts: *volts,
+        },
     }
 }
 

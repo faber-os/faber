@@ -6,6 +6,7 @@ import type { FlashStage } from "./FlashStage";
 import type { LeaseEndReason } from "./LeaseEndReason";
 import type { LeaseInfo } from "./LeaseInfo";
 import type { LogEntry } from "./LogEntry";
+import type { Notice } from "./Notice";
 import type { PackageInfo } from "./PackageInfo";
 import type { PartInfo } from "./PartInfo";
 import type { PortInfo } from "./PortInfo";
@@ -43,4 +44,4 @@ movers: Array<WorldMover>,
 /**
  * When the world last moved on (µs, core clock).
  */
-tUs: number, } | { "type": "world-changed", id: number, name: string, } | { "type": "flash", id: number, port: string, stage: FlashStage, done: number, total: number, } | { "type": "error", id?: number, error: ErrorBody, };
+tUs: number, } | { "type": "world-changed", id: number, name: string, } | { "type": "flash", id: number, port: string, stage: FlashStage, done: number, total: number, } | { "type": "notice", id: number, notice: Notice, } | { "type": "error", id?: number, error: ErrorBody, };

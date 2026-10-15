@@ -174,7 +174,7 @@ describe('CoreState', () => {
     expect(core.connection).toBe('reconnecting');
   });
 
-  it('subscribes to parts, ports, logs, settings, files, leases, the e-stop, packages and apps on start', () => {
+  it('subscribes to parts, ports, logs, settings, files, leases, the e-stop, packages, apps and notices on start', () => {
     const { ws } = setup();
     expect(sentTopics(ws).map((m) => m.topic?.kind)).toEqual([
       'parts',
@@ -186,6 +186,7 @@ describe('CoreState', () => {
       'estop',
       'packages',
       'apps',
+      'notices',
     ]);
   });
 

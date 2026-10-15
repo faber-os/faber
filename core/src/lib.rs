@@ -15,6 +15,7 @@ pub mod files;
 pub mod host;
 pub mod leases;
 pub mod logs;
+pub mod notices;
 pub mod packages;
 pub mod ports;
 pub mod roles;

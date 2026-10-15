@@ -7,7 +7,7 @@
 use crate::names::SignalAddress;
 use faber_capabilities::{Capability, Delivery, Reading};
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::{broadcast, watch};
 
 /// How many events an every-message subscriber may fall behind before it loses some.
@@ -33,9 +33,13 @@ pub enum PublishError {
     WrongCapability { declared: Capability, got: Capability },
 }
 
+/// Sees every reading that is published, after it is delivered (see [`Router::set_tap`]).
+pub type Tap = Arc<dyn Fn(&SignalAddress, &Reading) + Send + Sync>;
+
 #[derive(Default)]
 pub struct Router {
     signals: Mutex<BTreeMap<SignalAddress, Signal>>,
+    tap: RwLock<Option<Tap>>,
 }
 
 pub enum Subscription {
@@ -86,7 +90,21 @@ impl Router {
         self.signals.lock().expect("router lock").remove(address);
     }
 
+    /// Calls `tap` with every reading published from now on, after its subscribers have it and
+    /// outside the router's lock. It must be quick: it runs on the publisher's thread.
+    pub fn set_tap(&self, tap: Tap) {
+        *self.tap.write().expect("router tap lock") = Some(tap);
+    }
+
     pub fn publish(&self, address: &SignalAddress, reading: Reading) -> Result<(), PublishError> {
+        let reading = self.deliver(address, reading)?;
+        if let Some(tap) = self.tap.read().expect("router tap lock").as_ref() {
+            tap(address, &reading);
+        }
+        Ok(())
+    }
+
+    fn deliver(&self, address: &SignalAddress, reading: Reading) -> Result<Arc<Reading>, PublishError> {
         let mut signals = self.signals.lock().expect("router lock");
         let signal = signals.get_mut(address).ok_or(PublishError::Undeclared)?;
         if reading.capability() != signal.capability {
@@ -99,13 +117,13 @@ impl Router {
         signal.last = Some(Arc::clone(&reading));
         match &signal.channel {
             Channel::Latest(tx) => {
-                tx.send_replace(Some(reading));
+                tx.send_replace(Some(Arc::clone(&reading)));
             }
             Channel::Every(tx) => {
-                let _ = tx.send(reading); // no subscribers is fine
+                let _ = tx.send(Arc::clone(&reading)); // no subscribers is fine
             }
         }
-        Ok(())
+        Ok(reading)
     }
 
     /// Subscribes to `address`, or `None` if no such signal exists right now.
@@ -180,6 +198,21 @@ mod tests {
         assert_eq!(next_t(&mut sub).await, None);
         assert!(router.subscribe(&addr()).is_none());
         assert_eq!(router.publish(&addr(), scan(1)), Err(PublishError::Undeclared));
+    }
+
+    #[test]
+    fn a_tap_sees_every_published_reading_but_not_refused_ones() {
+        let router = Router::new();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let s = Arc::clone(&seen);
+        router.set_tap(Arc::new(move |a: &SignalAddress, r: &Reading| {
+            s.lock().unwrap().push((a.to_string(), r.t_us()));
+        }));
+        router.declare(addr(), Capability::LaserScan);
+        router.publish(&addr(), scan(3)).unwrap();
+        let other = SignalAddress::parse("nobody/laser-scan").unwrap();
+        assert!(router.publish(&other, scan(4)).is_err());
+        assert_eq!(*seen.lock().unwrap(), [("lidar/laser-scan".to_string(), 3)]);
     }
 
     #[test]

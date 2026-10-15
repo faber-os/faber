@@ -432,6 +432,9 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
     /** What another browser tab's install or uninstall sends every tab (the `packages` topic). */
     pushPackages: (packages: unknown[]) =>
       ws.receive(bin({ type: 'packages', id: subscriptionId('packages'), packages })),
+    /** A notice from the core (the `notices` topic), e.g. a battery's level changing. */
+    pushNotice: (notice: unknown) =>
+      ws.receive(bin({ type: 'notice', id: subscriptionId('notices'), notice })),
     filesChanged: (folders: string[]) =>
       ws.receive(bin({ type: 'files-changed', id: subscriptionId('files'), folders })),
   };

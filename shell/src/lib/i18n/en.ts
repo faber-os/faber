@@ -37,6 +37,13 @@ export const en = {
   // Desktop
   'desktop.windowsArea': 'Windows',
   'desktop.toast.dismiss': 'Dismiss',
+  // Notices from the core, shown as toasts (docs/api.md, "Notices")
+  'notice.battery.low': 'The battery of {part} is low ({volts}).',
+  'notice.battery.low.hint': 'Finish what you are doing and charge it soon.',
+  'notice.battery.critical': 'The battery of {part} is critical ({volts}).',
+  'notice.battery.critical.hint': 'Stop and charge it now: going on can damage the cells.',
+  'notice.battery.ok': 'The battery of {part} is ok again ({volts}).',
+  'notice.region': 'Notices',
 
   // Start menu
   'startMenu.label': 'Start',

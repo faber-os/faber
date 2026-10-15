@@ -6,6 +6,7 @@
   import DesktopIcons from './DesktopIcons.svelte';
   import { useDesktop } from './desktopController.svelte';
   import ErrorNotice from './ErrorNotice.svelte';
+  import NoticeToasts from './NoticeToasts.svelte';
   import Taskbar from './Taskbar.svelte';
   import type { WindowDef } from './windowDefs';
   import WindowFrame from './WindowFrame.svelte';
@@ -40,17 +41,20 @@
     {/each}
   </main>
 
-  {#if core.lastError}
-    <div class="toast">
-      <ErrorNotice error={core.lastError}>
-        {#snippet actions()}
-          <button class="btn quiet" onclick={() => (core.lastError = null)}
-            >{t('desktop.toast.dismiss')}</button
-          >
-        {/snippet}
-      </ErrorNotice>
-    </div>
-  {/if}
+  <div class="toasts">
+    <NoticeToasts />
+    {#if core.lastError}
+      <div class="toast">
+        <ErrorNotice error={core.lastError}>
+          {#snippet actions()}
+            <button class="btn quiet" onclick={() => (core.lastError = null)}
+              >{t('desktop.toast.dismiss')}</button
+            >
+          {/snippet}
+        </ErrorNotice>
+      </div>
+    {/if}
+  </div>
 
   <Taskbar {defs} />
   <ContextMenu />
@@ -77,12 +81,22 @@
   .windows > :global(*) {
     pointer-events: auto;
   }
-  .toast {
+  /* Notices and the last error, stacked above the taskbar; clicks pass between them. */
+  .toasts {
     position: absolute;
     right: var(--space-3);
     bottom: calc(var(--taskbar-h) + var(--space-3));
     width: min(420px, calc(100vw - 24px));
     z-index: 99998;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    pointer-events: none;
+  }
+  .toasts > :global(*) {
+    pointer-events: auto;
+  }
+  .toast {
     border-radius: var(--radius-md);
     background: var(--surface);
     box-shadow: var(--shadow-pop);

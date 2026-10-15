@@ -30,6 +30,7 @@ use crate::files::{self, Entry, FileError, Files, Special, VPath, WriteMode};
 use crate::host;
 use crate::leases::{EndReason, Leases};
 use crate::names::{PartName, SignalAddress};
+use crate::notices::Notices;
 use crate::ports::{
     Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortProblem, PortReader, PortWriter,
     ReplayLibrary, SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME, SerialDiscovery, UsbProblemDiscovery, catalog,
@@ -294,6 +295,8 @@ pub struct Machine {
     estop_events: broadcast::Sender<estop::Reading>,
     world_events: broadcast::Sender<WorldChanged>,
     flash_events: broadcast::Sender<FlashProgress>,
+    /// Battery level changes and the like, seen on every published reading.
+    notices: Arc<Notices>,
     /// What bridges need the machine to do. Their threads send without waiting; the sweeper
     /// handles it, so a bridge never waits for the machine's lock.
     bridge_events: mpsc::Sender<BridgeEvent>,
@@ -328,6 +331,11 @@ impl Machine {
         let settings = SettingsStore::load(&config_dir);
         let translations = Translations::open(&config_dir);
         let router = Arc::new(Router::new());
+        let notices = Arc::new(Notices::new(Arc::clone(&opts.clock)));
+        let tap = Arc::clone(&notices);
+        router.set_tap(Arc::new(move |address, reading| {
+            tap.observe(address, reading);
+        }));
         opts.world.attach(Arc::clone(&router));
         let (connectors, connector_problems) =
             installed_connectors(opts.connectors.clone(), &opts.data_dir.join("connectors"));
@@ -375,6 +383,7 @@ impl Machine {
             estop_events: broadcast::channel(64).0,
             world_events: broadcast::channel(16).0,
             flash_events: broadcast::channel(256).0,
+            notices,
             bridge_events,
             bridge_inbox: Mutex::new(bridge_inbox),
             stop_sweeping: Arc::new(AtomicBool::new(false)),

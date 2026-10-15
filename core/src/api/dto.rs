@@ -682,6 +682,9 @@ pub enum Topic {
     /// The installed apps: an `apps` list now and whenever one is installed, removed, turned on
     /// or off, gets other parts, or changes state.
     Apps,
+    /// Things to tell the user once, as they happen: a `notice` each (a battery's level changed).
+    /// Nothing is replayed; the log keeps them too.
+    Notices,
 }
 
 /// Messages from the shell to the core.
@@ -847,12 +850,39 @@ pub enum ServerMessage {
         done: u32,
         total: u32,
     },
+    /// Something to tell the user once (the `notices` topic).
+    Notice {
+        id: u32,
+        notice: Notice,
+    },
     /// Something the client asked for failed. `id` is absent when it isn't tied to one request.
     Error {
         #[ts(optional)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<u32>,
         error: ErrorBody,
+    },
+}
+
+/// Something the core tells every screen once, as it happens (docs/api.md, "Notices").
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+#[ts(export)]
+pub enum Notice {
+    /// A battery's level changed: to `low` or `critical`, or back to `ok`.
+    #[serde(rename_all = "camelCase")]
+    BatteryLevel {
+        /// When (µs, core clock).
+        #[ts(type = "number")]
+        t_us: u64,
+        /// The battery's signal, e.g. `sennep.battery/battery`.
+        address: String,
+        level: faber_capabilities::battery::Level,
+        /// Left out for a battery seen for the first time.
+        #[ts(optional)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous: Option<faber_capabilities::battery::Level>,
+        volts: f32,
     },
 }
 

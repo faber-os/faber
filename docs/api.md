@@ -91,10 +91,11 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `world` | — | a `world` message 20 times a second for as long as the subscription lasts, and `world-changed` (`name`) whenever the world is switched. See [The simulated world](#the-simulated-world). |
 | `flash` | — | a `flash` message (`port`, `stage`, `done`, `total`) after every page the Arduino flasher writes or reads back, on any port. See [The Arduino flasher](#the-arduino-flasher). |
 | `apps` | — | an `apps` message (`apps`: `AppInfo[]`, as `GET /api/v0/apps`) now and whenever an app is installed, removed, turned on or off, gets other parts, or changes state. See [Apps](#apps). |
+| `notices` | — | a `notice` message (`notice`: `Notice`) for each thing worth telling the user, as it happens. Nothing is replayed. See [Notices](#notices). |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
 `serial-opened`, `serial-data`, `serial-closed`, `leases`, `lease-granted`, `lease-ended`, `estop`,
-`packages`, `apps`, `world`, `world-changed`, `flash`, `error`. Each carries the `id` of the subscription
+`packages`, `apps`, `world`, `world-changed`, `flash`, `notice`, `error`. Each carries the `id` of the subscription
 or serial session it belongs to. `error` may come without an `id`.
 
 **Serial sessions**, step by step:
@@ -124,6 +125,20 @@ the part's name.
 | `internal` | A bug in the core. The log has details. |
 
 Every error carries `message` and `hint`, like REST errors.
+
+### Notices
+
+Things the core tells every screen once, as they happen. The shell shows each as a toast, and the
+core also writes each to the log (as the part or app whose signal it is), so nothing is lost while
+no screen is open. A `Notice` is tagged by `kind`:
+
+| `kind` | Fields | When |
+|---|---|---|
+| `battery-level` | `tUs`, `address` (the battery's signal), `level` (`ok` / `low` / `critical`), `previous` (left out for a battery seen for the first time), `volts` | a `battery@1` signal's level changes (docs/capabilities.md): to `low` or `critical`, or back to `ok`. Never for a first `ok`; a battery that is already low when it first reports is told about. Parts and apps' derived signals alike. |
+
+The level carries the capability's hysteresis, so a voltage wobbling around a threshold doesn't
+flood the topic. The shell keeps one toast per battery (low, then critical, replaces it): low and
+critical stay until dismissed, "ok again" goes away by itself.
 
 ## Driving: leases, commands and the e-stop
 

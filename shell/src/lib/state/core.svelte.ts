@@ -45,6 +45,7 @@ import type {
   LeaseEndReason,
   LeaseGrant,
   LeaseInfo,
+  Notice,
   Pattern,
   Simulation,
   WorldInfo,
@@ -56,6 +57,10 @@ import type { Result } from './result';
 
 export const LOG_CAPACITY = 1000;
 const LOG_FLUSH_MS = 50;
+const MAX_NOTICES = 5;
+
+/** A notice on screen, with a key to dismiss it by. */
+export type ShownNotice = { key: number; notice: Notice };
 
 export type { Result } from './result';
 
@@ -138,6 +143,11 @@ export class CoreState {
   lastError = $state.raw<ErrorBody | null>(null);
   /** Who drives what, live from the `leases` topic (docs/api.md, "Driving"). */
   leases = $state.raw<LeaseInfo[]>([]);
+  /**
+   * Notices to show as toasts, newest last (the `notices` topic): one per battery, so a battery
+   * going from low to critical replaces its toast. At most five; dismissed by the user.
+   */
+  notices = $state.raw<ShownNotice[]>([]);
   /** The e-stop, live from its topic; `null` until the core has said. */
   estop = $state.raw<EstopStatus | null>(null);
   /** Parts with something that moves (a `planar-base@1` or `motor@1`). */
@@ -265,6 +275,14 @@ export class CoreState {
           },
         },
       ),
+      s.subscribe(
+        { kind: 'notices' },
+        {
+          onMessage: (m) => {
+            if (m.type === 'notice') this.addNotice(m.notice);
+          },
+        },
+      ),
     );
     s.connect();
     void this.loadConnectors();
@@ -273,6 +291,19 @@ export class CoreState {
   stop(): void {
     for (const stop of this.stops.splice(0)) stop();
     this.socket.close();
+  }
+
+  private noticeKey = 0;
+
+  private addNotice(notice: Notice): void {
+    const shown = { key: ++this.noticeKey, notice };
+    const others = this.notices.filter((n) => n.notice.address !== notice.address);
+    this.notices = [...others, shown].slice(-MAX_NOTICES);
+  }
+
+  /** Takes a notice's toast away. */
+  dismissNotice(key: number): void {
+    this.notices = this.notices.filter((n) => n.key !== key);
   }
 
   /**

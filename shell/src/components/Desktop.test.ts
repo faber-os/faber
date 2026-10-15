@@ -104,4 +104,27 @@ describe('Desktop', () => {
     });
     await expect.poll(() => wall.getAttribute('data-wallpaper')).toBe('cutting-mat');
   });
+
+  it("shows a battery's level changes as toasts, one per battery, until dismissed", async () => {
+    const shell = setup();
+    const battery = (level: string, volts: number, previous?: string) => ({
+      kind: 'battery-level',
+      tUs: 1,
+      address: 'sennep.battery/battery',
+      level,
+      volts,
+      ...(previous ? { previous } : {}),
+    });
+    shell.pushNotice(battery('low', 10.4, 'ok'));
+    const region = await screen.findByRole('region', { name: 'Notices' });
+    expect(
+      within(region).getByText('The battery of sennep.battery is low (10.4 V).'),
+    ).toBeInTheDocument();
+    expect(within(region).getByText('Finish what you are doing and charge it soon.')).toBeVisible();
+    shell.pushNotice(battery('critical', 9.8, 'low'));
+    await screen.findByText('The battery of sennep.battery is critical (9.8 V).');
+    expect(screen.queryByText(/is low/)).not.toBeInTheDocument();
+    await userEvent.click(within(region).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByRole('region', { name: 'Notices' })).not.toBeInTheDocument();
+  });
 });
