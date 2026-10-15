@@ -36,6 +36,7 @@ access, in Phase 6).
 | `GET /api/v0/ports` | `PortInfo[]`: every port, with what claims it and suggestions |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
 | `POST /api/v0/ports/check-board` | `{"port": "usb:2341:0042"}` → `200 BoardCheck`, after up to 2.5 s: is a FaberLink board on this port? See [FaberLink boards](#faberlink-boards-bridges). |
+| `GET /api/v0/flasher/boards`, `POST /api/v0/ports/{id}/flash` | The Arduino flasher: puts a program on an Uno, Nano or Mega. See [The Arduino flasher](#the-arduino-flasher). |
 | `GET /api/v0/parts` | `PartInfo[]` |
 | `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name` (including `world`, the simulated world's own name), `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: add the FaberLink board it sits on instead), `400 bridge-not-simulated` (a `faber-bridge` with `simulate`: a board is real hardware), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
 | `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`); removing a bridge ends those on its sub-parts too. For a sub-part (`mega.arm`) it removes `[parts.mega.parts.arm]` from parts.toml, which works only while the board doesn't have that part: `409 part-on-board` otherwise. |
@@ -86,10 +87,11 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `estop` | — | an `estop` message (`status`: `engaged`, `engagedBy?`) now and on every engage and release. Every-message: none is lost. |
 | `packages` | — | a `packages` message (`packages`: `PackageInfo[]`, as `GET /api/v0/packages`) now and after every install, uninstall or reload of the connectors, so every browser tab sees an install at once. If `packages.toml` can't be read, an `error` (`io-error`) instead. |
 | `world` | — | a `world` message 20 times a second for as long as the subscription lasts, and `world-changed` (`name`) whenever the world is switched. See [The simulated world](#the-simulated-world). |
+| `flash` | — | a `flash` message (`port`, `stage`, `done`, `total`) after every page the Arduino flasher writes or reads back, on any port. See [The Arduino flasher](#the-arduino-flasher). |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
 `serial-opened`, `serial-data`, `serial-closed`, `leases`, `lease-granted`, `lease-ended`, `estop`,
-`packages`, `world`, `world-changed`, `error`. Each carries the `id` of the subscription
+`packages`, `world`, `world-changed`, `flash`, `error`. Each carries the `id` of the subscription
 or serial session it belongs to. `error` may come without an `id`.
 
 **Serial sessions**, step by step:
@@ -211,6 +213,70 @@ In `GET /api/v0/parts`, a bridge is followed by its sub-parts.
 
 The core never checks a port by itself: opening a serial port restarts most Arduino-based devices
 (a 3D printer mid-print, too) and they may not like the bytes, so it happens only when someone asks.
+
+## The Arduino flasher
+
+Puts a program (an Intel HEX file, as the Arduino IDE exports it) on an Arduino over its USB port,
+through the bootloader the board ships with: **STK500v1** for the Uno and Nano (Optiboot, 115 200
+baud; a Nano on the old bootloader at 57 600) and **STK500v2** for the Mega 2560 (115 200 baud). No
+Arduino IDE and no other program is needed. The protocol code is `sdk/rust/flash` (`faber-flash`);
+it has been tested against simulated bootloaders only, not yet against a real board.
+
+**Flashing replaces the program on the board.** The core only ever does it when asked, never by
+itself, and it writes nothing before the program fits, the bootloader has answered and the chip's
+signature is the board's (a wrong board is refused with nothing written).
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/flasher/boards` | `FlashBoard[]`: `id` (`uno`, `nano`, `nano-old`, `mega2560`), `name`, `chip`, `room` (the bytes a program may use: the flash minus the bootloader). |
+| `POST /api/v0/ports/{id}/flash` | `FlashRequest` → `200 FlashResult`, once it is done: seconds for an Uno, up to a minute for a whole Mega. `{id}` is the port id, URL-encoded (`usb%3A2341%3A0043`). `board?` is a board id; left out, it is the board the port's USB ids name. `firmware` is `{"kind": "file", "path": "home:/Documents/blink.hex"}` (a file in Files) or `{"kind": "package", "package": "<id>"}` (an installed package's `firmware/<board>.hex`). `stopPart?` (default `false`): stop the FaberLink board on the port, see below. `FlashResult`: `port`, `board`, `boardName`, `bytes` (where the program ends), `pages` (written and read back), `stoppedPart?`. |
+
+**What it does:** checks the program (valid HEX, fits the board), claims the port (it shows
+`claimedBy: "tool:arduino-flasher"`, so nothing else opens it), opens it at the bootloader's speed,
+resets the board through DTR/RTS (released 250 ms, then asserted, then 50 ms for the bootloader to
+start), syncs, reads the chip's signature, writes every page that holds part of the program, reads
+each one back and compares, and leaves the bootloader, which starts the new program. Then it gives
+the port back.
+
+**A port in use:** a port a part uses is refused (`409 port-claimed`). The one exception is a
+FaberLink board (a `faber-bridge` part): without `stopPart` it is refused with
+`409 port-used-by-bridge`; with `stopPart: true` the bridge is stopped first (its leases end with
+`part-restarted` and its motors get `SAFE`), waits while the flasher holds its port, and starts
+again by itself afterwards, on the new firmware. A port open in a tool (the serial monitor) is
+always refused.
+
+**The guess:** `GET /api/v0/ports` gives each port a `board?` (`BoardGuess`): `{"board": "uno"}` or
+`{"board": "mega2560"}` for an official Arduino's USB ids (vendor `2341` or `2a03`), or
+`{"usbChip": "CH340"}` / `{"usbChip": "FT232"}` for the USB chips clone boards use, which say nothing
+about the board: then the request must name one.
+
+**Errors**, each with a hint:
+
+| Status and code | When |
+|---|---|
+| `400 unknown-port`, `400 not-a-serial-port` | No such port right now, or a recording |
+| `400 unknown-board` | `board` isn't one of `GET /api/v0/flasher/boards` |
+| `400 board-needed` | No `board`, and the port's USB ids don't name one (a clone) |
+| `404 not-found`, `404 not-installed` | The file isn't there; the package isn't installed or has no firmware for this board |
+| `409 port-claimed`, `409 port-used-by-bridge`, `409 port-unavailable` | A part or tool uses the port; a FaberLink board does (ask again with `stopPart`); it couldn't be opened |
+| `422 firmware-invalid` | Not valid Intel HEX: the line that is wrong (a bad checksum, a cut-off file, …) |
+| `422 firmware-too-large` | The program doesn't fit next to the bootloader |
+| `422 board-not-answering` | The bootloader never answered: "The board didn't answer the bootloader." Try pressing reset just as you press Flash; check the board is the one picked. Nothing was written. |
+| `422 wrong-board` | The chip's signature isn't the board's (e.g. an old Nano's ATmega168 picked as an Uno). Nothing was written. |
+| `422 board-stopped-answering` | It stopped in the middle; flash again |
+| `422 verify-failed` | What was read back differs (the address and both bytes) |
+| `422 damaged-answers` | The Mega's answers kept arriving with bad checksums: a cable or noise problem |
+| `422 board-refused` | The bootloader said no to a command |
+| `409 port-failed` | The port stopped working (unplugged) |
+
+The `flash` topic on the WebSocket follows it: `stage` is `connecting` (reset and sync), `writing`,
+`verifying`, then `done`; `done` and `total` count bytes (whole pages). The result, or the error,
+comes as the `POST`'s answer.
+
+**Firmware in packages:** a package may carry `firmware/<board>.hex`, one per board, each declared
+in its `faber.toml` as `[[firmware]]` with `board = "uno"`. Installing checks that every declared
+file is there and valid HEX that fits the board, and that no undeclared one is. `PackageInfo`
+lists the boards in `firmware`.
 
 ## The simulated world
 
@@ -396,15 +462,15 @@ the shell too, since only the shell has the English catalogue.
 ## Packages
 
 A connector package (`.faberpkg`, [packages.md](packages.md) §5) is a zip with `faber.toml` at its
-root, `connector.wasm` (wasm connectors only), `README.md`, `LICENSE`, and optionally `icon.svg` and
-`captures/*.fbcap`. Installing one needs no restart: the connector is offered by
+root, `connector.wasm` (wasm connectors only), `README.md`, `LICENSE`, and optionally `icon.svg`,
+`captures/*.fbcap` and `firmware/<board>.hex` (bridge firmware, see [the Arduino flasher](#the-arduino-flasher)). Installing one needs no restart: the connector is offered by
 `GET /api/v0/connectors` at once, and parts already using that connector restart with the new
 version. Until the store exists (Phase 7), nothing is checked by the Faber registry: every package
 says `checked: false`, and the shell says so before installing.
 
 | Method and path | Body / result |
 |---|---|
-| `GET /api/v0/packages` | `PackageInfo[]`, by id: `id`, `name`, `version`, `kind` (`wasm` or `declarative`), `publisher?`, `installedAt` (RFC 3339, UTC), `source` (the file it came from), `checked` (always `false` for now), `usedBy` (the parts using it), and `problem?` (a `ConnectorProblem`, when its connector isn't loaded). Read from `<data>/config/packages.toml`. Errors: `500 io-error` (that file can't be read; the hint says how to recover). |
+| `GET /api/v0/packages` | `PackageInfo[]`, by id: `id`, `name`, `version`, `kind` (`wasm` or `declarative`), `publisher?`, `installedAt` (RFC 3339, UTC), `source` (the file it came from), `checked` (always `false` for now), `usedBy` (the parts using it), `problem?` (a `ConnectorProblem`, when its connector isn't loaded), and `firmware` (the boards it carries firmware for, for [the Arduino flasher](#the-arduino-flasher)). Read from `<data>/config/packages.toml`. Errors: `500 io-error` (that file can't be read; the hint says how to recover). |
 | `POST /api/v0/packages?mode=preview&name=<file name>` | The package file as the body (any content type). Checks it in full, exactly as installing would, and installs nothing: `200 PackagePreview`: `connector` (a `ConnectorInfo`, as `GET /api/v0/connectors` will list it; its `port` is what it can touch), `publisher?`, `readme` (the README as text: show it as text or safe Markdown, never as HTML), `captures` (its recordings), `replaces?` (the version installed now) and `checked`. |
 | `POST /api/v0/packages?name=<file name>` | The same, and installs it into `<data>/connectors/<id>/`: `201 PackageInfo`. `name` is remembered as `source` (default `upload.faberpkg`). The version it replaces is kept until the new one has loaded; if it doesn't load, the old one is put back. |
 | `DELETE /api/v0/packages/{id}` | `204`. Removes the folder and its line in `packages.toml`. Errors: `404 not-installed`, `409 package-in-use` (a part uses its connector: the message names the parts; remove them first). |

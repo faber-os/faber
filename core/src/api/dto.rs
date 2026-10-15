@@ -219,6 +219,11 @@ pub struct PortInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claimed_by: Option<String>,
     pub suggestions: Vec<Suggestion>,
+    /// What its USB ids say about the Arduino on it (the Arduino flasher's guess). Left out
+    /// when they say nothing.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<BoardGuess>,
 }
 
 /// A connector installed in `<data>/connectors/` that the core couldn't load. The core runs
@@ -286,6 +291,8 @@ pub struct PackageInfo {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problem: Option<ConnectorProblem>,
+    /// The boards it carries firmware for (`firmware/<board>.hex`), for the Arduino flasher.
+    pub firmware: Vec<String>,
 }
 
 /// Something plugged in over USB that the computer can't talk to, so it never became a port
@@ -546,6 +553,9 @@ pub enum Topic {
     /// The installed connector packages: a `packages` list now and after every install,
     /// uninstall or reload of the connectors (so every browser tab sees an install at once).
     Packages,
+    /// The Arduino flasher's progress: a `flash` message after every page it writes or reads
+    /// back, on any port.
+    Flash,
 }
 
 /// Messages from the shell to the core.
@@ -697,6 +707,14 @@ pub enum ServerMessage {
     WorldChanged {
         id: u32,
         name: String,
+    },
+    /// The Arduino flasher on `port`: in which stage, and how many of `total` bytes are done.
+    Flash {
+        id: u32,
+        port: String,
+        stage: FlashStage,
+        done: u32,
+        total: u32,
     },
     /// Something the client asked for failed. `id` is absent when it isn't tied to one request.
     Error {
@@ -1081,6 +1099,96 @@ pub use crate::settings::{
     Units,
 };
 pub use crate::translations::TranslationInfo;
+
+/// What a port's USB ids say about the Arduino on it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BoardGuess {
+    /// The board (`uno`, `mega2560`), when the ids are an official Arduino's.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<String>,
+    /// The USB-serial chip (`CH340`, `FT232`) that clone boards use. It doesn't say which
+    /// board, so the user picks one.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usb_chip: Option<String>,
+}
+
+/// A board the Arduino flasher can program (`GET /api/v0/flasher/boards`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FlashBoard {
+    /// `uno`, `nano`, `nano-old` or `mega2560`: the name of a package's `firmware/<id>.hex`.
+    pub id: String,
+    pub name: String,
+    pub chip: String,
+    /// The flash a program may use, in bytes (the chip's flash minus the bootloader).
+    pub room: u32,
+}
+
+/// Body of `POST /api/v0/ports/{id}/flash`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FlashRequest {
+    /// A board id from `GET /api/v0/flasher/boards`. Left out: the board the port's USB ids
+    /// name; a clone's port then answers `400 board-needed`.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<String>,
+    pub firmware: FirmwareRef,
+    /// Stop the FaberLink board (bridge) on the port for this. Without it, such a port is
+    /// refused with `409 port-used-by-bridge`. Other parts are always refused.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_part: Option<bool>,
+}
+
+/// The program to flash.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+#[ts(export)]
+pub enum FirmwareRef {
+    /// An Intel HEX file in Files, e.g. `home:/Documents/blink.hex`.
+    File { path: String },
+    /// An installed package's firmware for the board (`firmware/<board>.hex`).
+    Package { package: String },
+}
+
+/// What the flasher put on the board.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct FlashResult {
+    pub port: String,
+    /// The board id, and its name.
+    pub board: String,
+    pub board_name: String,
+    /// Where the program ends, in bytes.
+    pub bytes: u32,
+    /// Pages written and read back.
+    pub pages: u32,
+    /// The bridge that was stopped for it; it starts again by itself on the new firmware.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_part: Option<String>,
+}
+
+/// Where the flasher is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum FlashStage {
+    /// Resetting the board and waiting for its bootloader.
+    Connecting,
+    Writing,
+    /// Reading the program back and comparing.
+    Verifying,
+    Done,
+}
 
 #[cfg(test)]
 mod tests {

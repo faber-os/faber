@@ -5,10 +5,12 @@
 
 #[cfg(test)]
 mod bridge_tests;
+mod flash;
 mod packages;
 mod safety;
 mod world;
 
+pub use flash::{FirmwareSource, FlashProgress, FlashRequest, Flashed};
 pub use packages::{PackagePreview, PackageView, installed_connectors};
 pub use safety::{CommandReply, EstopView, LeaseEvent};
 pub use world::{DEFAULT_WORLD, WorldChanged, WorldView};
@@ -191,6 +193,8 @@ pub struct PortView {
     pub entry: PortEntry,
     pub claimed_by: Option<String>,
     pub suggestions: Vec<Suggestion>,
+    /// The Arduino board its USB ids name, for the flasher.
+    pub board: faber_flash::Detected,
 }
 
 /// What the data folder's disk holds (`GET /api/v0/storage`), in bytes.
@@ -287,6 +291,7 @@ pub struct Machine {
     lease_events: broadcast::Sender<LeaseEvent>,
     estop_events: broadcast::Sender<estop::Reading>,
     world_events: broadcast::Sender<WorldChanged>,
+    flash_events: broadcast::Sender<FlashProgress>,
     /// What bridges need the machine to do. Their threads send without waiting; the sweeper
     /// handles it, so a bridge never waits for the machine's lock.
     bridge_events: mpsc::Sender<BridgeEvent>,
@@ -362,6 +367,7 @@ impl Machine {
             lease_events: broadcast::channel(256).0,
             estop_events: broadcast::channel(64).0,
             world_events: broadcast::channel(16).0,
+            flash_events: broadcast::channel(256).0,
             bridge_events,
             bridge_inbox: Mutex::new(bridge_inbox),
             stop_sweeping: Arc::new(AtomicBool::new(false)),
@@ -563,6 +569,7 @@ impl Machine {
                     entry: entry.clone(),
                     claimed_by: st.claims.holder(&entry.id).map(|c| c.to_string()),
                     suggestions,
+                    board: flash::guess(entry),
                 }
             })
             .collect()

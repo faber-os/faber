@@ -6,6 +6,7 @@ mod convert;
 mod driving;
 pub mod dto;
 mod files;
+mod flash;
 mod packages;
 mod shell;
 mod translations;
@@ -44,6 +45,7 @@ pub fn router(state: AppState) -> Router {
         .merge(files::routes())
         .merge(packages::routes())
         .merge(driving::routes())
+        .merge(flash::routes())
         .merge(translations::routes())
         .merge(world::routes())
         .fallback(shell::serve)

@@ -501,6 +501,30 @@ fn subscribe(
                 }
             }))
         }
+        dto::Topic::Flash => {
+            let mut rx = state.machine.flash_events();
+            Ok(tokio::spawn(async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(e) => {
+                            let msg = dto::ServerMessage::Flash {
+                                id,
+                                port: e.port,
+                                stage: convert::flash_stage(e.progress.stage),
+                                done: e.progress.done,
+                                total: e.progress.total,
+                            };
+                            if out.send(msg).await.is_err() {
+                                return;
+                            }
+                        }
+                        // Missed some pages: the next one says where it is.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(_) => return,
+                    }
+                }
+            }))
+        }
         dto::Topic::Logs => {
             let (recent, mut rx) = state.logs.follow();
             Ok(tokio::spawn(async move {
