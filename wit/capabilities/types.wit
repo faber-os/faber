@@ -1,0 +1,30 @@
+package faber:capabilities@0.1.0;
+
+/// Types shared by all capabilities.
+interface types {
+  /// Microseconds on the core's monotonic clock.
+  type timestamp = u64;
+  /// Proof of holding a lease; required by leased commands.
+  type lease-id = u64;
+
+  record vec3 { x: f32, y: f32, z: f32 }
+  record quaternion { x: f32, y: f32, z: f32, w: f32 }
+  /// Planar velocity in the machine frame (x forward, y left).
+  record twist2d { vx: f32, vy: f32, omega: f32 }
+  record rgb { r: u8, g: u8, b: u8 }
+
+  /// Where a spatial part sits on the machine (m, rad).
+  record mount {
+    x: f32, y: f32, z: f32,
+    roll: f32, pitch: f32, yaw: f32,
+  }
+
+  enum command-error {
+    no-lease,
+    lease-expired,
+    estop-engaged,
+    unsupported,
+    out-of-range,
+    part-not-ready,
+  }
+}

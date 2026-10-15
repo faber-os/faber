@@ -1,0 +1,72 @@
+package faber:capabilities@0.1.0;
+
+interface distance {
+  use types.{timestamp, mount};
+  enum status { ok, too-close, too-far, no-target, failed }
+  enum kind { ultrasonic, laser-tof, infrared, radar }
+  record info { min-m: f32, max-m: f32, field-of-view-rad: f32, kind: kind }
+  record settings { rate-hz: f32, mount: mount }
+  record reading { t-us: timestamp, meters: f32, status: status }
+}
+
+interface imu {
+  use types.{timestamp, mount, vec3, quaternion};
+  record settings { rate-hz: f32, mount: mount }
+  record reading {
+    t-us: timestamp,
+    orientation: option<quaternion>,
+    angular-velocity: vec3,
+    linear-acceleration: vec3,
+    orientation-variance: option<vec3>,
+    angular-velocity-variance: option<vec3>,
+    linear-acceleration-variance: option<vec3>,
+  }
+}
+
+interface laser-scan {
+  use types.{timestamp, mount};
+  record info { range-min-m: f32, range-max-m: f32 }
+  record settings { rate-hz: f32, mount: mount }
+  /// Even bins when `angles` is none (angle = angle-min + i * angle-increment);
+  /// raw points when `angles` is present. `+inf` in `ranges` means no return.
+  record reading {
+    t-us: timestamp,
+    angle-min: f32,
+    angle-increment: f32,
+    angles: option<list<f32>>,
+    time-increment: option<f32>,
+    scan-time: f32,
+    ranges: list<f32>,
+    intensities: option<list<f32>>,
+  }
+}
+
+interface position {
+  use types.{timestamp};
+  enum fix { none, fix2d, fix3d, dgps, rtk-float, rtk-fixed }
+  record reading {
+    t-us: timestamp,
+    latitude-deg: f64,
+    longitude-deg: f64,
+    altitude-m: option<f32>,
+    fix: fix,
+    satellites: u8,
+    horizontal-accuracy-m: option<f32>,
+    vertical-accuracy-m: option<f32>,
+    speed-m-s: option<f32>,
+    course-rad: option<f32>,
+  }
+}
+
+interface pose {
+  use types.{timestamp, vec3, quaternion};
+  /// Usually published as a derived signal, e.g. `sennep:pose`.
+  record reading {
+    t-us: timestamp,
+    frame: string,
+    position: vec3,
+    orientation: quaternion,
+    position-variance: option<vec3>,
+    yaw-variance: option<f32>,
+  }
+}

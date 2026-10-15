@@ -1,0 +1,20 @@
+package faber:capabilities@0.1.0;
+
+interface temperature {
+  use types.{timestamp};
+  record settings { rate-hz: f32 }
+  record reading { t-us: timestamp, celsius: f32, variance: option<f32> }
+}
+
+interface humidity {
+  use types.{timestamp};
+  record settings { rate-hz: f32 }
+  /// Relative humidity as a fraction 0..1.
+  record reading { t-us: timestamp, relative: f32, variance: option<f32> }
+}
+
+interface pressure {
+  use types.{timestamp};
+  record settings { rate-hz: f32 }
+  record reading { t-us: timestamp, pascal: f32, variance: option<f32> }
+}

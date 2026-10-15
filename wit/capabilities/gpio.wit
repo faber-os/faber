@@ -1,0 +1,50 @@
+package faber:capabilities@0.1.0;
+
+interface digital-in {
+  use types.{timestamp};
+  enum pull { none, up, down }
+  record settings { pull: pull, debounce-ms: u32, active-low: bool }
+  /// Signal, every-message.
+  record reading { t-us: timestamp, level: bool }
+}
+
+interface digital-out {
+  use types.{timestamp, lease-id, command-error};
+  record settings { active-low: bool, safe-level: bool, lease-ms: u32 }
+  /// Signal, latest-value.
+  record reading { t-us: timestamp, level: bool }
+  /// Leased.
+  set: func(lease: lease-id, level: bool) -> result<_, command-error>;
+}
+
+interface analog-in {
+  use types.{timestamp};
+  record settings { rate-hz: f32, reference-volts: option<f32> }
+  record reading { t-us: timestamp, fraction: f32, volts: option<f32> }
+}
+
+interface pwm-out {
+  use types.{timestamp, lease-id, command-error};
+  record settings { frequency-hz: f32, lease-ms: u32 }
+  record reading { t-us: timestamp, duty: f32 }
+  /// Leased. Duty 0..1.
+  set-duty: func(lease: lease-id, duty: f32) -> result<_, command-error>;
+}
+
+interface servo {
+  use types.{timestamp, lease-id, command-error};
+  enum safe-state { hold, release }
+  record settings {
+    min-angle-rad: f32,
+    max-angle-rad: f32,
+    pulse-min-us: u32,
+    pulse-max-us: u32,
+    max-speed-rad-s: option<f32>,
+    safe-state: safe-state,
+    lease-ms: u32,
+  }
+  /// The commanded angle; most servos give no feedback.
+  record reading { t-us: timestamp, angle-rad: f32 }
+  /// Leased.
+  set-angle: func(lease: lease-id, angle-rad: f32) -> result<_, command-error>;
+}

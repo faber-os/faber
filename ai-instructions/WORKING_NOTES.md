@@ -1,7 +1,8 @@
 # Working notes
 
 ## State
-- All design decisions D01–D28 are accepted and there are no open questions (`docs/decisions.md`). The next design work is the **starter capability field lists** (WIT), then Phase 1 in `docs/roadmap.md`.
+- All design decisions D01–D30 are accepted and there are no open questions (`docs/decisions.md`). Capabilities are specified (`docs/capabilities.md`). Next: **Phase 1** in `docs/roadmap.md` (core on the PC, LD19 over USB, Svelte shell v0).
+- WIT sketches share one package version (`faber:capabilities@0.1.0`). Per-capability versioning (`distance@1`) still needs a concrete scheme before the API is frozen (Phase 2).
 - `private/` (git-ignored) holds Mikkel's explainers: WASM, A/B updates, licences + the Apache patent clause, wire formats, package signing, frontend options, the name brainstorm. Never link to it from public docs.
 
 ## Things to keep in mind

@@ -9,6 +9,8 @@ microcontrollers in it. Add a part from the store, and you instantly see its liv
 use it in your project, without writing drivers or touching Linux.
 
 It's like Home Assistant OS, but for **maker and robotics projects** instead of smart homes.
+Think of it as **the next step after Arduino, before bare Raspberry Pi**: easy enough to start with
+in an afternoon, powerful enough for a robot.
 
 ## Why
 
@@ -54,6 +56,8 @@ screen. More in [docs/architecture.md](docs/architecture.md).
 | Doc | What's in it |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | How it's built: layers, capabilities, connectors, apps, safety, store, image |
+| [docs/principles.md](docs/principles.md) | Easy first: the design rules every feature follows |
+| [docs/capabilities.md](docs/capabilities.md) | All 41 capabilities, field by field, and the lease |
 | [docs/glossary.md](docs/glossary.md) | Every term, with exactly one meaning |
 | [docs/decisions.md](docs/decisions.md) | Why things are the way they are, plus open questions |
 | [docs/roadmap.md](docs/roadmap.md) | Phases, from "runs on a PC" to "public store" |

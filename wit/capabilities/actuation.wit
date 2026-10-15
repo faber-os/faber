@@ -1,0 +1,46 @@
+package faber:capabilities@0.1.0;
+
+interface motor {
+  use types.{timestamp, lease-id, command-error};
+  enum kind { dc, stepper, bldc, continuous-servo }
+  flags modes { velocity, position, duty }
+  enum stop-mode { brake, coast }
+  record info { kind: kind, modes: modes, max-velocity-rad-s: option<f32> }
+  record settings { stop-mode: stop-mode, lease-ms: u32 }
+  record reading {
+    t-us: timestamp,
+    velocity-rad-s: option<f32>,
+    position-rad: option<f32>,
+    current-a: option<f32>,
+  }
+  /// Leased. Safe state: velocity 0 / duty 0.
+  set-velocity: func(lease: lease-id, rad-per-s: f32) -> result<_, command-error>;
+  set-position: func(lease: lease-id, rad: f32) -> result<_, command-error>;
+  /// Open loop, -1..1.
+  set-duty: func(lease: lease-id, duty: f32) -> result<_, command-error>;
+}
+
+interface planar-base {
+  use types.{timestamp, lease-id, command-error, twist2d};
+  record info {
+    holonomic: bool,
+    max-velocity: twist2d,
+    max-acceleration: twist2d,
+    /// Names of the parts this base is built from; a lease locks them too.
+    built-from: list<string>,
+  }
+  record settings { lease-ms: u32 }
+  record reading { t-us: timestamp, commanded: twist2d, measured: option<twist2d> }
+  /// Leased. Safe state: stop, ramped down on the microcontroller.
+  set-velocity: func(lease: lease-id, velocity: twist2d) -> result<_, command-error>;
+}
+
+interface light {
+  use types.{timestamp, rgb, command-error};
+  record info { pixel-count: u32, effects: list<string>, max-brightness: f32 }
+  record reading { t-us: timestamp, pixels: list<rgb>, brightness: f32 }
+  /// Shared: last writer wins.
+  set-all: func(color: rgb, brightness: f32) -> result<_, command-error>;
+  set-pixels: func(start: u32, colors: list<rgb>) -> result<_, command-error>;
+  set-effect: func(name: string) -> result<_, command-error>;
+}

@@ -1,0 +1,120 @@
+package faber:capabilities@0.1.0;
+
+interface button {
+  use types.{timestamp};
+  enum event { press, release, long-press, double-press }
+  record settings { long-press-ms: u32, double-press-ms: u32, debounce-ms: u32 }
+  /// Every-message.
+  record reading { t-us: timestamp, event: event, pressed: bool }
+}
+
+interface encoder {
+  use types.{timestamp, command-error};
+  record info { counts-per-rev: option<u32> }
+  /// velocity: counts/s, or rad/s when counts-per-rev is known.
+  record reading { t-us: timestamp, count: s64, delta: s32, velocity: f32 }
+  reset-count: func() -> result<_, command-error>;
+}
+
+interface keypad {
+  use types.{timestamp};
+  record info { layout: list<list<string>> }
+  /// Every-message.
+  record reading { t-us: timestamp, key: string, pressed: bool }
+}
+
+interface presence {
+  use types.{timestamp};
+  record settings { hold-time-ms: u32 }
+  /// Every-message, on change.
+  record reading { t-us: timestamp, detected: bool, distance-m: option<f32> }
+}
+
+interface illuminance {
+  use types.{timestamp};
+  record settings { rate-hz: f32 }
+  record reading { t-us: timestamp, lux: f32 }
+}
+
+interface color-sensor {
+  use types.{timestamp};
+  record settings { gain: f32, integration-ms: u32 }
+  record reading {
+    t-us: timestamp,
+    r: f32,
+    g: f32,
+    b: f32,
+    clear: f32,
+    color-temperature-k: option<f32>,
+  }
+}
+
+interface sound-level {
+  use types.{timestamp};
+  /// calibrated: dB SPL; otherwise relative dB.
+  record info { calibrated: bool }
+  record reading { t-us: timestamp, decibels: f32 }
+}
+
+interface concentration {
+  use types.{timestamp};
+  enum substance {
+    co2, co, ch4, lpg, alcohol, voc-index,
+    pm1, pm2p5, pm10, o3, no2, nh3, other,
+  }
+  enum unit { ppm, ppb, ug-per-m3, index }
+  record info { substance: substance, unit: unit, calibrated: bool }
+  record reading { t-us: timestamp, value: f32 }
+}
+
+interface soil-moisture {
+  use types.{timestamp};
+  record settings { raw-dry: u32, raw-wet: u32 }
+  record reading { t-us: timestamp, fraction: f32 }
+}
+
+interface force {
+  use types.{timestamp, command-error};
+  record settings { calibration-factor: f32 }
+  record reading { t-us: timestamp, newtons: f32 }
+  tare: func() -> result<_, command-error>;
+}
+
+interface flow-rate {
+  use types.{timestamp, command-error};
+  record settings { pulses-per-litre: f32 }
+  record reading { t-us: timestamp, m3-per-s: f32, total-m3: f64 }
+  reset-total: func() -> result<_, command-error>;
+}
+
+interface power-meter {
+  use types.{timestamp, command-error};
+  record settings { shunt-ohms: f32 }
+  record reading { t-us: timestamp, volts: f32, amps: f32, watts: f32, watt-hours: f64 }
+  reset-energy: func() -> result<_, command-error>;
+}
+
+interface magnetic-field {
+  use types.{timestamp, mount, vec3};
+  record settings { mount: mount, declination-rad: f32 }
+  record reading { t-us: timestamp, tesla: vec3, heading-rad: option<f32> }
+}
+
+interface tag-reader {
+  use types.{timestamp};
+  enum kind { rfid, nfc, barcode, qr }
+  record info { kinds: list<kind> }
+  /// Every-message.
+  record reading { t-us: timestamp, tag-id: string, kind: kind }
+}
+
+interface wind {
+  use types.{timestamp};
+  record reading { t-us: timestamp, speed-m-s: f32, direction-rad: option<f32> }
+}
+
+interface counter {
+  use types.{timestamp, command-error};
+  record reading { t-us: timestamp, count: u64, rate-per-s: f32 }
+  reset: func() -> result<_, command-error>;
+}

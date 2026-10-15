@@ -11,7 +11,8 @@ started" as of 2026-10-15.
 - [x] Name: Faber (D25)
 - [x] Mikkel reviewed all decisions (D01–D28 accepted)
 - [x] Repo with licence and README
-- [ ] Write the starter capability WIT files on paper (final field lists)
+- [x] Capability field lists ([capabilities.md](capabilities.md)) and WIT sketches
+- [x] Design principles ([principles.md](principles.md))
 - [ ] CI skeleton
 
 **Done when:** the repo exists and the docs are agreed.
@@ -64,7 +65,7 @@ drives a motor, and killing the app stops the motor.
 
 ## Phase 5: The Pi and the image
 
-- Port manager: I2C, SPI, GPIO, Pi UARTs, device-tree overlays
+- Port manager: I2C, SPI, GPIO, Pi UARTs, device-tree overlays, detect-then-suggest for I²C and USB
 - Tools: **I2C scanner**, **GPIO panel**, **Ports**, **Signal plotter**
 - rpi-image-gen image: read-only A/B (Rugix Ctrl), `/data`, `faber.txt` provisioning
 - Kiosk on an attached screen (Cage + Chromium)
@@ -80,7 +81,7 @@ on the 7" screen.
 - Store window in the shell: browse, permissions dialog, install, update, rollback
 - Third-party registries by URL
 - Signed registry index and OS images with minisign, later TUF (D27)
-- Docs site: "write your first connector in 15 minutes"
+- Docs site (Astro Starlight): "your first connector" guide; every example tested in CI ([principles](principles.md))
 
 **Done when:** someone who isn't Mikkel publishes a connector and someone else installs it.
 

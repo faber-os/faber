@@ -1,0 +1,44 @@
+package faber:capabilities@0.1.0;
+
+// All commands in this file are shared: last writer wins.
+
+interface tone {
+  use types.{timestamp, command-error};
+  record reading { t-us: timestamp, playing: bool, frequency-hz: option<f32> }
+  play: func(frequency-hz: f32, duration-ms: u32) -> result<_, command-error>;
+  stop: func() -> result<_, command-error>;
+}
+
+interface text-display {
+  use types.{timestamp, command-error};
+  record info { rows: u8, columns: u8 }
+  record reading { t-us: timestamp, lines: list<string> }
+  set-line: func(row: u8, text: string) -> result<_, command-error>;
+  clear: func() -> result<_, command-error>;
+  set-backlight: func(on: bool) -> result<_, command-error>;
+}
+
+interface pixel-display {
+  use types.{rgb, command-error};
+  record info { width: u32, height: u32, color-depth-bits: u8 }
+  record point { x: s32, y: s32 }
+  variant draw-op {
+    text(tuple<point, string, rgb>),
+    line(tuple<point, point, rgb>),
+    /// Two corners, colour, filled.
+    rect(tuple<point, point, rgb, bool>),
+    /// Top-left corner, width, RGB pixel data.
+    image(tuple<point, u32, list<rgb>>),
+  }
+  clear: func() -> result<_, command-error>;
+  draw: func(ops: list<draw-op>) -> result<_, command-error>;
+  %flush: func() -> result<_, command-error>;
+}
+
+interface ir-remote {
+  use types.{timestamp, command-error};
+  record info { can-send: bool, can-receive: bool }
+  /// Every-message.
+  record reading { t-us: timestamp, protocol: string, code: u64 }
+  send: func(protocol: string, code: u64) -> result<_, command-error>;
+}

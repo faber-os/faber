@@ -25,6 +25,8 @@ Status (2026-10-15): **design phase, docs only.** No repo yet (Mikkel asked to w
 9. **No time estimates** anywhere (global rule).
 10. **Write the name only as `Faber`, `faber` or `FABER`** (see "How the name is written" in
     `docs/research/naming.md`), so a rename stays a case-sensitive search and replace.
+11. **Ease of use first** (`docs/principles.md`): every feature, error message, doc and example
+    must be checked against it. Examples are tested and explained, never left outdated.
 
 ## Working style
 Same as Mikkel's global rules (`GLOBAL_CLAUDE.md`): status → research → plan → ask → build,

@@ -1,0 +1,9 @@
+package faber:capabilities@0.1.0;
+
+interface camera {
+  use types.{timestamp};
+  enum exposure { auto, manual }
+  record settings { width: u32, height: u32, fps: f32, exposure: exposure }
+  /// About 1 Hz. The video itself is served as a stream by the core, not through the router.
+  record reading { t-us: timestamp, width: u32, height: u32, format: string, fps: f32 }
+}

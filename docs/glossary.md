@@ -31,8 +31,11 @@ ever two of these.
 | **Signal** | A stream of typed readings from one capability of one part, e.g. `front_lidar/laser-scan`. |
 | **Derived signal** | A stream of typed data an *app* computes and publishes under its own name, e.g. `sennep:pose`. It uses a capability's data shape, but it's never hardware: it can't claim ports or accept commands. |
 | **Command** | A request sent to a part, e.g. `left_motor/motor.set-velocity`. Commands that move things need a **lease**. |
+| **Info** | Facts a part reports about itself once, not in every reading: range limits, field of view, pixel count, supported modes. |
+| **Built from** | A part's info can say it is built from other parts (SENNEP's `planar-base` from its 4 `motor`s). A lease on it locks those parts too. |
+| **Leased / shared command** | A *leased* command needs a lease (anything that can hurt something). A *shared* command is harmless, and the last writer wins (lights, displays, tare). See [capabilities.md](capabilities.md). |
 | **Setting** | A configuration value of a part or app, validated against its manifest schema. |
-| **Lease** | Permission held by one app to command an actuator part, with a deadline. If it is not renewed, the core puts the part in its **safe state**. |
+| **Lease** | An exclusive, time-limited right for one holder (an app or an operator in the shell) to command one actuator part and the parts it is built from. Every command renews it. If it is released, expires, is revoked (e-stop, update, operator takeover) or the part fails, the part goes to its **safe state**. Full definition in [capabilities.md](capabilities.md#the-lease). |
 | **Safe state** | What each actuator capability does when nobody is in control (e.g. a motor stops). Defined by the capability, not the connector. |
 | **Port** | A physical hardware interface on the machine: `i2c-1`, `spi0.0`, `uart0`, `gpio17`, `usb:1a86:7523`. Only the port manager opens ports. |
 | **Port manager** | The part of the core that owns all ports, grants them to connectors, and detects conflicts (two parts on one UART, two I2C devices at one address). |

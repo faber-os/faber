@@ -1,0 +1,9 @@
+package faber:capabilities@0.1.0;
+
+/// For the long tail. Use a proper capability when one exists.
+interface measurement {
+  use types.{timestamp};
+  /// unit: a UCUM string such as "mV" or "Hz".
+  record info { quantity: string, unit: string }
+  record reading { t-us: timestamp, value: f64 }
+}

@@ -73,8 +73,10 @@ Capabilities are the contract the whole ecosystem depends on, so they get the mo
   - a **viewer**: the shell's built-in live view.
 - **Data shapes follow ROS `sensor_msgs` / `geometry_msgs`** where they exist (LaserScan, Imu,
   NavSatFix, Twist), in SI units, timestamped in µs. That keeps a ROS bridge cheap later.
-- The core ships a **fixed starter set**. Third parties can propose new capabilities to the
-  registry through a review process, but cannot invent them ad hoc. This keeps apps portable.
+- The core ships a **fixed starter set** of 41 capabilities, specified in
+  **[capabilities.md](capabilities.md)** (common rules, the lease, and every field). Third parties
+  can propose new capabilities through registry review, but cannot invent them ad hoc. This keeps
+  apps portable.
 
 **Starter set (v1).** Chosen so SENNEP is fully covered and a typical maker project mostly is:
 
@@ -280,7 +282,7 @@ Every part and app goes through the same states, shown in the shell:
 
 ## 9. Router
 
-- Addresses: `part/capability` for signals (`front_lidar/laser-scan`), `part/capability.command`
+- Addresses: `part/name` for signals, where the name defaults to the capability's name (`part/capability`) (`front_lidar/laser-scan`), `part/capability.command`
   for commands, and `app:name` for derived signals (`sennep:pose`). The `/` vs `:` separator makes
   hardware vs computed visible in every address.
 - Two delivery modes per signal, chosen by the capability: **latest-value** (a sensor at 100 Hz,
@@ -300,14 +302,18 @@ Every part and app goes through the same states, shown in the shell:
 - **Device-tree overlays:** when a part needs a port that isn't enabled (e.g. a second UART), the
   port manager edits the boot config and asks for a reboot, instead of the user hand-editing
   `config.txt`.
+- **Detect, then suggest** ([principles](principles.md)): the port manager scans I²C buses and
+  USB, and the registry maps known addresses and USB ids to connectors (*"Found a device at 0x76,
+  probably a BME280. Install its connector?"*). The user confirms, and doesn't have to type anything.
 - USB devices are matched by vendor:product id (plus serial number when there are two of the same
   kind), so `ttyUSB0`/`ttyUSB1` swapping after a reboot doesn't break anything.
 
 ## 11. Safety
 
-1. **Leases.** Only one app at a time can command an actuator part. A lease has a deadline (e.g.
-   250 ms) and must be renewed. If it lapses (the app crashed, hung or lost Wi-Fi), the core sends
-   that part's **safe state**.
+1. **Leases.** Only one holder at a time can command an actuator part. A lease has a deadline (e.g.
+   250 ms), and every command renews it. If it lapses (the app crashed, hung or lost Wi-Fi), the
+   core sends that part's **safe state**. Operators can always take over. The full rules are in
+   [capabilities.md](capabilities.md#the-lease).
 2. **E-stop** is a core capability with a button that is always visible in the shell (and the
    kiosk). It drops all leases and sends every actuator to its safe state. A hardware e-stop on a
    bridge appears as a part providing `estop@1`.

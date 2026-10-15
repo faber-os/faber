@@ -1,0 +1,41 @@
+package faber:capabilities@0.1.0;
+
+interface battery {
+  use types.{timestamp};
+  enum level { ok, low, critical }
+  record info { chemistry: string, cells-in-series: u8, capacity-ah: option<f32> }
+  record reading {
+    t-us: timestamp,
+    volts: f32,
+    /// Negative when discharging.
+    amps: option<f32>,
+    charge: option<f32>,
+    celsius: option<f32>,
+    cell-volts: option<list<f32>>,
+    level: level,
+  }
+}
+
+interface rc-input {
+  use types.{timestamp};
+  record info { axis-labels: list<string>, button-labels: list<string> }
+  record reading {
+    t-us: timestamp,
+    axes: list<f32>,
+    buttons: list<bool>,
+    connected: bool,
+    link-quality: option<f32>,
+  }
+}
+
+interface estop {
+  use types.{timestamp, command-error};
+  enum source { part, app, shell }
+  record info { hardware-latching: bool }
+  /// Signal, every-message.
+  record reading { t-us: timestamp, engaged: bool, source: source, reason: string }
+  /// Always allowed, for anyone.
+  engage: func(reason: string) -> result<_, command-error>;
+  /// Operator role only; refused while a hardware e-stop is latched.
+  release: func() -> result<_, command-error>;
+}
