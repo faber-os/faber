@@ -15,12 +15,17 @@ enum Rule {
 
 fn rule_for(name: &str, manifest_path: &str) -> Option<Rule> {
     let path = manifest_path.replace('\\', "/");
-    if path.contains("/connectors/") {
-        return Some(Rule::Only(&["faber-connector", "faber-capabilities", "toml"]));
+    // Connectors, and the core's misbehaving test connectors: bytes in, readings out, no I/O. The
+    // wasm glue is only compiled for the wasm build of the same code.
+    if path.contains("/connectors/") || path.contains("/wasm-guests/") {
+        return Some(Rule::Only(&["faber-connector", "faber-capabilities", "toml", "faber-connector-wasm"]));
     }
     match name {
         "faber-capabilities" => Some(Rule::Only(&["serde", "ts-rs"])),
         "faber-connector" => Some(Rule::Only(&["faber-capabilities", "serde", "toml"])),
+        "faber-connector-wasm" => {
+            Some(Rule::Only(&["faber-connector", "faber-capabilities", "toml", "wit-bindgen"]))
+        }
         "faber-core" => Some(Rule::Anything),
         "faber-arch-check" => Some(Rule::Only(&["serde_json"])),
         _ => None,
@@ -129,6 +134,21 @@ mod tests {
             pkg("faber-connector", "/r/sdk/rust/connector/Cargo.toml", &[("faber-core", None)]),
         ]});
         assert_eq!(violations(&m).len(), 1);
+    }
+
+    #[test]
+    fn the_wasm_glue_may_only_add_wit_bindgen() {
+        let m = json!({"packages": [
+            pkg("faber-connector-wasm", "/r/sdk/rust/connector-wasm/Cargo.toml", &[("wit-bindgen", None)]),
+            pkg("ldrobot-ld19", "/r/connectors/ldrobot-ld19/Cargo.toml", &[("faber-connector-wasm", None)]),
+            pkg("test-guest", "/r/core/tests/wasm-guests/x/Cargo.toml", &[("faber-connector-wasm", None)]),
+        ]});
+        assert!(violations(&m).is_empty(), "{:?}", violations(&m));
+        let m = json!({"packages": [
+            pkg("faber-connector-wasm", "/r/sdk/rust/connector-wasm/Cargo.toml", &[("tokio", None)]),
+            pkg("test-guest", "/r/core/tests/wasm-guests/x/Cargo.toml", &[("serialport", None)]),
+        ]});
+        assert_eq!(violations(&m).len(), 2);
     }
 
     #[test]

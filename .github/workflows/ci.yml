@@ -91,3 +91,9 @@ jobs:
         with:
           tool: wasm-tools
       - run: wasm-tools component wit wit/capabilities > /dev/null
+      - name: The connector world, with the capability types it uses
+        run: |
+          mkdir -p "$RUNNER_TEMP/wit/deps"
+          cp -r wit/capabilities "$RUNNER_TEMP/wit/deps/"
+          cp wit/connector/*.wit "$RUNNER_TEMP/wit/"
+          wasm-tools component wit "$RUNNER_TEMP/wit" > /dev/null

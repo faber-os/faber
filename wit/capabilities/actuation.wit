@@ -13,6 +13,12 @@ interface motor {
     position-rad: option<f32>,
     current-a: option<f32>,
   }
+  /// One command as data, as a connector receives it (the core has checked the lease).
+  variant command {
+    set-velocity(f32),
+    set-position(f32),
+    set-duty(f32),
+  }
   /// Leased. Safe state: velocity 0 / duty 0.
   set-velocity: func(lease: lease-id, rad-per-s: f32) -> result<_, command-error>;
   set-position: func(lease: lease-id, rad: f32) -> result<_, command-error>;
@@ -32,6 +38,8 @@ interface planar-base {
   record settings { lease-ms: u32 }
   /// `bumped`: it stopped short because it would have hit something (simulated worlds).
   record reading { t-us: timestamp, commanded: twist2d, measured: option<twist2d>, bumped: bool }
+  /// One command as data, as a connector receives it (the core has checked the lease).
+  variant command { set-velocity(twist2d) }
   /// Leased. Safe state: stop, ramped down on the microcontroller.
   set-velocity: func(lease: lease-id, velocity: twist2d) -> result<_, command-error>;
 }

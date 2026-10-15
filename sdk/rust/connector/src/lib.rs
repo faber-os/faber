@@ -8,6 +8,7 @@
 //! See docs/architecture.md §4 and docs/development.md.
 
 pub mod capture;
+pub mod manifest_file;
 pub mod settings;
 pub mod testing;
 
