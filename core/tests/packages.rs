@@ -340,3 +340,167 @@ mod ws {
         assert_eq!(next_packages(&mut ws).await, []);
     }
 }
+
+mod backups {
+    use super::*;
+    use std::io::{Read, Write};
+
+    async fn back_up(c: &TestCore) -> String {
+        let (s, b) = json_call(&c.app, "POST", "/api/v0/backups", json!({"includeRecordings": false})).await;
+        assert_eq!(s, StatusCode::CREATED, "{b}");
+        b["path"].as_str().unwrap().to_string()
+    }
+
+    async fn restore(c: &TestCore, path: &str) -> (StatusCode, Value) {
+        json_call(&c.app, "POST", "/api/v0/backups/restore", json!({ "path": path })).await
+    }
+
+    fn on_disk(c: &TestCore, path: &str) -> std::path::PathBuf {
+        c.dir.path().join("files").join(path.strip_prefix("home:/").unwrap())
+    }
+
+    /// One way to tamper with a backup file.
+    type Tamper<'a> = dyn Fn(&std::path::Path) + 'a;
+
+    /// Rewrites a backup zip, changing or adding entries.
+    fn tamper(
+        file: &std::path::Path,
+        change: impl Fn(&str, Vec<u8>) -> Option<Vec<u8>>,
+        add: &[(&str, &[u8])],
+    ) {
+        let bytes = std::fs::read(file).unwrap();
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut out = zip::ZipWriter::new(std::fs::File::create(file).unwrap());
+        for i in 0..zip.len() {
+            let mut e = zip.by_index(i).unwrap();
+            let name = e.name().unwrap().into_owned();
+            if e.is_dir() {
+                out.add_directory(name, zip::write::SimpleFileOptions::default()).unwrap();
+                continue;
+            }
+            let mut data = Vec::new();
+            e.read_to_end(&mut data).unwrap();
+            if let Some(data) = change(&name, data) {
+                out.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+                out.write_all(&data).unwrap();
+            }
+        }
+        for (name, data) in add {
+            out.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            out.write_all(data).unwrap();
+        }
+        out.finish().unwrap();
+    }
+
+    async fn package_ids(c: &TestCore) -> Vec<(String, String)> {
+        let (_, list) = call(&c.app, "GET", "/api/v0/packages", None).await;
+        list.as_array()
+            .unwrap()
+            .iter()
+            .map(|p| (p["id"].as_str().unwrap().to_string(), p["version"].as_str().unwrap().to_string()))
+            .collect()
+    }
+
+    /// A restored connector at the installed version is left alone; another version replaces the
+    /// installed one exactly like an install, and the parts on it restart with it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_restored_connector_is_skipped_at_the_same_version_and_replaces_another() {
+        let c = core();
+        call(
+            &c.app,
+            "POST",
+            "/api/v0/packages?name=my-sensor-0.1.0.faberpkg",
+            Some(Body::from(package(SENSOR))),
+        )
+        .await;
+        let part = json!({"name": "front", "connector": "my-sensor", "port": "replay:bench"});
+        json_call(&c.app, "POST", "/api/v0/parts", part).await;
+        let path = back_up(&c).await;
+
+        let (_, before) = call(&c.app, "GET", "/api/v0/packages", None).await;
+        assert_eq!(restore(&c, &path).await.0, StatusCode::NO_CONTENT);
+        let (_, after) = call(&c.app, "GET", "/api/v0/packages", None).await;
+        assert_eq!(after[0]["installedAt"], before[0]["installedAt"], "the same version is skipped");
+
+        let v2 = SENSOR.replace("0.1.0", "0.2.0").replace("scale = 0.01", "scale = 0.001");
+        call(&c.app, "POST", "/api/v0/packages", Some(Body::from(package(&v2)))).await;
+        reading_where(&c.app, "front/distance", |r| r["reading"]["meters"] == 0.15).await;
+        assert_eq!(restore(&c, &path).await.0, StatusCode::NO_CONTENT);
+        assert_eq!(package_ids(&c).await, [("my-sensor".to_string(), "0.1.0".to_string())]);
+        let (_, after) = call(&c.app, "GET", "/api/v0/packages", None).await;
+        assert_eq!(after[0]["source"], "my-sensor-0.1.0.faberpkg", "where it first came from");
+        reading_where(&c.app, "front/distance", |r| r["reading"]["meters"] == 1.5).await;
+    }
+
+    /// Connector code in a backup is never copied in blind: it goes through the package checks
+    /// and the staging load first, and a connector that fails fails the whole restore.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_tampered_connector_in_a_backup_is_refused_and_nothing_changes() {
+        let c = core();
+        call(&c.app, "POST", "/api/v0/packages", Some(Body::from(package(SENSOR)))).await;
+        let path = back_up(&c).await;
+        call(&c.app, "DELETE", "/api/v0/packages/my-sensor", None).await;
+        let file = on_disk(&c, &path);
+        let original = std::fs::read(&file).unwrap();
+        let parts_before = std::fs::read_to_string(c.dir.path().join("config/parts.toml")).unwrap();
+
+        let broken_rule = |name: &str, data: Vec<u8>| {
+            Some(if name == "connectors/my-sensor/faber.toml" {
+                String::from_utf8(data).unwrap().replace("{meters:f32}", "{meters}").into_bytes()
+            } else {
+                data
+            })
+        };
+        let cases: [(&Tamper<'_>, &str); 3] = [
+            (&|f| tamper(f, broken_rule, &[]), "connectors/my-sensor/faber.toml line 13"),
+            (&|f| tamper(f, |_, d| Some(d), &[("connectors/my-sensor/run.sh", b"rm -rf /")]), "run.sh"),
+            (&|f| tamper(f, |n, d| (n != "config/packages.toml").then_some(d), &[]), "packages.toml"),
+        ];
+        for (make, words) in cases {
+            std::fs::write(&file, &original).unwrap();
+            make(&file);
+            std::fs::write(c.dir.path().join("files/Documents/marker.txt"), "keep").unwrap();
+            let (s, e) = restore(&c, &path).await;
+            assert_eq!(
+                (s, e["error"]["code"].as_str()),
+                (StatusCode::UNPROCESSABLE_ENTITY, Some("backup-invalid")),
+                "{e}"
+            );
+            let message = e["error"]["message"].as_str().unwrap();
+            assert!(message.contains("\"my-sensor\"") && message.contains(words), "{words}: {message}");
+            assert!(!e["error"]["hint"].as_str().unwrap().is_empty());
+            assert_eq!(package_ids(&c).await, [], "{words}: nothing installed");
+            assert!(!c.dir.path().join("connectors/my-sensor").exists(), "{words}");
+            assert!(!c.dir.path().join("packages/staging/my-sensor").exists(), "{words}: staging cleaned");
+            assert_eq!(
+                std::fs::read_to_string(c.dir.path().join("config/parts.toml")).unwrap(),
+                parts_before
+            );
+        }
+    }
+
+    /// A backup from before connectors were backed up still restores, and leaves the installed
+    /// packages as they are.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_old_backup_without_connectors_still_restores() {
+        let c = core();
+        call(&c.app, "POST", "/api/v0/packages", Some(Body::from(package(SENSOR)))).await;
+        let file = c.dir.path().join("files/Backups/faber-backup-2026-10-01-1200.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&file).unwrap());
+        let o = zip::write::SimpleFileOptions::default();
+        w.start_file("config/parts.toml", o).unwrap();
+        w.write_all(b"[parts.front]\nconnector = \"my-sensor\"\nport = \"replay:bench\"\n").unwrap();
+        w.start_file("files/Documents/old.txt", o).unwrap();
+        w.write_all(b"from before").unwrap();
+        w.finish().unwrap();
+
+        let (s, e) = restore(&c, "home:/Backups/faber-backup-2026-10-01-1200.zip").await;
+        assert_eq!(s, StatusCode::NO_CONTENT, "{e}");
+        assert_eq!(package_ids(&c).await, [("my-sensor".to_string(), "0.1.0".to_string())]);
+        assert_eq!(
+            std::fs::read_to_string(c.dir.path().join("files/Documents/old.txt")).unwrap(),
+            "from before"
+        );
+        reading_where(&c.app, "front/distance", |r| r["reading"]["meters"] == 1.5).await;
+    }
+}

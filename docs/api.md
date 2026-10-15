@@ -267,17 +267,32 @@ gets ` (2)`. Inside, it is laid out like the data folder:
 ```
 config/parts.toml
 config/settings.toml        (if the settings were ever changed)
+config/packages.toml        (if a package was ever installed)
+connectors/<id>/…           each installed package's connector, as installed
 files/Desktop/…
 files/Documents/…
 files/Recordings/…          only with includeRecordings
 ```
 
+Only packages listed in `packages.toml` are backed up; a folder copied into `connectors/` by hand
+isn't a package and is left out.
+
 **Restore checks everything before anything changes:** the zip must be a Faber backup
 (`config/parts.toml`, and nothing outside the folders above: `backup-invalid`), `parts.toml` must
 be valid (`config-invalid`, its message saying the line, exactly like saving it in Files),
 `settings.toml` must be readable, every name must be a safe path, and the files must fit on the
-disk. Then:
+disk. **Connector code is never copied in blind:** every connector in the backup must be listed in
+its `packages.toml` and goes through the same checks and staging load as
+`POST /api/v0/packages`. One that fails fails the whole restore with `422 backup-invalid`, naming
+the connector and why (e.g. `The connector "my-sensor" in this backup can't be restored:
+connectors/my-sensor/faber.toml line 13: …`). A backup made before connectors were backed up has
+none, and restores as before. Then:
 
+- The connectors are put in place first, like an install: one installed already at the same
+  version is left alone; another version replaces the installed one, and the parts on it restart.
+  Its `source` is kept from the backup, `installedAt` is the time of the restore. Packages that
+  aren't in the backup stay. If one doesn't load once in place, all are put back and the restore
+  fails before anything else changes. The `packages` topic announces the change.
 - `parts.toml` is saved and applied at once (parts start or stop).
 - The settings are replaced, **except the developer settings**: a backup never turns
   whole-machine files on. A time zone this machine doesn't know falls back to its own.

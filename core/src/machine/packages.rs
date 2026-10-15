@@ -4,16 +4,43 @@
 //! the connector itself, loaded by the engine for its kind from a staging folder. Only then is
 //! it moved into `<data>/connectors/<id>/`, the connector list reloaded, and the parts on that
 //! connector restarted with the new version. The core never restarts.
+//!
+//! Backups hold the installed connectors too (D41, docs/api.md "Storage and backups"). Restoring
+//! one never copies connector code in blind: each goes through the same checks and staging load
+//! as installing its package, before anything changes.
 
 use super::{ErrorKind, Machine, MachineError, State};
+use crate::backup::Archive;
 use crate::connectors::{LoadProblem, ShownAs};
 use crate::leases::EndReason;
 use crate::names::PartName;
-use crate::packages::{self, Installed, PackageError, Store};
+use crate::packages::{self, Installed, PackageError, Prepared, Store, Swapped};
 use crate::{declarative, wasm};
 use faber_connector::manifest_file::PackageHeader;
 use faber_connector::{Definition, Manifest, Problem};
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+/// A connector from a backup, checked and loaded in staging, waiting to be put in place.
+pub(super) struct StagedConnector {
+    prepared: Prepared<Definition>,
+    /// The package file it was first installed from, as the backup's packages.toml says.
+    source: String,
+}
+
+fn backup_invalid(id: &str, problem: Problem) -> MachineError {
+    MachineError::new(
+        ErrorKind::Unprocessable,
+        "backup-invalid",
+        format!("The connector \"{id}\" in this backup can't be restored: {}", problem.message),
+        problem.hint,
+    )
+}
+
+fn now_rfc3339() -> String {
+    let now = jiff::Timestamp::now();
+    now.round(jiff::Unit::Second).unwrap_or(now).to_string()
+}
 
 /// Every connector: `base` (the built-in ones), then those installed in `folder`
 /// (`<data>/connectors/`), each folder read by the engine for its kind. An installed one can't
@@ -200,8 +227,7 @@ impl Machine {
                 problem.hint,
             ));
         }
-        let at = jiff::Timestamp::now().round(jiff::Unit::Second).unwrap_or_else(|_| jiff::Timestamp::now());
-        let installed = swapped.keep(&at.to_string(), source)?;
+        let installed = swapped.keep(&now_rfc3339(), source)?;
         tracing::info!(target: "core::machine", "installed the package {id} {} from {source}", installed.version);
         self.restart_parts_on(&mut st, &id);
         self.announce_packages();
@@ -226,6 +252,149 @@ impl Machine {
         tracing::info!(target: "core::machine", "uninstalled the package {id}");
         self.reload_connectors();
         self.reconcile(&mut st);
+        self.announce_packages();
+        Ok(())
+    }
+
+    /// What a backup holds of the packages: `packages.toml`, the connectors folder, and the
+    /// installed packages whose folder is there. Folders put there by hand aren't packages, so
+    /// they aren't backed up (a restore checks every connector as a package).
+    pub(super) fn packages_to_back_up(&self) -> Result<(PathBuf, PathBuf, Vec<String>), MachineError> {
+        let store = self.package_store();
+        let ids = store
+            .list()?
+            .into_iter()
+            .map(|p| p.id)
+            .filter(|id| store.connectors_dir().join(id).is_dir())
+            .collect();
+        let list = self.data_dir.join("config").join(packages::LIST_FILE);
+        Ok((list, store.connectors_dir().to_path_buf(), ids))
+    }
+
+    /// Step 1 of a restore, for the connectors: each one in the backup is checked and loaded in
+    /// staging exactly like installing its package. The first that fails fails the restore
+    /// (`backup-invalid`, naming it and why), and nothing is left staged.
+    pub(super) fn stage_backup_connectors(
+        &self,
+        archive: &mut Archive,
+    ) -> Result<Vec<StagedConnector>, MachineError> {
+        let ids = archive.connector_ids();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let listed = archive.packages_toml().map(packages::parse_list).transpose();
+        let store = self.package_store();
+        let mut staged = Vec::new();
+        for id in ids {
+            match self.stage_backup_connector(&store, archive, &id, &listed) {
+                Ok(s) => staged.push(s),
+                Err(problem) => {
+                    for s in staged {
+                        s.prepared.discard();
+                    }
+                    return Err(backup_invalid(&id, problem));
+                }
+            }
+        }
+        Ok(staged)
+    }
+
+    fn stage_backup_connector(
+        &self,
+        store: &Store,
+        archive: &mut Archive,
+        id: &str,
+        listed: &Result<Option<BTreeMap<String, Installed>>, PackageError>,
+    ) -> Result<StagedConnector, Problem> {
+        let problem = |e: PackageError| Problem::new(e.message, e.hint);
+        let listed = listed.as_ref().map_err(|e| problem(e.clone()))?;
+        let Some(entry) = listed.as_ref().and_then(|l| l.get(id)) else {
+            return Err(Problem::new(
+                "The backup's config/packages.toml doesn't list it as an installed package.",
+                "Pick a backup Faber made (in home:/Backups, named …-backup-….zip).",
+            ));
+        };
+        let files =
+            archive.connector_files(id, packages::MAX_BYTES).map_err(|e| Problem::new(e.message, e.hint))?;
+        let opened = packages::from_files(files).map_err(problem)?;
+        if opened.header.id != id {
+            return Err(Problem::new(
+                format!("Its folder holds the connector \"{}\".", opened.header.id),
+                "Pick a backup Faber made (in home:/Backups, named …-backup-….zip).",
+            ));
+        }
+        if self.base_connectors.iter().any(|d| d.manifest.id == id) {
+            return Err(Problem::new(
+                "It has the id of a connector built into Faber.",
+                "Restore the backup on a Faber that doesn't have it built in, or remove it from the backup.",
+            ));
+        }
+        let kind = opened.header.kind.clone();
+        let shown = ShownAs::installed(id);
+        let prepared = store.prepare(opened, |folder| load(&kind, folder, &shown)).map_err(problem)?;
+        Ok(StagedConnector { prepared, source: entry.source.clone() })
+    }
+
+    /// Step 2 of a restore, for the connectors: each staged one is put in place like an install.
+    /// One already installed at the same version is left as it is; another version is replaced,
+    /// and the parts on it restart. If one doesn't load once in place, all are put back.
+    pub(super) fn restore_connectors(&self, staged: Vec<StagedConnector>) -> Result<(), MachineError> {
+        if staged.is_empty() {
+            return Ok(());
+        }
+        let store = self.package_store();
+        let mut st = self.state.lock().expect("machine lock");
+        let undo = |swapped: Vec<(String, Swapped, String)>| {
+            for (id, s, _) in swapped.into_iter().rev() {
+                if let Err(e) = s.roll_back() {
+                    tracing::error!(target: "core::backup", "couldn't put connectors/{id} back: {} {}", e.message, e.hint);
+                }
+            }
+        };
+        let mut swapped = Vec::new();
+        let mut rest = staged.into_iter();
+        while let Some(s) = rest.next() {
+            let (id, version) = (s.prepared.header().id.clone(), s.prepared.header().version.clone());
+            if store.get(&id).ok().flatten().is_some_and(|i| i.version == version) {
+                tracing::info!(target: "core::backup", "the backup's connector {id} {version} is installed already");
+                s.prepared.discard();
+                continue;
+            }
+            match s.prepared.swap_in() {
+                Ok(done) => swapped.push((id, done, s.source)),
+                Err(e) => {
+                    rest.for_each(|r| r.prepared.discard());
+                    undo(swapped);
+                    self.reload_connectors();
+                    return Err(e.into());
+                }
+            }
+        }
+        if swapped.is_empty() {
+            return Ok(());
+        }
+        let problems = self.reload_connectors();
+        let failed = swapped.iter().find_map(|(id, _, _)| {
+            let problem = problems.iter().find(|p| &p.folder == id).map(|p| p.problem.clone());
+            problem
+                .or_else(|| {
+                    self.definition(id).is_none().then(|| {
+                        Problem::new("It didn't load once in place.", "Try restoring the backup again.")
+                    })
+                })
+                .map(|p| (id.clone(), p))
+        });
+        if let Some((id, problem)) = failed {
+            undo(swapped);
+            self.reload_connectors();
+            return Err(backup_invalid(&id, problem));
+        }
+        let at = now_rfc3339();
+        for (id, done, source) in swapped {
+            let installed = done.keep(&at, &source)?;
+            tracing::info!(target: "core::backup", "restored the package {id} {}", installed.version);
+            self.restart_parts_on(&mut st, &id);
+        }
         self.announce_packages();
         Ok(())
     }

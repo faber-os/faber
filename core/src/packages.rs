@@ -128,6 +128,21 @@ pub fn open(bytes: &[u8]) -> Result<Opened, PackageError> {
     check_files(files)
 }
 
+/// Checks a package that is already unpacked (path inside it → contents), e.g. a connector
+/// folder from a backup, exactly as [`open`] checks a package file: sizes, paths, which files it
+/// holds and its `[package]` header.
+pub fn from_files(files: BTreeMap<String, Vec<u8>>) -> Result<Opened, PackageError> {
+    let mut total = 0u64;
+    for (name, data) in &files {
+        check_path(name)?;
+        total += data.len() as u64;
+    }
+    if total > MAX_BYTES {
+        return Err(too_big());
+    }
+    check_files(files)
+}
+
 /// Every path must be a plain relative path inside the package.
 fn check_path(name: &str) -> Result<(), PackageError> {
     let bad = name.is_empty()
@@ -244,6 +259,20 @@ struct ListFile {
     packages: BTreeMap<String, Installed>,
 }
 
+/// Reads a `packages.toml` (this machine's, or one from a backup): the packages by id.
+pub fn parse_list(text: &str) -> Result<BTreeMap<String, Installed>, PackageError> {
+    let mut file: ListFile = toml::from_str(text).map_err(|e| {
+        PackageError::invalid(
+            format!("config/packages.toml can't be read: {}", e.message().trim()),
+            "It is the list of installed packages that Faber writes.",
+        )
+    })?;
+    for (id, p) in file.packages.iter_mut() {
+        p.id = id.clone();
+    }
+    Ok(file.packages)
+}
+
 const LIST_HEADER: &str = "# Connector packages installed on this machine (docs/packages.md). Faber writes this file\n\
 # when a package is installed or uninstalled. checked = false: not checked by the Faber registry.\n\n";
 
@@ -284,17 +313,14 @@ impl Store {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(ListFile::default()),
             Err(e) => return Err(PackageError::io("read config/packages.toml", &e)),
         };
-        let mut file: ListFile = toml::from_str(&text).map_err(|e| {
+        let packages = parse_list(&text).map_err(|e| {
             PackageError::new(
                 "io-error",
-                format!("config/packages.toml can't be read: {}", e.message().trim()),
+                e.message,
                 "Fix the file by hand, or delete it: the installed connectors keep working, only the list of packages is lost.",
             )
         })?;
-        for (id, p) in file.packages.iter_mut() {
-            p.id = id.clone();
-        }
-        Ok(file)
+        Ok(ListFile { packages })
     }
 
     fn write_list(&self, file: &ListFile) -> Result<(), PackageError> {
@@ -571,6 +597,31 @@ mod tests {
         let bytes = out.finish().unwrap().into_inner();
         assert!((bytes.len() as u64) < MAX_BYTES);
         assert_eq!(open(&bytes).unwrap_err().code, "package-too-big");
+    }
+
+    #[test]
+    fn unpacked_files_get_the_same_checks_as_a_package_file() {
+        assert_eq!(from_files(files(&[])).unwrap(), open(&pack(&files(&[])).unwrap()).unwrap());
+        let e = from_files(files(&[("../evil.txt", b"x")])).unwrap_err();
+        assert!(e.message.contains("outside its own folder"), "{e:?}");
+        let e = from_files(files(&[("run.sh", b"x")])).unwrap_err();
+        assert!(e.message.contains("run.sh"), "{e:?}");
+        let huge = vec![0u8; MAX_BYTES as usize + 1];
+        assert_eq!(from_files(files(&[("captures/a.fbcap", &huge)])).unwrap_err().code, "package-too-big");
+    }
+
+    #[test]
+    fn a_list_from_elsewhere_reads_with_its_ids() {
+        let list = parse_list(
+            "[packages.my-sensor]\nversion = \"0.1.0\"\nkind = \"declarative\"\n\
+            name = \"My sensor\"\ninstalled-at = \"t\"\nsource = \"a.faberpkg\"\nchecked = false\n",
+        )
+        .unwrap();
+        assert_eq!(
+            (list["my-sensor"].id.as_str(), list["my-sensor"].source.as_str()),
+            ("my-sensor", "a.faberpkg")
+        );
+        assert_eq!(parse_list("[packages").unwrap_err().code, "package-invalid");
     }
 
     #[test]

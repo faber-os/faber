@@ -4,14 +4,18 @@
 //! ```text
 //! config/parts.toml
 //! config/settings.toml
+//! config/packages.toml    the installed connector packages
+//! connectors/<id>/…       each installed package's connector
 //! files/Desktop/…
 //! files/Documents/…
 //! files/Recordings/…      only when asked for (recordings are big)
 //! ```
 //!
-//! This module only packs and unpacks. Checking what is inside before anything changes, and
-//! putting it back, is the machine's job.
+//! This module only packs and unpacks. Checking what is inside before anything changes (for a
+//! connector: the same checks and staging load as installing its package), and putting it back,
+//! is the machine's job.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -20,6 +24,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 pub const PARTS: &str = "config/parts.toml";
 pub const SETTINGS: &str = "config/settings.toml";
+pub const PACKAGES: &str = "config/packages.toml";
+const CONNECTORS: &str = "connectors/";
 const FILES: &str = "files/";
 /// The home folder's own folders a backup holds. Recordings only when asked for.
 const FOLDERS: [&str; 3] = ["Desktop", "Documents", "Recordings"];
@@ -56,6 +62,11 @@ impl BackupError {
 pub struct Sources<'a> {
     pub parts_toml: &'a Path,
     pub settings_toml: &'a Path,
+    /// The list of installed packages, copied as it is (if there is one).
+    pub packages_toml: &'a Path,
+    /// `<data>/connectors`, and which folders in it to back up: the installed packages.
+    pub connectors: &'a Path,
+    pub connector_ids: &'a [String],
     /// The home folder (`<data>/files`).
     pub home: &'a Path,
     pub include_recordings: bool,
@@ -88,6 +99,16 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf, u64)>) {
     }
 }
 
+/// Every file of the connectors backed up, as `connectors/<id>/…`.
+fn connector_files(src: &Sources) -> Vec<(String, PathBuf, u64)> {
+    let mut out = Vec::new();
+    for id in src.connector_ids {
+        walk(&src.connectors.join(id), &format!("{CONNECTORS}{id}/"), &mut out);
+    }
+    out.retain(|(rel, _, _)| !rel.ends_with('/'));
+    out
+}
+
 fn home_entries(src: &Sources) -> Vec<(String, PathBuf, u64)> {
     let mut out = Vec::new();
     for folder in src.folders() {
@@ -99,12 +120,13 @@ fn home_entries(src: &Sources) -> Vec<(String, PathBuf, u64)> {
 
 /// Bytes the backup will hold before compression, to check there is room for it first.
 pub fn source_bytes(src: &Sources) -> u64 {
-    let config = [src.parts_toml, src.settings_toml]
+    let config = [src.parts_toml, src.settings_toml, src.packages_toml]
         .iter()
         .filter_map(|p| fs::metadata(p).ok())
         .map(|m| m.len())
         .sum::<u64>();
-    config + home_entries(src).iter().map(|(_, _, size)| size).sum::<u64>()
+    let files = connector_files(src).into_iter().chain(home_entries(src));
+    config + files.map(|(_, _, size)| size).sum::<u64>()
 }
 
 /// Writes the backup to `dest` and returns its size. It is written beside `dest` first and
@@ -138,6 +160,12 @@ fn write_zip(src: &Sources, out: &Path) -> Result<(), BackupError> {
     if let Ok(meta) = fs::metadata(src.settings_toml) {
         add_file(&mut zip, SETTINGS, src.settings_toml, meta.len())?;
     }
+    if let Ok(meta) = fs::metadata(src.packages_toml) {
+        add_file(&mut zip, PACKAGES, src.packages_toml, meta.len())?;
+    }
+    for (name, path, size) in connector_files(src) {
+        add_file(&mut zip, &name, &path, size)?;
+    }
     for (rel, path, size) in home_entries(src) {
         let name = format!("{FILES}{rel}");
         if rel.ends_with('/') {
@@ -168,12 +196,24 @@ pub struct Item {
     pub size: u64,
 }
 
+/// One file of a connector inside a backup.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConnectorFile {
+    index: usize,
+    /// Its path inside the connector's folder, e.g. `faber.toml` or `captures/a.fbcap`.
+    path: String,
+    size: u64,
+}
+
 /// An opened backup: its config, its settings and a list of everything else, read before
 /// anything is unpacked.
 pub struct Archive {
     zip: ZipArchive<File>,
     parts_toml: String,
     settings_toml: Option<String>,
+    packages_toml: Option<String>,
+    /// By the connector folder's name, as the backup has it (not checked yet).
+    connectors: BTreeMap<String, Vec<ConnectorFile>>,
     items: Vec<Item>,
 }
 
@@ -182,7 +222,9 @@ impl Archive {
         let file = File::open(path).map_err(|e| BackupError::io("open the backup", &e))?;
         let mut zip = ZipArchive::new(file)
             .map_err(|e| BackupError::invalid(format!("This isn't a zip file Faber can read ({e}).")))?;
-        let (mut parts_toml, mut settings_toml, mut items) = (None, None, Vec::new());
+        let (mut parts_toml, mut settings_toml, mut packages_toml) = (None, None, None);
+        let mut items = Vec::new();
+        let mut connectors = BTreeMap::<String, Vec<ConnectorFile>>::new();
         let mut unexpected: Option<String> = None;
         for index in 0..zip.len() {
             let mut entry = zip
@@ -192,12 +234,27 @@ impl Archive {
                 .name()
                 .map_err(|e| BackupError::invalid(format!("A name in the backup can't be read ({e}).")))?
                 .into_owned();
-            if name == PARTS || name == SETTINGS {
-                let text = read_config(&mut entry, &name)?;
-                if name == PARTS {
-                    parts_toml = Some(text)
-                } else {
-                    settings_toml = Some(text)
+            if name == PARTS || name == SETTINGS || name == PACKAGES {
+                let text = Some(read_config(&mut entry, &name)?);
+                match name.as_str() {
+                    PARTS => parts_toml = text,
+                    SETTINGS => settings_toml = text,
+                    _ => packages_toml = text,
+                }
+                continue;
+            }
+            // connectors/<id>/<path>: only listed here; the machine checks it as a package.
+            if let Some(rest) = name.strip_prefix(CONNECTORS) {
+                match rest.split_once('/') {
+                    Some((id, path)) if !id.is_empty() => {
+                        if !entry.is_dir() && !path.is_empty() {
+                            let file = ConnectorFile { index, path: path.to_string(), size: entry.size() };
+                            connectors.entry(id.to_string()).or_default().push(file);
+                        }
+                    }
+                    _ => {
+                        unexpected.get_or_insert(name);
+                    }
                 }
                 continue;
             }
@@ -223,7 +280,7 @@ impl Archive {
                 "The backup holds {name}, which a Faber backup never does."
             )));
         }
-        Ok(Archive { zip, parts_toml, settings_toml, items })
+        Ok(Archive { zip, parts_toml, settings_toml, packages_toml, connectors, items })
     }
 
     pub fn parts_toml(&self) -> &str {
@@ -235,13 +292,53 @@ impl Archive {
         self.settings_toml.as_deref()
     }
 
+    /// `config/packages.toml`; `None` in a backup without connectors (or one made before
+    /// connectors were backed up).
+    pub fn packages_toml(&self) -> Option<&str> {
+        self.packages_toml.as_deref()
+    }
+
+    /// The connector folders in the backup, by name.
+    pub fn connector_ids(&self) -> Vec<String> {
+        self.connectors.keys().cloned().collect()
+    }
+
+    /// Every file of one connector folder (path inside it → contents), read into memory. Fails
+    /// past `max_bytes` in all, counting what really comes out of the zip, not what it claims.
+    pub fn connector_files(
+        &mut self,
+        id: &str,
+        max_bytes: u64,
+    ) -> Result<BTreeMap<String, Vec<u8>>, BackupError> {
+        let files = self.connectors.get(id).cloned().unwrap_or_default();
+        let unreadable = |path: &str, e: &dyn std::fmt::Display| {
+            BackupError::invalid(format!("connectors/{id}/{path} in the backup can't be read ({e})."))
+        };
+        let mut out = BTreeMap::new();
+        let mut left = max_bytes;
+        for f in files {
+            let entry = self.zip.by_index(f.index).map_err(|e| unreadable(&f.path, &e))?;
+            let mut data = Vec::new();
+            entry.take(left + 1).read_to_end(&mut data).map_err(|e| unreadable(&f.path, &e))?;
+            if data.len() as u64 > left {
+                return Err(BackupError::invalid(format!(
+                    "The connector \"{id}\" in the backup is larger than a package may be."
+                )));
+            }
+            left -= data.len() as u64;
+            out.insert(f.path, data);
+        }
+        Ok(out)
+    }
+
     pub fn items(&self) -> &[Item] {
         &self.items
     }
 
-    /// Bytes the files take once unpacked.
+    /// Bytes the files and connectors take once unpacked.
     pub fn unpacked_bytes(&self) -> u64 {
-        self.items.iter().map(|i| i.size).sum()
+        let connectors = self.connectors.values().flatten().map(|f| f.size).sum::<u64>();
+        self.items.iter().map(|i| i.size).sum::<u64>() + connectors
     }
 
     /// Writes a file item's contents to `dest` (which must not be a folder).
@@ -295,7 +392,20 @@ mod tests {
             fs::write(d.join("files/Documents/robot/notes.txt"), "wheel torque").unwrap();
             fs::write(d.join("files/Recordings/bench.fbcap"), vec![7u8; 5000]).unwrap();
             fs::write(d.join("files/Trash/old.txt"), "gone").unwrap();
+            fs::write(d.join("config/packages.toml"), "[packages.my-sensor]\n").unwrap();
+            for c in ["my-sensor/captures", "not-a-package"] {
+                fs::create_dir_all(d.join("connectors").join(c)).unwrap();
+            }
+            fs::write(d.join("connectors/my-sensor/faber.toml"), "toml").unwrap();
+            fs::write(d.join("connectors/my-sensor/captures/a.fbcap"), "cap").unwrap();
+            fs::write(d.join("connectors/not-a-package/faber.toml"), "toml").unwrap();
             Data { dir }
+        }
+
+        /// packages.toml and the connectors folder.
+        fn packages(&self) -> (PathBuf, PathBuf) {
+            let d = self.dir.path();
+            (d.join("config/packages.toml"), d.join("connectors"))
         }
 
         /// parts.toml, settings.toml and the home folder.
@@ -308,7 +418,17 @@ mod tests {
     fn make(data: &Data, include_recordings: bool) -> PathBuf {
         let (parts, settings, home) = data.sources();
         let dest = data.dir.path().join("files/Backups/b.zip");
-        let src = Sources { parts_toml: &parts, settings_toml: &settings, home: &home, include_recordings };
+        let (packages, connectors) = data.packages();
+        let ids = ["my-sensor".to_string()];
+        let src = Sources {
+            parts_toml: &parts,
+            settings_toml: &settings,
+            packages_toml: &packages,
+            connectors: &connectors,
+            connector_ids: &ids,
+            home: &home,
+            include_recordings,
+        };
         let bytes = create(&src, &dest).unwrap();
         assert_eq!(bytes, fs::metadata(&dest).unwrap().len());
         dest
@@ -338,7 +458,22 @@ mod tests {
                 "Documents/robot/notes.txt"
             ]
         );
-        assert_eq!(a.unpacked_bytes(), 6 + 12);
+        assert_eq!(a.unpacked_bytes(), 6 + 12 + 4 + 3);
+    }
+
+    #[test]
+    fn a_backup_holds_the_installed_connectors_and_their_list() {
+        let data = Data::new();
+        let mut a = Archive::open(&make(&data, false)).unwrap();
+        assert_eq!(a.packages_toml(), Some("[packages.my-sensor]\n"));
+        assert_eq!(a.connector_ids(), ["my-sensor"], "only the folders asked for");
+        let files = a.connector_files("my-sensor", 100).unwrap();
+        let names: Vec<_> = files.keys().map(String::as_str).collect();
+        assert_eq!(names, ["captures/a.fbcap", "faber.toml"]);
+        assert_eq!(files["faber.toml"], b"toml");
+        let e = a.connector_files("my-sensor", 5).unwrap_err();
+        assert!(e.message.contains("larger than a package"), "{e:?}");
+        assert!(a.connector_files("other", 100).unwrap().is_empty());
     }
 
     #[test]
@@ -347,8 +482,16 @@ mod tests {
         let a = Archive::open(&make(&data, true)).unwrap();
         assert!(paths(&a).contains(&"Recordings/bench.fbcap".to_string()));
         let (parts, settings, home) = data.sources();
-        let with =
-            Sources { parts_toml: &parts, settings_toml: &settings, home: &home, include_recordings: true };
+        let (packages, connectors) = data.packages();
+        let with = Sources {
+            parts_toml: &parts,
+            settings_toml: &settings,
+            packages_toml: &packages,
+            connectors: &connectors,
+            connector_ids: &[],
+            home: &home,
+            include_recordings: true,
+        };
         let without = Sources { include_recordings: false, ..with };
         assert_eq!(source_bytes(&with) - source_bytes(&without), 5000);
     }
