@@ -94,10 +94,12 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `flash` | — | a `flash` message (`port`, `stage`, `done`, `total`) after every page the Arduino flasher writes or reads back, on any port. See [The Arduino flasher](#the-arduino-flasher). |
 | `apps` | — | an `apps` message (`apps`: `AppInfo[]`, as `GET /api/v0/apps`) now and whenever an app is installed, removed, turned on or off, gets other parts, or changes state. See [Apps](#apps). |
 | `notices` | — | a `notice` message (`notice`: `Notice`) for each thing worth telling the user, as it happens. Nothing is replayed. See [Notices](#notices). |
+| `app-state` | `app` | an `app-state` message (`app`, `values`) now, then `app-state-changed` (`app`, `key`, `value?`) for every change to that app's state. `error` `unknown-app` if there is no such app. See [Apps](#apps). |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
 `serial-opened`, `serial-data`, `serial-closed`, `leases`, `lease-granted`, `lease-ended`, `estop`,
-`packages`, `apps`, `world`, `world-changed`, `flash`, `notice`, `error`. Each carries the `id` of the subscription
+`packages`, `apps`, `world`, `world-changed`, `flash`, `notice`, `app-state`, `app-state-changed`,
+`error`. Each carries the `id` of the subscription
 or serial session it belongs to. `error` may come without an `id`.
 
 **Serial sessions**, step by step:
@@ -565,6 +567,8 @@ end when it is turned off, when it stops or traps, and when the core stops.
 | `POST /api/v0/apps/{id}/enable` | Turns it on (`enabled = true` in apps.toml): `200 AppInfo`. It starts when its roles are filled. `404 unknown-app`, `422 config-broken` (apps.toml can't be read: the message has its line). |
 | `POST /api/v0/apps/{id}/disable` | Turns it off: its logic stops, its leases end and its parts get their safe state before this answers. `200 AppInfo`. |
 | `PUT /api/v0/apps/{id}/roles` | `{"roles": {"lidar": "lidar", "proximity": ["front", "rear"]}}` (a part's name, or a list): exactly these roles get these parts; roles left out get none. An app that is on restarts with its new parts. `200 AppInfo`. Errors: `400 unknown-role`, `400 too-many-parts` (more than one for a `count = "1"` role), `400 bad-request` (a part twice), `422 unknown-part`, `422 role-mismatch` (the part doesn't provide the role's capability: the message says what it provides). Sub-parts (`mega.left`) fill roles like any part. |
+| `GET /api/v0/apps/{id}/state` | `AppState`: `values` (every key and value the app saved, both strings), `bytes` (keys and values together) and `maxBytes` (65536). The app's logic (the `state` interface) and its windows share this one store. `404 unknown-app`. |
+| `PUT /api/v0/apps/{id}/state` | `{"key": "speed", "value": "0.3"}` sets one key; `"value": null` removes it. `200 AppState`. The running logic sees it at its next `get`, and the `app-state` topic tells every window. Errors: `400 bad-key` (a key of 0 or more than 256 bytes), `413 state-full` (the store would pass 64 KB), `404 unknown-app`. |
 | `GET /apps/{id}/ui/{path}` | The app's UI files, for the shell's app window. Only files the installer accepts, with their type from their extension, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `Content-Security-Policy: default-src 'self'; connect-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; media-src 'self'; object-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-scripts`: a UI can't reach the network or the API, only the shell, through `postMessage` ([apps.md](apps.md) §9). `sandbox` gives every page an opaque origin even when it is opened on its own, so it never runs as the shell's origin; its own files answer that origin with `Access-Control-Allow-Origin: null` (module scripts and fonts are fetched with CORS). `404 not-found` for anything else. |
 | `GET /apps/{id}/icon.svg` | The icon at the root of an app's package, for `<img>` only: `image/svg+xml`, `nosniff` and `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox`, so opened on its own it runs and loads nothing. The shell never puts an app's SVG inline. `404 not-found` when the app has none. |
 
@@ -577,6 +581,16 @@ end when it is turned off, when it stops or traps, and when the core stops.
 | `conflict` | On, but a part filling a role was removed, or doesn't provide the role's capability right now. It starts by itself when the part is back. |
 | `starting`, `running` | Its logic is starting, or runs at its `tickHz`. A UI-only app is `running` while on. |
 | `failed` | Its logic crashed: a trap, a panic ("The app stopped because of a bug: it panicked (…)"), more than 32 MB of memory, more than 20 ms in one call, or a broken rule (publishing a signal its manifest doesn't declare). Its leases have ended; Faber restarts it after 1, 2, 4, … s. |
+
+**State.** Each app has one small store (keys and values are strings, 64 KB together), kept in
+the core while it runs and saved in `<data>/apps/<id>/state.toml`: at most once a second, when its
+logic's run ends, before a backup and when the core stops. Its logic and its windows read and
+write the same store, so a window's slider and the logic that reads it always agree. The
+`app-state` topic (`{"kind": "app-state", "app": "<id>"}`) sends an `app-state` message (`app`,
+`values`) at once, then an `app-state-changed` (`app`, `key`, `value?`; no `value` when removed)
+for every change, whoever made it; after missing changes it sends `app-state` again. A window never
+calls these itself: the shell's app host does, for the `faber.state` calls ([apps.md](apps.md)).
+Editing `state.toml` by hand while the core runs has no effect (and is overwritten): use the API.
 
 **Derived signals** (D24) are published as `app:<id>/<name>` while the app runs, read-only: they
 appear in `GET /api/v0/signals/…` and the `signal` topic, but there are no leases or commands on

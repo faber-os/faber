@@ -269,7 +269,7 @@ fn smoke_run(manifest: &apps::manifest::AppManifest, compiled: &apps::Compiled) 
         manifest.publishes.clone(),
         std::sync::Arc::new(faber_core::router::Router::new()),
         std::sync::Arc::new(NoParts),
-        apps::StateStore::in_memory(),
+        std::sync::Arc::new(apps::SharedState::in_memory(&manifest.id)),
     );
     let crashed = |p: Problem| {
         CliError::new(

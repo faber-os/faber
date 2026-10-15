@@ -4,7 +4,7 @@
 //! plain Rust, so it is tested without wasm.
 
 use super::manifest::{PublishSpec, RoleSpec};
-use super::state::StateStore;
+use super::state::SharedState;
 use crate::names::{PartName, SignalAddress};
 use crate::router::{PublishError, Router};
 use faber_capabilities::{Command, Reading};
@@ -73,7 +73,8 @@ pub struct Session {
     leases: BTreeMap<(String, u32), (PartName, String)>,
     /// (role, index) → the reading `poll` last handed out.
     polled: BTreeMap<(String, u32), Arc<Reading>>,
-    pub state: StateStore,
+    /// The app's store, shared with its windows and every run.
+    pub state: Arc<SharedState>,
     /// A rule the app broke during a call; it stops the app.
     bug: Option<Problem>,
 }
@@ -90,7 +91,7 @@ impl Session {
         publishes: Vec<PublishSpec>,
         router: Arc<Router>,
         driver: Arc<dyn Driver>,
-        state: StateStore,
+        state: Arc<SharedState>,
     ) -> Self {
         Session {
             app: app.to_string(),
@@ -304,7 +305,7 @@ pub(crate) mod tests {
             publishes,
             Arc::clone(&router),
             driver.clone(),
-            StateStore::in_memory(),
+            Arc::new(SharedState::in_memory("t")),
         );
         (s, router, driver)
     }

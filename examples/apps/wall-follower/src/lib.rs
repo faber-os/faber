@@ -11,7 +11,8 @@ use faber_capabilities::{Twist2d, distance, laser_scan, planar_base};
 use std::f32::consts::PI;
 
 /// How the app steers. The defaults fit SENNEP V2 (0.8 × 0.65 m, its LiDAR on the centre line).
-/// Each can be changed in the app's state, e.g. `target-m = "0.25"`.
+/// Each can be changed in the app's state, e.g. `target-m = "0.25"`. The window's slider sets
+/// `speed`, which the app reads again on every tick, so a change takes effect at once.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tuning {
     /// The gap to keep between the base's right side and the wall (m).
@@ -43,6 +44,9 @@ pub struct Steer {
 const NO_WALL_M: f32 = 1.5;
 /// Stop and turn left when something ahead is closer than this to the base's front (m).
 const BLOCKED_M: f32 = 0.45;
+/// The fastest it drives along a wall, whatever the state says (m/s); the window's slider stops
+/// here too.
+pub const MAX_SPEED: f32 = 0.5;
 
 /// The shortest range within ±`half` of `angle` (rad, the LiDAR's frame, counter-clockwise).
 fn range_near(scan: &laser_scan::Reading, angle: f32, half: f32) -> f32 {
@@ -86,11 +90,12 @@ pub fn steer(scan: &laser_scan::Reading, t: Tuning) -> Steer {
     Steer { twist: Twist2d::new(t.speed, vy, omega), gap_m: gap }
 }
 
-/// The app: steers on every new scan, and keeps driving (and so keeps its lease) between them.
+/// The app: steers by the newest scan on every tick (so a new speed counts at once), publishes
+/// the gap once per scan, and keeps driving (and so keeps its lease) between scans.
 #[derive(Default)]
 pub struct WallFollower {
     tuning: Tuning,
-    last: Option<Twist2d>,
+    scan: Option<laser_scan::Reading>,
     /// Said once that it can't drive, so the log isn't flooded.
     told: bool,
 }
@@ -112,10 +117,10 @@ impl App for WallFollower {
     }
 
     fn tick(&mut self, host: &mut dyn Host, _now_us: u64) {
+        // The window's speed slider writes the shared state; follow it while driving.
+        self.tuning.speed = number(host, "speed", self.tuning.speed).clamp(0.0, MAX_SPEED);
         if let Some(Reading::LaserScan(scan)) = host.poll("lidar", 0) {
-            let s = steer(&scan, self.tuning);
-            self.last = Some(s.twist);
-            let (meters, status) = match s.gap_m {
+            let (meters, status) = match steer(&scan, self.tuning).gap_m {
                 Some(g) => (g.max(0.0), distance::Status::Ok),
                 None => (NO_WALL_M, distance::Status::NoTarget),
             };
@@ -123,8 +128,10 @@ impl App for WallFollower {
                 "wall-distance",
                 Reading::Distance(distance::Reading { t_us: scan.t_us, meters, status }),
             );
+            self.scan = Some(scan);
         }
-        let Some(twist) = self.last else { return };
+        let Some(scan) = &self.scan else { return };
+        let twist = steer(scan, self.tuning).twist;
         let go = Command::PlanarBase(planar_base::Command::SetVelocity(twist));
         let sent = match host.send("base", 0, go) {
             // No lease yet, or it ended (an operator took over, the e-stop, …): ask again. While
@@ -226,6 +233,29 @@ mod tests {
         assert_eq!(host.sent.len(), 3, "it asked for the lease again and drives on");
         app.stop(&mut host);
         assert!(host.leases.is_empty());
+    }
+
+    #[test]
+    fn the_speed_follows_the_state_while_it_drives() {
+        let mut host = TestHost::with_roles(vec![
+            Role { name: "lidar".into(), capability: "laser-scan@1".into(), command: false, parts: 1 },
+            Role { name: "base".into(), capability: "planar-base@1".into(), command: true, parts: 1 },
+        ]);
+        let mut app = WallFollower::default();
+        app.start(&mut host, 0);
+        host.set_reading("lidar", 0, Reading::LaserScan(wall_on_right(0.63, 5)));
+        app.tick(&mut host, 1);
+        let vx = |host: &TestHost| match host.sent.last() {
+            Some((_, _, Command::PlanarBase(planar_base::Command::SetVelocity(t)))) => t.vx,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(vx(&host), 0.25);
+        host.state.insert("speed".into(), "0.1".into());
+        app.tick(&mut host, 2);
+        assert_eq!(vx(&host), 0.1, "the slider's new speed, at the next tick");
+        host.state.insert("speed".into(), "9".into());
+        app.tick(&mut host, 3);
+        assert_eq!(vx(&host), MAX_SPEED, "never faster than its top speed");
     }
 
     #[test]

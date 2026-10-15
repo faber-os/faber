@@ -28,6 +28,13 @@ use faber_connector::Problem;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
+use std::time::Duration;
+
+/// An app's state is written at most this often, however often it changes.
+const SAVE_STATE_EVERY: Duration = Duration::from_secs(1);
+
+/// The longest state key a window may set (bytes). Keys are names, like `speed`.
+pub const MAX_STATE_KEY: usize = 256;
 
 /// The apps the machine knows, and the ones running.
 #[derive(Default)]
@@ -335,9 +342,15 @@ impl Machine {
                 if let Some(r) = a.running.remove(id) {
                     r.stop();
                 }
+                if let Some(s) = self.app_states.lock().expect("app states lock").get(id) {
+                    s.suspend_saving();
+                }
             }
             let out = change();
             let (defs, problems) = apps::load_installed(&self.apps_dir(), crate::sandbox::Limits::default());
+            for d in defs.iter().filter(|d| ids.contains(&d.manifest.id)) {
+                self.state_of(d).reload(d.state_file());
+            }
             a.definitions = defs;
             a.problems = problems;
             a.generation += 1;
@@ -362,6 +375,80 @@ impl Machine {
     /// Whether an installed app is turned on (it can't be uninstalled then).
     pub(super) fn app_enabled(&self, id: &str) -> bool {
         self.read_apps_config().1.is_ok_and(|c| c.entry(id).enabled)
+    }
+
+    /// An app's shared state, opened from its folder the first time it is wanted.
+    fn state_of(&self, d: &AppDefinition) -> Arc<apps::SharedState> {
+        let mut states = self.app_states.lock().expect("app states lock");
+        let state = states
+            .entry(d.manifest.id.clone())
+            .or_insert_with(|| Arc::new(apps::SharedState::open(d.state_file(), &d.manifest.id)));
+        Arc::clone(state)
+    }
+
+    /// Writes every app state that changed, at most once a second each (the sweeper calls it).
+    pub(super) fn flush_app_states(&self) {
+        let states: Vec<_> = self.app_states.lock().expect("app states lock").values().cloned().collect();
+        for s in states {
+            s.save_if_due(SAVE_STATE_EVERY);
+        }
+    }
+
+    /// Writes every app state that changed, now (the core is stopping).
+    pub(super) fn save_app_states(&self) {
+        let states: Vec<_> = self.app_states.lock().expect("app states lock").values().cloned().collect();
+        for s in states {
+            s.save_if_due(Duration::ZERO);
+        }
+    }
+
+    /// Lets go of an app's state before its folder is removed, so nothing writes it again.
+    pub(super) fn drop_app_state(&self, id: &str) {
+        self.app_states.lock().expect("app states lock").remove(id);
+    }
+
+    /// An app's saved state: every key and value (`GET /api/v0/apps/{id}/state`).
+    pub fn app_state(&self, id: &str) -> Result<BTreeMap<String, String>, MachineError> {
+        Ok(self.state_of(&self.known_app(id)?).values())
+    }
+
+    /// Sets one key of an app's state, or removes it with `None` (`PUT /api/v0/apps/{id}/state`).
+    /// The app's logic and its other windows hear about it at once.
+    pub fn set_app_state(&self, id: &str, key: &str, value: Option<&str>) -> Result<(), MachineError> {
+        let state = self.state_of(&self.known_app(id)?);
+        if key.is_empty() || key.len() > MAX_STATE_KEY {
+            return Err(MachineError::new(
+                ErrorKind::BadRequest,
+                "bad-key",
+                format!("A state key is 1 to {MAX_STATE_KEY} bytes long; this one is {}.", key.len()),
+                "Use short names for keys, like \"speed\".",
+            ));
+        }
+        match value {
+            Some(v) => state.set(key, v).map_err(|why| {
+                MachineError::new(
+                    ErrorKind::TooLarge,
+                    "state-full",
+                    why,
+                    "Remove keys the app no longer needs.",
+                )
+            }),
+            None => {
+                state.remove(key);
+                Ok(())
+            }
+        }
+    }
+
+    /// Every change to an app's state from now on (the `app-state` topic), with what it holds now.
+    pub fn watch_app_state(
+        &self,
+        id: &str,
+    ) -> Result<(BTreeMap<String, String>, tokio::sync::broadcast::Receiver<apps::StateChange>), MachineError>
+    {
+        let state = self.state_of(&self.known_app(id)?);
+        let rx = state.subscribe();
+        Ok((state.values(), rx))
     }
 
     /// Forgets an uninstalled app's line in apps.toml.
@@ -407,7 +494,8 @@ impl Machine {
                     }
                     let driver: Arc<dyn Driver> =
                         Arc::new(MachineDriver(self.me.get().cloned().unwrap_or_default()));
-                    let handle = def.run_spec(roles, Arc::clone(&self.router), driver).map(|spec| {
+                    let state = self.state_of(&def);
+                    let handle = def.run_spec(roles, Arc::clone(&self.router), driver, state).map(|spec| {
                         tracing::info!(target: "core::apps", app = id.as_str(), "starting {} {}", def.manifest.name, def.manifest.version);
                         apps::start(spec, self.app_deps())
                     });

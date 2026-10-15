@@ -306,6 +306,9 @@ pub struct Machine {
     /// The installed apps and the running ones (docs/apps.md). Locked before `state`, never after.
     apps: Mutex<apps::Apps>,
     app_status: Arc<crate::apps::StatusBoard>,
+    /// Each installed app's state, shared by its logic and its windows. A leaf lock: nothing
+    /// else is taken while it is held.
+    app_states: Mutex<BTreeMap<String, Arc<crate::apps::SharedState>>>,
     /// This machine, for what it hands out that must not keep it alive (apps' lease driver).
     me: OnceLock<Weak<Machine>>,
 }
@@ -390,6 +393,7 @@ impl Machine {
             sweeper: Mutex::new(None),
             apps: Mutex::new(apps::Apps::default()),
             app_status: Arc::new(crate::apps::StatusBoard::default()),
+            app_states: Mutex::new(BTreeMap::new()),
             me: OnceLock::new(),
         });
         let _ = machine.me.set(Arc::downgrade(&machine));
@@ -426,6 +430,7 @@ impl Machine {
         }
         // The sweeper is gone, so nothing starts them again; their leases end as they stop.
         self.stop_apps();
+        self.save_app_states();
         let mut st = self.state.lock().expect("machine lock");
         self.revoke_all(&mut st, EndReason::Shutdown);
         let names: Vec<_> = st.running.keys().cloned().collect();
@@ -1277,6 +1282,8 @@ impl Machine {
         let settings_path = self.config_path.with_file_name(settings_file::FILE_NAME);
         // No install or uninstall half-way through while the connectors are copied.
         let _one_at_a_time = self.package_lock.lock().expect("package lock");
+        // What an app's window changed in the last second is in memory still: write it first.
+        self.save_app_states();
         let (packages_path, connectors, connector_ids) = self.packages_to_back_up()?;
         let (apps_toml, apps, app_ids) = self.apps_to_back_up()?;
         let src = backup::Sources {

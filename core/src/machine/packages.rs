@@ -375,6 +375,7 @@ impl Machine {
                     format!("Turn it off first (POST /api/v0/apps/{id}/disable), then uninstall it."),
                 ));
             }
+            self.drop_app_state(id);
             self.package_store().uninstall(id)?;
             tracing::info!(target: "core::machine", "uninstalled the app {id}");
             self.forget_app(id);

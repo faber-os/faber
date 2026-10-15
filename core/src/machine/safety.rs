@@ -581,6 +581,7 @@ pub(super) fn sweep_leases(machine: Weak<Machine>, stop: Arc<AtomicBool>) {
                 m.sweep();
                 if apps_checked.elapsed() >= APPS_EVERY {
                     m.reconcile_apps();
+                    m.flush_app_states();
                     apps_checked = std::time::Instant::now();
                 }
             }

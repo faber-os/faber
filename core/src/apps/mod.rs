@@ -20,7 +20,7 @@ mod supervisor;
 pub use installed::{AppDefinition, load_folder, load_installed};
 pub use logic::{Compiled, Logic, WasmLogic, compile};
 pub use session::{BoundPart, BoundRole, DriveError, Driver, RoleView, Session, holder};
-pub use state::{MAX_BYTES as STATE_MAX_BYTES, StateStore};
+pub use state::{MAX_BYTES as STATE_MAX_BYTES, SharedState, StateChange, StateStore};
 pub use supervisor::{AppHandle, AppStatus, MakeLogic, RunDeps, RunSpec, StatusBoard, Timing, start};
 
 use crate::router::Router;
@@ -30,17 +30,23 @@ use std::sync::Arc;
 pub const STATE_FILE: &str = "state.toml";
 
 impl AppDefinition {
-    /// What runs this app with these roles: a fresh instance and session for every run.
-    /// `None` for a UI-only app (it has no logic to run).
+    /// Where this app's state is saved.
+    pub fn state_file(&self) -> std::path::PathBuf {
+        self.folder.join(STATE_FILE)
+    }
+
+    /// What runs this app with these roles: a fresh instance and session for every run, all with
+    /// the app's one shared `state`. `None` for a UI-only app (it has no logic to run).
     pub fn run_spec(
         &self,
         roles: Vec<BoundRole>,
         router: Arc<Router>,
         driver: Arc<dyn Driver>,
+        state: Arc<SharedState>,
     ) -> Option<RunSpec> {
         let compiled = Arc::clone(self.logic.as_ref()?);
         let m = &self.manifest;
-        let (id, publishes, state) = (m.id.clone(), m.publishes.clone(), self.folder.join(STATE_FILE));
+        let (id, publishes) = (m.id.clone(), m.publishes.clone());
         let make: MakeLogic = Box::new(move || {
             let session = Session::new(
                 &id,
@@ -48,7 +54,7 @@ impl AppDefinition {
                 publishes.clone(),
                 Arc::clone(&router),
                 Arc::clone(&driver),
-                StateStore::open(state.clone(), &id),
+                Arc::clone(&state),
             );
             Ok(Box::new(compiled.instantiate(session)?) as Box<dyn Logic>)
         });

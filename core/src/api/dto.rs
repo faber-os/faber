@@ -7,6 +7,7 @@
 use crate::sim::world::{Footprint, Geometry, Pose, Twist};
 use faber_capabilities::{Capability, Command, Info, Mount, Reading};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use ts_rs::TS;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -705,6 +706,9 @@ pub enum Topic {
     /// Things to tell the user once, as they happen: a `notice` each (a battery's level changed).
     /// Nothing is replayed; the log keeps them too.
     Notices,
+    /// One app's saved state: an `app-state` message with all of it now, then an
+    /// `app-state-changed` for every key its logic or a window sets or removes.
+    AppState { app: String },
 }
 
 /// Messages from the shell to the core.
@@ -875,6 +879,21 @@ pub enum ServerMessage {
         id: u32,
         notice: Notice,
     },
+    /// Everything an app has saved (the `app-state` topic, now and after a missed change).
+    AppState {
+        id: u32,
+        app: String,
+        values: BTreeMap<String, String>,
+    },
+    /// One key of an app's state was set (`value`) or removed (no `value`).
+    AppStateChanged {
+        id: u32,
+        app: String,
+        key: String,
+        #[ts(optional)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
+    },
     /// Something the client asked for failed. `id` is absent when it isn't tied to one request.
     Error {
         #[ts(optional)]
@@ -882,6 +901,34 @@ pub enum ServerMessage {
         id: Option<u32>,
         error: ErrorBody,
     },
+}
+
+/// An app's saved state (`GET /api/v0/apps/{id}/state`): what its logic and its windows share.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppState {
+    pub values: BTreeMap<String, String>,
+    /// Its keys and values together, in bytes.
+    pub bytes: u32,
+    /// The most it may hold (64 KB).
+    pub max_bytes: u32,
+}
+
+impl AppState {
+    pub fn of(values: BTreeMap<String, String>) -> AppState {
+        let bytes = values.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as u32;
+        AppState { values, bytes, max_bytes: crate::apps::STATE_MAX_BYTES as u32 }
+    }
+}
+
+/// Body of `PUT /api/v0/apps/{id}/state`: one key, and its new value or `null` to remove it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppStateChange {
+    pub key: String,
+    pub value: Option<String>,
 }
 
 /// Something the core tells every screen once, as it happens (docs/api.md, "Notices").

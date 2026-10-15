@@ -581,6 +581,23 @@ mod backups {
         assert!(!c.dir.path().join("packages/staging/gauges").exists(), "staging cleaned");
     }
 
+    /// An app's state lives in the core and is written at most once a second; a backup made right
+    /// after a window changed it still holds the change.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backup_holds_what_a_window_has_just_set() {
+        let c = core();
+        install(&c, GAUGES).await;
+        let change = json!({"key": "speed", "value": "0.4"});
+        let (s, e) = json_call(&c.app, "PUT", "/api/v0/apps/gauges/state", change).await;
+        assert_eq!(s, StatusCode::OK, "{e}");
+        let path = back_up(&c).await;
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(on_disk(&c, &path)).unwrap()).unwrap();
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("apps/gauges/state.toml").unwrap(), &mut text)
+            .unwrap();
+        assert!(text.contains("speed = \"0.4\""), "{text}");
+    }
+
     /// App code in a backup is never copied in blind either: every app goes through the package
     /// checks and the staging load, its state is checked as the app reads it, and apps.toml is
     /// checked like parts.toml. Any problem fails the whole restore before anything changes.

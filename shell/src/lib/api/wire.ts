@@ -46,6 +46,8 @@ const SERVER_TYPE_LIST: Record<ServerMessage['type'], true> = {
   'world-changed': true,
   flash: true,
   notice: true,
+  'app-state': true,
+  'app-state-changed': true,
   error: true,
 };
 const SERVER_TYPES = new Set<string>(Object.keys(SERVER_TYPE_LIST));

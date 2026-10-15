@@ -44,4 +44,4 @@ movers: Array<WorldMover>,
 /**
  * When the world last moved on (µs, core clock).
  */
-tUs: number, } | { "type": "world-changed", id: number, name: string, } | { "type": "flash", id: number, port: string, stage: FlashStage, done: number, total: number, } | { "type": "notice", id: number, notice: Notice, } | { "type": "error", id?: number, error: ErrorBody, };
+tUs: number, } | { "type": "world-changed", id: number, name: string, } | { "type": "flash", id: number, port: string, stage: FlashStage, done: number, total: number, } | { "type": "notice", id: number, notice: Notice, } | { "type": "app-state", id: number, app: string, values: { [key in string]: string }, } | { "type": "app-state-changed", id: number, app: string, key: string, value?: string, } | { "type": "error", id?: number, error: ErrorBody, };
