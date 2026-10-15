@@ -25,6 +25,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("runtime", 3),
     ("simparts", 3),
     ("suggest", 3),
+    ("wasm", 3),
     ("machine", 4),
     ("api", 5),
 ];

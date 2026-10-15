@@ -23,11 +23,12 @@ agents alike.
 ```
 core/                     faber-core: the single Rust process (lib + binary)
 sdk/rust/capabilities/    faber-capabilities: capability data types (mirror of wit/)
-sdk/rust/connector/       faber-connector: the connector trait and manifest types
-connectors/ldrobot-ld19/  first connector (built-in Rust in Phase 1, WASM in Phase 3)
+sdk/rust/connector/       faber-connector: the connector trait and manifest types (and faber.toml)
+sdk/rust/connector-wasm/  faber-connector-wasm: builds a connector as a WebAssembly component
+connectors/ldrobot-ld19/  first connector: built in, and the same code as a WebAssembly component
 shell/                    the web desktop (Svelte 5 + Vite + TypeScript)
 tools/arch-check/         enforces the crate dependency rules below
-wit/                      capability interfaces (the future plugin API)
+wit/                      capability interfaces, and the connector world (wit/connector)
 fixtures/                 test data, e.g. a real LD19 capture
 ```
 
@@ -38,13 +39,15 @@ fixtures/                 test data, e.g. a real LD19 capture
 ```
 faber-core ──► faber-connector ──► faber-capabilities
     └────────► ldrobot-ld19 ──► faber-connector
+                    └ (wasm32 only) ──► faber-connector-wasm ──► faber-connector
 ```
 
 | Crate | May depend on | Must not |
 |---|---|---|
 | `faber-capabilities` | `serde`, plus `ts-rs` behind the `typescript` feature (code generation only) | anything with I/O |
 | `faber-connector` | `faber-capabilities`, `serde`, `toml` | I/O, async runtimes, `faber-core` |
-| connectors (`connectors/*`) | `faber-connector`, `faber-capabilities`, `toml` | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
+| `faber-connector-wasm` | `faber-connector`, `faber-capabilities`, `toml`, `wit-bindgen` (the component glue; its generated code is the only `unsafe` allowed outside the core's dependencies) | I/O, `faber-core` |
+| connectors (`connectors/*`, and the core's test guests in `core/tests/wasm-guests/*`) | `faber-connector`, `faber-capabilities`, `toml`, and `faber-connector-wasm` for their wasm build | **any I/O crate** (serial, net, fs, tokio). Connectors get bytes in and give readings out. The core owns all I/O. |
 | `faber-core` | everything above, plus I/O crates | — |
 
 **Inside `faber-core`**, the modules form layers. A module may only use the layers below it:
@@ -53,7 +56,7 @@ faber-core ──► faber-connector ──► faber-capabilities
 |---|---|---|
 | 5 | `api` | HTTP + WebSocket. Translates between the wire and the machine. No logic of its own. |
 | 4 | `machine` | Ties everything together. The only place that changes what runs: it writes `parts.toml` first, then reconciles. |
-| 3 | `runtime`, `simparts`, `suggest` | Supervising parts, the world engine that runs `simulate = "world"` parts, and detect-then-suggest. Built on layer 2. |
+| 3 | `runtime`, `simparts`, `suggest`, `wasm` | Supervising parts, the world engine that runs `simulate = "world"` parts, detect-then-suggest, and running wasm connectors in their sandbox (docs/packages.md). Built on layer 2. |
 | 2 | `backup`, `config`, `connectors`, `disks`, `estop`, `files`, `host`, `leases`, `logs`, `ports`, `router`, `settings`, `sim`, `simulation`, `translations` | One job each. They don't know about HTTP or each other. |
 | 1 | `clock`, `names` | Small pure building blocks. |
 
@@ -84,7 +87,8 @@ that isn't. How translations work, and `npm run i18n:check`: [translations.md](t
 | Rust integration | `cargo test` | `core/tests/`. A real LD19 capture goes through the whole core: replay port → connector → router → WebSocket |
 | Shell units | Vitest + Testing Library | `shell/src/**/*.test.ts` |
 | End-to-end | Playwright | `shell/e2e/`. Builds the shell, starts the real core with it compiled in (`embed-shell`), adds a part on the demo recording and checks that a scan is drawn, at desktop and 7" sizes |
-| Interfaces | `wasm-tools component wit wit/capabilities` | CI |
+| Wasm connectors | `cargo test` | `core/tests/wasm.rs` builds the LD19 and a misbehaving test guest for `wasm32-unknown-unknown` and runs them in the sandbox. Without that target the tests are skipped with a message (`rustup target add wasm32-unknown-unknown`); CI sets `FABER_REQUIRE_WASM=1` so they always run there |
+| Interfaces | `wasm-tools component wit wit/capabilities`, and the connector world (see [wit/connector](../wit/connector/README.md)) | CI |
 
 ## End-to-end tests
 

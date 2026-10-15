@@ -26,6 +26,7 @@ pub mod translations;
 
 // Layer 3: runs parts (`runtime` and `suggest` too; see docs/development.md).
 pub mod simparts;
+pub mod wasm;
 
 // Layer 4: ties everything together.
 pub mod machine;

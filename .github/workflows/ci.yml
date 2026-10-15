@@ -19,6 +19,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          # core/tests/wasm.rs builds connectors as WebAssembly components (docs/packages.md).
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: System libraries (serial port discovery)
         if: runner.os == 'Linux'
@@ -26,6 +28,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+        env:
+          # The wasm connector tests skip themselves without the target; here they must run.
+          FABER_REQUIRE_WASM: "1"
       - name: Crate dependency rules
         run: cargo run -p faber-arch-check
       - name: Generated shell types are up to date
