@@ -41,22 +41,28 @@ browser window at `localhost`.
 
 Goal: write and test driving and safety code with no motors or sensors connected (D36, D37).
 
-- Actuator and ranging capabilities: `motor`, `planar-base`, `distance`, with commands over the API
-- **Leases, safe states and the e-stop** in the core (moved here from the bridges phase, so they are
+Design: [simulation.md](simulation.md).
+
+- [x] Actuator and ranging capabilities: `motor`, `planar-base`, `distance`, with commands over the API
+- [x] **Leases, safe states and the e-stop** in the core (moved here from the bridges phase, so they are
   tested in simulation before real motors exist)
-- **Simulated parts** for every implemented capability: sensors give values you set (slider) or a
+- [x] **Simulated parts** for every implemented capability: sensors give values you set (slider) or a
   pattern (steady, sine, noise, step); actuators accept commands and report a plausible state
-- **The world**: 2D and kinematic only. A floor plan, the machine's footprint and pose, and
+- [x] **The world**: 2D and kinematic only. A floor plan, the machine's footprint and pose, and
   simulated `laser-scan` / `distance` / `planar-base` computed from each part's `mount`
-- **Prebuilt worlds**, realistic layouts to test against:
+- [x] **Prebuilt worlds**, realistic layouts to test against:
   - an empty test floor;
   - an apartment: rooms, doorways, a hallway and furniture with thin legs (hard for LiDARs);
   - an office or classroom: desks, chairs, narrow gaps;
   - a warehouse: long aisles and shelves;
   - a corridor maze;
   - an obstacle course with a person walking a path (a moving obstacle)
-- A manual-drive window (on-screen joystick) and a world viewer: the room, the machine, and its rays
-- Your own driving code can run as a program that talks to the API, until apps exist (Phase 5)
+- [x] A manual-drive window (on-screen joystick) and a world viewer: the room, the machine, and its rays
+- [x] Your own driving code can run as a program that talks to the API, until apps exist (Phase 5):
+  `examples/drive-square.py`
+
+**Status (2026-10-15):** done. `core/tests/world.rs` proves the "done when" below, and it was
+checked by hand in the browser.
 
 **Done when:** SENNEP's parts are simulated in the apartment world, a program drives the base
 with the lease held, the simulated LiDAR scan shows the room, and dropping the lease or pressing
