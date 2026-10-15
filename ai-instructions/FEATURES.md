@@ -29,6 +29,7 @@ Phase 1 is built (see `docs/roadmap.md`).
 | World wiring (Phase 2c) | Implemented | world parts in `simparts`, world API and `world` topic, `GET /signals/{part}/{name}`, the Phase 2 done-when test (`core/tests/world.rs`) | 2026-10-15 | 2a, 2b | — |
 | Drive window, Stop, Simulated switch (Phase 2d) | Implemented | Simulated switch in Add part, manual sensor sliders/patterns, Drive window (D46 confirm, pad, keys, 20 Hz, lease keeper), taskbar Stop + Pause/Break, distance and base viewers | 2026-10-15 | 2a | — |
 | World window (Phase 2e) | Implemented | top view with machine, scan points, cones, movers, trail; world picker; reset; per-part limits; connector settings described by the core and the Add part form built from them | 2026-10-15 | 2c | — |
+| Declarative connectors (Phase 3c) | Implemented | `faber.toml` only: serial line patterns with typed fields, NMEA (GGA/RMC/GSA) → `position@1`; loaded from `<data>/connectors/<id>/`; guide in `docs/connectors-declarative.md`; two tested examples | 2026-10-15 | — | — |
 | Restart / shut down | Planned | Power items exist in the start menu but are disabled until the machine image (Phase 6) | — | Image | Phase 6 |
 | Copy / paste, multi-select in Files | Planned | Also unlocks moving between disks and home | — | Files | — |
 | Real LD19 on the PC | Planned | Mikkel plugs in the LD19 and adds it via its USB port | — | Phase 1 | Mikkel |
