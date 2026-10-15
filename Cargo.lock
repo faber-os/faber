@@ -769,6 +769,7 @@ dependencies = [
  "clap",
  "faber-capabilities",
  "faber-connector",
+ "faber-flash",
  "faber-test-guest",
  "faberlink",
  "faberlink-interop",

@@ -20,6 +20,8 @@ faber-capabilities = { version = "0.1.0", path = "../sdk/rust/capabilities", fea
 faber-connector = { version = "0.1.0", path = "../sdk/rust/connector" }
 # FaberLink, the bridge protocol: the faber-bridge connector runs its session (docs/faberlink.md).
 faberlink = { version = "0.1.0", path = "../sdk/rust/faberlink" }
+# The Arduino flasher's protocols: Intel HEX, STK500v1 and v2 (POST /api/v0/ports/{id}/flash).
+faber-flash = { version = "0.1.0", path = "../sdk/rust/flash" }
 futures-util = "0.3.34"
 # Free and total space on the data folder's disk (GET /api/v0/storage). Only its statvfs is used.
 fs4 = { version = "1.1.0", default-features = false }
