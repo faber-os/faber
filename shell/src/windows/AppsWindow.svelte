@@ -235,11 +235,16 @@
 {/if}
 
 <style>
+  /* The scrolling area, and the containing block of what is positioned inside it (visually
+     hidden text, such as the role picker's legends): otherwise that hangs below the window's body
+     once the list is longer than the window, instead of scrolling with it. */
   .apps {
+    position: relative;
     display: grid;
     align-content: start;
     gap: var(--space-4);
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: var(--space-4);
   }
