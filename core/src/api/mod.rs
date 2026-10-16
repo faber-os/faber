@@ -5,6 +5,7 @@
 pub mod access;
 mod apps;
 pub mod auth;
+mod arduino;
 mod convert;
 mod driving;
 pub mod dto;
@@ -62,6 +63,7 @@ pub fn router(state: AppState) -> Router {
         .merge(apps::routes())
         .merge(driving::routes())
         .merge(flash::routes())
+        .merge(arduino::routes())
         .merge(translations::routes())
         .merge(world::routes())
         .merge(auth::routes())

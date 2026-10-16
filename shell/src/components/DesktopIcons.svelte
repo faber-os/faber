@@ -37,6 +37,7 @@
   import { uploadSummary, type ConflictAnswer } from '../lib/desktop/uploads';
   import ErrorNotice from './ErrorNotice.svelte';
   import UploadConflict from './UploadConflict.svelte';
+  import { openInArduino } from './arduinoWindow';
   import { fileLook } from './fileLook';
   import { menuTrigger, useMenu } from './menuController.svelte';
   import { desktopItem, pinItem, runDesktopItem, runPinItem } from './programs';
@@ -437,6 +438,7 @@
         onSelect: (id: string) => {
           if (id === 'open') open(i);
           else if (id === 'notes') openInNotes(desktop, e.path);
+          else if (id === 'arduino') openInArduino(desktop, e.path);
           else if (id === 'rename') void startRename(e);
           else if (id === 'trash') void trash(e);
           else if (id === 'download') download(core, e.path);

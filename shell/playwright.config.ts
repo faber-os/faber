@@ -44,7 +44,7 @@ export default defineConfig({
     command:
       'node shell/e2e/reset-users.mjs && ' +
       'npm --prefix shell run build && cargo run -p faber-core --features embed-shell -- ' +
-      `--data target/e2e-data --listen 127.0.0.1:${port}`,
+      `--data target/e2e-data --listen 127.0.0.1:${port} --fake-arduino-cli`,
     cwd: '..',
     url: `http://127.0.0.1:${port}/api/v0/system`,
     reuseExistingServer: !process.env.CI,

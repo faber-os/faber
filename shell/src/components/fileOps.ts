@@ -15,12 +15,15 @@ import type { DesktopController } from './desktopController.svelte';
 import { fileLook } from './fileLook';
 import { isPackageFile } from '../lib/desktop/packages';
 import { openPackage } from './installWindow';
+import { openInArduino } from './arduinoWindow';
+import { isSketchFile } from '../lib/desktop/arduino';
 import { formatBytes } from './format';
 
 /**
  * What files and folders do when opened, the same on the desktop and in Files: folders open in
- * Files, recordings explain themselves, connector packages open the Install window, everything
- * else opens in Notes (which says clearly when a file isn't text).
+ * Files, recordings explain themselves, connector packages open the Install window, sketches
+ * (`.ino`) open in the Arduino editor, everything else opens in Notes (which says clearly when a
+ * file isn't text).
  */
 export function openEntry(desktop: DesktopController, entry: FileEntry): void {
   if (entry.kind === 'folder') openFolder(desktop, entry.path);
@@ -28,6 +31,7 @@ export function openEntry(desktop: DesktopController, entry: FileEntry): void {
     desktop.noteRecent(entry.path);
     openProperties(desktop, entry);
   } else if (isPackageFile(entry.name)) openPackage(desktop, entry.path);
+  else if (extension(entry.name) === 'ino') openInArduino(desktop, entry.path);
   else openInNotes(desktop, entry.path);
 }
 
@@ -124,6 +128,9 @@ export function entryMenu(entry: FileEntry): (MenuEntry | false)[] {
   return [
     item('open', t('files.menu.open'), { icon: 'open', shortcut: 'Enter' }),
     isFile && !replay && item('notes', t('files.menu.openWithNotes'), { icon: 'notes' }),
+    isFile &&
+      isSketchFile(entry.name) &&
+      item('arduino', t('files.menu.openWithArduino'), { icon: 'code' }),
     separator(),
     item('rename', t('files.menu.rename'), {
       shortcut: 'F2',

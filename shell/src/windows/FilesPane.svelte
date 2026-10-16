@@ -30,6 +30,7 @@
   import { uploadSummary, type ConflictAnswer } from '../lib/desktop/uploads';
   import { uploadFiles } from '../components/uploadFiles';
   import UploadConflict from '../components/UploadConflict.svelte';
+  import { openInArduino } from '../components/arduinoWindow';
   import Dialog from '../components/Dialog.svelte';
   import { useDesktop } from '../components/desktopController.svelte';
   import ErrorNotice from '../components/ErrorNotice.svelte';
@@ -299,6 +300,8 @@
         return onopentab(e.path);
       case 'notes':
         return openInNotes(desktop, e.path);
+      case 'arduino':
+        return openInArduino(desktop, e.path);
       case 'rename':
         return startRename(e.path, e.name);
       case 'trash':

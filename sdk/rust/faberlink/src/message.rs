@@ -52,6 +52,11 @@ pub struct HelloAck {
     pub board: String,
     pub firmware: String,
     pub firmware_version: String,
+    /// Which build of the sketch the board runs: Faber's Arduino editor compiles every sketch
+    /// with one (`FABER_BUILD_ID`, docs/arduino-editor.md). `None` for a sketch built elsewhere.
+    /// On the wire it is optional, after the strings, so a board without one sends exactly the
+    /// bytes it always did.
+    pub build_id: Option<u64>,
 }
 
 /// What a part's info decodes to: known capabilities are typed; a capability this core doesn't
@@ -296,6 +301,9 @@ impl Message {
                 w.str8(&a.board, "board")?;
                 w.str8(&a.firmware, "firmware")?;
                 w.str8(&a.firmware_version, "firmwareVersion")?;
+                if let Some(id) = a.build_id {
+                    w.u64(id);
+                }
             }
             _ if !(MIN_VERSION..=MAX_VERSION).contains(&version) => {
                 return Err(EncodeError::UnsupportedVersion(version));
@@ -383,6 +391,9 @@ impl Message {
                 board: r.str8("board")?,
                 firmware: r.str8("firmware")?,
                 firmware_version: r.str8("firmwareVersion")?,
+                // Optional fields follow the strings. Bytes after the ones this side knows are a
+                // later Faber's optional fields: HELLO_ACK must stay readable across versions.
+                build_id: if r.remaining() == 0 { None } else { Some(r.u64()?) },
             }),
             _ if !(MIN_VERSION..=MAX_VERSION).contains(&version) => {
                 return Err(DecodeError::UnsupportedVersion(version));
@@ -461,7 +472,9 @@ impl Message {
             }
             other => return Err(DecodeError::UnknownKind(other)),
         };
-        r.end()?;
+        if kind != kind::HELLO_ACK {
+            r.end()?;
+        }
         Ok(m)
     }
 }
@@ -483,8 +496,8 @@ mod tests {
                 max_version: b,
                 max_payload: c
             })),
-            (any::<(u8, u8, u8, u8, u16, u8)>(), text(30), text(30), text(30)).prop_map(
-                |(n, board, firmware, v)| {
+            (any::<(u8, u8, u8, u8, u16, u8)>(), text(30), text(30), text(30), any::<Option<u64>>())
+                .prop_map(|(n, board, firmware, v, build_id)| {
                     Message::HelloAck(HelloAck {
                         version: n.0,
                         min_version: n.1,
@@ -495,9 +508,9 @@ mod tests {
                         board,
                         firmware,
                         firmware_version: v,
+                        build_id,
                     })
-                }
-            ),
+                }),
             Just(Message::Describe),
             (any::<(u8, u8, u16)>(), text(20), info()).prop_map(|((id, count, lease_ms), name, info)| {
                 Message::Part(PartDescription {
@@ -607,8 +620,60 @@ mod tests {
             board: "b".repeat(256),
             firmware: String::new(),
             firmware_version: String::new(),
+            build_id: None,
         });
         assert_eq!(a.encode(1), Err(EncodeError::TooLong { field: "board" }));
+    }
+
+    fn uno_ack(build_id: Option<u64>) -> Message {
+        Message::HelloAck(HelloAck {
+            version: 1,
+            min_version: 1,
+            max_version: 1,
+            max_payload: 64,
+            heartbeat_timeout_ms: 250,
+            part_count: 1,
+            board: "b".into(),
+            firmware: "f".into(),
+            firmware_version: "1".into(),
+            build_id,
+        })
+    }
+
+    /// The bytes every board sent before build ids existed.
+    const OLD_ACK: [u8; 13] = [1, 1, 1, 64, 250, 0, 1, 1, b'b', 1, b'f', 1, b'1'];
+
+    #[test]
+    fn a_hello_ack_without_a_build_id_is_the_same_bytes_as_before() {
+        assert_eq!(uno_ack(None).encode(1).unwrap(), OLD_ACK);
+        assert_eq!(Message::decode(1, kind::HELLO_ACK, &OLD_ACK).unwrap(), uno_ack(None));
+    }
+
+    #[test]
+    fn a_build_id_follows_the_strings_little_endian() {
+        let p = uno_ack(Some(0x0123_4567_89AB_CDEF)).encode(1).unwrap();
+        assert_eq!(p[..13], OLD_ACK);
+        assert_eq!(p[13..], [0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01]);
+        // HELLO_ACK is read before a version is agreed, so it decodes in any version.
+        assert_eq!(Message::decode(0, kind::HELLO_ACK, &p).unwrap(), uno_ack(Some(0x0123_4567_89AB_CDEF)));
+    }
+
+    #[test]
+    fn a_cut_build_id_is_refused() {
+        for n in 1..8 {
+            let mut p = OLD_ACK.to_vec();
+            p.extend(std::iter::repeat_n(0xAA, n));
+            assert_eq!(Message::decode(1, kind::HELLO_ACK, &p), Err(DecodeError::Truncated), "{n} bytes");
+        }
+    }
+
+    #[test]
+    fn optional_fields_a_later_faber_adds_are_skipped() {
+        let mut p = uno_ack(Some(7)).encode(1).unwrap();
+        p.extend_from_slice(&[9, 9, 9]);
+        assert_eq!(Message::decode(1, kind::HELLO_ACK, &p).unwrap(), uno_ack(Some(7)));
+        // Every other message stays exact.
+        assert_eq!(Message::decode(1, kind::SAFE, &[1, 2]), Err(DecodeError::TrailingBytes));
     }
 
     proptest! {

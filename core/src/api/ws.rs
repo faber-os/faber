@@ -885,6 +885,23 @@ fn subscribe(
                 }
             }))
         }
+        dto::Topic::ArduinoTools => {
+            let mut rx = state.machine.arduino_events();
+            Ok(tokio::spawn(async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(p) => {
+                            if out.send(super::arduino::tools_message(id, &p)).await.is_err() {
+                                return;
+                            }
+                        }
+                        // Missed a step: the next one says where it is.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(_) => return,
+                    }
+                }
+            }))
+        }
         dto::Topic::Logs => {
             let (recent, mut rx) = state.logs.follow();
             Ok(tokio::spawn(async move {

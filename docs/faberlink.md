@@ -62,6 +62,9 @@ on the wire:  COBS( type · seq · payload · crc_lo · crc_hi ) · 0x00
 
 `HELLO` and `HELLO_ACK` have the same layout in every protocol version, so two sides can always
 agree on one. Every other layout belongs to the negotiated version; this page is **version 1**.
+`HELLO_ACK` is the one layout that may grow: it can end in **optional fields** (below), and a
+receiver ignores bytes after the optional fields it knows, because it reads `HELLO_ACK` before any
+version is agreed.
 
 | Type | Name | Direction | When |
 |---|---|---|---|
@@ -84,7 +87,8 @@ agree on one. Every other layout belongs to the negotiated version; this page is
 and the largest payload it accepts.
 
 **`HELLO_ACK`**: `version u8 · min_version u8 · max_version u8 · max_payload u8 ·
-heartbeat_timeout_ms u16 · part_count u8 · board str8 · firmware str8 · firmware_version str8`
+heartbeat_timeout_ms u16 · part_count u8 · board str8 · firmware str8 · firmware_version str8`,
+then the optional `build_id u64`
 - `version`: the highest version both sides speak, or **0** if the ranges don't overlap. With 0 the
   board stays unconnected (it sends nothing and applies nothing) and the core reports a version
   mismatch.
@@ -93,7 +97,18 @@ heartbeat_timeout_ms u16 · part_count u8 · board str8 · firmware str8 · firm
   turn sends at most `min(its own, the core's)` once connected.
 - `heartbeat_timeout_ms`: no `HEARTBEAT` for this long and the board stops every actuator
   (100–1000 ms, default 250).
-
+- `build_id` (optional, added 2026-10-16): which build of the sketch the board runs. Faber's
+  Arduino editor compiles every sketch with `-DFABER_BUILD_ID=0x…`, the first 8 bytes of a SHA-256
+  over the sketch's files and board ([arduino-editor.md](arduino-editor.md#the-same-code-check)),
+  and the library sends it here. A sketch compiled anywhere else (the Arduino IDE) has none and
+  sends exactly the bytes it always did. A receiver takes 0 bytes after the strings as "no build
+  id", 8 or more as the build id (ignoring what follows: a later optional field), and refuses 1–7
+  (a cut-off frame). The board leaves room for it when it shortens its strings to fit
+  `max_payload`.
+- **Compatibility:** a board without a build id works with every core. A board *with* one needs a
+  core from 2026-10-16 or later: an older core refuses the longer `HELLO_ACK` ("No FaberLink
+  answer"). That only happens if a sketch compiled by a newer Faber's editor meets an older core;
+  the editor always compiles with the library copy built into the same core.
 **`DESCRIBE`** (0 B).
 
 **`PART`**: `id u8 · count u8 · lease_ms u16 · capability str8 · name str8 · info`
@@ -234,6 +249,9 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   24 ms for the echo (for 4 m), and the speed of sound is taken at about 20 °C (343 m/s).
 - Examples: `examples/MotorAndDistance`, `examples/Ultrasonic` and `examples/BatteryMonitor`. CI
   compiles every example for an Uno and a Mega.
+- **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
+  does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
+  sends it at the end of every `HELLO_ACK` (§3). Faber then shows which sketch the board runs.
 - Not built yet: `FaberServo`, digital in/out, VL53L0X, encoders, a planar-base part with
   on-board ramp-down (the interop harness has a plain test one, for SENNEP's fake Mega:
   `FakeBoard::sennep`), and negotiating 1 Mbaud.
@@ -261,6 +279,16 @@ stack. On a Mega (250-byte payloads): 10 422 B flash and 1 011 B of globals.
 
 Battery support (2026-10-16) adds 12 B of flash and 12 B of RAM to every sketch (the
 `"battery@1"` id string). `BatteryMonitor` alone on an Uno: 6 896 B flash and 590 B of globals.
+
+The build id (2026-10-16) adds 52 B of flash and 9 B of RAM to every sketch, and another 52 B of
+flash when the sketch is compiled with one. Measured with `arduino-cli` 1.5.1 and AVR core 1.8.8
+after that change, without a build id:
+
+| Example | Uno flash | Uno globals | Mega flash | Mega globals |
+|---|---|---|---|---|
+| `MotorAndDistance` | 9 382 B | 662 B | 10 500 B | 1 034 B |
+| `BatteryMonitor` | 6 948 B | 599 B | 7 348 B | 971 B |
+| `Ultrasonic` | 6 874 B | 598 B | 7 654 B | 970 B |
 These numbers were measured on a PC without `arduino-cli`, compiling sketch, library and AVR core
 1.8.8 with the Arduino IDE's avr-gcc 7.3 (`-Os`, LTO, `--gc-sections`, `-Wall -Wextra -Werror`);
 that build gives `MotorAndDistance` 20 B more flash and 2 B more globals than the figures above,
@@ -396,6 +424,9 @@ second to start after the reset, then closes the port.
   ways, no answer, another version, unplug and reconnect, new firmware, a board fault, status
   silence, a base's built-from, and the probe.
 - `core/src/machine/bridge_tests.rs`: leases, commands, Not on the board, removing, mounts.
+- `core/tests/arduino.rs`: a sketch uploaded from the Arduino editor, then run as the C++ board
+  with that build id: Parts and `GET /api/v0/arduino/boards/{port}/code` prove the code live; the
+  same sketch without a build id is "different" ([arduino-editor.md](arduino-editor.md)).
 - `core/tests/bridge.rs`: **the roadmap's proof**, through the HTTP API with the C++ board.
   The Mega shows two motors and two distance sensors; a program with a lease drives a motor;
   killing it stops the motor within the lease time through `SAFE` (with the board's own lease set

@@ -40,6 +40,7 @@ mod ffi {
         pub fn flh_heartbeat_timeout(h: *mut c_void) -> u16;
         pub fn flh_estop_engaged(h: *mut c_void) -> i32;
         pub fn flh_speak_versions(h: *mut c_void, lo: u8, hi: u8);
+        pub fn flh_set_build_id(h: *mut c_void, id: u64);
         pub fn flh_sizeof_board() -> usize;
         pub fn flh_max_payload() -> usize;
     }
@@ -158,6 +159,11 @@ mod ffi {
         pub fn speak_versions(&mut self, lo: u8, hi: u8) {
             // SAFETY: self.0 is a live harness.
             unsafe { flh_speak_versions(self.0, lo, hi) }
+        }
+
+        pub fn set_build_id(&mut self, id: u64) {
+            // SAFETY: self.0 is a live harness.
+            unsafe { flh_set_build_id(self.0, id) }
         }
 
         pub fn estop_engaged(&self) -> bool {
@@ -315,6 +321,18 @@ impl FakeBoard {
     /// Makes the board answer as if its library spoke only protocol versions `lo..=hi`.
     pub fn speak_versions(&mut self, lo: u8, hi: u8) {
         self.handle.speak_versions(lo, hi);
+    }
+
+    /// Makes the board carry this build id, as a sketch compiled by Faber's Arduino editor does
+    /// (`-DFABER_BUILD_ID=…`).
+    pub fn set_build_id(&mut self, id: u64) {
+        self.handle.set_build_id(id);
+    }
+
+    /// Builder form of [`FakeBoard::set_build_id`].
+    pub fn with_build_id(mut self, id: u64) -> FakeBoard {
+        self.set_build_id(id);
+        self
     }
 
     /// `sizeof(faberlink::Board)` as compiled on this machine.

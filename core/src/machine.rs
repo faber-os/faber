@@ -4,6 +4,7 @@
 //! running parts match it.
 
 mod apps;
+mod arduino;
 #[cfg(test)]
 mod bridge_tests;
 mod flash;
@@ -13,6 +14,10 @@ mod users;
 mod world;
 
 pub use apps::{AppView, AppWindowLink};
+pub use arduino::{
+    ArduinoStatus, BoardCode, CodeResult, CompileReport, FlashedCode, OpenedSketch, Proof, SKETCHBOOK,
+    ToolsProgress, ToolsState, UploadReport,
+};
 pub use flash::{FirmwareSource, FlashProgress, FlashRequest, Flashed};
 pub use packages::{PackagePreview, PackagePreviewOf, PackageView, installed_connectors};
 pub use safety::{CommandReply, EstopView, LeaseEvent};
@@ -165,6 +170,8 @@ pub struct PartView {
     pub bridge: Option<PartName>,
     /// For a bridge: its board and the link to it.
     pub board: Option<BoardView>,
+    /// For a bridge whose board has answered: the code it says it runs (docs/arduino-editor.md).
+    pub code: Option<FlashedCode>,
 }
 
 /// What checking a port for a FaberLink board found.
@@ -326,6 +333,8 @@ pub struct Machine {
     sessions: crate::sessions::Sessions,
     /// Failed sign-ins per address and name.
     sign_in_limit: crate::sessions::LoginLimiter,
+    /// The Arduino editor: its toolchain, its records of what was flashed.
+    arduino: arduino::Workshop,
 }
 
 impl Machine {
@@ -418,6 +427,7 @@ impl Machine {
             users,
             sessions,
             sign_in_limit,
+            arduino: arduino::Workshop::new(&opts.data_dir),
         });
         let _ = machine.me.set(Arc::downgrade(&machine));
         machine.refresh_ports();
@@ -541,6 +551,7 @@ impl Machine {
                     signals,
                     bridge: None,
                     board: None,
+                    code: None, // a paused board isn't heard, so nothing says what it runs
                 });
                 if cfg.connector == BRIDGE_CONNECTOR {
                     let had = st.paused_boards.get(name).map(Vec::as_slice).unwrap_or_default();
@@ -557,6 +568,10 @@ impl Machine {
                 signals,
                 bridge: None,
                 board: handle.map(BridgeHandle::view),
+                code: handle
+                    .map(BridgeHandle::view)
+                    .and_then(|v| v.board)
+                    .map(|b| self.flashed_code(b.build_id)),
             });
             if cfg.connector == BRIDGE_CONNECTOR {
                 out.extend(self.sub_part_views(name, cfg, handle));
@@ -583,6 +598,7 @@ impl Machine {
             signals,
             bridge: Some(bridge.clone()),
             board: None,
+            code: None,
         };
         let mut out: Vec<PartView> = subs
             .iter()
@@ -1941,6 +1957,7 @@ fn paused_sub_part_views(bridge: &PartName, cfg: &PartConfig, had: &[PartName]) 
             signals: Vec::new(),
             bridge: Some(bridge.clone()),
             board: None,
+            code: None,
         })
         .collect()
 }

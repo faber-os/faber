@@ -30,6 +30,8 @@ futures-util = "0.3.34"
 # Free and total space on the data folder's disk (GET /api/v0/storage). Only its statvfs is used.
 fs4 = { version = "1.1.0", default-features = false }
 # The machine's IANA time zone (GET /api/v0/system).
+# Unpacks arduino-cli's .tar.gz release (Linux, macOS); the .zip goes through `zip` below.
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 # Wall-clock time in an IANA zone: backup names and checking the time-zone setting.
 jiff = "0.2.38"
 # Random session tokens, API tokens and password salts, from the operating system.
@@ -41,8 +43,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_bytes = "0.11.19"
 serde_json = "1.0.154"
 serialport = "4.10.1"
-# Token hashes: only a token's SHA-256 is kept (docs/auth.md).
-sha2 = "0.10"
+# SHA-256: token hashes (only a token's hash is kept, docs/auth.md), the Arduino editor's
+# build ids, and checking a download against its published checksum.
+sha2 = "0.10.9"
 # Constant-time comparison of token hashes.
 subtle = "2.6.1"
 thiserror = "2.0.21"
@@ -52,6 +55,9 @@ toml_edit = "0.25.17"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ts-rs = { version = "12.0.1", features = ["serde-json-impl"] }
+# Downloads arduino-cli from Arduino's GitHub releases, only when the user confirms "Install
+# Arduino tools" (docs/arduino-editor.md). Pure Rust TLS, so the core stays one binary.
+ureq = { version = "3.4.0", default-features = false, features = ["rustls"] }
 # Runs wasm connectors as sandboxed components (docs/packages.md §3, D07, D09). No WASI: the
 # only thing a connector can call is the core's `context`.
 wasmtime = { version = "49.0.3", default-features = false, features = ["cranelift", "runtime", "component-model", "std", "parallel-compilation"] }

@@ -49,6 +49,12 @@ import type {
   FlashBoard,
   FlashRequest,
   FlashResult,
+  ArduinoInfo,
+  ArduinoTools,
+  BoardCodeInfo,
+  CompileResult,
+  SketchRef,
+  UploadResult,
   LeaseEndReason,
   LeaseGrant,
   LeaseInfo,
@@ -87,6 +93,9 @@ export type WorldUpdate = Omit<Extract<ServerMessage, { type: 'world' }>, 'type'
 
 /** The Arduino flasher's progress on a port: a `flash` message (docs/api.md). */
 export type FlashProgress = Omit<Extract<ServerMessage, { type: 'flash' }>, 'type' | 'id'>;
+
+/** Where "Install Arduino tools" is: an `arduino-tools` message (docs/api.md). */
+export type ToolsProgress = Omit<Extract<ServerMessage, { type: 'arduino-tools' }>, 'type' | 'id'>;
 
 export interface WorldHandlers {
   /** 20 times a second while watched. */
@@ -483,6 +492,63 @@ export class CoreState {
   /** Replaces the program on the board on `port`. Only ever after the user confirmed it. */
   flash(port: string, req: FlashRequest): Promise<Result<FlashResult>> {
     return this.call(() => this.http.flash(port, req));
+  }
+
+  /** The Arduino editor: its tools, boards and templates (docs/arduino-editor.md). */
+  arduino(): Promise<Result<ArduinoInfo>> {
+    return this.call(() => this.http.getArduino());
+  }
+
+  /** Downloads and installs the Arduino tools. Only ever after the user confirmed it. */
+  installArduinoTools(): Promise<Result<ArduinoTools>> {
+    return this.call(() => this.http.installArduinoTools());
+  }
+
+  /** "Install Arduino tools" step by step, while watched. */
+  watchArduinoTools(onProgress: (p: ToolsProgress) => void): () => void {
+    return this.socket.subscribe(
+      { kind: 'arduino-tools' },
+      {
+        onMessage: (m) => {
+          if (m.type !== 'arduino-tools') return;
+          const { type: _type, id: _id, ...progress } = m;
+          onProgress(progress);
+        },
+      },
+    );
+  }
+
+  newSketch(name: string, template: string): Promise<Result<SketchRef>> {
+    return this.call(() => this.http.newSketch({ name, template }));
+  }
+
+  compileSketch(sketch: string, board: string): Promise<Result<CompileResult>> {
+    return this.call(() => this.http.compileSketch({ sketch, board }));
+  }
+
+  /** Compiles and puts the sketch on the board on `port`. Only ever after the user confirmed it. */
+  uploadSketch(
+    sketch: string,
+    board: string,
+    port: string,
+    stopPart = false,
+  ): Promise<Result<UploadResult>> {
+    return this.call(() =>
+      this.http.uploadSketch({ sketch, board, port, ...(stopPart ? { stopPart } : {}) }),
+    );
+  }
+
+  boardCode(port: string): Promise<Result<BoardCodeInfo>> {
+    return this.call(() => this.http.getBoardCode(port));
+  }
+
+  /** Reads the program back from the board (it resets the board): only when the user asks. */
+  checkBoardCode(port: string, stopPart = false): Promise<Result<BoardCodeInfo>> {
+    return this.call(() => this.http.checkBoardCode(port, stopPart));
+  }
+
+  openFlashed(id: string, copy = false): Promise<Result<SketchRef>> {
+    return this.call(() => this.http.openFlashed(id, copy));
   }
 
   /** The flasher's progress on every port, while watched. */

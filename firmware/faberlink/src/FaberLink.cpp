@@ -99,6 +99,11 @@ void FaberLink::begin(unsigned long baud, const char* board, const char* firmwar
                       uint16_t heartbeatTimeoutMs) {
   if (serial_) serial_->begin(baud);
   board_.setIdentity(board, "faberlink-arduino", firmwareVersion);
+#ifdef FABER_BUILD_ID
+  // Set by Faber's Arduino editor when it compiles the sketch (docs/arduino-editor.md), so Faber
+  // can tell which code runs on the board. The Arduino IDE doesn't set it.
+  board_.setBuildId(static_cast<uint64_t>(FABER_BUILD_ID));
+#endif
   board_.setHeartbeatTimeout(heartbeatTimeoutMs);
   for (uint8_t i = 0; i < pendingCount; i++) board_.add(*pending[i]);
   pendingCount = 0;

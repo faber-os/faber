@@ -56,6 +56,8 @@ pub struct BoardInfo {
     pub heartbeat_timeout_ms: u16,
     pub max_payload: u8,
     pub part_count: u8,
+    /// The build of the sketch, when Faber's Arduino editor compiled it (docs/arduino-editor.md).
+    pub build_id: Option<u64>,
 }
 
 /// Why a session can't continue.
@@ -395,6 +397,7 @@ impl Session {
             heartbeat_timeout_ms: ack.heartbeat_timeout_ms,
             max_payload: ack.max_payload,
             part_count: ack.part_count,
+            build_id: ack.build_id,
         };
         self.board = Some(info.clone());
         self.state = State::Describing;
@@ -527,6 +530,7 @@ mod tests {
                 board: "mega".into(),
                 firmware: "test".into(),
                 firmware_version: "0.1.0".into(),
+                build_id: None,
             }))
         }
 
@@ -689,6 +693,7 @@ mod tests {
             board: "uno".into(),
             firmware: "f".into(),
             firmware_version: "1".into(),
+            build_id: None,
         });
         s.receive(&b.wire(ack), 0);
         s.take_output();
@@ -756,6 +761,7 @@ mod tests {
             board: "mega".into(),
             firmware: "sennep".into(),
             firmware_version: "2.0.0".into(),
+            build_id: None,
         });
         s.receive(&b.wire(ack), 1_000);
         assert_eq!(s.state(), State::Failed);
@@ -771,6 +777,32 @@ mod tests {
         s.restart(10_000_000);
         assert_eq!(s.state(), State::Connecting);
         assert!(!s.take_output().is_empty());
+    }
+
+    #[test]
+    fn the_build_id_reaches_the_board_info() {
+        let mut s = Session::new(SessionConfig::default(), 0);
+        s.take_output();
+        let mut b = Board { seq: 0 };
+        let ack = Message::HelloAck(HelloAck {
+            version: 1,
+            min_version: 1,
+            max_version: 1,
+            max_payload: 64,
+            heartbeat_timeout_ms: 250,
+            part_count: 0,
+            board: "uno".into(),
+            firmware: "faberlink-arduino".into(),
+            firmware_version: "0.1.0".into(),
+            build_id: Some(0xFEED_0000_0000_0042),
+        });
+        s.receive(&b.wire(ack), 1_000);
+        let events = s.take_events();
+        assert!(
+            matches!(&events[0], Event::Connected(i) if i.build_id == Some(0xFEED_0000_0000_0042)),
+            "{events:?}"
+        );
+        assert_eq!(s.board().and_then(|i| i.build_id), Some(0xFEED_0000_0000_0042));
     }
 
     #[test]

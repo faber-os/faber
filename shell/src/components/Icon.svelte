@@ -47,6 +47,8 @@
     upload: 'M12 15.5V4.5M7.5 9L12 4.5 16.5 9M5 15.5v4h14v-4',
     // A microcontroller: the Arduino flasher.
     chip: 'M7 7h10v10H7zM10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3',
+    // Angle brackets around a slash: the Arduino editor.
+    code: 'M8.5 7.5L4 12l4.5 4.5M15.5 7.5L20 12l-4.5 4.5M13.5 5.5l-3 13',
     download: 'M12 4.5v11M7.5 11l4.5 4.5 4.5-4.5M5 15.5v4h14v-4',
     record: 'M12 12m-6 0a6 6 0 1 0 12 0a6 6 0 1 0-12 0',
     stop: 'M7 7h10v10H7z',

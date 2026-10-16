@@ -6,6 +6,7 @@ pub mod clock;
 pub mod names;
 
 // Layer 2: one job each; none of them knows about HTTP.
+pub mod arduino;
 pub mod backup;
 pub mod config;
 pub mod connectors;

@@ -273,6 +273,14 @@ class Board {
   explicit Board(Output& out);
 
   void setIdentity(const char* board, const char* firmware, const char* firmwareVersion);
+  // The build id Faber's Arduino editor gives a sketch (FABER_BUILD_ID). It travels at the end of
+  // HELLO_ACK, so Faber can tell which code the board runs; without it the HELLO_ACK is exactly
+  // what it always was.
+  // Kept as its wire bytes, so a sketch without one pays almost nothing for it.
+  void setBuildId(uint64_t id) {
+    for (uint8_t i = 0; i < 8; i++) buildId_[i] = static_cast<uint8_t>(id >> (8 * i));
+    hasBuildId_ = true;
+  }
   // Clamped to 100..1000 ms.
   void setHeartbeatTimeout(uint16_t ms);
   // For tests: answer HELLO as if this library spoke only versions lo..hi.
@@ -330,6 +338,7 @@ class Board {
   const char* board_;
   const char* firmware_;
   const char* firmwareVersion_;
+  uint8_t buildId_[8];
   uint32_t lastHeartbeatMs_;
   uint32_t lastStatusMs_;
   uint16_t heartbeatTimeoutMs_;
@@ -350,6 +359,7 @@ class Board {
   bool hwLatched_;
   bool releasePending_;
   bool started_;
+  bool hasBuildId_;
 };
 
 }  // namespace faberlink

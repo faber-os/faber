@@ -60,6 +60,9 @@ pub const ROUTES: &[(&str, &str, Need)] = &[
     ("GET", "/api/v0/apps/{id}/state", VIEWER),
     ("GET", "/api/v0/packages", VIEWER),
     ("GET", "/api/v0/flasher/boards", VIEWER),
+    ("GET", "/api/v0/arduino", VIEWER),
+    // Reads only what the board told Faber when it connected; never resets it.
+    ("GET", "/api/v0/arduino/boards/{port}/code", VIEWER),
     ("GET", "/api/v0/worlds", VIEWER),
     ("GET", "/api/v0/world", VIEWER),
     // Your own password and API tokens (the handlers check whose).
@@ -86,6 +89,10 @@ pub const ROUTES: &[(&str, &str, Need)] = &[
     ("POST", "/api/v0/files/delete", OPERATOR),
     ("POST", "/api/v0/files/empty-trash", OPERATOR),
     ("POST", "/api/v0/files/samples", OPERATOR),
+    // Sketches are files in home:/Arduino; compiling writes nothing outside Faber's data.
+    ("POST", "/api/v0/arduino/sketches", OPERATOR),
+    ("POST", "/api/v0/arduino/compile", OPERATOR),
+    ("POST", "/api/v0/arduino/flashed/{id}/open", OPERATOR),
     // Display settings; the machine's own settings in it need an admin (`settings_need`).
     ("PUT", "/api/v0/settings", OPERATOR),
     // The machine itself: parts, packages, apps, flashing, backups, settings and users.
@@ -100,6 +107,10 @@ pub const ROUTES: &[(&str, &str, Need)] = &[
     ("POST", "/api/v0/apps/{id}/disable", ADMIN),
     ("PUT", "/api/v0/apps/{id}/roles", ADMIN),
     ("POST", "/api/v0/ports/{id}/flash", ADMIN),
+    // Uploading flashes like the flasher; a check resets the board; install downloads software.
+    ("POST", "/api/v0/arduino/upload", ADMIN),
+    ("POST", "/api/v0/arduino/boards/{port}/check", ADMIN),
+    ("POST", "/api/v0/arduino/tools/install", ADMIN),
     ("POST", "/api/v0/backups", ADMIN),
     ("POST", "/api/v0/backups/restore", ADMIN),
     ("POST", "/api/v0/backups/setup", ADMIN),

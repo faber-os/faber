@@ -40,3 +40,9 @@ class NoPath2D {
   arc() {}
 }
 globalThis.Path2D ??= NoPath2D as unknown as typeof Path2D;
+
+/** Text ranges have no boxes without layout; CodeMirror (the Arduino editor) measures them. */
+const noRects = () => [] as unknown as DOMRectList;
+const noRect = () => new DOMRect(0, 0, 0, 0);
+Range.prototype.getClientRects ??= noRects;
+Range.prototype.getBoundingClientRect ??= noRect;

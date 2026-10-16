@@ -11,6 +11,10 @@ use std::collections::BTreeMap;
 use ts_rs::TS;
 
 pub use crate::users::UserRole;
+// The Arduino editor's types live in their own file.
+#[path = "dto_arduino.rs"]
+mod arduino;
+pub use arduino::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -587,6 +591,11 @@ pub struct BoardLink {
     pub hardware_estop: bool,
     /// The board stopped its actuators because Faber's heartbeat didn't reach it in time.
     pub failsafe: bool,
+    /// Once the board has answered: the code it runs, as far as its build id says
+    /// (docs/arduino-editor.md).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<BoardCodeLink>,
 }
 
 /// Where the link to a FaberLink board stands.
@@ -721,6 +730,8 @@ pub enum Topic {
     /// The Arduino flasher's progress: a `flash` message after every page it writes or reads
     /// back, on any port.
     Flash,
+    /// "Install Arduino tools": an `arduino-tools` message at every step (docs/arduino-editor.md).
+    ArduinoTools,
     /// The installed apps: an `apps` list now and whenever one is installed, removed, turned on
     /// or off, gets other parts, or changes state.
     Apps,
@@ -951,6 +962,21 @@ pub enum ServerMessage {
         stage: FlashStage,
         done: u32,
         total: u32,
+    },
+    /// "Install Arduino tools": which step, and for the download how many of `total` bytes are
+    /// done; for the AVR core, the last line `arduino-cli` printed.
+    ArduinoTools {
+        id: u32,
+        step: ArduinoToolsStep,
+        #[ts(optional, type = "number")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        done: Option<u64>,
+        #[ts(optional, type = "number")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        total: Option<u64>,
+        #[ts(optional)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        line: Option<String>,
     },
     /// Something to tell the user once (the `notices` topic).
     Notice {

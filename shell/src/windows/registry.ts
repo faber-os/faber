@@ -3,6 +3,7 @@ import { t } from '../lib/i18n';
 import AboutWindow from './AboutWindow.svelte';
 import AppWindow from './AppWindow.svelte';
 import AppsWindow from './AppsWindow.svelte';
+import ArduinoWindow from './ArduinoWindow.svelte';
 import DistanceWindow from './DistanceWindow.svelte';
 import DriveWindow from './DriveWindow.svelte';
 import FilesWindow from './FilesWindow.svelte';
@@ -224,6 +225,25 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 560, h: 600 },
     minSize: { w: 340, h: 380 },
     component: FlasherWindow,
+  },
+  {
+    // Write a sketch, compile it and put it on a board (docs/arduino-editor.md). One window per
+    // sketch, keyed by its folder (components/arduinoWindow.ts).
+    kind: 'arduino',
+    get title() {
+      return t('programs.arduino.title');
+    },
+    get description() {
+      return t('programs.arduino.description');
+    },
+    icon: 'code',
+    menu: 'tools',
+    program: 'tool:arduino',
+    colour: 'flasher',
+    multiple: true,
+    defaultSize: { w: 880, h: 540 },
+    minSize: { w: 380, h: 340 },
+    component: ArduinoWindow,
   },
   {
     kind: 'logs',
