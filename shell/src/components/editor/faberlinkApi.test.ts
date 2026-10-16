@@ -1,11 +1,16 @@
 /// <reference types="node" />
 // Node's types: this test reads the FaberLink library's header from disk.
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { FABERLINK_CLASSES } from './faberlinkApi';
 
-// Tests run in shell/.
-const HEADER = readFileSync('../firmware/faberlink/src/FaberLink.h', 'utf8');
+// Tests run in shell/. FaberLink.h and the optional headers with part classes (FaberServo.h);
+// FaberLinkCore.h is the portable core, not the sketch's API.
+const SRC = '../firmware/faberlink/src/';
+const HEADER = readdirSync(SRC)
+  .filter((f) => /^Faber\w*\.h$/.test(f) && f !== 'FaberLinkCore.h')
+  .map((f) => readFileSync(SRC + f, 'utf8'))
+  .join('\n');
 
 /**
  * The public classes of a header and the public functions each declares (constructors under the

@@ -317,6 +317,66 @@ uint8_t PinOutput::enterSafeState(uint8_t* out) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Servos
+
+ServoPart::ServoPart(const char* name, float minRad, float maxRad, ServoSafeState safeState, uint16_t leaseMs)
+    : Part(name, SERVO, leaseMs == 0 ? OUTPUT_LEASE_MS : leaseMs, 100),
+      minRad_(minRad < maxRad ? minRad : maxRad),
+      maxRad_(minRad < maxRad ? maxRad : minRad),
+      angle_(0),
+      safeState_(safeState),
+      holding_(false) {}
+
+// servo@1 info layout: min f32, max f32, safe state u8 (0 hold, 1 release).
+uint8_t ServoPart::writeInfo(uint8_t* out) const {
+  putF32(out, minRad_);
+  putF32(out + 4, maxRad_);
+  out[8] = safeState_;
+  return 9;
+}
+
+// servo@1 reading layout: holding u8, angle f32 (0 while released).
+uint8_t ServoPart::writeReading(uint8_t* out, uint32_t) {
+  out[0] = holding_ ? 1 : 0;
+  putF32(out + 1, holding_ ? angle_ : 0);
+  return 5;
+}
+
+// The command layout: kind u8 (0 set-angle, 1 release, 2 safe), angle f32.
+uint8_t ServoPart::release(uint8_t* out) {
+  if (holding_) letGo();
+  holding_ = false;
+  out[0] = 1;
+  putF32(out + 1, 0);
+  return 5;
+}
+
+uint8_t ServoPart::apply(const uint8_t* c, uint8_t len, uint8_t* out, bool* clamped) {
+  if (len != 5) return 0;
+  if (c[0] == 1) return release(out);
+  if (c[0] == 2) return enterSafeState(out);
+  if (c[0] != 0) return 0;
+  float a = getF32(c + 1);
+  if (!isFinite(a)) return 0;
+  a = clampf(a, minRad_, maxRad_, clamped);
+  angle_ = a;
+  holding_ = true;
+  moveTo(a);
+  out[0] = 0;
+  putF32(out + 1, a);
+  return 5;
+}
+
+// Hold: the angle it was told stays (said as set-angle to it); release: it lets go. A servo that
+// was never told an angle stays released either way.
+uint8_t ServoPart::enterSafeState(uint8_t* out) {
+  if (safeState_ == SERVO_RELEASE || !holding_) return release(out);
+  out[0] = 0;
+  putF32(out + 1, angle_);
+  return 5;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Battery
 
 namespace {

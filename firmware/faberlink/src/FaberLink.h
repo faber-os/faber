@@ -52,6 +52,11 @@ enum ActiveLevel : uint8_t {
   ACTIVE_HIGH = 1,
 };
 
+// Adds a part to the table FaberLink::begin() adds to the board: what the library's own parts do
+// in their constructors, so a global declaration is enough. For part classes in optional headers
+// (FaberServo.h); your own parts use link.add().
+void autoAdd(Part& part);
+
 }  // namespace faberlink
 
 // A DC motor on a motor driver (H-bridge). The pins depend on the driver:

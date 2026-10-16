@@ -270,7 +270,16 @@ What exists, and where it differs in detail from the design above. The decisions
   switch) and `ir-obstacle` (`FaberObstacle` of kind infrared: FC-51, E18-D80NK). Buttons and
   bumpers are separate on purpose (capabilities.md, `obstacle`). `led` (`FaberOutput`: on/off,
   or dimmable on a PWM pin), `relay` (on/off, active low by default, with the coil-current,
-  flyback-diode and mains warnings) and `mosfet` (PWM, own supply, the IRF520 warning).
+  flyback-diode and mains warnings) and `mosfet` (PWM, own supply, the IRF520 warning). `servo`
+  (`FaberServo`, `include = "FaberServo.h"`, `uses = ["servo"]` so the allocator's timer rules
+  apply: no PWM on D9/D10 of an Uno once a servo is in the plan).
+- **Libraries a part needs.** A part whose class needs another library has its own header
+  (`FaberServo.h` needs the Arduino Servo library). The Servo library comes with the Arduino IDE,
+  but an `arduino-cli` run on its own (Faber's own copy, or the IDE's run by Faber) doesn't look
+  in the IDE's library folder, so **a guided board with a servo doesn't compile in Faber yet**.
+  Open: install it on demand (`arduino-cli lib install Servo`, which downloads), or point Faber's
+  compile at the IDE's library folder when there is one. The golden-sketch compile test points
+  `arduino-cli` at the IDE's folder (`%LOCALAPPDATA%\Arduino15\libraries`) when it has Servo.
 - **Pin providers**: a template's `provides` adds pins named `<part>.<pin>` (`servos.ch3`) while
   that part is in the plan; only a role marked `provided` may take one. No provider template
   exists yet (tested with a test PCA9685).

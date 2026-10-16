@@ -171,6 +171,22 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
     ],
   },
   {
+    name: 'FaberServo',
+    doc: 'A hobby servo (SG90, MG996R) that Faber turns to an angle, on any digital pin. Needs #include <FaberServo.h> after FaberLink.h (it uses the Servo library). Angles are degrees: minDeg and maxDeg are what minPulseUs and maxPulseUs (544 and 2400 µs by default) turn it to. It starts limp, and holds its angle when nobody drives it (faberlink::SERVO_RELEASE: goes limp). On an Uno, a servo stops analogWrite() on pins 9 and 10. Give it its own 5–6 V supply.',
+    library: 'faberlink',
+    include: 'FaberServo.h',
+    constructors: [
+      parseSignature(
+        'FaberServo(const char* name, uint8_t pin, float minDeg = 0, float maxDeg = 180, faberlink::ServoSafeState safeState = faberlink::SERVO_HOLD, uint16_t minPulseUs = 544, uint16_t maxPulseUs = 2400)',
+      ).overload,
+    ],
+    members: inherited([
+      ...PART_MEMBERS,
+      f('bool holding() const', 'True while it holds an angle (it gets pulses), false while limp.'),
+      f('float angle() const', 'The angle it holds, in radians, as Faber last told it.'),
+    ]),
+  },
+  {
     name: 'FaberBattery',
     doc: 'A battery measured through a voltage divider (battery + to R1 to the pin to R2 to GND). dividerRatio is (R1 + R2) / R2; keep the pin below referenceVolts when the battery is full.',
     library: 'faberlink',
@@ -229,6 +245,8 @@ export const FABERLINK_CONSTANTS: ApiConstant[] = [
     'ACTIVE_HIGH',
     'FaberButton, FaberObstacle: HIGH means pressed or detected, no pull-up (a TTP223 touch pad). FaberOutput: HIGH means on; its default.',
   ),
+  k('SERVO_HOLD', 'FaberServo: holds its angle when nobody drives it (the default).'),
+  k('SERVO_RELEASE', 'FaberServo: goes limp (no pulses) when nobody drives it.'),
   k('OUTPUT_ON_OFF', 'FaberOutput: on or off, Faber sees a digital output (the default).'),
   k(
     'OUTPUT_PWM',

@@ -3,7 +3,7 @@
 //! stand-in Arduino core, driven from the Rust session. What passes here is the glue that runs on the board; only `digitalWrite()` and
 //! friends are stand-ins.
 
-use faber_capabilities::{Command, Info, Reading, digital_out, motor, obstacle, pwm_out};
+use faber_capabilities::{Command, Info, Reading, digital_out, motor, obstacle, pwm_out, servo};
 use faberlink::message::{Applied, Cause, PartInfo, PartPins, PinRole, PinUse};
 use faberlink::session::{Event, Session, SessionConfig, State};
 use faberlink_interop::{Driver, NO_PIN, PinMode, PinOut, Sketch, SketchPart};
@@ -497,4 +497,70 @@ fn an_output_goes_off_when_its_lease_ends_on_the_board_and_on_the_e_stop() {
     l.session.safe(Some(0)).unwrap();
     l.flush();
     assert_eq!(l.sketch.pin(7), PinOut::Pwm(0), "SAFE");
+}
+
+fn servo(release: bool) -> SketchPart {
+    SketchPart::Servo { name: "arm", pin: 9, release }
+}
+
+fn angle(rad: f32) -> Command {
+    Command::Servo(servo::Command::SetAngle { angle_rad: rad })
+}
+
+#[test]
+fn a_servo_starts_released_and_turns_to_its_angle_with_the_matching_pulse() {
+    let mut l = Link::ready(&[servo(false)]);
+    assert_eq!(l.session.parts()[0].capability, "servo@1");
+    let PartInfo::Known(Info::Servo(i)) = &l.session.parts()[0].info else { panic!() };
+    assert!((i.max_angle_rad - std::f32::consts::PI).abs() < 1e-5);
+    assert_eq!((i.min_angle_rad, i.safe_state), (0.0, servo::SafeState::Hold));
+    assert_eq!(l.sketch.servo_pulse(9), None, "no pulses until the first angle: it doesn't jump");
+    set(&mut l, 0, angle(std::f32::consts::FRAC_PI_2));
+    // 90° is halfway from 544 to 2400 µs (the Servo library's defaults): 1472 µs.
+    assert_eq!(l.sketch.servo_pulse(9), Some(1472));
+    set(&mut l, 0, angle(0.0));
+    assert_eq!(l.sketch.servo_pulse(9), Some(544));
+    let a = set(&mut l, 0, angle(4.0));
+    assert!(a.clamped, "past 180°");
+    assert_eq!(l.sketch.servo_pulse(9), Some(2400));
+    assert_eq!(l.session.pins()[0], pins(0, &[(PinRole::Signal, 9)]));
+}
+
+#[test]
+fn a_holding_servo_keeps_its_angle_when_its_lease_ends_and_a_releasing_one_lets_go() {
+    let mut l = Link::ready(&[servo(false)]);
+    set(&mut l, 0, angle(1.0));
+    let held = l.sketch.servo_pulse(9);
+    l.run(1100);
+    let a = l.applied().unwrap();
+    assert_eq!((a.cause, a.command), (Cause::LeaseExpired, angle(1.0)), "it says it holds 1 rad");
+    assert_eq!(l.sketch.servo_pulse(9), held, "hold: an arm doesn't drop what it carries");
+    l.session.set_estop(true, faber_capabilities::estop::Source::Shell, "test");
+    l.flush();
+    assert_eq!(l.sketch.servo_pulse(9), held, "the e-stop holds it too");
+
+    let mut l = Link::ready(&[servo(true)]);
+    set(&mut l, 0, angle(1.0));
+    l.run(1100);
+    assert_eq!(l.applied().map(|a| a.command), Some(Command::Servo(servo::Command::Release)));
+    assert_eq!(l.sketch.servo_pulse(9), None, "release: no more pulses");
+}
+
+#[test]
+fn a_servo_can_be_released_and_reports_what_it_holds() {
+    let mut l = Link::ready(&[servo(false)]);
+    set(&mut l, 0, angle(0.5));
+    l.events.clear();
+    l.run(150);
+    let last = |l: &Link| {
+        l.events.iter().rev().find_map(|e| match e {
+            Event::Reading { reading: Reading::Servo(r), .. } => Some(r.angle_rad),
+            _ => None,
+        })
+    };
+    assert_eq!(last(&l), Some(Some(0.5)));
+    set(&mut l, 0, Command::Servo(servo::Command::Release));
+    assert_eq!(l.sketch.servo_pulse(9), None);
+    l.run(150);
+    assert_eq!(last(&l), Some(None), "released: no angle");
 }

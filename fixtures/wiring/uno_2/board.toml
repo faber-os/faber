@@ -5,6 +5,12 @@ faber-board = 1
 board = "uno"
 name = "uno_2"
 
+[parts.arm]
+template = "servo"
+shape = "signal"
+pins = { signal = 4 }
+settings = { min-deg = 0, max-deg = 180, safe-state = "hold", min-pulse-us = 544, max-pulse-us = 2400 }
+
 [parts.fan]
 template = "mosfet"
 shape = "sig"

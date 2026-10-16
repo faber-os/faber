@@ -216,6 +216,7 @@ layout maps 1:1 onto the types in `sdk/rust/capabilities` (and `wit/capabilities
 | 7 | `obstacle@1` (added 2026-10-16) |
 | 8 | `digital-out@1` (added 2026-10-16) |
 | 9 | `pwm-out@1` (added 2026-10-16) |
+| 10 | `servo@1` (added 2026-10-16) |
 
 Other capabilities have no FaberLink layout yet; one is added (with a new code) when a board needs
 it. A capability without info (`digital-in@1`) has an empty info layout, and the core's
@@ -231,6 +232,7 @@ it. A capability without info (`digital-in@1`) has an empty info layout, and the
 | `digital-in@1` | `level u8` (1 B): the logical level, 1 = active (an active-low input reads 1 while its pin is low). | — | — (0 B) |
 | `digital-out@1` | `level u8` (1 B): the logical level, 1 = on. | `kind u8 (0 = set) · level u8` (2 B). The safe state is set 0 (off). | — (0 B) |
 | `pwm-out@1` | `duty f32` (4 B), 0..1; always finite. | `kind u8 (0 = set-duty) · duty f32` (5 B). The safe state is duty 0. | — (0 B) |
+| `servo@1` | `holding u8 · angle_rad f32` (5 B): the angle it holds, 0 while released (holding 0). | `kind u8 · angle_rad f32` (5 B). `kind`: 0 set-angle, 1 release, 2 safe (the angle is 0 for 1 and 2). The safe state is `safe`: the board answers with set-angle to the angle it holds (hold) or release. | `min_angle_rad f32 · max_angle_rad f32 · safe_state u8` (9 B). `safe_state`: 0 hold, 1 release. |
 | `obstacle@1` | `detected u8` (1 B) | — | `kind u8 · trigger_distance_m f32` (5 B). `kind`: 0 bumper, 1 infrared, 2 limit. A NaN trigger distance means "unknown". |
 
 ## 5. Rules a board follows (the library enforces them, not the sketch)
@@ -360,14 +362,26 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   no command for 1 s, the e-stop, `SAFE` or a lost heartbeat, and it goes off. Off is written
   before the pin becomes an output, so an active-low relay doesn't click on at start. It reports
   its value 10 times a second.
+- **Optional headers** (2026-10-16): a part class that needs another library lives in its own
+  header, header-only, so `#include <FaberLink.h>` alone still builds with nothing else installed
+  and a sketch that doesn't include it doesn't build it. It registers itself through
+  `faberlink::autoAdd()`. The first is `FaberServo.h`.
+- `FaberServo` (`servo@1`, `#include <FaberServo.h>`, on the Arduino Servo library that comes
+  with the IDE): `FaberServo arm("arm", 9);` is a 0-180° servo on 544-2400 µs (the Servo
+  library's defaults); further arguments: the angles in degrees, the safe state, and the pulse
+  widths. Faber speaks radians. It starts released (no pulses until the first angle, so it
+  doesn't jump at power-up), is leased for 1 s like an output, and when the lease ends, on the
+  e-stop or when the heartbeat stops it holds its angle (`faberlink::SERVO_HOLD`, D29's default)
+  or goes limp (`faberlink::SERVO_RELEASE`). A sketch with a servo loses PWM on D9/D10 of an Uno
+  (D44-D46 of a Mega): the Servo library takes their timer.
 - Examples: `examples/MotorAndDistance`, `examples/MotorL298N` (two motors on an L298N),
-  `examples/Ultrasonic`, `examples/BatteryMonitor`, `examples/ButtonAndBumper` and
-  `examples/LedAndRelay`. CI compiles every example for an Uno and a
+  `examples/Ultrasonic`, `examples/BatteryMonitor`, `examples/ButtonAndBumper`,
+  `examples/LedAndRelay` and `examples/ServoArm`. CI compiles every example for an Uno and a
   Mega.
 - **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
   does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
   sends it at the end of every `HELLO_ACK` (§3). Faber then shows which sketch the board runs.
-- Not built yet: `FaberServo`, VL53L0X, encoders, a planar-base part with
+- Not built yet: VL53L0X, encoders, a planar-base part with
   on-board ramp-down (the interop harness has a plain test one, for SENNEP's fake Mega:
   `FakeBoard::sennep`), and negotiating 1 Mbaud.
 - **Where it lives:** inside the Faber repo for now. Moving it to its own repo
@@ -451,6 +465,10 @@ flash and 2 B of RAM (a virtual table entry per part class, and the loop in `pol
 | `Ultrasonic` | 7 026 B | 555 B | 7 818 B | 927 B |
 | `ButtonAndBumper` (new) | 6 556 B | 635 B | 7 370 B | 1 007 B |
 | `LedAndRelay` (new, outputs) | 7 592 B | 588 B | 8 680 B | 960 B |
+| `ServoArm` (new, with the Servo library 1.3.0) | 8 576 B | 588 B | 9 808 B | 1 071 B |
+
+A servo doesn't change any other sketch: the figures above are the same with `FaberServo.h` in
+the library.
 
 ## 8. Interop tests (`tools/faberlink-interop`)
 

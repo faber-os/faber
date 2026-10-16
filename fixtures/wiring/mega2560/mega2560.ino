@@ -5,6 +5,7 @@
 // Board: Arduino Mega 2560 (mega2560)
 //
 // Wiring:
+//   arm: Servo signal (orange or yellow) → D29, Servo V+ (red) → its own 5-6 V supply, Servo GND (brown or black) → the supply's - and the board's GND
 //   battery: Battery + → R1 (20000 Ω) → A1, A1 → R2 (10000 Ω) → GND, Battery - → GND
 //   bumper: Switch COM → D25, Switch NO (normally open) → GND
 //   fan: Module SIG → D10, Module GND → GND, Module V+/V− (or VIN/GND) → the load's own supply, Load → the module's output terminals
@@ -20,8 +21,12 @@
 //   start: One leg → D24, The other leg → GND (or, for a TTP223: VCC → 5V, GND → GND, I/O → D24)
 
 #include <FaberLink.h>
+#include <FaberServo.h>
 
 FaberLink link(Serial);
+
+// arm: Servo, Signal D29
+FaberServo arm("arm", 29, 0.0, 180.0, faberlink::SERVO_HOLD, 544, 2400);
 
 // battery: Battery voltage (divider), Sense A1
 FaberBattery battery("battery", A1, 3.0, 3, faberlink::BATTERY_LI_ION, 5.0, 0.0);

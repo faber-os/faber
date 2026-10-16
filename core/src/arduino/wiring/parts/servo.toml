@@ -1,0 +1,92 @@
+# A hobby servo: FaberServo (firmware/faberlink/src/FaberServo.h, on the Arduino Servo library),
+# servo@1.
+# Part facts: docs/research/common-parts.md §2.6 (any digital pin with the Servo library, which
+# uses a timer: on an Uno it stops PWM on D9/D10, on a Mega the first servo stops it on D44-D46;
+# SG90-class servos draw ~100-250 mA moving and ~650 mA+ stalled, an MG996R ~2.5 A stalled:
+# typical figures, verify) and the Servo library 1.3.0 (Servo.h: 544 and 2400 us by default;
+# Servo.cpp keeps min and max as (544 - min) / 4 and (2400 - max) / 4 in an int8_t, so they must
+# stay within 36..1056 and 1892..2908 us).
+
+faber-part = 1
+id = "servo"
+name = "Servo"
+description = "A hobby servo that Faber turns to an angle: SG90, MG90S, MG996R."
+covers = ["SG90", "MG90S", "MG996R", "MG995"]
+capability = "servo"
+class = "FaberServo"
+include = "FaberServo.h"
+default-name = "arm"
+uses = ["servo"]
+warnings = [
+  "A moving servo draws more than the board's 5V pin should give (an SG90 several hundred mA, an MG996R amperes when it stalls): give it its own 5-6 V supply and join its - to the board's GND.",
+  "It starts limp and moves to its first angle when Faber sends one: keep fingers clear the first time.",
+]
+
+[power]
+supply = "own"
+own-supply = true
+
+[[settings]]
+id = "min-deg"
+name = "Smallest angle"
+unit = "°"
+type = "number"
+default = 0
+min = -360
+max = 360
+apply = "build"
+help = "The angle the shortest pulse turns it to. Faber never sends one below it."
+
+[[settings]]
+id = "max-deg"
+name = "Largest angle"
+unit = "°"
+type = "number"
+default = 180
+min = -360
+max = 360
+apply = "build"
+help = "The angle the longest pulse turns it to. Faber never sends one above it."
+
+[[settings]]
+id = "safe-state"
+name = "When nobody drives it"
+type = "choice"
+default = "hold"
+apply = "build"
+help = "What it does when its lease ends, on the e-stop and when Faber goes quiet."
+options = [
+  { id = "hold", name = "Hold its angle", code = "faberlink::SERVO_HOLD" },
+  { id = "release", name = "Go limp (release)", code = "faberlink::SERVO_RELEASE" },
+]
+
+[[settings]]
+id = "min-pulse-us"
+name = "Shortest pulse"
+unit = "µs"
+type = "integer"
+default = 544
+min = 400
+max = 1056
+apply = "build"
+help = "The Servo library's default. A servo that buzzes at its smallest angle wants a longer one (1000 µs is the classic hobby range)."
+
+[[settings]]
+id = "max-pulse-us"
+name = "Longest pulse"
+unit = "µs"
+type = "integer"
+default = 2400
+min = 1892
+max = 2600
+apply = "build"
+help = "The Servo library's default. A servo that buzzes at its largest angle wants a shorter one (2000 µs is the classic hobby range)."
+
+[[shapes]]
+id = "signal"
+name = "Signal pin"
+args = ["name", "pin:signal", "setting:min-deg", "setting:max-deg", "setting:safe-state", "setting:min-pulse-us", "setting:max-pulse-us"]
+wiring = ["Servo signal (orange or yellow) → {pin:signal}", "Servo V+ (red) → its own 5-6 V supply", "Servo GND (brown or black) → the supply's - and the board's GND"]
+roles = [
+  { id = "signal", name = "Signal", needs = "digital-out", help = "Any digital pin: the Servo library makes the pulses." },
+]

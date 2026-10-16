@@ -5,6 +5,12 @@ faber-board = 1
 board = "mega2560"
 name = "mega2560"
 
+[parts.arm]
+template = "servo"
+shape = "signal"
+pins = { signal = 29 }
+settings = { min-deg = 0, max-deg = 180, safe-state = "hold", min-pulse-us = 544, max-pulse-us = 2400 }
+
 [parts.battery]
 template = "battery"
 shape = "divider"

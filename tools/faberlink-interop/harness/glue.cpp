@@ -11,6 +11,7 @@
 
 #include "Arduino.h"
 #include "FaberLink.h"
+#include "FaberServo.h"
 
 namespace {
 
@@ -36,6 +37,8 @@ struct Pins {
       state[i].value = 0;
       analogIn[i] = 0;
       digitalIn[i] = -1;
+      servoUs[i] = -1;
+      servoMin[i] = servoMax[i] = 0;
     }
   }
   PinState state[256];
@@ -43,6 +46,9 @@ struct Pins {
   // What drives an input pin from outside: 0 LOW, 1 HIGH, -1 nothing (it floats, or its pull-up
   // holds it HIGH).
   int digitalIn[256];
+  // The pulse each pin's servo gets (us), or -1 for none; and the range it was attached with.
+  int servoUs[256];
+  int servoMin[256], servoMax[256];
   std::vector<PinWrite> log;
   unsigned long nowMs;
   unsigned long echoUs;
@@ -72,7 +78,7 @@ class FakeSerial : public HardwareSerial {
 // trig, echo), 4 FaberBattery(name, pin, 3.0, 3), 5 FaberButton(name, pin, driver as the active
 // level), 6 FaberObstacle(name, pin, pins[1] as the kind, driver as the active level,
 // maxVelocity as the trigger distance), 7 FaberOutput(name, pin, driver as the mode, pins[1] as
-// the active level).
+// the active level), 8 FaberServo(name, pin, 0, 180, driver as the safe state).
 struct PartSpec {
   uint8_t type;
   const char* name;
@@ -94,6 +100,7 @@ struct Sketch {
   std::vector<std::unique_ptr<FaberButton>> buttons;
   std::vector<std::unique_ptr<FaberObstacle>> obstacles;
   std::vector<std::unique_ptr<FaberOutput>> outputs;
+  std::vector<std::unique_ptr<FaberServo>> servos;
 };
 
 // Parts register themselves in a global table until the next FaberLink::begin(), as globals in a
@@ -144,6 +151,34 @@ void delayMicroseconds(unsigned int) {}
 unsigned long pulseIn(uint8_t, uint8_t, unsigned long timeoutUs) {
   if (!current || current->echoUs > timeoutUs) return 0;
   return current->echoUs;
+}
+
+// The stand-in Servo library: the pulse goes to the pin while attached.
+uint8_t Servo::attach(int pin) { return attach(pin, 544, 2400); }
+
+uint8_t Servo::attach(int pin, int min, int max) {
+  pin_ = pin;
+  attached_ = true;
+  if (current) {
+    current->state[pin].mode = OUTPUT;
+    current->servoMin[pin] = min;
+    current->servoMax[pin] = max;
+    current->servoUs[pin] = 1500;  // the library's DEFAULT_PULSE_WIDTH until written
+  }
+  return 0;
+}
+
+void Servo::detach() {
+  attached_ = false;
+  if (current && pin_ >= 0) current->servoUs[pin_] = -1;
+}
+
+void Servo::write(int value) { writeMicroseconds(value); }
+
+void Servo::writeMicroseconds(int value) {
+  if (!current || pin_ < 0 || !attached_) return;
+  const int lo = current->servoMin[pin_], hi = current->servoMax[pin_];
+  current->servoUs[pin_] = value < lo ? lo : value > hi ? hi : value;
 }
 
 extern "C" {
@@ -200,6 +235,13 @@ void* fla_new(const PartSpec* parts, size_t n) {
         } else {
           s->outputs.emplace_back(new FaberOutput(name, p.pins[0], static_cast<faberlink::OutputMode>(p.driver),
                                                   static_cast<faberlink::ActiveLevel>(p.pins[1])));
+        }
+        break;
+      case 8:
+        if (p.driver == faberlink::SERVO_HOLD) {
+          s->servos.emplace_back(new FaberServo(name, p.pins[0]));  // the shortest call
+        } else {
+          s->servos.emplace_back(new FaberServo(name, p.pins[0], 0, 180, static_cast<faberlink::ServoSafeState>(p.driver)));
         }
         break;
       default:
@@ -264,4 +306,6 @@ void fla_set_analog(void* h, uint8_t pin, int32_t value) { use(h)->pins.analogIn
 void fla_set_echo_us(void* h, uint32_t us) { use(h)->pins.echoUs = us; }
 
 void fla_set_digital(void* h, uint8_t pin, int32_t level) { use(h)->pins.digitalIn[pin] = level; }
+
+int32_t fla_servo_us(void* h, uint8_t pin) { return use(h)->pins.servoUs[pin]; }
 }

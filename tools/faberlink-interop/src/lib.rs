@@ -62,6 +62,7 @@ mod ffi {
         pub fn fla_set_analog(h: *mut c_void, pin: u8, value: i32);
         pub fn fla_set_echo_us(h: *mut c_void, us: u32);
         pub fn fla_set_digital(h: *mut c_void, pin: u8, level: i32);
+        pub fn fla_servo_us(h: *mut c_void, pin: u8) -> i32;
     }
 
     /// `PartSpec` in glue.cpp.
@@ -146,6 +147,11 @@ mod ffi {
         pub fn set_echo_us(&mut self, us: u32) {
             // SAFETY: self.0 is a live sketch.
             unsafe { fla_set_echo_us(self.0, us) }
+        }
+
+        pub fn servo_us(&mut self, pin: u8) -> i32 {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_servo_us(self.0, pin) }
         }
 
         pub fn set_digital(&mut self, pin: u8, level: i32) {
@@ -483,6 +489,8 @@ pub enum SketchPart {
     Obstacle { name: &'static str, pin: u8, kind: u8, active_high: bool, trigger_m: f32 },
     /// `FaberOutput name(name, pin, mode, active)`: PWM or on/off, active low or high.
     Output { name: &'static str, pin: u8, pwm: bool, active_low: bool },
+    /// `FaberServo name(name, pin)`: 0 to 180°, 544 to 2400 µs; or released when stopped.
+    Servo { name: &'static str, pin: u8, release: bool },
 }
 
 impl SketchPart {
@@ -495,7 +503,8 @@ impl SketchPart {
             | SketchPart::Battery { name, .. }
             | SketchPart::Button { name, .. }
             | SketchPart::Obstacle { name, .. }
-            | SketchPart::Output { name, .. } => name,
+            | SketchPart::Output { name, .. }
+            | SketchPart::Servo { name, .. } => name,
         }
     }
 }
@@ -580,6 +589,9 @@ impl Sketch {
                     SketchPart::Output { pin, pwm, active_low, .. } => {
                         (7, pwm as u8, [pin, !active_low as u8, NO_PIN, NO_PIN], 0.0)
                     }
+                    SketchPart::Servo { pin, release, .. } => {
+                        (8, release as u8, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0)
+                    }
                 };
                 ffi::PartSpec { kind, name: name.as_ptr(), driver, pins, max_velocity }
             })
@@ -640,6 +652,11 @@ impl Sketch {
     /// `None` nothing (its pull-up, if on, holds it HIGH).
     pub fn set_input(&mut self, pin: u8, level: Option<bool>) {
         self.handle.set_digital(pin, level.map_or(-1, i32::from));
+    }
+
+    /// The pulse the Servo library sends on `pin` (µs), or `None` while no servo pulses it.
+    pub fn servo_pulse(&mut self, pin: u8) -> Option<u16> {
+        u16::try_from(self.handle.servo_us(pin)).ok()
     }
 
     /// What `pulseIn()` measures from now on (0: no echo).

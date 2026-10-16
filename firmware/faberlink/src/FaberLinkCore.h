@@ -76,6 +76,7 @@ enum Capability : uint8_t {
   OBSTACLE = 7,
   DIGITAL_OUT = 8,
   PWM_OUT = 9,
+  SERVO = 10,
 };
 
 // Why an actuator's output changed (APPLIED.cause).
@@ -414,6 +415,47 @@ class PinOutput : public Part {
   uint8_t writeCommand(uint8_t* out) const;
   float value_;
   bool pwm_;
+};
+
+// What a servo does when its lease ends, on the e-stop and when Faber goes quiet (D29).
+enum ServoSafeState : uint8_t {
+  // Keep the angle it was last told (the default): an arm holding something doesn't drop it.
+  SERVO_HOLD = 0,
+  // Stop the pulses, so it goes limp.
+  SERVO_RELEASE = 1,
+};
+
+// servo@1: a hobby servo turned to an angle (rad), within minRad..maxRad. It starts released (no
+// pulses, so it doesn't jump at power-up) and holds an angle once told one. Commands: set-angle
+// (clamped to the range), release, and safe (its safe state: hold or release). It reports the
+// angle it holds 10 times a second; a servo gives no feedback, so it is the angle it was told.
+class ServoPart : public Part {
+ public:
+  ServoPart(const char* name, float minRad, float maxRad, ServoSafeState safeState = SERVO_HOLD,
+            uint16_t leaseMs = OUTPUT_LEASE_MS);
+  const char* capabilityId() const override { return "servo@1"; }
+  uint8_t writeInfo(uint8_t* out) const override;
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+  uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped) override;
+  uint8_t enterSafeState(uint8_t* out) override;
+  // True while it holds an angle (it gets pulses); false while released.
+  bool holding() const { return holding_; }
+  // The angle it holds (rad), when it holds one.
+  float angle() const { return angle_; }
+
+ protected:
+  ~ServoPart() {}
+  // Turns the servo to `rad` (within the range), starting its pulses if they are off.
+  virtual void moveTo(float rad) = 0;
+  // Stops its pulses.
+  virtual void letGo() = 0;
+  float minRad_, maxRad_;
+
+ private:
+  uint8_t release(uint8_t* out);
+  float angle_;
+  ServoSafeState safeState_;
+  bool holding_;
 };
 
 // The board's side of the protocol.

@@ -242,6 +242,13 @@ fn every_generated_sketch_compiles_with_the_real_arduino_cli() {
         return;
     }
     let library = crate::arduino::library::install(tmp.path()).unwrap();
+    // The libraries that ship with the Arduino IDE (Servo), where it keeps them. An arduino-cli
+    // run on its own doesn't look there, so FaberServo.h wouldn't find Servo.h. (Faber's own
+    // compile doesn't either yet: docs/wiring.md §13, "Libraries a part needs".)
+    let builtin = std::env::var_os("LOCALAPPDATA")
+        .map(|d| PathBuf::from(d).join("Arduino15/libraries"))
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".arduino15/libraries")))
+        .filter(|d| d.join("Servo").is_dir());
     for board in pins::arduino_boards() {
         let fqbn = crate::arduino::fqbn(board).unwrap();
         for (folder_name, files) in folders(board) {
@@ -257,6 +264,7 @@ fn every_generated_sketch_compiles_with_the_real_arduino_cli() {
                 .arg(&build)
                 .arg("--library")
                 .arg(&library)
+                .args(builtin.iter().flat_map(|b| [std::ffi::OsStr::new("--libraries"), b.as_os_str()]))
                 .arg(&dir)
                 .stdin(std::process::Stdio::null())
                 .output()

@@ -35,6 +35,8 @@ bool isActive(uint8_t pin, faberlink::ActiveLevel level) {
 }
 }  // namespace
 
+void faberlink::autoAdd(Part& part) { enqueue(&part); }
+
 FaberMotor::FaberMotor(const char* name, uint8_t pwmPin, uint8_t directionPin, float maxVelocityRadS)
     : faberlink::Motor(name, maxVelocityRadS),
       a_(pwmPin),

@@ -28,6 +28,7 @@ const FILES: &[(&str, &str)] = &[
     ("led", include_str!("parts/led.toml")),
     ("relay", include_str!("parts/relay.toml")),
     ("mosfet", include_str!("parts/mosfet.toml")),
+    ("servo", include_str!("parts/servo.toml")),
 ];
 
 /// What a pin must be able to do for a role.
@@ -948,13 +949,19 @@ pub(crate) mod tests {
         pub has_default: bool,
     }
 
-    /// The `Faber*` classes in FaberLink.h and their constructors.
-    pub(crate) fn library_classes() -> BTreeMap<String, Vec<Vec<Param>>> {
-        let header = crate::arduino::library::FILES
+    /// The library's headers with part classes: FaberLink.h and the optional ones (FaberServo.h).
+    fn part_headers() -> String {
+        crate::arduino::library::FILES
             .iter()
-            .find(|(p, _)| *p == "src/FaberLink.h")
+            .filter(|(p, _)| p.starts_with("src/Faber") && p.ends_with(".h") && *p != "src/FaberLinkCore.h")
             .map(|(_, t)| *t)
-            .expect("FaberLink.h is built in");
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The `Faber*` classes in the library's headers and their constructors.
+    pub(crate) fn library_classes() -> BTreeMap<String, Vec<Vec<Param>>> {
+        let header = part_headers();
         let code: String =
             header.lines().map(|l| l.split("//").next().unwrap_or("")).collect::<Vec<_>>().join("\n");
         let mut out = BTreeMap::new();
@@ -1043,12 +1050,12 @@ pub(crate) mod tests {
         })
     }
 
-    /// Both library headers: constants such as `DISTANCE_*` live in FaberLinkCore.h, the motor's
+    /// Every library header: constants such as `DISTANCE_*` live in FaberLinkCore.h, the motor's
     /// `DRIVER_*` in FaberLink.h.
     fn core_header() -> String {
         crate::arduino::library::FILES
             .iter()
-            .filter(|(p, _)| *p == "src/FaberLinkCore.h" || *p == "src/FaberLink.h")
+            .filter(|(p, _)| p.starts_with("src/") && p.ends_with(".h"))
             .map(|(_, t)| *t)
             .collect()
     }
@@ -1099,7 +1106,7 @@ pub(crate) mod tests {
     fn drift_pending_shapes_match_the_library_too() {
         check_against_library(|t| t.all_shapes().collect());
         // The methods `setup` lines call (`{var}.setMaxVelocity(...)`) exist too.
-        let header = crate::arduino::library::FILES.iter().find(|(p, _)| *p == "src/FaberLink.h").unwrap().1;
+        let header = part_headers();
         for t in templates() {
             for line in t.all_shapes().flat_map(|s| &s.setup) {
                 let method = line.split('.').nth(1).and_then(|m| m.split('(').next()).unwrap_or(line);

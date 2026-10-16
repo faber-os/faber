@@ -20,12 +20,14 @@ pub const FILES: &[(&str, &str)] = library![
     "src/FaberLink.cpp",
     "src/FaberLinkCore.h",
     "src/FaberLinkCore.cpp",
+    "src/FaberServo.h",
     "examples/MotorAndDistance/MotorAndDistance.ino",
     "examples/Ultrasonic/Ultrasonic.ino",
     "examples/BatteryMonitor/BatteryMonitor.ino",
     "examples/MotorL298N/MotorL298N.ino",
     "examples/ButtonAndBumper/ButtonAndBumper.ino",
     "examples/LedAndRelay/LedAndRelay.ino",
+    "examples/ServoArm/ServoArm.ino",
 ];
 
 /// Writes the library to `<dir>/FaberLink/` (only the files that differ) and returns that folder.
@@ -103,6 +105,13 @@ pub const TEMPLATES: &[Template] = &[
         description: "A dimmable LED on pin 5 and a relay module on pin 7.",
         faberlink: true,
         example: Some("LedAndRelay"),
+    },
+    Template {
+        id: "servo-arm",
+        name: "FaberLink: a servo",
+        description: "A hobby servo (SG90) on pin 9, on its own supply.",
+        faberlink: true,
+        example: Some("ServoArm"),
     },
     Template {
         id: "battery-monitor",

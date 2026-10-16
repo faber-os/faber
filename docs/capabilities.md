@@ -91,7 +91,8 @@ also before its first command). Commands: `set-angle` (clamped to the info's `mi
 `max-angle-rad`), `release`, and `safe`. The lease's safe state is `safe`: the part does what its
 info's `safe-state` says, holding its angle (the default, D29) or releasing, so the core needs no
 per-part safe state. Pulse widths and max speed are the part's own settings, not info.
-`generic-servo` for the simulator, the Servo viewer (a dial).
+FaberLink code 10, `FaberServo` (an optional header on the Arduino Servo library), `generic-servo`
+for the simulator, the Servo viewer (a dial).
 
 ## Environment
 

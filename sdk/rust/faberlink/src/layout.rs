@@ -8,7 +8,7 @@ use crate::bytes::{Reader, Writer};
 use crate::{DecodeError, EncodeError};
 use faber_capabilities::{
     Capability, Command, Info, Reading, Timestamp, Twist2d, battery, digital_in, digital_out, distance,
-    estop, motor, obstacle, planar_base, pwm_out,
+    estop, motor, obstacle, planar_base, pwm_out, servo,
 };
 
 /// The one-byte code a capability has in `READING`, `COMMAND` and `APPLIED` (protocol v1).
@@ -23,13 +23,13 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::Obstacle => 7,
         Capability::DigitalOut => 8,
         Capability::PwmOut => 9,
+        Capability::Servo => 10,
         // No layout yet: the board side (the Arduino library) has none either.
         Capability::LaserScan
         | Capability::Pose
         | Capability::Position
         | Capability::Temperature
         | Capability::AnalogIn
-        | Capability::Servo
         | Capability::Encoder
         | Capability::Imu => return None,
     })
@@ -79,6 +79,7 @@ const ESTOP_SOURCE: &[estop::Source] = &[estop::Source::Part, estop::Source::App
 const BATTERY_LEVEL: &[battery::Level] = &[battery::Level::Ok, battery::Level::Low, battery::Level::Critical];
 const OBSTACLE_KIND: &[obstacle::Kind] =
     &[obstacle::Kind::Bumper, obstacle::Kind::Infrared, obstacle::Kind::Limit];
+const SERVO_SAFE: &[servo::SafeState] = &[servo::SafeState::Hold, servo::SafeState::Release];
 const CHEMISTRY: &[battery::Chemistry] = &[
     battery::Chemistry::LiIon,
     battery::Chemistry::Lipo,
@@ -136,6 +137,10 @@ pub fn encode_reading(reading: &Reading, out: &mut Vec<u8>) -> Result<(), Encode
         Reading::Obstacle(r) => w.bool(r.detected),
         Reading::DigitalOut(r) => w.bool(r.level),
         Reading::PwmOut(r) => w.f32(r.duty),
+        Reading::Servo(r) => {
+            w.bool(r.angle_rad.is_some());
+            w.f32(r.angle_rad.unwrap_or(0.0));
+        }
         other => return Err(unsupported(other.capability())),
     }
     Ok(())
@@ -216,6 +221,14 @@ pub fn decode_reading(capability: Capability, t_us: Timestamp, bytes: &[u8]) -> 
             }
             Reading::PwmOut(pwm_out::Reading { t_us, duty })
         }
+        Capability::Servo => {
+            let holding = r.bool("holding")?;
+            let angle = r.f32()?;
+            if holding && !angle.is_finite() {
+                return Err(DecodeError::BadValue { field: "angleRad" });
+            }
+            Reading::Servo(servo::Reading { t_us, angle_rad: holding.then_some(angle) })
+        }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
     r.end()?;
@@ -247,7 +260,15 @@ pub fn encode_command(command: &Command, out: &mut Vec<u8>) -> Result<(), Encode
             w.u8(0);
             w.f32(duty);
         }
-        Command::Servo(_) => return Err(unsupported(command.capability())),
+        Command::Servo(c) => {
+            let (kind, angle) = match c {
+                servo::Command::SetAngle { angle_rad } => (0, angle_rad),
+                servo::Command::Release => (1, 0.0),
+                servo::Command::Safe => (2, 0.0),
+            };
+            w.u8(kind);
+            w.f32(angle);
+        }
     }
     Ok(())
 }
@@ -282,6 +303,16 @@ pub fn decode_command(capability: Capability, bytes: &[u8]) -> Result<Command, D
                 return Err(DecodeError::BadValue { field: "kind" });
             }
             Command::PwmOut(pwm_out::Command::SetDuty { duty: r.f32()? })
+        }
+        Capability::Servo => {
+            let kind = r.u8()?;
+            let angle = r.f32()?;
+            Command::Servo(match kind {
+                0 => servo::Command::SetAngle { angle_rad: angle },
+                1 => servo::Command::Release,
+                2 => servo::Command::Safe,
+                _ => return Err(DecodeError::BadValue { field: "kind" }),
+            })
         }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
@@ -329,6 +360,11 @@ pub fn encode_info(info: &Info, out: &mut Vec<u8>) -> Result<(), EncodeError> {
         Info::Obstacle(i) => {
             w.u8(enum_index(OBSTACLE_KIND, i.kind));
             w.f32(i.trigger_distance_m.unwrap_or(f32::NAN));
+        }
+        Info::Servo(i) => {
+            w.f32(i.min_angle_rad);
+            w.f32(i.max_angle_rad);
+            w.u8(enum_index(SERVO_SAFE, i.safe_state));
         }
         other => return Err(unsupported(other.capability())),
     }
@@ -393,6 +429,11 @@ pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Option<Info>,
                 trigger_distance_m: (!trigger.is_nan()).then_some(trigger),
             }))
         }
+        Capability::Servo => Some(Info::Servo(servo::Info {
+            min_angle_rad: r.f32()?,
+            max_angle_rad: r.f32()?,
+            safe_state: enum_at(SERVO_SAFE, r.u8()?, "safeState")?,
+        })),
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
     r.end()?;
@@ -450,6 +491,8 @@ pub(crate) mod tests {
             (t.clone(), any::<bool>())
                 .prop_map(|(t_us, level)| Reading::DigitalOut(digital_out::Reading { t_us, level })),
             (t.clone(), finite()).prop_map(|(t_us, duty)| Reading::PwmOut(pwm_out::Reading { t_us, duty })),
+            (t.clone(), proptest::option::of(finite()))
+                .prop_map(|(t_us, angle_rad)| Reading::Servo(servo::Reading { t_us, angle_rad })),
             (
                 (t, finite(), 0..3u8),
                 proptest::option::of(finite()),
@@ -479,6 +522,9 @@ pub(crate) mod tests {
             twist().prop_map(|t| Command::PlanarBase(planar_base::Command::SetVelocity(t))),
             any::<bool>().prop_map(|level| Command::DigitalOut(digital_out::Command::Set { level })),
             finite().prop_map(|duty| Command::PwmOut(pwm_out::Command::SetDuty { duty })),
+            finite().prop_map(|angle_rad| Command::Servo(servo::Command::SetAngle { angle_rad })),
+            Just(Command::Servo(servo::Command::Release)),
+            Just(Command::Servo(servo::Command::Safe)),
         ]
     }
 
@@ -519,6 +565,9 @@ pub(crate) mod tests {
             }),
             (0..3u8, proptest::option::of(0.0f32..10.0)).prop_map(|(k, trigger_distance_m)| {
                 Info::Obstacle(obstacle::Info { kind: OBSTACLE_KIND[k as usize], trigger_distance_m })
+            }),
+            (finite(), finite(), 0..2u8).prop_map(|(min_angle_rad, max_angle_rad, s)| {
+                Info::Servo(servo::Info { min_angle_rad, max_angle_rad, safe_state: SERVO_SAFE[s as usize] })
             }),
         ]
     }
@@ -603,6 +652,23 @@ pub(crate) mod tests {
         out.clear();
         encode_command(&Command::PwmOut(pwm_out::Command::SetDuty { duty: 0.5 }), &mut out).unwrap();
         assert_eq!(out, [0, 0x00, 0x00, 0x00, 0x3F], "pwm-out: set-duty, the duty");
+
+        out.clear();
+        encode_command(&Command::Servo(servo::Command::Release), &mut out).unwrap();
+        assert_eq!(out, [1, 0, 0, 0, 0], "servo: release, the angle unused");
+
+        out.clear();
+        encode_reading(&Reading::Servo(servo::Reading { t_us: 0, angle_rad: None }), &mut out).unwrap();
+        assert_eq!(out, [0, 0, 0, 0, 0], "servo: released");
+
+        out.clear();
+        let i = Info::Servo(servo::Info {
+            min_angle_rad: 0.0,
+            max_angle_rad: 2.0,
+            safe_state: servo::SafeState::Release,
+        });
+        encode_info(&i, &mut out).unwrap();
+        assert_eq!(out, [0, 0, 0, 0, 0x00, 0x00, 0x00, 0x40, 1], "servo: min, max, safe state");
     }
 
     #[test]
@@ -636,6 +702,14 @@ pub(crate) mod tests {
         assert_eq!(decode_info(Capability::DigitalIn, &[]), Ok(None), "digital-in has no info");
         assert_eq!(decode_info(Capability::DigitalIn, &[0]), Err(DecodeError::TrailingBytes));
         assert_eq!(decode_info(Capability::PwmOut, &[]), Ok(None));
+        assert_eq!(
+            decode_command(Capability::Servo, &[3, 0, 0, 0, 0]),
+            Err(DecodeError::BadValue { field: "kind" })
+        );
+        assert_eq!(
+            decode_info(Capability::Servo, &[0, 0, 0, 0, 0, 0, 0, 0, 2]),
+            Err(DecodeError::BadValue { field: "safeState" })
+        );
         assert_eq!(
             decode_command(Capability::DigitalOut, &[1, 1]),
             Err(DecodeError::BadValue { field: "kind" })
