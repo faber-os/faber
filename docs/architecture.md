@@ -125,6 +125,8 @@ is behind a part.
 **Declarative example** (TMP102 temperature sensor; register values from the TI datasheet):
 
 ```toml
+faber-manifest = 1
+
 [package]
 id = "ti-tmp102"
 type = "connector"

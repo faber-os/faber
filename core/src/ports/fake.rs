@@ -16,7 +16,7 @@ pub trait FakeI2cDevice: Send {
     fn read(&mut self, buf: &mut [u8]);
 }
 
-/// A TI TMP102 temperature sensor, after its datasheet (SBOS397, §7.5): a pointer register picks
+/// A TI TMP102 temperature sensor, after its datasheet (SBOS397, "Register Maps"): a pointer register picks
 /// one of four 16-bit registers, sent most significant byte first.
 ///
 /// - `0x00` temperature, read-only: 12 bits, left-justified, 0.0625 °C per bit, two's complement
@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn tmp102_encodes_as_its_datasheet_table_says() {
-        // SBOS397 table 8-1 (12-bit) and 8-2 (13-bit, extended mode).
+        // The datasheet's temperature data format tables (12-bit, and 13-bit in extended mode).
         for (c, raw) in [(127.9375, 0x7ff0), (100.0, 0x6400), (25.0, 0x1900), (0.0625, 0x0010), (0.0, 0x0000)]
         {
             assert_eq!(Tmp102::encode(c, false), raw, "{c} °C");

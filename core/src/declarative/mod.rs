@@ -3,8 +3,8 @@
 //! runs it as an ordinary [`Connector`](faber_connector::Connector), so the supervisor treats it
 //! exactly like a built-in one.
 //!
-//! First cut: serial devices that send text lines, read with typed patterns or the built-in NMEA
-//! reader. Register maps for I²C/SPI follow when the buses arrive (Phase 6).
+//! Serial devices that send text lines, read with typed patterns or the built-in NMEA reader, and
+//! I²C sensors whose registers it reads on a schedule (Phase 6). SPI is not declarative yet.
 
 pub mod engine;
 pub mod installed;
@@ -12,6 +12,7 @@ pub mod lines;
 pub mod manifest;
 pub mod nmea;
 pub mod pattern;
+pub mod registers;
 pub mod values;
 
 pub use manifest::{Declarative, FILE_NAME, FORMAT, ManifestError};

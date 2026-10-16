@@ -1,0 +1,21 @@
+faber-manifest = 1
+
+[package]
+id = "ti-tmp102"
+type = "connector"
+kind = "declarative"
+version = "1.0.0"
+name = "TI TMP102 temperature sensor"
+
+# The TMP102's address is set by its ADD0 pin: 0x48 (to GND, the usual breakout default), 0x49
+# (V+), 0x4A (SDA) or 0x4B (SCL). TI datasheet SBOS397, "Serial Bus Address".
+[ports]
+i2c = { addresses = [0x48, 0x49, 0x4A, 0x4B], default = 0x48 }
+
+# The temperature register (0x00): 12 bits, left-justified in two bytes, most significant byte
+# first, two's complement, 0.0625 °C per bit (SBOS397, "Temperature Register"). Read once a second;
+# the sensor converts four times a second at power-up.
+[[provides]]
+capability = "temperature@1"
+poll = { default-hz = 1 }
+read = { register = 0x00, bytes = 2, format = "i16be", shift = 4, scale = 0.0625, unit = "celsius" }
