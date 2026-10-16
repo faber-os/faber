@@ -894,10 +894,10 @@ pub(crate) mod tests {
         assert!(m.warnings.iter().any(|w| w.contains("own supply")));
         assert_eq!(
             m.shapes.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            ["pwm-dir"],
-            "only what FaberMotor has"
+            ["pwm-dir", "en-in1-in2", "two-pwm"],
+            "FaberMotor's three driver shapes"
         );
-        assert_eq!(m.pending_shapes.len(), 2, "EN+IN1+IN2 and two-PWM wait for FaberMotor");
+        assert!(m.pending_shapes.is_empty(), "every motor shape works today");
         let b = BuiltIn.template("battery").unwrap();
         assert_eq!(b.setting("chemistry").unwrap().kind, SettingType::Choice);
         assert!(b.settings.iter().all(|s| s.apply == Apply::Build), "every setting is compiled in today");

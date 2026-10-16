@@ -8,7 +8,12 @@ import type { PinUse } from "./PinUse";
  */
 export type RoleOptions = { role: string, name: string, needs: PinNeed, 
 /**
- * Faber's pick (or the one asked for, when it can do the job). None: no pin can.
+ * The part works without it (a driver's STBY). Faber only places it when asked for.
+ */
+optional: boolean, 
+/**
+ * Faber's pick (or the one asked for, when it can do the job). None: no pin can, or the role
+ * is optional and wasn't asked for.
  */
 suggested?: string, 
 /**

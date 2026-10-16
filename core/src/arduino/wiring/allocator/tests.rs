@@ -66,6 +66,14 @@ fn catalog() -> Vec<Template> {
     all.push(simple("encoder", &["a:interrupt", "b:interrupt"], ""));
     all.push(simple("strip", &["din:digital-out"], "uses = [\"interrupts-off\"]"));
     all.push(simple("button", &["in:digital-in"], ""));
+    // A shape the library can't drive yet (a template may land before its class does).
+    let mut relay = simple("relay", &["coil:digital-out"], "");
+    let mut latching = relay.shapes[0].clone();
+    latching.id = "latching".into();
+    latching.name = "Latching".into();
+    latching.todo = Some("waits for a latching relay in the library".into());
+    relay.pending_shapes.push(latching);
+    all.push(relay);
     all.push(simple(
         "imu",
         &[],
@@ -468,11 +476,16 @@ fn reserved_and_unknown_pins_and_bad_parts_are_errors() {
 
     let p = plan("uno", vec![("loop", part("toaster", &[]))]);
     assert_eq!(codes(&check(&uno, &p, &catalog(), &[])), ["invalid-part-name", "unknown-template"]);
-    let mut pending = part("motor", &[("en", "D5"), ("in1", "D4"), ("in2", "D7")]);
-    pending.shape = Some("en-in1-in2".into());
-    let e = check(&uno, &plan("uno", vec![("left", pending)]), &catalog(), &[]);
+    // An L298N-style motor on EN D5, IN1 D4, IN2 D7 is fine; only the supply warning remains.
+    let mut l298n = part("motor", &[("en", "D5"), ("in1", "D4"), ("in2", "D7")]);
+    l298n.shape = Some("en-in1-in2".into());
+    let e = check(&uno, &plan("uno", vec![("left", l298n)]), &catalog(), &[]);
+    assert_eq!(codes(&e), ["own-supply"]);
+    let mut latching = part("relay", &[("coil", "D4")]);
+    latching.shape = Some("latching".into());
+    let e = check(&uno, &plan("uno", vec![("lamp", latching)]), &catalog(), &[]);
     assert_eq!(codes(&e), ["shape-not-ready"]);
-    assert!(e[0].message.contains("EN + IN1 + IN2"), "{}", e[0].message);
+    assert!(e[0].message.contains("\"Latching\" isn't ready yet"), "{}", e[0].message);
     let wrong = Candidate { shape: Some("nope".into()), ..want("motor") };
     let err = suggest(&uno, &plan("uno", vec![]), &catalog(), &[], &wrong).unwrap_err();
     assert_eq!(err.code, "unknown-shape");

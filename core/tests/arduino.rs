@@ -798,7 +798,7 @@ async fn pin_maps_and_part_templates_are_served() {
     let ids: Vec<&str> = parts.as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
     assert_eq!(ids, ["ultrasonic", "ir-distance", "battery", "motor"]);
     let motor = parts.as_array().unwrap().iter().find(|t| t["id"] == "motor").unwrap();
-    assert_eq!(motor["shapes"].as_array().unwrap().len(), 1, "only shapes FaberMotor has");
+    assert_eq!(motor["shapes"].as_array().unwrap().len(), 3, "FaberMotor's three driver shapes");
     assert_eq!(motor["shapes"][0]["roles"][0]["needs"], "pwm");
     assert_eq!(motor["power"]["ownSupply"], true);
 }
