@@ -225,6 +225,7 @@ fn core_without_tools() -> TestCore {
         usb_problems: Arc::new(Ports),
         disks: Arc::new(Ports),
         opener: Arc::new(Opener(vec![Arc::clone(&uno), Arc::clone(&clone), Arc::clone(&mega)])),
+        hardware: Arc::new(faber_core::ports::NoHardware),
         replays: ReplayLibrary::default(),
         connectors: faber_core::connectors::built_in(),
         timing: Timing {

@@ -249,7 +249,7 @@
     font-weight: 600;
   }
   .power .name {
-    color: var(--warn);
+    color: var(--warn-text);
   }
   .ground .name {
     color: var(--text-muted);
