@@ -60,10 +60,24 @@ Every pin with its abilities: digital I/O, analog in (and analog-*only* pins lik
 PWM, external interrupt, I²C (SDA/SCL), SPI (MOSI/MISO/SCK/SS), hardware serial, the on-board LED,
 and the voltage (5 V or 3.3 V). Also the **conflicts that bite beginners**:
 - D0/D1 carry the USB link to Faber, so they are reserved (Serial1–3 on a Mega are free);
-- the `Servo` library takes over PWM on D9/D10 on an Uno (D11/D12 and others on a Mega);
+- the `Servo` library takes over PWM on D9/D10 on an Uno; on a Mega it takes Timer5 first, so
+  the first servo stops PWM on D44–D46 (D11/D12 only go after 12 servos);
 - `tone()` takes PWM on D3/D11 on an Uno;
 - I²C pins can't be used as ordinary pins while an I²C part exists;
-- D13 drives the on-board LED, which is fine for outputs but weak as an input with a pull-up.
+- D13 drives the on-board LED, which is fine for outputs but weak as an input with a pull-up;
+- interrupt pins are scarce: an Uno has D2/D3, and of a Mega's six, D20/D21 are also I²C and
+  D18/D19 also Serial1, which matters for wheel encoders;
+- common modules share I²C addresses out of the box (0x68 MPU6050 vs DS3231, 0x40 INA219 vs
+  PCA9685, 0x29 VL53L0X vs TCS34725, 0x27 LCD backpack vs MCP23017); the allocator checks
+  addresses like pins;
+- addressable LED strips turn interrupts off while they update (about 30 µs per pixel), which
+  drops FaberLink bytes and encoder edges on a long strip: guided mode warns, and suggests a
+  separate board for the strip.
+
+**Pin providers.** Some parts add pins instead of measuring anything (PCA9685 PWM, MCP23017 GPIO,
+ADS1115 analog in, 74HC595 outputs). The pin-map format lets a part contribute pins, so the
+allocator can place a servo on a PCA9685 channel. On a Pi, which has no analog inputs, this is the
+only way to use an analog part.
 
 The first set is Uno, Nano (old and new bootloader), Mega 2560, i.e. the flasher's boards. The
 values come from the ATmega datasheets and Arduino's published board pinouts. Each file is checked
@@ -170,9 +184,15 @@ is an **admin** (D53, as for the editor).
    guided boards know their pins?
 3. **Take over the code is one way** (recommended), or should Faber try to keep a hand-edited
    sketch in sync with the plan? Keeping them in sync means parsing C++, which is fragile.
-4. **First part catalogue**: the four existing library classes, then which new ones first? Servo,
-   encoder, button and LED are the common beginner parts; for SENNEP, the encoders and the IMU
-   matter.
+4. **First part catalogue.** [research/common-parts.md](research/common-parts.md) ranks about 60
+   parts. Its recommended first wave of 12: HC-SR04, Sharp IR, battery divider, DC motor with a
+   driver, quadrature encoder, IMU (MPU6050 first), VL53L0X/L1X time of flight, button / switch /
+   bumper, LED / relay / MOSFET output, servo, WS2812B strip, and potentiometer / joystick. That
+   means eight new library classes, and two new capabilities, `line-sensor@1` and `obstacle@1`.
+   Also: `FaberMotor` (PWM + DIR) fits none of the most common drivers (L298N, L293D and TB6612
+   need EN + IN1 + IN2; L9110, DRV8833 and BTS7960 need two PWM pins), so motor templates need
+   driver shapes. And `FaberUltrasonic` blocks for up to about 24 ms per reading, so several sonars
+   should move to interrupt timing.
 5. **Pi GPIO** (Phase 6b) could later use the same wizard, pin drawing and allocator, with the Pi's
    40-pin header as one more pin map. Should the design aim for that now? Recommended: yes, in the
    data format only.
