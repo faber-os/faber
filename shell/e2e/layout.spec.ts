@@ -5,12 +5,13 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * No window may cut its content off. A window's body never scrolls itself, so anything taller
  * than it must sit in a scrolling area inside the window. This opens every program, and the
  * viewers of a simulated drive base, distance sensor and battery, at the project's screen size and at a
- * small browser window, and checks that no body overflows. An app's window (the wall follower's,
- * installed for it) is open too.
+ * small browser window, and checks that no body overflows. Two apps' windows (the wall follower's
+ * and SENNEP's, installed for it) are open too, and SENNEP's own page never scrolls sideways.
  */
 const APP_PACKAGE = readFileSync(
   new URL('./fixtures/wall-follower-0.1.0.faberpkg', import.meta.url),
 );
+const SENNEP_PACKAGE = readFileSync(new URL('./fixtures/sennep-0.1.0.faberpkg', import.meta.url));
 const SIM_PARTS = [
   { name: 'layout_base', connector: 'generic-planar-base' },
   { name: 'layout_front', connector: 'generic-distance' },
@@ -29,6 +30,12 @@ test.beforeEach(async ({ request }) => {
     headers: { 'content-type': 'application/octet-stream' },
   });
   expect(app.status()).toBe(201);
+  await request.post('/api/v0/apps/sennep/disable');
+  const sennep = await request.post('/api/v0/packages?name=sennep-0.1.0.faberpkg', {
+    data: SENNEP_PACKAGE,
+    headers: { 'content-type': 'application/octet-stream' },
+  });
+  expect(sennep.status()).toBe(201);
   for (const p of SIM_PARTS) {
     const res = await request.post('/api/v0/parts', { data: { ...p, simulate: 'manual' } });
     expect(res.status()).toBe(201);
@@ -38,7 +45,17 @@ test.beforeEach(async ({ request }) => {
 test.afterEach(async ({ request }) => {
   await removeSimParts(request);
   await request.delete('/api/v0/packages/wall-follower');
+  await request.delete('/api/v0/packages/sennep');
 });
+
+/** Whether SENNEP's own page (in its sandboxed frame) is wider than its window. */
+async function sennepScrollsSideways(page: Page): Promise<boolean> {
+  const frame = page.frames().find((f) => f.url().includes('/apps/sennep/ui/'));
+  if (!frame) throw new Error('SENNEP’s window is not open');
+  return frame.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+  );
+}
 
 async function clipped(page: Page): Promise<string[]> {
   return page.locator('[data-window-kind] .body').evaluateAll((bodies) =>
@@ -104,8 +121,19 @@ test('no window cuts its content off, also after the browser shrinks', async ({ 
     .getByRole('button', { name: 'Open Wall follower' })
     .click();
   await expect(page.locator('[data-window-kind="app"]')).toBeVisible();
+  await page
+    .getByRole('navigation', { name: 'Taskbar' })
+    .getByRole('button', { name: 'Apps' })
+    .click();
+  await page
+    .getByRole('dialog', { name: 'Apps' })
+    .getByRole('button', { name: 'Open SENNEP' })
+    .click();
+  await expect(page.locator('[data-window-kind="app"]')).toHaveCount(2);
+  await expect.poll(() => sennepScrollsSideways(page)).toBe(false);
   expect(await clipped(page)).toEqual([]);
 
   await page.setViewportSize({ width: 760, height: 520 });
   await expect.poll(() => clipped(page)).toEqual([]);
+  await expect.poll(() => sennepScrollsSideways(page)).toBe(false);
 });
