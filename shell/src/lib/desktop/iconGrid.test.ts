@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   cellToPoint,
   gridSize,
+  iconsInRect,
   moveIcon,
+  moveIcons,
   placeIcons,
   pointToCell,
   positionsForSettings,
@@ -99,6 +101,39 @@ describe('moveIcon', () => {
   it('dropping an icon on its own cell changes nothing', () => {
     const p = placeIcons(['a'], [], area, spec);
     expect(moveIcon(p, 'a', { x: 12, y: 15 }, area, spec).get('a')).toEqual({ col: 0, row: 0 });
+  });
+});
+
+describe('moveIcons', () => {
+  it('moves several icons by the same amount, keeping their shape', () => {
+    const p = placeIcons(['a', 'b', 'c'], [], area, spec); // a 0,0  b 0,1  c 0,2
+    const next = moveIcons(p, ['a', 'b'], { dx: 200, dy: 0 }, area, spec);
+    expect(next.get('a')).toEqual({ col: 2, row: 0 });
+    expect(next.get('b')).toEqual({ col: 2, row: 1 });
+    expect(next.get('c')).toEqual({ col: 0, row: 2 });
+  });
+
+  it('can move down into cells the group itself leaves', () => {
+    const p = placeIcons(['a', 'b'], [], area, spec); // a 0,0  b 0,1
+    const next = moveIcons(p, ['a', 'b'], { dx: 0, dy: 100 }, area, spec);
+    expect(next.get('a')).toEqual({ col: 0, row: 1 });
+    expect(next.get('b')).toEqual({ col: 0, row: 2 });
+  });
+
+  it('never stacks icons: one landing on another takes a free cell', () => {
+    const p = placeIcons(['a', 'b', 'c'], [], area, spec);
+    const next = moveIcons(p, ['a'], { dx: 0, dy: 100 }, area, spec);
+    const cells = [...next.values()].map((c) => `${c.col},${c.row}`);
+    expect(new Set(cells).size).toBe(3);
+  });
+});
+
+describe('iconsInRect', () => {
+  it('finds the icons a selection rectangle touches, drawn in any direction', () => {
+    const p = placeIcons(['a', 'b', 'c', 'd'], [], area, spec); // column 0, then d at 1,0
+    expect(iconsInRect(p, { x: 0, y: 0, w: 50, h: 150 }, spec)).toEqual(['a', 'b']);
+    expect(iconsInRect(p, { x: 150, y: 50, w: -100, h: -20 }, spec)).toEqual(['a', 'd']);
+    expect(iconsInRect(p, { x: 400, y: 300, w: 5, h: 5 }, spec)).toEqual([]);
   });
 });
 

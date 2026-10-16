@@ -218,3 +218,102 @@ describe('Context menus', () => {
     expect(shell.desktop.state.windows[0]!.minimised).toBe(true);
   });
 });
+
+describe('Selecting several icons', () => {
+  function setupFiles(routes: Parameters<typeof fakeShell>[0] = []) {
+    const shell = fakeShell([
+      listing('home:/Desktop', [
+        { name: 'a.txt', size: 1 },
+        { name: 'b.txt', size: 1 },
+      ]),
+      ...routes,
+    ]);
+    shell.pushSettings({
+      ...DEFAULT_SETTINGS,
+      desktop: {
+        icons: [
+          { key: 'home:/Desktop/a.txt', x: 380, y: 12 },
+          { key: 'home:/Desktop/b.txt', x: 380, y: 108 },
+        ],
+        removed: [],
+      },
+    });
+    render(Desktop, { props: { defs: WINDOW_DEFS }, context: shell.context });
+    return shell;
+  }
+  const selected = () =>
+    within(desktopList())
+      .getAllByRole('option')
+      .filter((o) => o.getAttribute('aria-selected') === 'true')
+      .map((o) => o.textContent?.trim());
+
+  it('adds to the selection with Ctrl+click and Shift+click', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(icon('Parts'));
+    await user.keyboard('{Control>}');
+    await user.click(icon('Files'));
+    await user.keyboard('{/Control}');
+    expect(selected()).toEqual(expect.arrayContaining(['Parts', 'Files']));
+    expect(selected()).toHaveLength(2);
+    await user.click(icon('Notes'));
+    expect(selected()).toEqual(['Notes']);
+  });
+
+  it('selects the icons a rubber band is drawn over', async () => {
+    setupFiles();
+    await within(desktopList()).findByRole('option', { name: 'b.txt' });
+    const list = desktopList();
+    // From an empty spot above the two files, down past both of them.
+    await fireEvent.pointerDown(list, { button: 0, clientX: 370, clientY: 5, pointerId: 1 });
+    await fireEvent.pointerMove(list, { clientX: 420, clientY: 150, pointerId: 1 });
+    expect(screen.getByTestId('rubber-band')).toBeInTheDocument();
+    await fireEvent.pointerUp(list, { clientX: 420, clientY: 150, pointerId: 1 });
+    expect(screen.queryByTestId('rubber-band')).toBeNull();
+    expect(selected()).toEqual(['a.txt', 'b.txt']);
+  });
+
+  it('moves the selected icons together', async () => {
+    const user = userEvent.setup();
+    const shell = setupFiles([{ method: 'PUT', path: '/api/v0/settings', body: DEFAULT_SETTINGS }]);
+    const a = await within(desktopList()).findByRole('option', { name: 'a.txt' });
+    await user.click(a);
+    await user.keyboard('{Control>}');
+    await user.click(icon('b.txt'));
+    await user.keyboard('{/Control}');
+    await fireEvent.pointerDown(a, { button: 0, clientX: 400, clientY: 30, pointerId: 1 });
+    await fireEvent.pointerMove(a, { clientX: 584, clientY: 30, pointerId: 1 });
+    await fireEvent.pointerUp(a, { clientX: 584, clientY: 30, pointerId: 1 });
+    await waitFor(() => expect(shell.fetch.calls.some((c) => c.method === 'PUT')).toBe(true));
+    const put = shell.fetch.calls.find((c) => c.method === 'PUT')!.body as typeof DEFAULT_SETTINGS;
+    const at = (key: string) => put.desktop.icons.find((p) => p.key === key);
+    expect(at('home:/Desktop/a.txt')).toEqual({ key: 'home:/Desktop/a.txt', x: 564, y: 12 });
+    expect(at('home:/Desktop/b.txt')).toEqual({ key: 'home:/Desktop/b.txt', x: 564, y: 108 });
+  });
+
+  it('opens every selected icon with Enter, and trashes the selected files with Delete', async () => {
+    const user = userEvent.setup();
+    const shell = setupFiles([{ method: 'POST', path: '/api/v0/files/trash', status: 204 }]);
+    const a = await within(desktopList()).findByRole('option', { name: 'a.txt' });
+    await user.click(a);
+    await user.keyboard('{Control>}');
+    await user.click(icon('b.txt'));
+    await user.click(icon('Settings'));
+    await user.keyboard('{/Control}');
+    await user.keyboard('{Enter}');
+    // Both text files open in Notes (as its tabs), and Settings opens too.
+    expect(shell.desktop.state.windows.map((w) => w.kind).sort()).toEqual(['notes', 'settings']);
+
+    await user.click(icon('a.txt'));
+    await user.keyboard('{Control>}');
+    await user.click(icon('b.txt'));
+    await user.click(icon('Settings'));
+    await user.keyboard('{/Control}');
+    await user.keyboard('{Delete}');
+    await waitFor(() =>
+      expect(shell.fetch.calls.find((c) => c.path === '/api/v0/files/trash')?.body).toEqual({
+        paths: ['home:/Desktop/a.txt', 'home:/Desktop/b.txt'],
+      }),
+    );
+  });
+});

@@ -96,6 +96,59 @@ export function moveIcon(
   return next;
 }
 
+/**
+ * Several icons dragged together, moved by the same pixels. They keep their shape where the
+ * cells are free; one that would land on another icon (or off the grid) takes the nearest free
+ * cell. The cells the group leaves are free for the group itself.
+ */
+export function moveIcons(
+  placement: Placement,
+  keys: readonly string[],
+  delta: { dx: number; dy: number },
+  area: { width: number; height: number },
+  spec: GridSpec,
+): Placement {
+  const grid = gridSize(area, spec);
+  const moving = new Set(keys);
+  const taken = new Set([...placement].filter(([k]) => !moving.has(k)).map(([, c]) => id(c)));
+  const next = new Map(placement);
+  for (const key of keys) {
+    const from = placement.get(key);
+    if (!from) continue;
+    const p = cellToPoint(from, spec);
+    const cell = freeNear(
+      pointToCell({ x: p.x + delta.dx, y: p.y + delta.dy }, spec, grid),
+      taken,
+      grid,
+    );
+    next.set(key, cell);
+    taken.add(id(cell));
+  }
+  return next;
+}
+
+/** A rectangle on the desktop in pixels; `w` and `h` are negative when drawn up or left. */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** The icons whose cell a selection rectangle touches, in placement order. */
+export function iconsInRect(placement: Placement, rect: Rect, spec: GridSpec): string[] {
+  const left = Math.min(rect.x, rect.x + rect.w);
+  const right = Math.max(rect.x, rect.x + rect.w);
+  const top = Math.min(rect.y, rect.y + rect.h);
+  const bottom = Math.max(rect.y, rect.y + rect.h);
+  return [...placement]
+    .filter(([, cell]) => {
+      const p = cellToPoint(cell, spec);
+      return p.x < right && p.x + spec.cellW > left && p.y < bottom && p.y + spec.cellH > top;
+    })
+    .map(([key]) => key);
+}
+
 /** The layout to save: every placed icon, in pixels, sorted by key so saves are stable. */
 export function positionsForSettings(placement: Placement, spec: GridSpec): SavedPosition[] {
   return [...placement]

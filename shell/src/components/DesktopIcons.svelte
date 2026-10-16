@@ -10,11 +10,15 @@
     ICON_GRID,
     cellToPoint,
     gridSize,
+    iconsInRect,
     moveIcon,
+    moveIcons,
     placeIcons,
     positionsForSettings,
     type Placement,
+    type Rect,
   } from '../lib/desktop/iconGrid';
+  import { clickSelect } from '../lib/desktop/selection';
   import { useDesktop } from './desktopController.svelte';
   import AppIcon from './AppIcon.svelte';
   import {
@@ -48,12 +52,17 @@
   }
 
   let files = $state.raw<FileEntry[]>([]);
+  /** The icon keyboard keys act from (and the anchor of a Shift+click). */
   let selected = $state<string | null>(null);
+  /** Every selected icon: Ctrl/Shift+click and the rubber band select several. */
+  let picked = $state.raw<string[]>([]);
+  /** The rubber band being drawn, in pixels from the desktop's top-left. */
+  let band = $state.raw<Rect | null>(null);
   let renaming = $state<string | null>(null);
   let renameValue = $state('');
   /** The layout just saved, shown until the core's answer arrives. */
   let pending = $state.raw<DesktopLayout | null>(null);
-  let drag = $state<{ key: string; dx: number; dy: number } | null>(null);
+  let drag = $state<{ keys: string[]; dx: number; dy: number } | null>(null);
   let root: HTMLElement | undefined = $state();
   let lastClick = { key: '', at: 0 };
   let justDragged = false;
@@ -125,6 +134,17 @@
     }
   }
 
+  /** Just this icon selected (or none). */
+  function selectOnly(key: string | null) {
+    selected = key;
+    picked = key === null ? [] : [key];
+  }
+
+  /** The selected icons, in keyboard order. */
+  function pickedIcons(): DesktopIcon[] {
+    return ordered.filter((i) => picked.includes(i.key));
+  }
+
   function open(i: DesktopIcon) {
     if (i.def) desktop.open(i.def.kind);
     else if (i.entry) openEntry(desktop, i.entry);
@@ -136,13 +156,15 @@
     const sx = e.clientX;
     const sy = e.clientY;
     let moved = false;
+    // Dragging a selected icon moves every selected icon with it.
+    const group = picked.includes(i.key) ? picked : [i.key];
     el.setPointerCapture?.(e.pointerId);
     const move = (ev: PointerEvent) => {
       const dx = ev.clientX - sx;
       const dy = ev.clientY - sy;
       if (!moved && Math.hypot(dx, dy) < DRAG_START_PX) return;
       moved = true;
-      drag = { key: i.key, dx, dy };
+      drag = { keys: group, dx, dy };
     };
     const end = (ev: PointerEvent) => {
       el.removeEventListener('pointermove', move);
@@ -154,8 +176,13 @@
       // The browser still sends a click after a drag; it must not select or open anything.
       justDragged = true;
       setTimeout(() => (justDragged = false), 0);
+      if (d.keys.length > 1) {
+        selected = i.key;
+        void save(moveIcons(placement, d.keys, { dx: d.dx, dy: d.dy }, desktop.area, ICON_GRID));
+        return;
+      }
       const from = cellToPoint(placement.get(i.key)!, ICON_GRID);
-      selected = i.key;
+      selectOnly(i.key);
       void save(
         moveIcon(placement, i.key, { x: from.x + d.dx, y: from.y + d.dy }, desktop.area, ICON_GRID),
       );
@@ -165,8 +192,21 @@
     el.addEventListener('pointercancel', end);
   }
 
-  function click(i: DesktopIcon) {
+  function click(e: MouseEvent, i: DesktopIcon) {
     if (justDragged) return;
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl || e.shiftKey) {
+      const next = clickSelect(
+        { keys: picked, anchor: selected },
+        i.key,
+        { ctrl, shift: e.shiftKey },
+        ordered.map((x) => x.key),
+      );
+      picked = next.keys;
+      selected = next.anchor;
+      lastClick = { key: '', at: 0 };
+      return;
+    }
     const now = performance.now();
     // Select on the first click or tap, open on a second one soon after (touch included).
     if (lastClick.key === i.key && now - lastClick.at < 450) {
@@ -174,7 +214,7 @@
       open(i);
     } else {
       lastClick = { key: i.key, at: now };
-      selected = i.key;
+      selectOnly(i.key);
     }
   }
 
@@ -207,20 +247,24 @@
       );
     } else if (dir) {
       e.preventDefault();
-      selected = (cur ? neighbour(cur.key, dir) : ordered[0])?.key ?? selected;
+      selectOnly((cur ? neighbour(cur.key, dir) : ordered[0])?.key ?? selected);
       void focusSelected();
     } else if (cur?.entry && e.key === 'Enter' && e.altKey) {
       e.preventDefault();
       openProperties(desktop, cur.entry);
     } else if (cur && e.key === 'Enter') {
       e.preventDefault();
-      open(cur);
+      const all = pickedIcons();
+      for (const x of all.length > 1 ? all : [cur]) open(x);
     } else if (cur?.entry && e.key === 'F2') {
       e.preventDefault();
       void startRename(cur.entry);
-    } else if (cur?.entry && e.key === 'Delete') {
+    } else if (cur && e.key === 'Delete') {
+      // Programs stay: only files go to the Trash.
+      const entries = pickedIcons().flatMap((x) => (x.entry ? [x.entry] : []));
+      if (entries.length === 0) return;
       e.preventDefault();
-      void trash(cur.entry);
+      void trashAll(entries);
     }
   }
 
@@ -243,7 +287,7 @@
   }
 
   async function startRename(e: FileEntry) {
-    selected = e.path;
+    selectOnly(e.path);
     renaming = e.path;
     renameValue = e.name;
     await tick();
@@ -262,7 +306,7 @@
       const r = await core.move(from, to);
       if (!r.ok) core.lastError = r.error;
       else {
-        selected = to;
+        selectOnly(to);
         desktop.renameRecent(from, to);
         await moveSavedKey(from, to);
       }
@@ -281,9 +325,50 @@
   }
 
   async function trash(e: FileEntry) {
-    const r = await core.trash([e.path]);
+    // Move to Trash on one of several selected files moves all of them.
+    const all = pickedIcons().flatMap((x) => (x.entry ? [x.entry] : []));
+    await trashAll(all.length > 1 && all.some((x) => x.path === e.path) ? all : [e]);
+  }
+
+  async function trashAll(entries: FileEntry[]) {
+    const r = await core.trash(entries.map((x) => x.path));
     if (!r.ok) core.lastError = r.error;
+    selectOnly(null);
     await load();
+  }
+
+  /** Where a pointer event is, in pixels from the desktop's top-left. */
+  function local(e: PointerEvent): { x: number; y: number } {
+    const box = root?.getBoundingClientRect();
+    return { x: e.clientX - (box?.left ?? 0), y: e.clientY - (box?.top ?? 0) };
+  }
+
+  /** A rubber band from an empty spot selects the icons it is drawn over (Ctrl adds to them). */
+  function bandStart(e: PointerEvent) {
+    if (e.target !== e.currentTarget || e.button !== 0) return;
+    const el = e.currentTarget as HTMLElement;
+    const start = local(e);
+    const base = e.ctrlKey || e.metaKey || e.shiftKey ? picked : [];
+    if (base.length === 0) selectOnly(null);
+    el.setPointerCapture?.(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const p = local(ev);
+      const rect = { x: start.x, y: start.y, w: p.x - start.x, h: p.y - start.y };
+      if (!band && Math.hypot(rect.w, rect.h) < DRAG_START_PX) return;
+      band = rect;
+      const inside = iconsInRect(placement, rect, ICON_GRID);
+      picked = [...base, ...inside.filter((k) => !base.includes(k))];
+      selected = picked[0] ?? null;
+    };
+    const end = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', end);
+      el.removeEventListener('pointercancel', end);
+      band = null;
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
   }
 
   async function create(kind: 'folder' | 'text') {
@@ -308,9 +393,10 @@
   function build(target: HTMLElement) {
     const key = target.closest<HTMLElement>('[data-key]')?.dataset.key;
     const i = icons.find((x) => x.key === key);
+    // Right-clicking an icon outside the selection selects just it.
+    if (i && !picked.includes(i.key)) selectOnly(i.key);
     if (i?.def) {
       const d = i.def;
-      selected = i.key;
       return {
         label: i.label,
         header: { title: d.title, detail: d.description, icon: d.icon },
@@ -322,7 +408,7 @@
         onSelect: (id: string) => {
           if (id === 'desktop-remove') {
             pending = removeFromDesktop(layout, i.key);
-            selected = null;
+            selectOnly(null);
           }
           if (!runPinItem(core, i.key, id) && !runDesktopItem(core, i.key, id)) open(i);
         },
@@ -330,7 +416,6 @@
     }
     if (i?.entry) {
       const e = i.entry;
-      selected = i.key;
       return {
         label: i.label,
         header: entryHeader(e),
@@ -345,7 +430,7 @@
         },
       };
     }
-    selected = null;
+    selectOnly(null);
     return {
       label: t('desktop.label'),
       entries: [
@@ -398,9 +483,8 @@
   tabindex={selected ? -1 : 0}
   style:height="{desktop.area.height}px"
   use:menuTrigger={{ menu, build }}
-  onpointerdown={(e) => {
-    if (e.target === e.currentTarget) selected = null;
-  }}
+  aria-multiselectable="true"
+  onpointerdown={bandStart}
   onkeydown={keydown}
   ondragover={dragOver}
   ondrop={drop}
@@ -408,12 +492,12 @@
   {#each icons as i (i.key)}
     {@const cell = placement.get(i.key)!}
     {@const p = cellToPoint(cell, ICON_GRID)}
-    {@const dragging = drag?.key === i.key}
+    {@const dragging = drag?.keys.includes(i.key) ?? false}
     <li
       class="icon"
       class:dragging
       role="option"
-      aria-selected={selected === i.key}
+      aria-selected={picked.includes(i.key)}
       tabindex={selected === i.key ? 0 : -1}
       data-key={i.key}
       style:left="{p.x}px"
@@ -421,7 +505,7 @@
       style:width="{ICON_GRID.cellW}px"
       style:transform={dragging ? `translate(${drag!.dx}px, ${drag!.dy}px)` : undefined}
       onpointerdown={(e) => pointerDown(e, i)}
-      onclick={() => click(i)}
+      onclick={(e) => click(e, i)}
       onkeydown={() => {}}
     >
       {#if i.def}
@@ -454,6 +538,17 @@
       {/if}
     </li>
   {/each}
+  {#if band}
+    <li
+      class="band"
+      role="presentation"
+      data-testid="rubber-band"
+      style:left="{Math.min(band.x, band.x + band.w)}px"
+      style:top="{Math.min(band.y, band.y + band.h)}px"
+      style:width="{Math.abs(band.w)}px"
+      style:height="{Math.abs(band.h)}px"
+    ></li>
+  {/if}
 </ul>
 
 <style>
@@ -519,6 +614,13 @@
   .icon:focus-visible .plate {
     outline: 2px solid var(--focus-ring);
     outline-offset: 3px;
+  }
+  .band {
+    position: absolute;
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    background: var(--selected);
+    pointer-events: none;
   }
   .rename {
     width: 100%;
