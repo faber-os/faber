@@ -258,6 +258,10 @@ struct State {
     world: world::Loaded,
     /// FaberLink boards found by checking a port, until the port goes away.
     board_checks: BTreeMap<PortId, BoardCheck>,
+    /// The parts a paused bridge's board had when it was paused, so they stay in the list
+    /// (paused) instead of vanishing. Only known while the core runs; after a restart a paused
+    /// board shows the sub-parts parts.toml names.
+    paused_boards: BTreeMap<PartName, Vec<PartName>>,
 }
 
 pub struct Machine {
@@ -378,6 +382,7 @@ impl Machine {
                 estop: Estop::default(),
                 world: world::Loaded::default(),
                 board_checks: BTreeMap::new(),
+                paused_boards: BTreeMap::new(),
             }),
             ports_changed: watch::channel(0).0,
             packages_changed: watch::channel(0).0,
@@ -512,6 +517,23 @@ impl Machine {
                 })
                 .unwrap_or_default();
             let handle = bridge_handle(&st, name);
+            if cfg.paused {
+                out.push(PartView {
+                    name: name.clone(),
+                    connector: cfg.connector.clone(),
+                    source: cfg.source.clone(),
+                    mount: cfg.mount,
+                    status: PartStatus::Paused,
+                    signals,
+                    bridge: None,
+                    board: None,
+                });
+                if cfg.connector == BRIDGE_CONNECTOR {
+                    let had = st.paused_boards.get(name).map(Vec::as_slice).unwrap_or_default();
+                    out.extend(paused_sub_part_views(name, cfg, had));
+                }
+                continue;
+            }
             out.push(PartView {
                 name: name.clone(),
                 connector: cfg.connector.clone(),
@@ -781,6 +803,59 @@ impl Machine {
         Ok(())
     }
 
+    /// Pauses a part (`paused = true` in parts.toml): it stops, its leases end and its port is
+    /// free for another program, e.g. the Arduino IDE uploading a sketch to the board. It stays
+    /// paused, also when its port goes and comes back or the core restarts, until it is resumed.
+    /// A bridge's sub-parts pause with it; they can't be paused on their own.
+    pub fn pause_part(&self, name: &str) -> Result<PartView, MachineError> {
+        self.set_paused(name, true)
+    }
+
+    /// Takes `paused = true` out of parts.toml again, so the part starts.
+    pub fn resume_part(&self, name: &str) -> Result<PartView, MachineError> {
+        self.set_paused(name, false)
+    }
+
+    fn set_paused(&self, name: &str, paused: bool) -> Result<PartView, MachineError> {
+        let unknown = || {
+            MachineError::new(
+                ErrorKind::NotFound,
+                "unknown-part",
+                format!("There is no part called \"{name}\"."),
+                "Refresh the parts list; it may have been removed.",
+            )
+        };
+        let part = PartName::parse_any(name).map_err(|_| unknown())?;
+        let mut st = self.state.lock().expect("machine lock");
+        refuse_if_config_broken(&st)?;
+        if let Some(bridge) = part.bridge() {
+            Self::known_part(&st, name).map_err(|_| unknown())?;
+            let verb = if paused { "Pause" } else { "Resume" };
+            return Err(MachineError::new(
+                ErrorKind::Conflict,
+                "pause-the-board",
+                format!(
+                    "\"{part}\" is a part on the board \"{bridge}\", so it pauses and resumes with the board."
+                ),
+                format!(
+                    "{verb} \"{bridge}\" instead: all of its parts follow, and its port is free while it is paused."
+                ),
+            ));
+        }
+        if !st.config.parts.contains_key(&part) {
+            return Err(unknown());
+        }
+        let text = config::set_paused(&st.text, &part, paused).map_err(config_write_error)?;
+        if text != st.text {
+            let what = if paused { "paused" } else { "resumed" };
+            tracing::info!(target: "core::machine", part = %part, "{what}");
+            self.save(&mut st, text)?;
+            self.reconcile(&mut st);
+        }
+        drop(st);
+        Ok(self.parts().into_iter().find(|p| p.name == part).expect("a part in parts.toml"))
+    }
+
     /// Removes what parts.toml says about a sub-part. The board decides which parts it has, so a
     /// sub-part it still has can't be removed; one it doesn't have (a stale entry) can.
     /// `Err(None)`: there is no such part.
@@ -843,11 +918,19 @@ impl Machine {
             .map(|(name, _)| name.clone())
             .collect();
         for name in gone {
-            let reason = if st.config.parts.contains_key(&name) {
-                EndReason::PartRestarted
-            } else {
-                EndReason::PartRemoved
+            let reason = match st.config.parts.get(&name) {
+                None => EndReason::PartRemoved,
+                Some(c) if c.paused => EndReason::PartPaused,
+                Some(_) => EndReason::PartRestarted,
             };
+            if reason == EndReason::PartPaused {
+                let had: Vec<PartName> = bridge_handle(st, &name)
+                    .map(|h| h.sub_parts().into_iter().map(|s| s.name).collect())
+                    .unwrap_or_default();
+                if !had.is_empty() {
+                    st.paused_boards.insert(name.clone(), had);
+                }
+            }
             self.end_part(st, &name, reason);
             self.stop_part(st, &name);
         }
@@ -860,14 +943,27 @@ impl Machine {
         let parts: Vec<(PartName, PartConfig)> =
             st.config.parts.iter().map(|(n, c)| (n.clone(), c.clone())).collect();
         for (name, cfg) in parts {
-            let retry = st.running.get(&name).is_some_and(|r| r.runner.is_none());
+            // A paused part has no runner on purpose: it isn't retried until it is resumed.
+            let retry = st.running.get(&name).is_some_and(|r| r.runner.is_none() && !r.config.paused);
             if st.running.contains_key(&name) && !retry {
                 continue;
             }
             st.running.remove(&name);
+            if cfg.paused {
+                self.status.set(&name, PartStatus::Paused);
+                st.running.insert(name, Running { config: cfg, runner: None, provides: Vec::new() });
+                continue;
+            }
+            st.paused_boards.remove(&name);
+            if self.status.get(&name) == Some(PartStatus::Paused) {
+                // Resumed: no runner may set a status at once (a bridge waits for its board).
+                self.status.set(&name, PartStatus::Starting);
+            }
             let (runner, provides) = self.try_start(st, &name, &cfg);
             st.running.insert(name, Running { config: cfg, runner, provides });
         }
+        let configured = &st.config.parts;
+        st.paused_boards.retain(|name, _| configured.contains_key(name));
         self.tell_default_world(st);
     }
 
@@ -1786,6 +1882,32 @@ impl BridgeOutlet for MachineBridgeOutlet {
     }
 }
 
+/// A paused bridge's sub-parts: those its board had when it was paused, then those parts.toml
+/// names. All paused, with no signals: nothing runs them.
+fn paused_sub_part_views(bridge: &PartName, cfg: &PartConfig, had: &[PartName]) -> Vec<PartView> {
+    let mut names = had.to_vec();
+    for local in cfg.parts.keys() {
+        if let Ok(name) = PartName::sub(bridge, local)
+            && !names.contains(&name)
+        {
+            names.push(name);
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| PartView {
+            mount: cfg.parts.get(name.local()).map(|c| c.mount).unwrap_or_default(),
+            name,
+            connector: cfg.connector.clone(),
+            source: cfg.source.clone(),
+            status: PartStatus::Paused,
+            signals: Vec::new(),
+            bridge: Some(bridge.clone()),
+            board: None,
+        })
+        .collect()
+}
+
 /// A running bridge's handle.
 fn bridge_handle<'a>(st: &'a State, bridge: &PartName) -> Option<&'a BridgeHandle> {
     match st.running.get(bridge)?.runner.as_ref()? {
@@ -2347,6 +2469,39 @@ mod tests {
         assert!(m.router().subscribe(&SignalAddress::parse("lidar/laser-scan").unwrap()).is_none());
         assert!(m.ports().iter().all(|p| p.claimed_by.is_none()));
         assert_eq!(m.remove_part("lidar").unwrap_err().code, "unknown-part");
+        m.shutdown();
+    }
+
+    #[test]
+    fn any_part_can_be_paused_to_free_its_port_and_resumed() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        m.add_part(demo("lidar")).unwrap();
+        wait_for_status(&m, "lidar", |s| *s == PartStatus::Running);
+        assert_eq!(m.pause_part("lidar").unwrap().status, PartStatus::Paused);
+        assert!(m.ports().iter().all(|p| p.claimed_by.is_none()), "its port is free");
+        // Another program (here the serial monitor) can have the port while it is paused.
+        let session = m.open_serial("replay:demo-ld19", 230_400).unwrap();
+        drop(session);
+        m.refresh_ports();
+        assert_eq!(wait_for_status(&m, "lidar", |_| true), PartStatus::Paused, "it doesn't take it back");
+        m.resume_part("lidar").unwrap();
+        wait_for_status(&m, "lidar", |s| *s == PartStatus::Running);
+        assert_eq!(
+            m.ports()
+                .iter()
+                .find(|p| p.entry.id.to_string() == "replay:demo-ld19")
+                .unwrap()
+                .claimed_by
+                .as_deref(),
+            Some("lidar")
+        );
+        // Pausing and resuming a simulated part works the same.
+        sim(&m, "front", "generic-distance", Simulate::Manual, "");
+        assert_eq!(m.pause_part("front").unwrap().status, PartStatus::Paused);
+        assert!(m.router().subscribe(&SignalAddress::parse("front/distance").unwrap()).is_none());
+        m.resume_part("front").unwrap();
+        wait_for_status(&m, "front", |s| *s == PartStatus::Running);
         m.shutdown();
     }
 

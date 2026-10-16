@@ -41,6 +41,8 @@ access, in Phase 6).
 | `GET /api/v0/parts` | `PartInfo[]` |
 | `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name` (including `world`, the simulated world's own name), `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: add the FaberLink board it sits on instead), `400 bridge-not-simulated` (a `faber-bridge` with `simulate`: a board is real hardware), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
 | `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`); removing a bridge ends those on its sub-parts too. For a sub-part (`mega.arm`) it removes `[parts.mega.parts.arm]` from parts.toml, which works only while the board doesn't have that part: `409 part-on-board` otherwise. |
+| `POST /api/v0/parts/{name}/pause` | `200 PartInfo` with `state.kind` `paused`. Writes `paused = true` into `[parts.<name>]` (the rest of parts.toml, comments too, stays as it was), then stops the part: its leases end (`part-paused`), its motors get their safe state, and its port is free for another program, e.g. the Arduino IDE uploading a sketch to a FaberLink board. It stays paused when its port goes and comes back, and after a restart, until it is resumed. A bridge's sub-parts show `paused` with it; a lease on a paused part, or on a part of a paused board, is refused with `409 part-paused`. Pausing a paused part changes nothing. Errors: `404 unknown-part`, `409 pause-the-board` (a sub-part such as `mega.left`: it pauses with its board), `409 config-broken` (parts.toml has an error; nothing is changed until it is fixed). |
+| `POST /api/v0/parts/{name}/resume` | `200 PartInfo`. Takes `paused = true` out again and starts the part (`state.kind` `starting`, then as usual). Errors as for `pause`. |
 
 `PartInfo` has `port` for a real part and `simulate` for a simulated one, never both. Each of its
 `signals` (`address`, `capability`, `info?`) carries the capability's `info` as **this part's own
@@ -212,7 +214,7 @@ got, and `clamped` says whether it differs from what was sent. A base that is no
 `lease-ended` messages and `403 lease-ended` errors give the **reason** (the error in its
 `reason` field, next to `code`, so a program doesn't have to read the message): `released`, `expired`,
 `estop`, `taken-over`, `part-removed`, `part-restarted` (its config changed), `part-failed`,
-`shutdown`. Expired leases are ended within 50 ms of their deadline.
+`part-paused`, `shutdown`. Expired leases are ended within 50 ms of their deadline.
 
 **The e-stop.**
 

@@ -39,6 +39,8 @@ pub enum PartStatus {
     Failed(Problem),
     /// Faber gave up (the connector kept crashing).
     Stopped(Problem),
+    /// Paused on purpose (`paused = true` in parts.toml): not running, its port free.
+    Paused,
 }
 
 /// Every part's status, plus a change counter the API watches.

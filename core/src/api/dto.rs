@@ -462,6 +462,9 @@ pub enum PartStateKind {
     Failed,
     /// Gave up after repeated failures, or stopped by the user.
     Stopped,
+    /// Paused on purpose (`paused = true` in parts.toml): it doesn't run and its port is free.
+    /// A bridge's sub-parts are paused with it. `POST /api/v0/parts/{name}/resume` starts it.
+    Paused,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1327,6 +1330,8 @@ pub enum LeaseEndReason {
     PartRemoved,
     PartRestarted,
     PartFailed,
+    /// The part was paused (`POST /api/v0/parts/{name}/pause`).
+    PartPaused,
     Shutdown,
 }
 

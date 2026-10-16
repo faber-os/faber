@@ -416,6 +416,7 @@ export const en = {
   'partState.conflict': 'Conflict',
   'partState.invalid': 'Invalid',
   'partState.stopped': 'Stopped',
+  'partState.paused': 'Paused',
 
   // ---- Driving: the Drive window, the e-stop, simulated parts ----------------------------------
 
@@ -429,6 +430,8 @@ export const en = {
   'drive.ended.partRestarted':
     '{part} restarted because its settings changed. Drive again once it is running.',
   'drive.ended.partFailed': '{part} stopped working. Parts says what went wrong.',
+  'drive.ended.partPaused':
+    '{part} was paused, so it stopped. Resume it in Parts to drive it again.',
   'drive.ended.shutdown': 'The Faber core is shutting down, so everything stopped.',
   'drive.ended.unknown': 'Driving {part} ended.',
 

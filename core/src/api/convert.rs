@@ -44,6 +44,7 @@ pub fn part_state(s: &PartStatus) -> dto::PartState {
         PartStatus::Degraded(p) => state(K::Degraded, Some(p)),
         PartStatus::Failed(p) => state(K::Failed, Some(p)),
         PartStatus::Stopped(p) => state(K::Stopped, Some(p)),
+        PartStatus::Paused => state(K::Paused, None),
     }
 }
 
@@ -150,6 +151,7 @@ pub fn lease_end_reason(r: EndReason) -> dto::LeaseEndReason {
         EndReason::PartRemoved => R::PartRemoved,
         EndReason::PartRestarted => R::PartRestarted,
         EndReason::PartFailed => R::PartFailed,
+        EndReason::PartPaused => R::PartPaused,
         EndReason::Shutdown => R::Shutdown,
     }
 }

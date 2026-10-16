@@ -107,6 +107,24 @@ fn estop_engaged(st: &State) -> MachineError {
     )
 }
 
+/// Refuses a part that is paused, or is on a paused board: nothing runs it until it is resumed.
+fn paused(st: &State, part: &str) -> Option<MachineError> {
+    let name = PartName::parse_any(part).ok()?;
+    let top = name.bridge().unwrap_or_else(|| name.clone());
+    st.config.parts.get(&top).filter(|c| c.paused)?;
+    let message = if top == name {
+        format!("\"{name}\" is paused.")
+    } else {
+        format!("\"{name}\" is on the board \"{top}\", which is paused.")
+    };
+    Some(err(
+        ErrorKind::Conflict,
+        "part-paused",
+        message,
+        &format!("Resume \"{top}\" in Parts first (POST /api/v0/parts/{top}/resume)."),
+    ))
+}
+
 fn unknown_part(name: &str) -> MachineError {
     err(
         ErrorKind::NotFound,
@@ -125,6 +143,7 @@ fn reason_words(r: EndReason) -> &'static str {
         EndReason::PartRemoved => "the part was removed",
         EndReason::PartRestarted => "the part was restarted",
         EndReason::PartFailed => "the part stopped working",
+        EndReason::PartPaused => "the part was paused",
         EndReason::Shutdown => "Faber stopped",
     }
 }
@@ -162,6 +181,7 @@ impl Machine {
             Some(b) => {
                 st.config.parts.get(&b).is_some_and(|c| c.parts.contains_key(n.local()))
                     || bridge_of(st, n).and_then(|h| h.sub_part(n)).is_some()
+                    || st.paused_boards.get(&b).is_some_and(|had| had.contains(n))
             }
         };
         PartName::parse_any(name).ok().filter(exists).ok_or_else(|| unknown_part(name))
@@ -191,6 +211,9 @@ impl Machine {
     /// the way (an operator taking over; its holder hears `taken-over`).
     pub fn request_lease(&self, part: &str, holder: &str, take_over: bool) -> Result<Lease, MachineError> {
         let mut st = self.state.lock().expect("machine lock");
+        if let Some(e) = paused(&st, part) {
+            return Err(e);
+        }
         let name = Self::known_part(&st, part)?;
         if st.estop.is_engaged() {
             return Err(estop_engaged(&st));

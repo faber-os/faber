@@ -309,6 +309,8 @@ export function leaseEndText(
       return t('drive.ended.partRestarted', { part });
     case 'part-failed':
       return t('drive.ended.partFailed', { part });
+    case 'part-paused':
+      return t('drive.ended.partPaused', { part });
     case 'shutdown':
       return t('drive.ended.shutdown');
     case null:

@@ -343,6 +343,7 @@ describe('driving helpers', () => {
       'part-removed',
       'part-restarted',
       'part-failed',
+      'part-paused',
       'shutdown',
     ] as const;
     const texts = reasons.map((r) => leaseEndText(r, 'base'));

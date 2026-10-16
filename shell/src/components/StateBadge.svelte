@@ -14,6 +14,7 @@
     conflict: { key: 'partState.conflict', tone: 'danger' },
     invalid: { key: 'partState.invalid', tone: 'danger' },
     stopped: { key: 'partState.stopped', tone: 'neutral' },
+    paused: { key: 'partState.paused', tone: 'neutral' },
   };
 </script>
 
