@@ -352,6 +352,17 @@ async fn every_screen_hears_when_a_batterys_level_changes() {
     ws.send(Message::Text(msg.to_string().into())).await.unwrap();
     let pack = json!({"name": "pack", "connector": "generic-battery", "simulate": "manual", "settings": {"rate-hz": 50}});
     assert_eq!(call(&c.app, "POST", "/api/v0/parts", Some(pack)).await.0, StatusCode::CREATED);
+    // The first reading (ok) must be published before the level drops, or the drop has no
+    // "previous" level: on a slow machine the new pattern can win the race.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let (_, v) = call(&c.app, "GET", "/api/v0/signals/pack/battery", None).await;
+        if v["reading"]["reading"]["level"] == "ok" {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "no first reading: {v}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     let low = json!({"pattern": {"kind": "steady", "value": 10.2}});
     assert_eq!(call(&c.app, "PUT", "/api/v0/parts/pack/simulation", Some(low)).await.0, StatusCode::OK);
     let notice = next(&mut ws).await;
