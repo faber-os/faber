@@ -3,4 +3,4 @@
 /**
  * What a pin does for its part (docs/faberlink.md, `PINS`).
  */
-export type PinRole = "pwm" | "dir" | "en" | "in1" | "in2" | "stby" | "trig" | "echo" | "signal" | "sense" | "other";
+export type PinRole = "pwm" | "dir" | "en" | "in1" | "in2" | "stby" | "trig" | "echo" | "signal" | "sense" | "out" | "a" | "b" | "sda" | "scl" | "xshut" | "other";

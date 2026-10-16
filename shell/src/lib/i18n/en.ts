@@ -385,6 +385,12 @@ export const en = {
   'parts.pins.role.echo': 'Echo',
   'parts.pins.role.signal': 'Signal',
   'parts.pins.role.sense': 'Sense',
+  'parts.pins.role.out': 'Out',
+  'parts.pins.role.a': 'A',
+  'parts.pins.role.b': 'B',
+  'parts.pins.role.sda': 'SDA',
+  'parts.pins.role.scl': 'SCL',
+  'parts.pins.role.xshut': 'XSHUT',
   'parts.pins.role.other': 'Pin',
 
   // Add part form

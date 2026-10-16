@@ -25,6 +25,7 @@ pub const FILES: &[(&str, &str)] = library![
     "examples/BatteryMonitor/BatteryMonitor.ino",
     "examples/MotorL298N/MotorL298N.ino",
     "examples/ButtonAndBumper/ButtonAndBumper.ino",
+    "examples/LedAndRelay/LedAndRelay.ino",
 ];
 
 /// Writes the library to `<dir>/FaberLink/` (only the files that differ) and returns that folder.
@@ -95,6 +96,13 @@ pub const TEMPLATES: &[Template] = &[
         description: "A push button on pin 4 and a bumper switch on pin 5, both to GND.",
         faberlink: true,
         example: Some("ButtonAndBumper"),
+    },
+    Template {
+        id: "led-and-relay",
+        name: "FaberLink: an LED and a relay",
+        description: "A dimmable LED on pin 5 and a relay module on pin 7.",
+        faberlink: true,
+        example: Some("LedAndRelay"),
     },
     Template {
         id: "battery-monitor",

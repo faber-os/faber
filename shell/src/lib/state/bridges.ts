@@ -59,6 +59,18 @@ function pinRoleText(role: PinRole): string {
       return t('parts.pins.role.signal');
     case 'sense':
       return t('parts.pins.role.sense');
+    case 'out':
+      return t('parts.pins.role.out');
+    case 'a':
+      return t('parts.pins.role.a');
+    case 'b':
+      return t('parts.pins.role.b');
+    case 'sda':
+      return t('parts.pins.role.sda');
+    case 'scl':
+      return t('parts.pins.role.scl');
+    case 'xshut':
+      return t('parts.pins.role.xshut');
     case 'other':
       return t('parts.pins.role.other');
   }

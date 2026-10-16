@@ -115,6 +115,18 @@ pub enum PinRole {
     Signal,
     /// A battery's voltage, through a divider.
     Sense,
+    /// An output the board switches: an LED, a relay module, a MOSFET.
+    Out,
+    /// A quadrature encoder's channel A.
+    A,
+    /// A quadrature encoder's channel B.
+    B,
+    /// The I²C bus's data line, for a part on the bus.
+    Sda,
+    /// The I²C bus's clock line.
+    Scl,
+    /// A time-of-flight sensor's shutdown input (VL53L0X XSHUT).
+    Xshut,
     /// A role a later library added.
     Other(u8),
 }
@@ -130,6 +142,12 @@ const PIN_ROLES: &[PinRole] = &[
     PinRole::Echo,
     PinRole::Signal,
     PinRole::Sense,
+    PinRole::Out,
+    PinRole::A,
+    PinRole::B,
+    PinRole::Sda,
+    PinRole::Scl,
+    PinRole::Xshut,
 ];
 
 impl PinRole {
@@ -704,7 +722,7 @@ mod tests {
     #[test]
     fn every_pin_role_has_its_own_code_and_unknown_codes_are_kept() {
         let codes: Vec<u8> = PIN_ROLES.iter().map(|r| r.code()).collect();
-        assert_eq!(codes, (1..=10).collect::<Vec<u8>>(), "the table in docs/faberlink.md §3");
+        assert_eq!(codes, (1..=16).collect::<Vec<u8>>(), "the table in docs/faberlink.md §3");
         for r in PIN_ROLES {
             assert_eq!(PinRole::from_code(r.code()), *r);
         }

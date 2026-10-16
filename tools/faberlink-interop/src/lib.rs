@@ -481,6 +481,8 @@ pub enum SketchPart {
     Button { name: &'static str, pin: u8, active_high: bool },
     /// `FaberObstacle name(name, pin, kind, active, trigger)`; `kind` is `faberlink::ObstacleKind`.
     Obstacle { name: &'static str, pin: u8, kind: u8, active_high: bool, trigger_m: f32 },
+    /// `FaberOutput name(name, pin, mode, active)`: PWM or on/off, active low or high.
+    Output { name: &'static str, pin: u8, pwm: bool, active_low: bool },
 }
 
 impl SketchPart {
@@ -492,7 +494,8 @@ impl SketchPart {
             | SketchPart::Ultrasonic { name, .. }
             | SketchPart::Battery { name, .. }
             | SketchPart::Button { name, .. }
-            | SketchPart::Obstacle { name, .. } => name,
+            | SketchPart::Obstacle { name, .. }
+            | SketchPart::Output { name, .. } => name,
         }
     }
 }
@@ -573,6 +576,9 @@ impl Sketch {
                     }
                     SketchPart::Obstacle { pin, kind, active_high, trigger_m, .. } => {
                         (6, active_high as u8, [pin, kind, NO_PIN, NO_PIN], trigger_m)
+                    }
+                    SketchPart::Output { pin, pwm, active_low, .. } => {
+                        (7, pwm as u8, [pin, !active_low as u8, NO_PIN, NO_PIN], 0.0)
                     }
                 };
                 ffi::PartSpec { kind, name: name.as_ptr(), driver, pins, max_velocity }

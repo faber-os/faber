@@ -3,7 +3,7 @@
 //! stand-in Arduino core, driven from the Rust session. What passes here is the glue that runs on the board; only `digitalWrite()` and
 //! friends are stand-ins.
 
-use faber_capabilities::{Command, Info, Reading, motor, obstacle};
+use faber_capabilities::{Command, Info, Reading, digital_out, motor, obstacle, pwm_out};
 use faberlink::message::{Applied, Cause, PartInfo, PartPins, PinRole, PinUse};
 use faberlink::session::{Event, Session, SessionConfig, State};
 use faberlink_interop::{Driver, NO_PIN, PinMode, PinOut, Sketch, SketchPart};
@@ -416,4 +416,85 @@ fn an_obstacle_says_its_kind_and_trigger_distance_and_when_it_is_detected() {
     l.run(30);
     assert_eq!(levels(&l, 1), [true]);
     assert!(levels(&l, 0).is_empty(), "the infrared module saw nothing");
+}
+
+fn output(pwm: bool, active_low: bool) -> SketchPart {
+    SketchPart::Output { name: "out", pin: 7, pwm, active_low }
+}
+
+fn set(l: &mut Link, part: u8, command: Command) -> Applied {
+    l.events.clear();
+    l.session.command(part, command, true).unwrap();
+    l.flush();
+    l.applied().expect("an APPLIED for every command")
+}
+
+fn on(level: bool) -> Command {
+    Command::DigitalOut(digital_out::Command::Set { level })
+}
+
+fn duty(duty: f32) -> Command {
+    Command::PwmOut(pwm_out::Command::SetDuty { duty })
+}
+
+#[test]
+fn an_on_off_output_switches_its_pin_and_reports_digital_out() {
+    let mut l = Link::ready(&[output(false, false)]);
+    assert_eq!(l.session.parts()[0].capability, "digital-out@1");
+    assert_eq!(l.session.parts()[0].lease_ms, 1000);
+    assert_eq!((l.sketch.pin_mode(7), l.sketch.pin(7)), (PinMode::Output, LOW), "it starts off");
+    assert_eq!(set(&mut l, 0, on(true)).cause, Cause::Command);
+    assert_eq!(l.sketch.pin(7), HIGH);
+    set(&mut l, 0, on(false));
+    assert_eq!(l.sketch.pin(7), LOW);
+    assert_eq!(l.session.pins()[0], pins(0, &[(PinRole::Out, 7)]));
+}
+
+#[test]
+fn an_active_low_output_is_high_when_off_from_before_it_is_an_output() {
+    let mut l = Link::ready(&[output(false, true)]);
+    // The first write to the pin is HIGH, made before pinMode(OUTPUT): a relay module never
+    // clicks on at start.
+    assert_eq!(l.sketch.writes().first(), Some(&(7, HIGH)));
+    assert_eq!(l.sketch.pin(7), HIGH);
+    set(&mut l, 0, on(true));
+    assert_eq!(l.sketch.pin(7), LOW, "on is LOW");
+}
+
+#[test]
+fn a_pwm_output_writes_its_duty_and_clamps_it() {
+    let mut l = Link::ready(&[output(true, false)]);
+    assert_eq!(l.session.parts()[0].capability, "pwm-out@1");
+    set(&mut l, 0, duty(0.5));
+    assert_eq!(l.sketch.pin(7), PinOut::Pwm(128));
+    let a = set(&mut l, 0, duty(1.5));
+    assert!(a.clamped);
+    assert_eq!(a.command, duty(1.0));
+    assert_eq!(l.sketch.pin(7), PinOut::Pwm(255));
+    let mut low = Link::ready(&[output(true, true)]);
+    set(&mut low, 0, duty(0.25));
+    assert_eq!(low.sketch.pin(7), PinOut::Pwm(191), "active low: 255 - 64");
+}
+
+#[test]
+fn an_output_goes_off_when_its_lease_ends_on_the_board_and_on_the_e_stop() {
+    for active_low in [false, true] {
+        let off = if active_low { HIGH } else { LOW };
+        let mut l = Link::ready(&[output(false, active_low)]);
+        set(&mut l, 0, on(true));
+        l.run(990);
+        assert_ne!(l.sketch.pin(7), off, "still on inside its 1 s lease");
+        l.run(20);
+        assert_eq!(l.applied().map(|a| a.cause), Some(Cause::LeaseExpired));
+        assert_eq!(l.sketch.pin(7), off, "off once nobody has commanded it for 1 s");
+        set(&mut l, 0, on(true));
+        l.session.set_estop(true, faber_capabilities::estop::Source::Shell, "test");
+        l.flush();
+        assert_eq!(l.sketch.pin(7), off, "the e-stop");
+    }
+    let mut l = Link::ready(&[output(true, false)]);
+    set(&mut l, 0, duty(0.8));
+    l.session.safe(Some(0)).unwrap();
+    l.flush();
+    assert_eq!(l.sketch.pin(7), PinOut::Pwm(0), "SAFE");
 }

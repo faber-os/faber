@@ -1,0 +1,11 @@
+# The plan for the board "nano_2": which parts are on its pins. Faber writes nano_2.ino from it.
+# Edit it in Faber, or here (Faber checks it when it is read). Your own code goes in my_code.h.
+
+faber-board = 1
+board = "nano"
+name = "nano_2"
+
+[parts.fan]
+template = "mosfet"
+shape = "sig"
+pins = { out = 5 }

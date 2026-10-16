@@ -35,6 +35,16 @@ shape = "out"
 pins = { signal = "A4" }
 settings = { trigger-distance-m = 0 }
 
+[parts.led]
+template = "led"
+shape = "on-off"
+pins = { out = 13 }
+
+[parts.led_2]
+template = "led"
+shape = "dimmable"
+pins = { out = 3 }
+
 [parts.left]
 template = "motor"
 shape = "pwm-dir"
@@ -52,6 +62,12 @@ template = "motor"
 shape = "two-pwm"
 pins = { in1 = 11, in2 = 10 }
 settings = { max-velocity-rad-s = 0 }
+
+[parts.relay]
+template = "relay"
+shape = "in"
+pins = { out = "A5" }
+settings = { active = "low" }
 
 [parts.start]
 template = "button"

@@ -7,12 +7,16 @@
 // Wiring:
 //   battery: Battery + → R1 (20000 Ω) → A1, A1 → R2 (10000 Ω) → GND, Battery - → GND
 //   bumper: Switch COM → D25, Switch NO (normally open) → GND
+//   fan: Module SIG → D10, Module GND → GND, Module V+/V− (or VIN/GND) → the load's own supply, Load → the module's output terminals
 //   front: VCC → 5V, GND → GND, Trig → D22, Echo → D23
 //   front_2: Vcc → 5V, GND → GND, Vo → A0
 //   front_3: VCC → 5V, GND → GND, OUT → D26
+//   led: D27 → 220 Ω resistor → LED's long leg (+), LED's short leg (−) → GND
+//   led_2: D9 → 220 Ω resistor → LED's long leg (+), LED's short leg (−) → GND
 //   left: Driver PWM → D4, Driver DIR → D5, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
 //   left_2: Driver EN (ENA, PWMA) → D6 (on an L298N, take the jumper off ENA), Driver IN1 → D7, Driver IN2 → D8, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
 //   left_3: Driver IN1 (IA, AIN1, RPWM) → D11, Driver IN2 (IB, AIN2, LPWM) → D12, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
+//   relay: Module VCC → 5V, Module GND → GND, Module IN → D28
 //   start: One leg → D24, The other leg → GND (or, for a TTP223: VCC → 5V, GND → GND, I/O → D24)
 
 #include <FaberLink.h>
@@ -24,6 +28,9 @@ FaberBattery battery("battery", A1, 3.0, 3, faberlink::BATTERY_LI_ION, 5.0, 0.0)
 
 // bumper: Bumper (micro switch), Switch D25
 FaberObstacle bumper("bumper", 25, faberlink::OBSTACLE_BUMPER);
+
+// fan: MOSFET module (PWM), SIG D10
+FaberOutput fan("fan", 10, faberlink::OUTPUT_PWM);
 
 // front: Ultrasonic distance sensor, Trig D22, Echo D23
 FaberUltrasonic front("front", 22, 23, 0.02, 4.0);
@@ -42,6 +49,12 @@ FaberDistance front_2("front_2", A0, 0.1, 0.8, faberlink::DISTANCE_INFRARED, fro
 // front_3: Infrared obstacle sensor (FC-51, E18-D80NK), OUT D26
 FaberObstacle front_3("front_3", 26, faberlink::OBSTACLE_INFRARED, faberlink::ACTIVE_LOW, 0.0);
 
+// led: LED, LED D27
+FaberOutput led("led", 27);
+
+// led_2: LED, LED D9
+FaberOutput led_2("led_2", 9, faberlink::OUTPUT_PWM);
+
 // left: DC motor with a driver, PWM D4, DIR D5
 FaberMotor left("left", 4, 5, 0.0);
 
@@ -50,6 +63,9 @@ FaberMotor left_2("left_2", faberlink::DRIVER_EN_IN1_IN2, 6, 7, 8);
 
 // left_3: DC motor with a driver, IN1 D11, IN2 D12
 FaberMotor left_3("left_3", faberlink::DRIVER_TWO_PWM, 11, 12);
+
+// relay: Relay module, IN D28
+FaberOutput relay("relay", 28, faberlink::OUTPUT_ON_OFF, faberlink::ACTIVE_LOW);
 
 // start: Button or switch, Signal D24
 FaberButton start("start", 24, faberlink::ACTIVE_LOW, 20);

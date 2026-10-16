@@ -17,6 +17,11 @@ shape = "pin"
 pins = { signal = 25 }
 settings = { kind = "bumper" }
 
+[parts.fan]
+template = "mosfet"
+shape = "sig"
+pins = { out = 10 }
+
 [parts.front]
 template = "ultrasonic"
 shape = "trig-echo"
@@ -35,6 +40,16 @@ shape = "out"
 pins = { signal = 26 }
 settings = { trigger-distance-m = 0 }
 
+[parts.led]
+template = "led"
+shape = "on-off"
+pins = { out = 27 }
+
+[parts.led_2]
+template = "led"
+shape = "dimmable"
+pins = { out = 9 }
+
 [parts.left]
 template = "motor"
 shape = "pwm-dir"
@@ -52,6 +67,12 @@ template = "motor"
 shape = "two-pwm"
 pins = { in1 = 11, in2 = 12 }
 settings = { max-velocity-rad-s = 0 }
+
+[parts.relay]
+template = "relay"
+shape = "in"
+pins = { out = 28 }
+settings = { active = "low" }
 
 [parts.start]
 template = "button"

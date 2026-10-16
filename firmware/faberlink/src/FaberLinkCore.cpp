@@ -267,6 +267,56 @@ uint8_t Obstacle::writeInfo(uint8_t* out) const {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Outputs
+
+PinOutput::PinOutput(const char* name, bool pwm, uint16_t leaseMs)
+    : Part(name, pwm ? PWM_OUT : DIGITAL_OUT, leaseMs == 0 ? OUTPUT_LEASE_MS : leaseMs, 100), value_(0), pwm_(pwm) {}
+
+// digital-out@1 reading: level u8. pwm-out@1 reading: duty f32.
+uint8_t PinOutput::writeReading(uint8_t* out, uint32_t) {
+  if (pwm_) {
+    putF32(out, value_);
+    return 4;
+  }
+  out[0] = value_ > 0 ? 1 : 0;
+  return 1;
+}
+
+// The command layout for the value now: kind 0 (set / set-duty), then the level u8 or duty f32.
+uint8_t PinOutput::writeCommand(uint8_t* out) const {
+  out[0] = 0;
+  if (pwm_) {
+    putF32(out + 1, value_);
+    return 5;
+  }
+  out[1] = value_ > 0 ? 1 : 0;
+  return 2;
+}
+
+uint8_t PinOutput::apply(const uint8_t* c, uint8_t len, uint8_t* out, bool* clamped) {
+  if (len < 1 || c[0] != 0) return 0;
+  float v;
+  if (pwm_) {
+    if (len != 5) return 0;
+    v = getF32(c + 1);
+    if (!isFinite(v)) return 0;
+    v = clampf(v, 0, 1, clamped);
+  } else {
+    if (len != 2 || c[1] > 1) return 0;
+    v = c[1];
+  }
+  value_ = v;
+  drive(v);
+  return writeCommand(out);
+}
+
+uint8_t PinOutput::enterSafeState(uint8_t* out) {
+  value_ = 0;
+  drive(0);
+  return writeCommand(out);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Battery
 
 namespace {

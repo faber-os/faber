@@ -26,11 +26,11 @@ void output(uint8_t pin) {
 }
 
 // An input with its pull-up on for an active-low part (a switch to GND, an open-collector output).
-void input(uint8_t pin, faberlink::InputLevel active) {
+void input(uint8_t pin, faberlink::ActiveLevel active) {
   pinMode(pin, active == faberlink::ACTIVE_LOW ? INPUT_PULLUP : INPUT);
 }
 
-bool isActive(uint8_t pin, faberlink::InputLevel level) {
+bool isActive(uint8_t pin, faberlink::ActiveLevel level) {
   return (digitalRead(pin) == HIGH) == (level == faberlink::ACTIVE_HIGH);
 }
 }  // namespace
@@ -161,7 +161,7 @@ float FaberUltrasonic::measure() {
   return echoUs * METERS_PER_ECHO_US;
 }
 
-FaberButton::FaberButton(const char* name, uint8_t pin, faberlink::InputLevel active, uint16_t debounceMs)
+FaberButton::FaberButton(const char* name, uint8_t pin, faberlink::ActiveLevel active, uint16_t debounceMs)
     : faberlink::DigitalIn(name, debounceMs), pin_(pin), active_(active) {
   enqueue(this);
 }
@@ -173,7 +173,7 @@ uint8_t FaberButton::writePins(uint8_t* out) const { return putPin(out, faberlin
 bool FaberButton::readLevel() { return isActive(pin_, active_); }
 
 FaberObstacle::FaberObstacle(const char* name, uint8_t pin, faberlink::ObstacleKind kind,
-                             faberlink::InputLevel active, float triggerDistanceM)
+                             faberlink::ActiveLevel active, float triggerDistanceM)
     : faberlink::Obstacle(name, kind, triggerDistanceM), pin_(pin), active_(active) {
   enqueue(this);
 }
@@ -183,6 +183,29 @@ void FaberObstacle::begin() { input(pin_, active_); }
 uint8_t FaberObstacle::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_SIGNAL, pin_); }
 
 bool FaberObstacle::readLevel() { return isActive(pin_, active_); }
+
+FaberOutput::FaberOutput(const char* name, uint8_t pin, faberlink::OutputMode mode, faberlink::ActiveLevel active)
+    : faberlink::PinOutput(name, mode == faberlink::OUTPUT_PWM), pin_(pin), active_(active) {
+  enqueue(this);
+}
+
+// Off before the pin becomes an output, so an active-low relay never clicks on at start.
+void FaberOutput::begin() {
+  digitalWrite(pin_, active_ == faberlink::ACTIVE_LOW ? HIGH : LOW);
+  pinMode(pin_, OUTPUT);
+}
+
+uint8_t FaberOutput::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_OUT, pin_); }
+
+void FaberOutput::drive(float value) {
+  const bool low = active_ == faberlink::ACTIVE_LOW;
+  if (isPwm()) {
+    int duty = static_cast<int>(value * 255.0f + 0.5f);
+    analogWrite(pin_, low ? 255 - duty : duty);
+  } else {
+    digitalWrite(pin_, (value > 0) != low ? HIGH : LOW);
+  }
+}
 
 FaberBattery::FaberBattery(const char* name, uint8_t analogPin, float dividerRatio, uint8_t cellsInSeries,
                            faberlink::BatteryChemistry chemistry, float referenceVolts, float capacityAh)

@@ -120,7 +120,7 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
     include: 'FaberLink.h',
     constructors: [
       parseSignature(
-        'FaberButton(const char* name, uint8_t pin, faberlink::InputLevel active = faberlink::ACTIVE_LOW, uint16_t debounceMs = 20)',
+        'FaberButton(const char* name, uint8_t pin, faberlink::ActiveLevel active = faberlink::ACTIVE_LOW, uint16_t debounceMs = 20)',
       ).overload,
     ],
     members: [
@@ -136,13 +136,38 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
     include: 'FaberLink.h',
     constructors: [
       parseSignature(
-        'FaberObstacle(const char* name, uint8_t pin, faberlink::ObstacleKind kind = faberlink::OBSTACLE_BUMPER, faberlink::InputLevel active = faberlink::ACTIVE_LOW, float triggerDistanceM = 0)',
+        'FaberObstacle(const char* name, uint8_t pin, faberlink::ObstacleKind kind = faberlink::OBSTACLE_BUMPER, faberlink::ActiveLevel active = faberlink::ACTIVE_LOW, float triggerDistanceM = 0)',
       ).overload,
     ],
     members: [
       f('void begin()', 'Sets up its pin; FaberLink calls it from begin().'),
       f('bool detected() const', 'True while something is in the way (debounced), Faber or not.'),
       ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
+    name: 'FaberOutput',
+    doc: 'An output on one pin that Faber switches: on or off (an LED, a relay module, an active buzzer), or with faberlink::OUTPUT_PWM a duty from 0 to 1 on a PWM pin (a dimmed LED, a MOSFET). faberlink::ACTIVE_LOW makes LOW mean on (most relay modules). Leased like a motor: it goes off when nobody has commanded it for 1 s, on the e-stop and when Faber goes quiet.',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberOutput(const char* name, uint8_t pin, faberlink::OutputMode mode = faberlink::OUTPUT_ON_OFF, faberlink::ActiveLevel active = faberlink::ACTIVE_HIGH)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pin, off; FaberLink calls it from begin().'),
+      ...inherited([
+        ...PART_MEMBERS,
+        f(
+          'float value() const',
+          'The output now: 0 or 1 when on/off, the duty from 0 to 1 for PWM.',
+        ),
+        f(
+          'bool active() const',
+          'True while it runs on a command from Faber, false while it is off (its safe state).',
+        ),
+      ]),
     ],
   },
   {
@@ -198,11 +223,16 @@ export const FABERLINK_CONSTANTS: ApiConstant[] = [
   k('NO_PIN', 'A pin that isn’t connected, for an optional pin you leave out.'),
   k(
     'ACTIVE_LOW',
-    'FaberButton, FaberObstacle: LOW means pressed or detected, and the pin’s pull-up is on (a switch to GND). The default.',
+    'FaberButton, FaberObstacle: LOW means pressed or detected, and the pin’s pull-up is on (a switch to GND); their default. FaberOutput: LOW means on (most relay modules).',
   ),
   k(
     'ACTIVE_HIGH',
-    'FaberButton, FaberObstacle: HIGH means pressed or detected, no pull-up (a TTP223 touch pad).',
+    'FaberButton, FaberObstacle: HIGH means pressed or detected, no pull-up (a TTP223 touch pad). FaberOutput: HIGH means on; its default.',
+  ),
+  k('OUTPUT_ON_OFF', 'FaberOutput: on or off, Faber sees a digital output (the default).'),
+  k(
+    'OUTPUT_PWM',
+    'FaberOutput: a duty from 0 to 1 with analogWrite(), on a PWM pin; Faber sees a PWM output.',
   ),
   k('OBSTACLE_BUMPER', 'FaberObstacle: a bumper or whisker that something presses (the default).'),
   k('OBSTACLE_INFRARED', 'FaberObstacle: a digital infrared obstacle module (FC-51, E18-D80NK).'),

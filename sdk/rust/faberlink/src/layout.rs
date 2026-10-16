@@ -7,8 +7,8 @@
 use crate::bytes::{Reader, Writer};
 use crate::{DecodeError, EncodeError};
 use faber_capabilities::{
-    Capability, Command, Info, Reading, Timestamp, Twist2d, battery, digital_in, distance, estop, motor,
-    obstacle, planar_base,
+    Capability, Command, Info, Reading, Timestamp, Twist2d, battery, digital_in, digital_out, distance,
+    estop, motor, obstacle, planar_base, pwm_out,
 };
 
 /// The one-byte code a capability has in `READING`, `COMMAND` and `APPLIED` (protocol v1).
@@ -21,14 +21,14 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::Battery => 5,
         Capability::DigitalIn => 6,
         Capability::Obstacle => 7,
+        Capability::DigitalOut => 8,
+        Capability::PwmOut => 9,
         // No layout yet: the board side (the Arduino library) has none either.
         Capability::LaserScan
         | Capability::Pose
         | Capability::Position
         | Capability::Temperature
-        | Capability::DigitalOut
         | Capability::AnalogIn
-        | Capability::PwmOut
         | Capability::Servo
         | Capability::Encoder
         | Capability::Imu => return None,
@@ -134,6 +134,8 @@ pub fn encode_reading(reading: &Reading, out: &mut Vec<u8>) -> Result<(), Encode
         }
         Reading::DigitalIn(r) => w.bool(r.level),
         Reading::Obstacle(r) => w.bool(r.detected),
+        Reading::DigitalOut(r) => w.bool(r.level),
+        Reading::PwmOut(r) => w.f32(r.duty),
         other => return Err(unsupported(other.capability())),
     }
     Ok(())
@@ -206,6 +208,14 @@ pub fn decode_reading(capability: Capability, t_us: Timestamp, bytes: &[u8]) -> 
         }
         Capability::DigitalIn => Reading::DigitalIn(digital_in::Reading { t_us, level: r.bool("level")? }),
         Capability::Obstacle => Reading::Obstacle(obstacle::Reading { t_us, detected: r.bool("detected")? }),
+        Capability::DigitalOut => Reading::DigitalOut(digital_out::Reading { t_us, level: r.bool("level")? }),
+        Capability::PwmOut => {
+            let duty = r.f32()?;
+            if !duty.is_finite() {
+                return Err(DecodeError::BadValue { field: "duty" });
+            }
+            Reading::PwmOut(pwm_out::Reading { t_us, duty })
+        }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
     r.end()?;
@@ -229,9 +239,15 @@ pub fn encode_command(command: &Command, out: &mut Vec<u8>) -> Result<(), Encode
             w.u8(0);
             twist(w, t);
         }
-        Command::DigitalOut(_) | Command::PwmOut(_) | Command::Servo(_) => {
-            return Err(unsupported(command.capability()));
+        Command::DigitalOut(digital_out::Command::Set { level }) => {
+            w.u8(0);
+            w.bool(level);
         }
+        Command::PwmOut(pwm_out::Command::SetDuty { duty }) => {
+            w.u8(0);
+            w.f32(duty);
+        }
+        Command::Servo(_) => return Err(unsupported(command.capability())),
     }
     Ok(())
 }
@@ -254,6 +270,18 @@ pub fn decode_command(capability: Capability, bytes: &[u8]) -> Result<Command, D
                 return Err(DecodeError::BadValue { field: "kind" });
             }
             Command::PlanarBase(planar_base::Command::SetVelocity(read_twist(r)?))
+        }
+        Capability::DigitalOut => {
+            if r.u8()? != 0 {
+                return Err(DecodeError::BadValue { field: "kind" });
+            }
+            Command::DigitalOut(digital_out::Command::Set { level: r.bool("level")? })
+        }
+        Capability::PwmOut => {
+            if r.u8()? != 0 {
+                return Err(DecodeError::BadValue { field: "kind" });
+            }
+            Command::PwmOut(pwm_out::Command::SetDuty { duty: r.f32()? })
         }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
@@ -311,7 +339,7 @@ pub fn encode_info(info: &Info, out: &mut Vec<u8>) -> Result<(), EncodeError> {
 pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Option<Info>, DecodeError> {
     let r = &mut Reader::new(bytes);
     let info = match capability {
-        Capability::DigitalIn => None,
+        Capability::DigitalIn | Capability::DigitalOut | Capability::PwmOut => None,
         Capability::Distance => Some(Info::Distance(distance::Info {
             min_m: r.f32()?,
             max_m: r.f32()?,
@@ -419,6 +447,9 @@ pub(crate) mod tests {
                 .prop_map(|(t_us, level)| Reading::DigitalIn(digital_in::Reading { t_us, level })),
             (t.clone(), any::<bool>())
                 .prop_map(|(t_us, detected)| Reading::Obstacle(obstacle::Reading { t_us, detected })),
+            (t.clone(), any::<bool>())
+                .prop_map(|(t_us, level)| Reading::DigitalOut(digital_out::Reading { t_us, level })),
+            (t.clone(), finite()).prop_map(|(t_us, duty)| Reading::PwmOut(pwm_out::Reading { t_us, duty })),
             (
                 (t, finite(), 0..3u8),
                 proptest::option::of(finite()),
@@ -446,6 +477,8 @@ pub(crate) mod tests {
             finite().prop_map(|v| Command::Motor(motor::Command::SetPosition { position_rad: v })),
             finite().prop_map(|v| Command::Motor(motor::Command::SetDuty { duty: v })),
             twist().prop_map(|t| Command::PlanarBase(planar_base::Command::SetVelocity(t))),
+            any::<bool>().prop_map(|level| Command::DigitalOut(digital_out::Command::Set { level })),
+            finite().prop_map(|duty| Command::PwmOut(pwm_out::Command::SetDuty { duty })),
         ]
     }
 
@@ -562,6 +595,14 @@ pub(crate) mod tests {
         let i = Info::Obstacle(obstacle::Info { kind: obstacle::Kind::Infrared, trigger_distance_m: None });
         encode_info(&i, &mut out).unwrap();
         assert_eq!(out, [1, 0x00, 0x00, 0xC0, 0x7F], "obstacle: kind, then the trigger distance (NaN)");
+
+        out.clear();
+        encode_command(&Command::DigitalOut(digital_out::Command::Set { level: true }), &mut out).unwrap();
+        assert_eq!(out, [0, 1], "digital-out: set, the level");
+
+        out.clear();
+        encode_command(&Command::PwmOut(pwm_out::Command::SetDuty { duty: 0.5 }), &mut out).unwrap();
+        assert_eq!(out, [0, 0x00, 0x00, 0x00, 0x3F], "pwm-out: set-duty, the duty");
     }
 
     #[test]
@@ -594,6 +635,17 @@ pub(crate) mod tests {
         );
         assert_eq!(decode_info(Capability::DigitalIn, &[]), Ok(None), "digital-in has no info");
         assert_eq!(decode_info(Capability::DigitalIn, &[0]), Err(DecodeError::TrailingBytes));
+        assert_eq!(decode_info(Capability::PwmOut, &[]), Ok(None));
+        assert_eq!(
+            decode_command(Capability::DigitalOut, &[1, 1]),
+            Err(DecodeError::BadValue { field: "kind" })
+        );
+        assert_eq!(
+            decode_command(Capability::DigitalOut, &[0, 2]),
+            Err(DecodeError::BadValue { field: "level" })
+        );
+        let nan = f32::NAN.to_le_bytes();
+        assert_eq!(decode_reading(Capability::PwmOut, 0, &nan), Err(DecodeError::BadValue { field: "duty" }));
         assert_eq!(
             decode_info(Capability::Obstacle, &[3, 0, 0, 0, 0]),
             Err(DecodeError::BadValue { field: "kind" })

@@ -31,13 +31,24 @@ enum MotorDriver : uint8_t {
   DRIVER_TWO_PWM = 2,
 };
 
-// Which level of an input pin means "active" (pressed, detected).
-enum InputLevel : uint8_t {
-  // LOW is active, and the pin's internal pull-up is on: a button or a switch between the pin and
-  // GND, or a module that pulls its output low (FC-51, E18-D80NK). The default.
+// What a FaberOutput does with its pin.
+enum OutputMode : uint8_t {
+  // On or off (digital-out@1): an LED, a relay module, an active buzzer. The default.
+  OUTPUT_ON_OFF = 0,
+  // A duty 0..1 with analogWrite() (pwm-out@1): a dimmed LED, a MOSFET driving a fan or a lamp.
+  // The pin must be a PWM pin (marked ~ on the board).
+  OUTPUT_PWM = 1,
+};
+
+// Which level of a pin means "active": pressed or detected for an input, on for an output.
+enum ActiveLevel : uint8_t {
+  // LOW is active. An input gets its internal pull-up: a button or a switch between the pin and
+  // GND, or a module that pulls its output low (FC-51, E18-D80NK); the inputs' default. An output
+  // is on while LOW: most relay modules.
   ACTIVE_LOW = 0,
-  // HIGH is active, and no pull-up: a module that drives its output high (a TTP223 touch pad).
-  // A plain switch to 5V needs a pull-down resistor (10 kOhm) from the pin to GND.
+  // HIGH is active. An input gets no pull-up: a module that drives its output high (a TTP223
+  // touch pad); a plain switch to 5V needs a pull-down resistor (10 kOhm) from the pin to GND. An
+  // output is on while HIGH: an LED from the pin to GND; the outputs' default.
   ACTIVE_HIGH = 1,
 };
 
@@ -131,7 +142,7 @@ class FaberUltrasonic : public faberlink::Distance {
 // pressed() is the debounced state, for your own code too; Faber sees every change.
 class FaberButton : public faberlink::DigitalIn {
  public:
-  FaberButton(const char* name, uint8_t pin, faberlink::InputLevel active = faberlink::ACTIVE_LOW,
+  FaberButton(const char* name, uint8_t pin, faberlink::ActiveLevel active = faberlink::ACTIVE_LOW,
               uint16_t debounceMs = 20);
   void begin() override;
   bool pressed() const { return level(); }
@@ -142,7 +153,7 @@ class FaberButton : public faberlink::DigitalIn {
 
  private:
   uint8_t pin_;
-  faberlink::InputLevel active_;
+  faberlink::ActiveLevel active_;
 };
 
 // A bumper, whisker, limit switch or digital infrared obstacle module (obstacle@1): it only says
@@ -156,7 +167,7 @@ class FaberButton : public faberlink::DigitalIn {
 class FaberObstacle : public faberlink::Obstacle {
  public:
   FaberObstacle(const char* name, uint8_t pin, faberlink::ObstacleKind kind = faberlink::OBSTACLE_BUMPER,
-                faberlink::InputLevel active = faberlink::ACTIVE_LOW, float triggerDistanceM = 0);
+                faberlink::ActiveLevel active = faberlink::ACTIVE_LOW, float triggerDistanceM = 0);
   void begin() override;
   bool detected() const { return level(); }
 
@@ -166,7 +177,33 @@ class FaberObstacle : public faberlink::Obstacle {
 
  private:
   uint8_t pin_;
-  faberlink::InputLevel active_;
+  faberlink::ActiveLevel active_;
+};
+
+// An output on one pin that Faber switches: on/off (digital-out@1) or a PWM duty (pwm-out@1).
+//
+//   FaberOutput led("led", 13);                                                   // on or off
+//   FaberOutput lamp("lamp", 5, faberlink::OUTPUT_PWM);                           // dimmable, a ~ pin
+//   FaberOutput relay("relay", 7, faberlink::OUTPUT_ON_OFF, faberlink::ACTIVE_LOW); // a relay module
+//
+// Faber leases it like a motor: when nobody has sent a command for 1 s, on the e-stop and when
+// Faber goes quiet, it goes off. "Off" is the pin's inactive level: LOW, or HIGH for ACTIVE_LOW,
+// which it also is from begin() on. A pin can give about 20 mA: an LED needs its resistor
+// (220 Ohm to 1 kOhm), and anything bigger (a relay coil, a motor, a lamp) a module or a
+// transistor between it and the pin.
+class FaberOutput : public faberlink::PinOutput {
+ public:
+  FaberOutput(const char* name, uint8_t pin, faberlink::OutputMode mode = faberlink::OUTPUT_ON_OFF,
+              faberlink::ActiveLevel active = faberlink::ACTIVE_HIGH);
+  void begin() override;
+
+ protected:
+  uint8_t writePins(uint8_t* out) const override;
+  void drive(float value) override;
+
+ private:
+  uint8_t pin_;
+  faberlink::ActiveLevel active_;
 };
 
 // A battery measured through a voltage divider on an analog pin: battery + -> R1 -> pin -> R2 -> GND.

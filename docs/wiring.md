@@ -268,7 +268,9 @@ What exists, and where it differs in detail from the design above. The decisions
   library classes land: `button` (`FaberButton`, `digital-in`: push buttons, toggles, end stops,
   TTP223), `bumper` (`FaberObstacle`, `obstacle`: a micro switch behind a bumper, or a limit
   switch) and `ir-obstacle` (`FaberObstacle` of kind infrared: FC-51, E18-D80NK). Buttons and
-  bumpers are separate on purpose (capabilities.md, `obstacle`).
+  bumpers are separate on purpose (capabilities.md, `obstacle`). `led` (`FaberOutput`: on/off,
+  or dimmable on a PWM pin), `relay` (on/off, active low by default, with the coil-current,
+  flyback-diode and mains warnings) and `mosfet` (PWM, own supply, the IRF520 warning).
 - **Pin providers**: a template's `provides` adds pins named `<part>.<pin>` (`servos.ch3`) while
   that part is in the plan; only a role marked `provided` may take one. No provider template
   exists yet (tested with a test PCA9685).
@@ -287,7 +289,7 @@ What exists, and where it differs in detail from the design above. The decisions
   `FaberLink link(Serial);`, each part's declaration (and helper, like the Sharp curve), then
   `#include "my_code.h"` (so your code can use the parts), `setup()` with
   `link.begin(115200, "<name>", "guided")` and `userSetup()`, and `loop()` with `link.poll()` and
-  `userLoop()`. Golden files for every template on every board are in `fixtures/wiring/`; the
+  `userLoop()`. Golden files for every template on every board are in `fixtures/wiring/`, spread over as many sketches as a board needs once its pins run out (`uno`, `uno_2`, …); the
   real `arduino-cli` compiles them with `--warnings all` in a test when the computer has one (it
   did, with no warnings, on 2026-10-16) and in CI's Arduino job.
 - **Not built yet**: the shell (wizard, pin drawing, wiring checklist, the editor's read-only bar),

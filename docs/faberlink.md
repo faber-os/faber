@@ -157,6 +157,12 @@ pins one part uses, so Faber can show them for a board whose sketch was written 
 | 8 | `echo` | Echo | `FaberUltrasonic` |
 | 9 | `signal` | Signal | `FaberDistance`: the sensor's output; `FaberButton`, `FaberObstacle`: the switch's or module's pin |
 | 10 | `sense` | Sense | `FaberBattery`: the divider's middle |
+| 11 | `out` | Out | `FaberOutput`: the pin it switches (added 2026-10-16) |
+| 12 | `a` | A | `FaberEncoder`: channel A |
+| 13 | `b` | B | `FaberEncoder`: channel B |
+| 14 | `sda` | SDA | a part on the I²C bus (`FaberImu`): the bus's data line |
+| 15 | `scl` | SCL | a part on the I²C bus: the clock line |
+| 16 | `xshut` | XSHUT | `FaberToF`: the sensor's shutdown input |
 
 - **Compatibility, both ways.** An older library never sends `PINS`; Faber then shows no pins
   (not "none"). An older core skips `PINS` as a message type it doesn't know (§2) and carries on:
@@ -208,6 +214,8 @@ layout maps 1:1 onto the types in `sdk/rust/capabilities` (and `wit/capabilities
 | 5 | `battery@1` |
 | 6 | `digital-in@1` (added 2026-10-16) |
 | 7 | `obstacle@1` (added 2026-10-16) |
+| 8 | `digital-out@1` (added 2026-10-16) |
+| 9 | `pwm-out@1` (added 2026-10-16) |
 
 Other capabilities have no FaberLink layout yet; one is added (with a new code) when a board needs
 it. A capability without info (`digital-in@1`) has an empty info layout, and the core's
@@ -221,6 +229,8 @@ it. A capability without info (`digital-in@1`) has an empty info layout, and the
 | `estop@1` | `engaged u8 · source u8 · reason str8` | — | `hardware_latching u8` (1 B) |
 | `battery@1` | `present u8 · volts f32 · amps f32 · charge f32 · celsius f32 · level u8 · n u8 · n × cell_volts f32` (19 B + 4n). `present` bits 0/1/2/3: amps, charge, celsius, cell volts; the others are sent as 0, and `n` is 0 without bit 3. `level`: 0 ok, 1 low, 2 critical. `volts` is always finite. | — | `chemistry u8 · cells_in_series u8 · capacity_ah f32` (6 B). `chemistry`: 0 li-ion, 1 lipo, 2 lifepo4, 3 nimh, 4 lead-acid. `cells_in_series` is at least 1. A NaN capacity means "unknown". |
 | `digital-in@1` | `level u8` (1 B): the logical level, 1 = active (an active-low input reads 1 while its pin is low). | — | — (0 B) |
+| `digital-out@1` | `level u8` (1 B): the logical level, 1 = on. | `kind u8 (0 = set) · level u8` (2 B). The safe state is set 0 (off). | — (0 B) |
+| `pwm-out@1` | `duty f32` (4 B), 0..1; always finite. | `kind u8 (0 = set-duty) · duty f32` (5 B). The safe state is duty 0. | — (0 B) |
 | `obstacle@1` | `detected u8` (1 B) | — | `kind u8 · trigger_distance_m f32` (5 B). `kind`: 0 bumper, 1 infrared, 2 limit. A NaN trigger distance means "unknown". |
 
 ## 5. Rules a board follows (the library enforces them, not the sketch)
@@ -343,13 +353,21 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   `_LIMIT`, and the trigger distance set on the module), so an app looking for a button is never
   offered a bumper. Neither stops the motors on the board by itself yet: Faber does that from the
   computer.
+- `FaberOutput` (2026-10-16) switches one pin: on/off as `digital-out@1`
+  (`faberlink::OUTPUT_ON_OFF`, the default) or a duty with `analogWrite()` as `pwm-out@1`
+  (`faberlink::OUTPUT_PWM`, on a PWM pin). `faberlink::ACTIVE_LOW` makes LOW "on" (most relay
+  modules; PWM is inverted too). It is leased like a motor, for 1 s on the board as in the core:
+  no command for 1 s, the e-stop, `SAFE` or a lost heartbeat, and it goes off. Off is written
+  before the pin becomes an output, so an active-low relay doesn't click on at start. It reports
+  its value 10 times a second.
 - Examples: `examples/MotorAndDistance`, `examples/MotorL298N` (two motors on an L298N),
-  `examples/Ultrasonic`, `examples/BatteryMonitor` and `examples/ButtonAndBumper`. CI compiles every example for an Uno and a
+  `examples/Ultrasonic`, `examples/BatteryMonitor`, `examples/ButtonAndBumper` and
+  `examples/LedAndRelay`. CI compiles every example for an Uno and a
   Mega.
 - **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
   does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
   sends it at the end of every `HELLO_ACK` (§3). Faber then shows which sketch the board runs.
-- Not built yet: `FaberServo`, digital out, VL53L0X, encoders, a planar-base part with
+- Not built yet: `FaberServo`, VL53L0X, encoders, a planar-base part with
   on-board ramp-down (the interop harness has a plain test one, for SENNEP's fake Mega:
   `FakeBoard::sennep`), and negotiating 1 Mbaud.
 - **Where it lives:** inside the Faber repo for now. Moving it to its own repo
@@ -432,6 +450,7 @@ flash and 2 B of RAM (a virtual table entry per part class, and the loop in `pol
 | `BatteryMonitor` | 7 072 B | 554 B | 7 484 B | 926 B |
 | `Ultrasonic` | 7 026 B | 555 B | 7 818 B | 927 B |
 | `ButtonAndBumper` (new) | 6 556 B | 635 B | 7 370 B | 1 007 B |
+| `LedAndRelay` (new, outputs) | 7 592 B | 588 B | 8 680 B | 960 B |
 
 ## 8. Interop tests (`tools/faberlink-interop`)
 

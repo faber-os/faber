@@ -43,6 +43,8 @@ const uint16_t DEFAULT_HEARTBEAT_TIMEOUT_MS = 250;
 const uint16_t MIN_HEARTBEAT_TIMEOUT_MS = 100;
 const uint16_t MAX_HEARTBEAT_TIMEOUT_MS = 1000;
 const uint16_t DEFAULT_LEASE_MS = 250;
+// digital-out@1, pwm-out@1 and servo@1 are leased for 1 s (docs/capabilities.md).
+const uint16_t OUTPUT_LEASE_MS = 1000;
 const uint16_t STATUS_PERIOD_MS = 100;
 const size_t MAX_RAW = FABERLINK_MAX_PAYLOAD + 4;  // type, seq, payload, CRC
 
@@ -72,6 +74,8 @@ enum Capability : uint8_t {
   BATTERY = 5,
   DIGITAL_IN = 6,
   OBSTACLE = 7,
+  DIGITAL_OUT = 8,
+  PWM_OUT = 9,
 };
 
 // Why an actuator's output changed (APPLIED.cause).
@@ -109,6 +113,12 @@ enum PinRole : uint8_t {
   ROLE_ECHO = 8,    // a range finder's echo
   ROLE_SIGNAL = 9,  // a sensor's output read by the board (also a button's or a module's pin)
   ROLE_SENSE = 10,  // a battery's voltage, through a divider
+  ROLE_OUT = 11,    // an output the board switches: an LED, a relay module, a MOSFET
+  ROLE_A = 12,      // a quadrature encoder's channel A
+  ROLE_B = 13,      // a quadrature encoder's channel B
+  ROLE_SDA = 14,    // the I2C bus's data line, for a part on the bus
+  ROLE_SCL = 15,    // the I2C bus's clock line
+  ROLE_XSHUT = 16,  // a time-of-flight sensor's shutdown input (VL53L0X XSHUT)
 };
 
 // "No pin": an optional pin that isn't wired, or (as the analog base) "not known".
@@ -378,6 +388,32 @@ class Obstacle : public DebouncedInput {
  private:
   float trigger_;
   ObstacleKind kind_;
+};
+
+// digital-out@1 (on or off) or pwm-out@1 (a duty 0..1): an LED, a relay, a MOSFET. Leased like a
+// motor: no command for its lease time (1 s) and it goes off, as it does on the e-stop and when
+// the heartbeat stops. It reports its value 10 times a second. No info.
+class PinOutput : public Part {
+ public:
+  PinOutput(const char* name, bool pwm, uint16_t leaseMs = OUTPUT_LEASE_MS);
+  const char* capabilityId() const override { return pwm_ ? "pwm-out@1" : "digital-out@1"; }
+  uint8_t writeInfo(uint8_t*) const override { return 0; }
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+  uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped) override;
+  uint8_t enterSafeState(uint8_t* out) override;
+  // The output now: 0 or 1 on/off, the duty 0..1 for PWM (1 = on, whatever the wiring).
+  float value() const { return value_; }
+  bool isPwm() const { return pwm_; }
+
+ protected:
+  ~PinOutput() {}
+  // Drives the hardware: 0 (off) or 1 (on), or a duty 0..1.
+  virtual void drive(float value) = 0;
+
+ private:
+  uint8_t writeCommand(uint8_t* out) const;
+  float value_;
+  bool pwm_;
 };
 
 // The board's side of the protocol.

@@ -71,7 +71,8 @@ class FakeSerial : public HardwareSerial {
 // 1 FaberMotor(name, driver, pins[0..4]), 2 FaberDistance(name, pin), 3 FaberUltrasonic(name,
 // trig, echo), 4 FaberBattery(name, pin, 3.0, 3), 5 FaberButton(name, pin, driver as the active
 // level), 6 FaberObstacle(name, pin, pins[1] as the kind, driver as the active level,
-// maxVelocity as the trigger distance).
+// maxVelocity as the trigger distance), 7 FaberOutput(name, pin, driver as the mode, pins[1] as
+// the active level).
 struct PartSpec {
   uint8_t type;
   const char* name;
@@ -92,6 +93,7 @@ struct Sketch {
   std::vector<std::unique_ptr<FaberBattery>> batteries;
   std::vector<std::unique_ptr<FaberButton>> buttons;
   std::vector<std::unique_ptr<FaberObstacle>> obstacles;
+  std::vector<std::unique_ptr<FaberOutput>> outputs;
 };
 
 // Parts register themselves in a global table until the next FaberLink::begin(), as globals in a
@@ -185,12 +187,20 @@ void* fla_new(const PartSpec* parts, size_t n) {
         if (p.driver == faberlink::ACTIVE_LOW) {
           s->buttons.emplace_back(new FaberButton(name, p.pins[0]));  // the shortest call
         } else {
-          s->buttons.emplace_back(new FaberButton(name, p.pins[0], static_cast<faberlink::InputLevel>(p.driver)));
+          s->buttons.emplace_back(new FaberButton(name, p.pins[0], static_cast<faberlink::ActiveLevel>(p.driver)));
         }
         break;
       case 6:
         s->obstacles.emplace_back(new FaberObstacle(name, p.pins[0], static_cast<faberlink::ObstacleKind>(p.pins[1]),
-                                                    static_cast<faberlink::InputLevel>(p.driver), p.maxVelocity));
+                                                    static_cast<faberlink::ActiveLevel>(p.driver), p.maxVelocity));
+        break;
+      case 7:
+        if (p.driver == faberlink::OUTPUT_ON_OFF && p.pins[1] == faberlink::ACTIVE_HIGH) {
+          s->outputs.emplace_back(new FaberOutput(name, p.pins[0]));  // the shortest call
+        } else {
+          s->outputs.emplace_back(new FaberOutput(name, p.pins[0], static_cast<faberlink::OutputMode>(p.driver),
+                                                  static_cast<faberlink::ActiveLevel>(p.pins[1])));
+        }
         break;
       default:
         s->batteries.emplace_back(new FaberBattery(name, p.pins[0], 3.0f, 3));
