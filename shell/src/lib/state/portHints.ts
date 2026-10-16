@@ -51,6 +51,12 @@ export function portKindLabel(port: Pick<PortInfo, 'kind'>): string {
       return t('parts.portKind.bluetooth');
     case 'replay':
       return t('parts.portKind.replay');
+    case 'i2c':
+      return t('parts.portKind.i2c');
+    case 'spi':
+      return t('parts.portKind.spi');
+    case 'gpio':
+      return t('parts.portKind.gpio');
     default:
       return port.kind;
   }

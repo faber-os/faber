@@ -18,7 +18,7 @@ const SHOWN_CHARS: usize = 60;
 
 impl Declarative {
     /// "the Acme ranger connector", for messages about settings.
-    fn what(&self) -> String {
+    pub(super) fn what(&self) -> String {
         format!("the {} connector", self.manifest.name)
     }
 
@@ -31,6 +31,9 @@ impl Declarative {
 
     /// A running connector for one part.
     pub fn create(self: &Arc<Self>, settings: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
+        if let PortRequirement::I2c { .. } = self.manifest.port {
+            return super::registers::create(self, settings);
+        }
         let specs = &self.manifest.settings;
         let reader = Reader::new(settings, specs, &self.what())?;
         let mut rules = Vec::new();
@@ -46,6 +49,7 @@ impl Declarative {
                     derive: *derive,
                     level: None,
                 },
+                Parse::Register(_) => unreachable!("register rules only run on an I²C port"),
             };
             rules.push(RunRule { info: provided.info, parse });
         }
@@ -122,6 +126,8 @@ impl LineConnector {
         match self.package.manifest.port {
             PortRequirement::Serial { baud } => format!("{baud} baud"),
             PortRequirement::Bridge => "its bridge".into(),
+            // A line connector only ever runs on a serial port.
+            PortRequirement::I2c { .. } | PortRequirement::Spi | PortRequirement::Gpio => "its bus".into(),
         }
     }
 
@@ -214,12 +220,24 @@ fn pattern_reading(
     for ((field, (_, raw)), (scale, offset)) in fields.iter().zip(raw).zip(scales) {
         values::set_path(&mut obj, &field.name, value(field, raw, *scale, *offset));
     }
+    finish(rule.capability, info, obj, (derive, level), t_us).map(Some)
+}
+
+/// The reading from its fields, with what the engine works out itself (a distance's status, a
+/// battery's level) filled in.
+pub(super) fn finish(
+    capability: faber_capabilities::Capability,
+    info: Option<&Info>,
+    mut obj: Map<String, Value>,
+    (derive, level): (Derive, &mut Option<battery::Level>),
+    t_us: Timestamp,
+) -> Result<Reading, String> {
     match derive {
         Derive::StatusFromRange => values::set_path(&mut obj, "status", "ok".into()),
         Derive::LevelFromVolts => values::set_path(&mut obj, "level", "ok".into()),
         Derive::Nothing => {}
     }
-    let mut reading = values::reading(rule.capability, t_us, obj)?;
+    let mut reading = values::reading(capability, t_us, obj)?;
     match (derive, &mut reading, info) {
         (Derive::StatusFromRange, Reading::Distance(d), Some(Info::Distance(info))) => {
             *d = info.reading(t_us, d.meters);
@@ -230,8 +248,8 @@ fn pattern_reading(
         }
         _ => {}
     }
-    debug_assert_eq!(reading.capability(), rule.capability);
-    Ok(Some(reading))
+    debug_assert_eq!(reading.capability(), capability);
+    Ok(reading)
 }
 
 fn value(field: &FieldRule, raw: f64, scale: f64, offset: f64) -> Value {

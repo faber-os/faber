@@ -188,8 +188,11 @@ line = { pattern = "D:{meters:f32}", scale = 0.01 }   # "D:123" → 1.23 m
 Patterns with typed fields (`f32`, `i32`, `u32`, `hex`, `{_}`) cover most line protocols; NMEA
 (`position@1`) gets a built-in parser (GGA, RMC, GSA, checksums checked). The engine lives in
 `core/src/declarative/` and loads `<data>/connectors/<id>/faber.toml` at start; examples with
-recorded captures, tested on every build, are in `examples/connectors/`. Register maps for I2C/SPI follow the TMP102 example in architecture.md §4 once Phase 6
-brings the buses; until then they are tested against a fake bus.
+recorded captures, tested on every build, are in `examples/connectors/`. **I²C register maps**
+(Phase 6b) follow the TMP102 example in architecture.md §4: `[ports] i2c = { addresses, default }`
+and per provide `read = { register, format, shift, scale, unit }` with `poll = { default-hz }`
+(connectors-declarative.md §10). The example `examples/connectors/ti-tmp102` is tested against
+the fake bus's TMP102 model. SPI register maps are not built yet.
 
 ## 7. Tools
 

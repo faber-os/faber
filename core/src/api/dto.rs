@@ -35,6 +35,21 @@ pub struct SystemInfo {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_problem: Option<ErrorBody>,
+    /// Where the I²C, SPI and GPIO buses come from.
+    pub buses: Buses,
+}
+
+/// Where a machine's I²C, SPI and GPIO buses come from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum Buses {
+    /// The machine's own (Linux, e.g. a Raspberry Pi).
+    System,
+    /// Simulated, with simulated parts on them (the core runs with `--fake-hardware`).
+    Fake,
+    /// This computer has none: Windows and macOS give programs no I²C, SPI or GPIO.
+    None,
 }
 
 /// An error the user can act on: what happened, and what to try next (docs/principles.md).
@@ -75,6 +90,15 @@ pub enum PortRequirementInfo {
     /// Hardware like this is reached through a FaberLink board, whose own parts appear by
     /// themselves once the board is added; a part on this connector can only be simulated.
     Bridge,
+    /// One device on an I²C bus, at one of `addresses`; a new part starts at `default`.
+    I2c {
+        addresses: Vec<u8>,
+        default: u8,
+    },
+    /// One SPI device (a bus and a chip select).
+    Spi,
+    /// One GPIO line.
+    Gpio,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -184,6 +208,22 @@ pub enum PortKind {
     Bluetooth,
     /// A recorded capture played back as if it were live.
     Replay,
+    /// An I²C bus (`i2c-1`), shared by parts at different addresses.
+    I2c,
+    /// One SPI device (`spi-0.0`): a bus and a chip select.
+    Spi,
+    /// One GPIO line (`gpio-17`).
+    Gpio,
+}
+
+/// Who holds one address on an I²C bus.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AddressClaim {
+    pub address: u8,
+    /// The part (or `tool:<name>`).
+    pub claimed_by: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -229,6 +269,15 @@ pub struct PortInfo {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claimed_by: Option<String>,
+    /// On an I²C bus: the addresses parts use, lowest first. Left out when there are none.
+    #[ts(as = "Option<Vec<AddressClaim>>", optional)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub addresses: Vec<AddressClaim>,
+    /// Set when something outside Faber has the port, so no part can use it, in words: "used
+    /// by I²C bus 1 (i2c-1)" (a GPIO line a bus uses).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reserved: Option<String>,
     pub suggestions: Vec<Suggestion>,
     /// What its USB ids say about the Arduino on it (the Arduino flasher's guess). Left out
     /// when they say nothing.
@@ -545,6 +594,10 @@ pub struct PartInfo {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<String>,
+    /// Its address, for a part on an I²C bus.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u8>,
     /// Set for a simulated part (D36): where its values come from.
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -616,6 +669,74 @@ pub enum LinkState {
     Incompatible,
 }
 
+/// Body of `POST /api/v0/ports/scan-i2c`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct I2cScanRequest {
+    /// The bus's port id, e.g. `i2c-1`.
+    pub port: String,
+}
+
+/// What a safe I²C scan found: only the addresses that answered or that a part uses. The scan
+/// probes 0x08–0x77 (`first`–`last`); everything else in that range didn't answer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct I2cScan {
+    pub port: String,
+    pub first: u8,
+    pub last: u8,
+    pub found: Vec<I2cFound>,
+}
+
+/// One address in an I²C scan.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct I2cFound {
+    pub address: u8,
+    /// The part using it: not probed (`i2cdetect` shows `UU`). Absent: something answered.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_by: Option<String>,
+    /// What it might be, most likely first. Guesses from common default addresses.
+    pub suggestions: Vec<I2cSuggestion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct I2cSuggestion {
+    /// What it might be, e.g. "TI TMP102 temperature sensor".
+    pub chip: String,
+    /// An installed connector for it, which Add part can use.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<String>,
+    /// Why, in plain words, saying the scan can't be sure.
+    pub reason: String,
+}
+
+/// One pin of the Raspberry Pi's 40-pin header (`GET /api/v0/ports/header`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HeaderPin {
+    /// The physical pin, 1–40.
+    pub pin: u8,
+    /// `GPIO17`, `3V3`, `5V` or `GND`.
+    pub name: String,
+    /// Its GPIO line (port `gpio-<line>`), for a GPIO pin.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// Its job when a bus or the UART is on, e.g. `I²C 1 SDA`. Absent: none.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function: Option<String>,
+}
+
 /// Body of `POST /api/v0/ports/check-board`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -660,6 +781,10 @@ pub struct NewPart {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<String>,
+    /// For a part on an I²C bus: its 7-bit address. Left out: the connector's default.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u8>,
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub simulate: Option<Simulate>,

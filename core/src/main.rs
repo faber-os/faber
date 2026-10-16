@@ -32,6 +32,10 @@ struct Args {
     /// end-to-end tests; docs/arduino-editor.md). Never for real boards.
     #[arg(long)]
     fake_arduino_cli: bool,
+    /// For development and tests: simulated I²C, SPI and GPIO buses with simulated parts on them
+    /// (a TMP102 at 0x48 on i2c-1), instead of the machine's own. Never touches real hardware.
+    #[arg(long)]
+    fake_hardware: bool,
 }
 
 fn main() -> ExitCode {
@@ -84,7 +88,14 @@ fn main() -> ExitCode {
             },
             None => None,
         };
-        let core = match Core::start(args.data.clone(), logs, clock) {
+        let hardware = if args.fake_hardware {
+            tracing::info!(target: "core", "using fake I²C, SPI and GPIO buses (--fake-hardware)");
+            Arc::new(faber_core::ports::fake::FakeHardware::standard())
+                as Arc<dyn faber_core::ports::Hardware>
+        } else {
+            faber_core::ports::system_hardware()
+        };
+        let core = match Core::start_with_buses(args.data.clone(), logs, clock, hardware) {
             Ok(mut c) => {
                 if args.no_auth {
                     c.auth = faber_core::api::auth::AuthMode::Off;

@@ -20,6 +20,8 @@ pub struct PartConfig {
     pub connector: String,
     /// Where its values come from: a real port, or a simulation (D36).
     pub source: Source,
+    /// Its 7-bit address, for a part on an I²C bus (`address = 0x48`).
+    pub address: Option<u8>,
     pub mount: Mount,
     pub settings: toml::Table,
     /// A bridge's sub-parts that parts.toml says something about, by the board's name for them
@@ -37,6 +39,7 @@ impl PartConfig {
         PartConfig {
             connector: connector.into(),
             source,
+            address: None,
             mount,
             settings,
             parts: BTreeMap::new(),
@@ -44,11 +47,17 @@ impl PartConfig {
         }
     }
 
+    /// The same part at this I²C address.
+    pub fn at_address(self, address: Option<u8>) -> Self {
+        PartConfig { address, ..self }
+    }
+
     /// True when `other` runs the same way: everything but the sub-parts' mounts, which change
     /// without restarting the bridge (and so without ending its leases).
     pub fn runs_like(&self, other: &PartConfig) -> bool {
         self.connector == other.connector
             && self.source == other.source
+            && self.address == other.address
             && self.mount == other.mount
             && self.settings == other.settings
             && self.paused == other.paused
@@ -175,6 +184,7 @@ struct RawPart {
     connector: String,
     port: Option<toml::Spanned<String>>,
     simulate: Option<toml::Spanned<String>>,
+    address: Option<toml::Spanned<i64>>,
     #[serde(default)]
     mount: Mount,
     #[serde(default)]
@@ -219,6 +229,7 @@ pub fn parse(text: &str) -> Result<PartsConfig, ConfigError> {
             ..ConfigError::at(text, part_key_span(text, &name), bad.message, "")
         })?;
         let source = source(text, &name, p.port, p.simulate)?;
+        let address = address(text, &source, p.address)?;
         for sub in p.parts.keys() {
             let span = || sub_part_key_span(text, &name, sub).or_else(|| part_key_span(text, &name));
             if p.connector != BRIDGE_CONNECTOR {
@@ -241,6 +252,7 @@ pub fn parse(text: &str) -> Result<PartsConfig, ConfigError> {
             PartConfig {
                 connector: p.connector,
                 source,
+                address,
                 mount: p.mount,
                 settings: p.settings,
                 parts: p.parts,
@@ -280,6 +292,32 @@ fn source(
             part_key_span(text, name),
             format!("The part \"{name}\" has neither port nor simulate."),
             "Add port = \"…\" with the port it is plugged into, or simulate = \"manual\" or \"world\" to simulate it.",
+        )),
+    }
+}
+
+/// `address = 0x48`: a 7-bit I²C address, only with a port.
+fn address(
+    text: &str,
+    source: &Source,
+    address: Option<toml::Spanned<i64>>,
+) -> Result<Option<u8>, ConfigError> {
+    let Some(a) = address else { return Ok(None) };
+    if source.port().is_none() {
+        return Err(ConfigError::at(
+            text,
+            Some(a.span()),
+            "A simulated part has no address.".into(),
+            "Remove address, or give the part its I²C port (port = \"i2c-1\") instead of simulate.",
+        ));
+    }
+    match u8::try_from(*a.get_ref()) {
+        Ok(v) if v <= 0x7f => Ok(Some(v)),
+        _ => Err(ConfigError::at(
+            text,
+            Some(a.span()),
+            format!("address = {} is not an I²C address.", a.get_ref()),
+            "I²C addresses go from 0x00 to 0x7f, e.g. address = 0x48. The part's datasheet says which it uses.",
         )),
     }
 }
@@ -401,6 +439,11 @@ pub fn add_part(text: &str, name: &PartName, cfg: &PartConfig) -> Result<String,
         Source::Port(port) => t.insert("port", toml_edit::value(port.as_str())),
         Source::Simulated(mode) => t.insert("simulate", toml_edit::value(mode.id())),
     };
+    if let Some(a) = cfg.address {
+        // Written in hex, as datasheets give addresses.
+        let hex: toml_edit::Value = format!("0x{a:02x}").parse().expect("a hex integer is valid toml");
+        t.insert("address", toml_edit::Item::Value(hex));
+    }
     if let Some(m) = mount_item(&cfg.mount) {
         t.insert("mount", m);
     }
@@ -965,5 +1008,47 @@ paused = \"yes\"
     fn removing_an_unknown_part_changes_nothing() {
         let text = "# hi\n[parts.b]\nconnector = \"y\"\nport = \"q\"\n";
         assert_eq!(remove_part(text, &name("zz")).unwrap(), text);
+    }
+
+    #[test]
+    fn an_i2c_part_has_an_address_written_in_hex() {
+        let cfg =
+            PartConfig::new("ti-tmp102", Source::Port("i2c-1".into()), Mount::default(), toml::Table::new())
+                .at_address(Some(0x48));
+        let out = add_part("", &name("cabin_temp"), &cfg).unwrap();
+        assert!(
+            out.contains(
+                "port = \"i2c-1\"
+address = 0x48
+"
+            ),
+            "{out}"
+        );
+        let back = parse(&out).unwrap();
+        assert_eq!(back.parts[&name("cabin_temp")], cfg);
+        assert!(!cfg.runs_like(&cfg.clone().at_address(Some(0x49))), "a new address restarts the part");
+    }
+
+    #[test]
+    fn a_wrong_address_points_at_its_line() {
+        let e = parse(
+            "[parts.t]
+connector = \"ti-tmp102\"
+port = \"i2c-1\"
+address = 0x80
+",
+        )
+        .unwrap_err();
+        assert_eq!(e.line, Some(4));
+        assert!(e.message.contains("128 is not an I²C address") && e.hint.contains("0x7f"), "{e:?}");
+        let e = parse(
+            "[parts.t]
+connector = \"x\"
+simulate = \"manual\"
+address = 0x48
+",
+        )
+        .unwrap_err();
+        assert!(e.message.contains("simulated part has no address"), "{e:?}");
     }
 }

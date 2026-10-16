@@ -44,6 +44,7 @@ pub const ROUTES: &[(&str, &str, Need)] = &[
     ("GET", "/api/v0/connectors/problems", VIEWER),
     ("GET", "/api/v0/ports", VIEWER),
     ("GET", "/api/v0/ports/problems", VIEWER),
+    ("GET", "/api/v0/ports/header", VIEWER),
     ("GET", "/api/v0/parts", VIEWER),
     ("GET", "/api/v0/signals/{part}/{name}", VIEWER),
     ("GET", "/api/v0/ws", VIEWER),
@@ -72,6 +73,8 @@ pub const ROUTES: &[(&str, &str, Need)] = &[
     ("DELETE", "/api/v0/tokens/{id}", VIEWER),
     // Driving, simulating and the home folder's files.
     ("POST", "/api/v0/ports/check-board", OPERATOR),
+    // Read-only probes, but they touch the hardware on the bus, like checking for a board.
+    ("POST", "/api/v0/ports/scan-i2c", OPERATOR),
     ("POST", "/api/v0/parts/{name}/lease", OPERATOR),
     ("DELETE", "/api/v0/parts/{name}/lease", OPERATOR),
     ("POST", "/api/v0/parts/{name}/lease/renew", OPERATOR),

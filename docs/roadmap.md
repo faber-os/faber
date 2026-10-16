@@ -142,6 +142,13 @@ with the shell's Stop bar from the browser. The "done when" needs the real Mega.
 
 - Port manager: I2C, SPI, GPIO, Pi UARTs, device-tree overlays, detect-then-suggest for I²C and USB
 - Tools: **I2C scanner**, **GPIO panel**, **Ports**, **Signal plotter**
+
+  **Phase 6b built (on a PC, against fake buses):** I²C (per address), SPI and GPIO (per line)
+  ports with Linux backends; `temperature`, `digital-in/out`, `analog-in` and `pwm-out`; I²C
+  register maps in the declarative engine (`examples/connectors/ti-tmp102`); a safe I²C scan with
+  suggestions; the four tools and the new viewers; `faber-core --fake-hardware`. Not yet run on a
+  Pi. Still to come in Phase 6: Pi UARTs, device-tree overlays, USB detect-then-suggest beyond
+  what exists.
 - rpi-image-gen image: read-only A/B (Rugix Ctrl), `/data`, `faber.txt` provisioning
 - Kiosk on an attached screen (Cage + Chromium)
 - Network: mDNS, hotspot fallback with captive portal, Tailscale toggle

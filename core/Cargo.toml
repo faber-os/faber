@@ -82,6 +82,14 @@ tower = "0.5.3"
 wasmtime = { version = "49.0.3", default-features = false, features = ["wat"] }
 wit-component = "0.262.0"
 
+# The real buses (docs/architecture.md §10): I²C through /dev/i2c-* (I2C_RDWR), SPI through spidev,
+# GPIO through the character device's v2 interface (never sysfs). The crates hold the ioctls,
+# since the workspace forbids unsafe code.
+[target.'cfg(target_os = "linux")'.dependencies]
+gpiocdev = { version = "0.8.0", default-features = false, features = ["uapi_v2"] }
+i2cdev = "0.6.2"
+spidev = "0.7.1"
+
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"
 wmi = { version = "0.18.4", default-features = false }

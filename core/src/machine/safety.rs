@@ -313,7 +313,8 @@ impl Machine {
         st.leases.check(&name, lease, now).map_err(|e| lease_error(&st, &name, e))?;
         let clamped = match &provide.info {
             Some(info) => command.clamp(info).map_err(|r| refused(&name, r))?,
-            None => faber_capabilities::Clamped { command, clamped: false },
+            // No info: only the limits every part of the capability has (a duty is 0–1).
+            None => command.clamp_bare().map_err(|r| refused(&name, r))?,
         };
         let applied = Self::apply(&mut st, &name, clamped.command).map_err(|e| match e {
             CommandError::Unsupported => err(

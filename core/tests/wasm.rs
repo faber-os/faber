@@ -340,6 +340,7 @@ mod supervised {
         let deps = RunDeps {
             clock: Arc::new(MonotonicClock::new()),
             opener: Arc::clone(&port) as Arc<dyn PortOpener>,
+            hardware: Arc::new(faber_core::ports::NoHardware),
             router: Arc::new(Router::new()),
             status: Arc::new(StatusBoard::default()),
             timing: Timing {
@@ -352,6 +353,7 @@ mod supervised {
         };
         let name = PartName::parse("guest").unwrap();
         let entry = PortEntry {
+            reserved: None,
             id: PortId::Serial("FAKE".into()),
             kind: PortKind::Serial,
             label: "FAKE".into(),
@@ -415,6 +417,7 @@ mod installed {
             usb_problems: Arc::new(Nothing),
             disks: Arc::new(Nothing),
             opener: Arc::new(SystemOpener::new(replays.clone())),
+            hardware: Arc::new(faber_core::ports::NoHardware),
             replays,
             connectors: faber_core::connectors::built_in(),
             timing: Timing::default(),

@@ -17,7 +17,15 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::PlanarBase => 3,
         Capability::Estop => 4,
         Capability::Battery => 5,
-        Capability::LaserScan | Capability::Pose | Capability::Position => return None,
+        // No layout yet: the board side (the Arduino library) has none either.
+        Capability::LaserScan
+        | Capability::Pose
+        | Capability::Position
+        | Capability::Temperature
+        | Capability::DigitalIn
+        | Capability::DigitalOut
+        | Capability::AnalogIn
+        | Capability::PwmOut => return None,
     })
 }
 
@@ -209,6 +217,7 @@ pub fn encode_command(command: &Command, out: &mut Vec<u8>) -> Result<(), Encode
             w.u8(0);
             twist(w, t);
         }
+        Command::DigitalOut(_) | Command::PwmOut(_) => return Err(unsupported(command.capability())),
     }
     Ok(())
 }

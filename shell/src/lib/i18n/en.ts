@@ -213,6 +213,20 @@ export const en = {
   'programs.install.description': 'Install a connector package (.faberpkg)',
   'programs.position.title': 'Position viewer',
   'programs.position.description': 'Live position of a GPS: coordinates, fix and satellites',
+  'programs.temperature.title': 'Temperature viewer',
+  'programs.temperature.description': 'Live temperature of a sensor, with a plot',
+  'programs.level.title': 'On/off viewer',
+  'programs.level.description': 'A digital input or output: on or off, and its latest changes',
+  'programs.fraction.title': 'Level viewer',
+  'programs.fraction.description': 'An analog input or a PWM output, as a share of full scale',
+  'programs.i2cScanner.title': 'I2C scanner',
+  'programs.i2cScanner.description': 'Find what answers on an I²C bus, and add it as a part',
+  'programs.gpioPanel.title': 'GPIO panel',
+  'programs.gpioPanel.description': "The Pi's 40-pin header: live inputs and switchable outputs",
+  'programs.ports.title': 'Ports',
+  'programs.ports.description': 'Every port of every kind, who uses it, and problems',
+  'programs.plotter.title': 'Signal plotter',
+  'programs.plotter.description': 'Plot any number from any signal, pause it, save it as CSV',
   'programs.battery.title': 'Battery viewer',
   'programs.battery.description':
     'Live voltage of a battery, how full it is, and whether it needs charging',
@@ -318,6 +332,9 @@ export const en = {
   'parts.title.base': '{name} · base',
   'parts.title.position': '{name} · position',
   'parts.title.battery': '{name} · battery',
+  'parts.title.temperature': '{name} · temperature',
+  'parts.title.level': '{name} · level',
+  'parts.title.fraction': '{name} · level',
   'parts.title.recordings': 'Recordings · Files',
 
   // What kind of link a port is
@@ -325,6 +342,9 @@ export const en = {
   'parts.portKind.serial': 'Serial',
   'parts.portKind.bluetooth': 'Bluetooth',
   'parts.portKind.replay': 'Recording',
+  'parts.portKind.i2c': 'I²C bus',
+  'parts.portKind.spi': 'SPI',
+  'parts.portKind.gpio': 'GPIO pin',
 
   // Parts: a FaberLink board (a bridge) and the parts on it (sub-parts, `mega.left`).
   // `{bridge}` is the board's part name, e.g. "mega".
@@ -577,6 +597,93 @@ export const en = {
 
   // Battery viewer (battery@1)
   'battery.waiting': 'Waiting for the first reading from <code>{address}</code>…',
+  // Viewers of single signals (temperature, on/off, level).
+  'signal.waiting': 'Waiting for the first reading from <code>{address}</code>…',
+  // `{min}` and `{max}` are the plot's bottom and top, with units.
+  'signal.plotRange': 'The last {seconds} seconds, from {min} to {max}',
+  'level.on': 'On',
+  'level.off': 'Off',
+  'level.output': 'An output: switch it in the GPIO panel',
+  'level.changes': {
+    one: 'Changed once since this window opened',
+    other: 'Changed {count} times since this window opened',
+  },
+  'level.latest': 'Latest',
+  'fraction.ofFullScale': 'of full scale',
+  'fraction.duty': 'duty',
+  'fraction.withVolts': '{what} · {volts}',
+
+  // I2C scanner.
+  'i2cScanner.noBus.title': 'No I²C bus here',
+  'i2cScanner.noBus.none':
+    'This computer has no I²C bus: Windows and macOS don’t let programs reach one. I²C is on a Raspberry Pi. To try the scanner here, start the core with --fake-hardware.',
+  'i2cScanner.noBus.system':
+    'No I²C bus is switched on. On a Raspberry Pi: sudo raspi-config, then Interface Options, I2C.',
+  'i2cScanner.noBus.fake': 'The simulated hardware has no I²C bus.',
+  'i2cScanner.bus': 'Bus',
+  'i2cScanner.scan': 'Scan',
+  'i2cScanner.scanning': 'Scanning…',
+  'i2cScanner.safe':
+    'Scan reads one byte from each address from 0x08 to 0x77, like i2cdetect. It never writes to a device, and it skips addresses that parts use.',
+  'i2cScanner.grid.label': 'Addresses on the bus',
+  'i2cScanner.cell.found': 'Something answers at {address}',
+  'i2cScanner.cell.used': '{address} is used by {part}',
+  'i2cScanner.cell.usedMark': 'UU',
+  'i2cScanner.cell.none': '--',
+  'i2cScanner.found.label': 'What answered',
+  'i2cScanner.found.nothing':
+    'Nothing answered. Check the wiring (SDA, SCL, 3.3 V and ground) and that the sensor has power.',
+  'i2cScanner.found.guess':
+    'Guesses from <b>common default addresses</b>: other chips use the same addresses, so the scan can’t be sure.',
+  'i2cScanner.found.usedBy': 'Used by {part}',
+  'i2cScanner.found.unknown': 'Faber has no guess for this address.',
+  'i2cScanner.found.maybe': 'Maybe a {chip}',
+  'i2cScanner.found.noConnector': 'No connector for it is installed.',
+  'i2cScanner.addPart': 'Add part',
+  'i2cScanner.addPart.label': 'Add a {connector} at {address} as a part',
+
+  // GPIO panel.
+  'gpio.noBuses':
+    'This computer has no GPIO pins Faber can use: Windows and macOS don’t let programs reach them. The header below is the Raspberry Pi’s. To try the panel here, start the core with --fake-hardware.',
+  'gpio.fake': 'These pins are simulated (the core runs with --fake-hardware).',
+  'gpio.help':
+    'A pin is used through a part: add one on a free pin. Inputs show their level live. An output stays on only while this window holds it, then goes back off by itself.',
+  'gpio.header.label': 'The 40-pin header',
+  'gpio.addPart': 'Add part',
+  'gpio.output.on': 'Switch on',
+  'gpio.output.off': 'Switch off',
+  'gpio.confirm.title': 'Switch outputs?',
+  'gpio.confirm.body':
+    'An output can switch a relay, a motor or anything wired to it. Make sure “{part}” is safe to switch on. Faber asks once per session.',
+  'gpio.confirm.start': 'Switch on',
+
+  // Ports.
+  'ports.none': 'There are no ports right now. Plug something in, or add a recording.',
+  'ports.table.label': 'Ports',
+  'ports.col.port': 'Port',
+  'ports.col.kind': 'Kind',
+  'ports.col.user': 'Used by',
+  'ports.reserved': 'Not usable: {why}',
+  'ports.address': '{address}: {part}',
+  'ports.busFree': 'Free: parts share it by address',
+  'ports.noBuses':
+    'No I²C, SPI or GPIO here: Windows and macOS don’t let programs reach them. They appear on a Raspberry Pi.',
+  'ports.fakeBuses': 'The I²C, SPI and GPIO ports are simulated (--fake-hardware).',
+
+  // Signal plotter.
+  'plotter.signal': 'Signal',
+  'plotter.field': 'Value',
+  'plotter.pick': 'Pick a signal',
+  'plotter.add': 'Plot',
+  'plotter.noSignals': 'No part gives a signal yet. Add a part first.',
+  'plotter.waiting': 'Waiting for a reading to see what it has…',
+  'plotter.range': 'The last {seconds} seconds, from {min} to {max}',
+  'plotter.series': 'Plotted values',
+  'plotter.remove': 'Stop plotting {series}',
+  'plotter.pause': 'Pause',
+  'plotter.resume': 'Go on',
+  'plotter.csv': 'Save as CSV',
+
   'battery.level.ok': 'OK',
   'battery.level.low': 'Low: charge it soon',
   'battery.level.critical': 'Critical: stop and charge it now',
@@ -637,9 +744,19 @@ export const en = {
   'install.facts.publisherUnknown': 'Not given',
   'install.facts.provides': 'Provides',
   'install.replaces': 'Replaces version {version}. Parts that use it restart with the new version.',
+  'addPart.address.legend': 'Address on the bus',
+  'addPart.address.help':
+    'Where the part answers on its I²C bus. Most sensors pick it with a pin; the datasheet says how.',
+  'addPart.connector.i2c': 'On an I²C bus',
+  'addPart.connector.spi': 'On an SPI bus',
+  'addPart.connector.gpio': 'On a GPIO pin',
   'install.touch.title': 'What it can touch',
   'install.touch.serial': 'A serial port you pick, at {baud} baud',
   'install.touch.bridge': 'A FaberLink bridge you pick',
+  // `{addresses}` is a list like "0x48, 0x49".
+  'install.touch.i2c': 'One device on an I²C bus you pick, at {addresses}',
+  'install.touch.spi': 'One SPI device you pick',
+  'install.touch.gpio': 'One GPIO pin you pick',
   'install.touch.nothingElse': 'Nothing else: no files, no network, no other hardware.',
   'install.notChecked.title': 'Not checked by the Faber registry',
   'install.notChecked.body':

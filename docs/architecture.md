@@ -125,6 +125,8 @@ is behind a part.
 **Declarative example** (TMP102 temperature sensor; register values from the TI datasheet):
 
 ```toml
+faber-manifest = 1
+
 [package]
 id = "ti-tmp102"
 type = "connector"
@@ -336,6 +338,10 @@ Every part and app goes through the same states, shown in the shell:
 - **Detect, then suggest** ([principles](principles.md)): the port manager scans I²C buses and
   USB, and the registry maps known addresses and USB ids to connectors (*"Found a device at 0x76,
   probably a BME280. Install its connector?"*). The user confirms, and doesn't have to type anything.
+- **Built (Phase 6b):** ports `i2c-<bus>` (claimed per address), `spi-<bus>.<cs>` and
+  `gpio-<line>` (claimed per line, a bus's own pins reserved while it is on), behind a hardware
+  trait: Linux backends (`I2C_RDWR`, spidev, the GPIO character device's v2 interface) and fake
+  buses for tests and `--fake-hardware`. The I²C scan only reads (docs/api.md, "I²C scan").
 - USB devices are matched by vendor:product id (plus serial number when there are two of the same
   kind), so `ttyUSB0`/`ttyUSB1` swapping after a reboot doesn't break anything.
 

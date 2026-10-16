@@ -18,6 +18,14 @@ const VIEWERS: Partial<
   'planar-base@1': { kind: 'planar-base', title: (name) => t('parts.title.base', { name }) },
   'position@1': { kind: 'position', title: (name) => t('parts.title.position', { name }) },
   'battery@1': { kind: 'battery', title: (name) => t('parts.title.battery', { name }) },
+  'temperature@1': {
+    kind: 'temperature',
+    title: (name) => t('parts.title.temperature', { name }),
+  },
+  'digital-in@1': { kind: 'level', title: (name) => t('parts.title.level', { name }) },
+  'digital-out@1': { kind: 'level', title: (name) => t('parts.title.level', { name }) },
+  'analog-in@1': { kind: 'fraction', title: (name) => t('parts.title.fraction', { name }) },
+  'pwm-out@1': { kind: 'fraction', title: (name) => t('parts.title.fraction', { name }) },
 };
 
 /** The signals of a part that Faber can draw. */

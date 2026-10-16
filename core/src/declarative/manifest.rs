@@ -194,6 +194,88 @@ pub enum Parse {
     },
     /// The built-in NMEA reader (`format = "nmea"`), for `position@1`.
     Nmea,
+    /// A register on an I²C device, read on a schedule (`read = { register = 0x00, … }`).
+    Register(RegisterRead),
+}
+
+/// How a register's bytes become a number (`format`), as datasheets give them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegisterFormat {
+    U8,
+    I8,
+    U16Be,
+    I16Be,
+    U16Le,
+    I16Le,
+    U32Be,
+    I32Be,
+    U32Le,
+    I32Le,
+}
+
+impl RegisterFormat {
+    pub const ALL: &'static [(&'static str, RegisterFormat)] = &[
+        ("u8", RegisterFormat::U8),
+        ("i8", RegisterFormat::I8),
+        ("u16be", RegisterFormat::U16Be),
+        ("i16be", RegisterFormat::I16Be),
+        ("u16le", RegisterFormat::U16Le),
+        ("i16le", RegisterFormat::I16Le),
+        ("u32be", RegisterFormat::U32Be),
+        ("i32be", RegisterFormat::I32Be),
+        ("u32le", RegisterFormat::U32Le),
+        ("i32le", RegisterFormat::I32Le),
+    ];
+
+    fn parse(s: &str) -> Option<RegisterFormat> {
+        Self::ALL.iter().find(|(n, _)| *n == s).map(|(_, f)| *f)
+    }
+
+    /// How many bytes it reads.
+    pub fn bytes(self) -> usize {
+        match self {
+            RegisterFormat::U8 | RegisterFormat::I8 => 1,
+            RegisterFormat::U16Be | RegisterFormat::I16Be | RegisterFormat::U16Le | RegisterFormat::I16Le => {
+                2
+            }
+            _ => 4,
+        }
+    }
+
+    /// The number in `b` (exactly [`Self::bytes`] long), shifted right by `shift` bits. A signed
+    /// value keeps its sign while it is shifted, as the datasheets mean it (the TMP102's 12 bits
+    /// in an `i16be` shifted by 4).
+    pub fn decode(self, b: &[u8], shift: u32) -> f64 {
+        use RegisterFormat::*;
+        let v: i64 = match self {
+            U8 => i64::from(b[0]),
+            I8 => i64::from(b[0] as i8),
+            U16Be => i64::from(u16::from_be_bytes([b[0], b[1]])),
+            I16Be => i64::from(i16::from_be_bytes([b[0], b[1]])),
+            U16Le => i64::from(u16::from_le_bytes([b[0], b[1]])),
+            I16Le => i64::from(i16::from_le_bytes([b[0], b[1]])),
+            U32Be => i64::from(u32::from_be_bytes([b[0], b[1], b[2], b[3]])),
+            I32Be => i64::from(i32::from_be_bytes([b[0], b[1], b[2], b[3]])),
+            U32Le => i64::from(u32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+            I32Le => i64::from(i32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+        };
+        (v >> shift) as f64
+    }
+}
+
+/// One register read: which register, how its bytes become a number, which reading field it
+/// fills (`value = (raw >> shift) × scale + offset`), and how often.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RegisterRead {
+    pub register: u8,
+    pub format: RegisterFormat,
+    pub shift: u32,
+    /// The reading field it fills, named by `unit` (`celsius`), with its scale and offset.
+    pub field: FieldRule,
+    pub set: Template,
+    pub derive: Derive,
+    /// Time between two reads (µs), from `poll = { default-hz = … }`.
+    pub period_us: u64,
 }
 
 /// A required reading field that a pattern rule doesn't give, worked out by the engine.
@@ -267,8 +349,34 @@ struct RawPackage {
 #[serde(deny_unknown_fields)]
 struct RawPorts {
     serial: Option<Spanned<RawSerial>>,
-    i2c: Option<Spanned<toml::Value>>,
+    i2c: Option<Spanned<RawI2c>>,
     spi: Option<Spanned<toml::Value>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawI2c {
+    addresses: Spanned<Vec<i64>>,
+    default: Option<Spanned<i64>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRead {
+    register: Spanned<i64>,
+    bytes: Option<Spanned<i64>>,
+    format: Spanned<String>,
+    shift: Option<Spanned<i64>>,
+    scale: Option<Spanned<toml::Value>>,
+    offset: Option<Spanned<toml::Value>>,
+    unit: Spanned<String>,
+    set: Option<Spanned<toml::Table>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct RawPoll {
+    default_hz: Spanned<toml::Value>,
 }
 
 #[derive(Deserialize)]
@@ -293,6 +401,8 @@ struct RawProvide {
     name: Option<Spanned<String>>,
     info: Option<Spanned<toml::Table>>,
     line: Option<Spanned<RawLine>>,
+    read: Option<Spanned<RawRead>>,
+    poll: Option<Spanned<RawPoll>>,
 }
 
 #[derive(Deserialize)]
@@ -414,7 +524,7 @@ impl Builder<'_> {
         }
         let mut rules = Vec::new();
         for p in raw.provides {
-            let rule = self.rule(p, &settings, &rules)?;
+            let rule = self.rule(p, &settings, &rules, &port)?;
             rules.push(rule);
         }
         let defaults = Settings::new();
@@ -494,18 +604,28 @@ impl Builder<'_> {
     fn port(&self, ports: Spanned<RawPorts>) -> Result<PortRequirement, ManifestError> {
         let span = ports.span();
         let ports = ports.into_inner();
-        if let Some(bus) = ports.i2c.as_ref().or(ports.spi.as_ref()) {
+        if let Some(spi) = &ports.spi {
             return Err(self.err(
-                bus.span(),
-                "Declarative connectors can't use I²C or SPI yet; they arrive with the buses in Phase 6.",
-                "Use a serial port, or write a wasm connector.",
+                spi.span(),
+                "Declarative connectors can't use SPI yet; they read I²C registers.",
+                "Use an I²C or serial version of the sensor if there is one.",
             ));
+        }
+        if let (Some(_), Some(i2c)) = (&ports.serial, &ports.i2c) {
+            return Err(self.err(
+                i2c.span(),
+                "A connector uses one port: serial or i2c, not both.",
+                "Keep the one the sensor is wired to.",
+            ));
+        }
+        if let Some(i2c) = ports.i2c {
+            return self.i2c(i2c);
         }
         let Some(serial) = ports.serial else {
             return Err(self.err(
                 span,
                 "The connector names no port.",
-                "Add serial = { baud = 9600 } under [ports], with the sensor's baud rate.",
+                "Add serial = { baud = 9600 } under [ports], with the sensor's baud rate, or i2c = { addresses = [0x48] } for an I²C sensor.",
             ));
         };
         let baud = serial.into_inner().baud;
@@ -517,6 +637,47 @@ impl Builder<'_> {
                 "Use the sensor's baud rate from its datasheet, like baud = 9600 or baud = 115200.",
             )),
         }
+    }
+
+    /// `i2c = { addresses = [0x48, 0x49], default = 0x48 }`.
+    fn i2c(&self, i2c: Spanned<RawI2c>) -> Result<PortRequirement, ManifestError> {
+        let i2c = i2c.into_inner();
+        let list_span = i2c.addresses.span();
+        let mut addresses = Vec::new();
+        for &a in i2c.addresses.get_ref() {
+            match u8::try_from(a) {
+                // 0x00–0x07 and 0x78–0x7f are reserved by the I²C specification.
+                Ok(v) if (0x08..=0x77).contains(&v) => addresses.push(v),
+                _ => {
+                    return Err(self.err(
+                        list_span,
+                        format!("{a} is not an I²C device address."),
+                        "Device addresses go from 0x08 to 0x77. Take them from the datasheet, like addresses = [0x48, 0x49].",
+                    ));
+                }
+            }
+        }
+        if addresses.is_empty() {
+            return Err(self.err(
+                list_span,
+                "addresses is empty.",
+                "List the addresses the sensor can have, from its datasheet, like addresses = [0x48].",
+            ));
+        }
+        let default = match i2c.default {
+            None => addresses[0],
+            Some(d) => match u8::try_from(*d.get_ref()) {
+                Ok(v) if addresses.contains(&v) => v,
+                _ => {
+                    return Err(self.err(
+                        d.span(),
+                        format!("default = {} is not one of the addresses.", d.get_ref()),
+                        "Use the address the sensor has out of the box, from the list in addresses.",
+                    ));
+                }
+            },
+        };
+        Ok(PortRequirement::I2c { addresses, default })
     }
 
     fn lines(&self, l: RawLines) -> Result<LineOptions, ManifestError> {
@@ -708,6 +869,7 @@ impl Builder<'_> {
         p: Spanned<RawProvide>,
         settings: &[SettingSpec],
         before: &[Rule],
+        port: &PortRequirement,
     ) -> Result<Rule, ManifestError> {
         let span = p.span();
         let p = p.into_inner();
@@ -724,7 +886,7 @@ impl Builder<'_> {
             return Err(self.err(
                 cap_span,
                 format!(
-                    "{} parts take commands, and a declarative connector can only read lines.",
+                    "{} parts take commands, and a declarative connector can only read.",
                     capability.id()
                 ),
                 "Write a wasm connector for hardware that is commanded.",
@@ -794,6 +956,31 @@ impl Builder<'_> {
                 Some(template)
             }
         };
+        if let PortRequirement::I2c { .. } = port {
+            if let Some(line) = &p.line {
+                return Err(self.err(
+                    line.span(),
+                    "An I²C sensor has registers, not lines.",
+                    "Use read = { register = 0x00, format = \"i16be\", unit = \"celsius\" } instead of line.",
+                ));
+            }
+            let Some(read) = p.read else {
+                return Err(self.err(
+                    span,
+                    format!("The provide \"{name}\" doesn't say which register to read."),
+                    "Add read = { register = 0x00, format = \"i16be\", unit = \"celsius\" }, from the sensor's datasheet.",
+                ));
+            };
+            let parse = self.register(read, p.poll, capability, info.is_some(), settings)?;
+            return Ok(Rule { provide: name, capability, info, parse });
+        }
+        if let Some(r) = p.read.as_ref().map(|r| r.span()).or(p.poll.as_ref().map(|r| r.span())) {
+            return Err(self.err(
+                r,
+                "read and poll are for registers of an I²C sensor, and this connector uses a serial port.",
+                "Use line = { pattern = … } for a serial sensor, or i2c = { addresses = […] } under [ports].",
+            ));
+        }
         let Some(line) = p.line else {
             return Err(self.err(
                 span,
@@ -803,6 +990,104 @@ impl Builder<'_> {
         };
         let parse = self.parse(line, capability, info.is_some(), settings)?;
         Ok(Rule { provide: name, capability, info, parse })
+    }
+
+    /// `read = { register, bytes?, format, shift?, scale?, offset?, unit, set? }` and
+    /// `poll = { default-hz }`.
+    fn register(
+        &self,
+        read: Spanned<RawRead>,
+        poll: Option<Spanned<RawPoll>>,
+        capability: Capability,
+        has_info: bool,
+        settings: &[SettingSpec],
+    ) -> Result<Parse, ManifestError> {
+        let span = read.span();
+        let r = read.into_inner();
+        let register = u8::try_from(*r.register.get_ref()).map_err(|_| {
+            self.err(
+                r.register.span(),
+                format!("register = {} is not a register number.", r.register.get_ref()),
+                "Registers go from 0x00 to 0xff; the datasheet's register map lists them.",
+            )
+        })?;
+        let format = RegisterFormat::parse(r.format.get_ref()).ok_or_else(|| {
+            let names: Vec<&str> = RegisterFormat::ALL.iter().map(|(n, _)| *n).collect();
+            self.err(
+                r.format.span(),
+                format!("format = \"{}\" is not a register format.", r.format.get_ref()),
+                format!("Use one of {}: be is most significant byte first, le least.", names.join(", ")),
+            )
+        })?;
+        if let Some(b) = &r.bytes
+            && usize::try_from(*b.get_ref()).ok() != Some(format.bytes())
+        {
+            return Err(self.err(
+                b.span(),
+                format!(
+                    "bytes = {} doesn't fit format = \"{}\", which reads {}.",
+                    b.get_ref(),
+                    r.format.get_ref(),
+                    format.bytes()
+                ),
+                format!("Write bytes = {}, or leave bytes out.", format.bytes()),
+            ));
+        }
+        let bits = format.bytes() as i64 * 8;
+        let shift = match &r.shift {
+            None => 0,
+            Some(s) => match u32::try_from(*s.get_ref()) {
+                Ok(v) if i64::from(v) < bits => v,
+                _ => {
+                    return Err(self.err(
+                        s.span(),
+                        format!("shift = {} doesn't fit a {bits}-bit value.", s.get_ref()),
+                        format!(
+                            "Shift by 0 to {} bits, like shift = 4 for a 12-bit value in 16 bits.",
+                            bits - 1
+                        ),
+                    ));
+                }
+            },
+        };
+        let name = r.unit.get_ref().clone();
+        let scale = match &r.scale {
+            Some(v) => self.num(v.span(), "scale", v.get_ref(), settings)?,
+            None => Num::Fixed(1.0),
+        };
+        let offset = match &r.offset {
+            Some(v) => self.num(v.span(), "offset", v.get_ref(), settings)?,
+            None => Num::Fixed(0.0),
+        };
+        let field = FieldRule { name, ty: super::pattern::FieldType::F32, scale, offset };
+        let period_us = match poll {
+            None => 1_000_000,
+            Some(p) => {
+                let hz = p.get_ref().default_hz.get_ref();
+                match hz.as_float().or_else(|| hz.as_integer().map(|i| i as f64)) {
+                    Some(hz) if hz > 0.0 && hz <= 100.0 => (1e6 / hz) as u64,
+                    _ => {
+                        return Err(self.err(
+                            p.get_ref().default_hz.span(),
+                            format!("default-hz = {hz} is not a rate Faber reads a register at."),
+                            "Use how often to read it, more than 0 and at most 100 times a second, like default-hz = 1.",
+                        ));
+                    }
+                }
+            }
+        };
+        let fields = [field];
+        let (set, derive) = self.check_reading(
+            span.clone(),
+            r.unit.span(),
+            &fields,
+            r.set.as_ref(),
+            capability,
+            has_info,
+            settings,
+        )?;
+        let [field] = fields;
+        Ok(Parse::Register(RegisterRead { register, format, shift, field, set, derive, period_us }))
     }
 
     fn check_references(
@@ -955,7 +1240,33 @@ impl Builder<'_> {
                 }
             }
         }
-        let set = match &l.set {
+        let (set, derive) = self.check_reading(
+            span,
+            raw_pattern.span(),
+            &fields,
+            l.set.as_ref(),
+            capability,
+            has_info,
+            settings,
+        )?;
+        Ok(Parse::Pattern { pattern, fields, set, derive })
+    }
+
+    /// Tries the fields once with stand-in values, so a wrong field name shows up when the file is
+    /// loaded, with its line, and not as bad readings on a running part. Gives the `set` template
+    /// and what the engine must work out itself. `fields_span` is where the fields are named.
+    #[allow(clippy::too_many_arguments)]
+    fn check_reading(
+        &self,
+        span: Range<usize>,
+        fields_span: Range<usize>,
+        fields: &[FieldRule],
+        set: Option<&Spanned<toml::Table>>,
+        capability: Capability,
+        has_info: bool,
+        settings: &[SettingSpec],
+    ) -> Result<(Template, Derive), ManifestError> {
+        let set = match set {
             Some(s) => {
                 let t = Template(s.get_ref().clone());
                 self.check_references(s.span(), &t, settings)?;
@@ -969,17 +1280,17 @@ impl Builder<'_> {
         let reader = Reader::new(&defaults, settings, "this connector").expect("no settings given");
         let mut trial = set.resolve(&reader, settings).expect("references are checked");
         let set_paths = values::leaf_paths(&trial);
-        for f in &fields {
+        for f in fields {
             if f.name == "t-us" {
                 return Err(self.err(
-                    raw_pattern.span(),
+                    fields_span.clone(),
                     "t-us is the time the line arrived, which the core fills in.",
                     "Remove the field, or use {_} to skip that text.",
                 ));
             }
             if set_paths.iter().any(|p| p == &f.name || p.starts_with(&format!("{}.", f.name))) {
                 return Err(self.err(
-                    raw_pattern.span(),
+                    fields_span.clone(),
                     format!("\"{}\" is both a pattern field and in set.", f.name),
                     "Remove it from one of them.",
                 ));
@@ -1021,8 +1332,8 @@ impl Builder<'_> {
                 None => self.err(
                     span.clone(),
                     format!("This line can't make a {} reading: {why}.", capability.id()),
-                    "Name the pattern's fields after the reading's fields, like {meters:f32}, and give fixed \
-                     ones under set. docs/capabilities.md lists them.",
+                    "Name the pattern's fields (or a read's unit) after the reading's fields, like {meters:f32} \
+                     or unit = \"celsius\", and give fixed ones under set. docs/capabilities.md lists them.",
                 ),
             }
         })?;
@@ -1033,7 +1344,7 @@ impl Builder<'_> {
                 "Check the spelling against docs/capabilities.md.",
             ));
         }
-        Ok(Parse::Pattern { pattern, fields, set, derive })
+        Ok((set, derive))
     }
 }
 
@@ -1198,7 +1509,8 @@ fields = { meters = { scale = 0.001 } }
             ("version = \"0.1.0\"", "version = \"0.1.0\"\npublisher = \" \"", 8, "publisher = \"Your name\""),
             ("name = \"Example line sensor\"", "nmae = \"x\"", 8, "unknown field `nmae`"),
             ("baud = 9600", "baud = 0", 11, "baud rate"),
-            ("serial = { baud = 9600 }", "i2c = { address = 0x48 }", 11, "Phase 6"),
+            ("serial = { baud = 9600 }", "i2c = { address = 0x48 }", 11, "unknown field `address`"),
+            ("serial = { baud = 9600 }", "i2c = { addresses = [0x48] }", 15, "registers, not lines"),
             ("\"distance@1\"", "\"distance@2\"", 14, "distance@1"),
             ("\"distance@1\"", "\"motor@1\"", 14, "wasm connector"),
             ("\"distance@1\"", "\"laser-scan@1\"", 14, "wasm connector"),
@@ -1282,5 +1594,72 @@ fields = { meters = { scale = 0.001 } }
         assert_eq!(derive, Derive::Nothing);
         let e = parse(&text.replace("frame = \"odom\", ", "")).unwrap_err();
         assert!(e.message.contains("missing field `frame`"), "{e}");
+    }
+
+    fn i2c_sensor(ports: &str, provide: &str) -> String {
+        format!(
+            "faber-manifest = 1\n[package]\nid = \"t\"\ntype = \"connector\"\nkind = \"declarative\"\n\
+             version = \"0.1.0\"\nname = \"T\"\n[ports]\n{ports}\n[[provides]]\ncapability = \"temperature@1\"\n{provide}\n"
+        )
+    }
+
+    const I2C: &str = "i2c = { addresses = [0x48, 0x49], default = 0x49 }";
+    const READ: &str =
+        "read = { register = 0x00, format = \"i16be\", shift = 4, scale = 0.0625, unit = \"celsius\" }";
+
+    #[test]
+    fn an_i2c_sensor_reads_a_register_on_a_schedule() {
+        let d = parse(&i2c_sensor(I2C, &format!("poll = {{ default-hz = 4 }}\n{READ}"))).unwrap();
+        assert_eq!(d.manifest.port, PortRequirement::I2c { addresses: vec![0x48, 0x49], default: 0x49 });
+        let Parse::Register(r) = &d.rules[0].parse else { panic!("{:?}", d.rules[0].parse) };
+        assert_eq!((r.register, r.format, r.shift, r.period_us), (0, RegisterFormat::I16Be, 4, 250_000));
+        assert_eq!((r.field.name.as_str(), &r.field.scale), ("celsius", &Num::Fixed(0.0625)));
+        let d = parse(&i2c_sensor("i2c = { addresses = [0x48] }", READ)).unwrap();
+        let Parse::Register(r) = &d.rules[0].parse else { panic!() };
+        assert_eq!(r.period_us, 1_000_000, "once a second unless it says");
+        assert_eq!(d.manifest.port, PortRequirement::I2c { addresses: vec![0x48], default: 0x48 });
+    }
+
+    #[test]
+    fn register_formats_decode_as_datasheets_mean_them() {
+        use RegisterFormat::*;
+        assert_eq!(I16Be.decode(&[0x19, 0x00], 4), 400.0);
+        assert_eq!(I16Be.decode(&[0xe7, 0x00], 4), -400.0, "the sign survives the shift");
+        assert_eq!(U16Be.decode(&[0xe7, 0x00], 4), 3696.0);
+        assert_eq!(U16Le.decode(&[0x34, 0x12], 0), 4660.0);
+        assert_eq!(I8.decode(&[0xff], 0), -1.0);
+        assert_eq!(I32Le.decode(&[0xfe, 0xff, 0xff, 0xff], 0), -2.0);
+        assert_eq!(U32Be.bytes(), 4);
+    }
+
+    #[test]
+    fn register_mistakes_name_their_line() {
+        let err = |ports: &str, provide: &str| parse(&i2c_sensor(ports, provide)).unwrap_err();
+        let e = err(I2C, "line = { pattern = \"T:{celsius:f32}\" }");
+        assert!(e.message.contains("registers, not lines"), "{e:?}");
+        let e = err(I2C, "");
+        assert!(e.message.contains("which register") && e.hint.contains("read = {"), "{e:?}");
+        let e = err(I2C, &READ.replace("i16be", "float"));
+        assert!(
+            e.message.contains("\"float\" is not a register format") && e.hint.contains("i16be"),
+            "{e:?}"
+        );
+        let e = err(I2C, &READ.replace("shift = 4", "bytes = 3, shift = 4"));
+        assert!(e.message.contains("bytes = 3 doesn't fit"), "{e:?}");
+        let e = err(I2C, &READ.replace("shift = 4", "shift = 16"));
+        assert!(e.message.contains("16-bit"), "{e:?}");
+        let e = err(I2C, &READ.replace("celsius", "kelvin"));
+        assert!(e.message.contains("missing field `celsius`") && e.hint.contains("unit"), "{e:?}");
+        let e = err(I2C, &format!("poll = {{ default-hz = 0 }}\n{READ}"));
+        assert!(e.message.contains("default-hz = 0"), "{e:?}");
+        let e = err("i2c = { addresses = [0x80] }", READ);
+        assert!(e.message.contains("128 is not an I²C device address"), "{e:?}");
+        let e = err("i2c = { addresses = [0x48], default = 0x49 }", READ);
+        assert!(e.message.contains("not one of the addresses"), "{e:?}");
+        let e = err("serial = { baud = 9600 }", READ);
+        assert!(e.message.contains("serial port"), "{e:?}");
+        let e = err("spi = {}", READ);
+        assert!(e.message.contains("can't use SPI"), "{e:?}");
+        assert!(e.line.is_some());
     }
 }

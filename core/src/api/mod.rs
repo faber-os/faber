@@ -52,6 +52,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/ports", get(ports))
         .route("/api/v0/ports/problems", get(port_problems))
         .route("/api/v0/ports/check-board", post(check_board))
+        .route("/api/v0/ports/scan-i2c", post(scan_i2c))
+        .route("/api/v0/ports/header", get(header))
         .route("/api/v0/parts", get(parts).post(add_part))
         .route("/api/v0/parts/{name}", delete(remove_part))
         .route("/api/v0/parts/{name}/pause", post(pause_part))
@@ -166,6 +168,11 @@ async fn system(State(s): State<AppState>) -> Json<dto::SystemInfo> {
             reason: None,
             needs: None,
         }),
+        buses: match s.machine.bus_support() {
+            crate::ports::BusSupport::System => dto::Buses::System,
+            crate::ports::BusSupport::Fake => dto::Buses::Fake,
+            crate::ports::BusSupport::None => dto::Buses::None,
+        },
     })
 }
 
@@ -204,6 +211,30 @@ async fn check_board(
 ) -> Result<Json<dto::BoardCheck>, Failure> {
     let check = blocking(move || s.machine.check_for_board(&body.port)).await??;
     Ok(Json(convert::board_check(&check)))
+}
+
+/// A safe I²C scan of one bus, only when asked (docs/api.md, "I²C scan").
+async fn scan_i2c(
+    State(s): State<AppState>,
+    ApiJson(body): ApiJson<dto::I2cScanRequest>,
+) -> Result<Json<dto::I2cScan>, Failure> {
+    let scan = blocking(move || s.machine.scan_i2c(&body.port)).await??;
+    Ok(Json(convert::i2c_scan(&scan)))
+}
+
+/// The Pi's 40-pin header: the same on every Pi with one, whatever this machine is.
+async fn header() -> Json<Vec<dto::HeaderPin>> {
+    Json(
+        crate::ports::header::HEADER
+            .iter()
+            .map(|p| dto::HeaderPin {
+                pin: p.pin,
+                name: p.name.into(),
+                line: p.line,
+                function: (!p.function.is_empty()).then(|| p.function.into()),
+            })
+            .collect(),
+    )
 }
 
 /// The newest reading of one signal. The WebSocket streams them; this is for simple programs.
@@ -248,6 +279,7 @@ async fn add_part(
         name: body.name,
         connector: body.connector,
         port: body.port,
+        address: body.address,
         simulate: body.simulate.map(convert::simulate_from),
         mount: body.mount.unwrap_or_default(),
         settings,

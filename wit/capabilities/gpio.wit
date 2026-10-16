@@ -11,9 +11,11 @@ interface digital-in {
 interface digital-out {
   use types.{timestamp, lease-id, command-error};
   record settings { active-low: bool, safe-level: bool, lease-ms: u32 }
-  /// Signal, latest-value.
+  /// Signal, latest-value: the level as last set. `true` is active.
   record reading { t-us: timestamp, level: bool }
-  /// Leased.
+  /// One command as data, as a connector receives it (the core has checked the lease).
+  variant command { set(bool) }
+  /// Leased (1 s). Safe state: inactive.
   set: func(lease: lease-id, level: bool) -> result<_, command-error>;
 }
 
@@ -27,7 +29,10 @@ interface pwm-out {
   use types.{timestamp, lease-id, command-error};
   record settings { frequency-hz: f32, lease-ms: u32 }
   record reading { t-us: timestamp, duty: f32 }
-  /// Leased. Duty 0..1.
+  /// One command as data, as a connector receives it (the core has checked the lease and
+  /// clamped the duty to 0..1).
+  variant command { set-duty(f32) }
+  /// Leased (1 s). Duty 0..1. Safe state: duty 0.
   set-duty: func(lease: lease-id, duty: f32) -> result<_, command-error>;
 }
 

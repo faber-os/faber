@@ -3,6 +3,7 @@
 
 pub mod bridge;
 pub mod generic;
+pub mod gpio;
 
 use faber_connector::{Definition, Problem};
 
@@ -47,6 +48,7 @@ impl ShownAs {
 pub fn built_in() -> Vec<Definition> {
     let mut defs = vec![ldrobot_ld19::definition(), bridge::definition()];
     defs.extend(generic::definitions());
+    defs.extend(gpio::definitions());
     defs
 }
 

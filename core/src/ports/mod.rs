@@ -1,17 +1,27 @@
 //! Layer 2: the port manager (docs/architecture.md §10). Owns every port: lists them, matches
-//! them to stable ids, hands out claims and refuses conflicts, and opens them as byte streams.
-//! Nothing else in Faber opens a port.
+//! them to stable ids, hands out claims and refuses conflicts, and opens them: serial ports as
+//! byte streams, I²C, SPI and GPIO as devices lent to one part ([`Hardware`]). Nothing else in
+//! Faber opens a port.
 
+mod buses;
 mod catalog;
 mod claims;
+pub mod fake;
+pub mod header;
 mod id;
+mod linux;
 mod replay;
+pub mod scan;
 mod stream;
 mod usb_problems;
 
-pub use catalog::{Discovered, PortEntry, PortKind, Usb, catalog};
+pub use buses::{
+    AddressedDevice, BusPort, BusSupport, Hardware, I2cBus, NoHardware, system_hardware, valid_address,
+};
+pub use catalog::{Discovered, PortEntry, PortKind, Usb, bus_label, catalog};
 pub use claims::{ClaimError, Claimant, Claims};
 pub use id::PortId;
+pub use linux::consumer as gpio_consumer;
 pub use replay::{
     DEMO_LD19, Pacing, Replay, ReplayEntry, ReplayLibrary, SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME,
 };

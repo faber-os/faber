@@ -7,6 +7,7 @@
 //!
 //! See docs/architecture.md §4 and docs/development.md.
 
+pub mod bus;
 pub mod capture;
 pub mod manifest_file;
 pub mod settings;
@@ -54,6 +55,27 @@ pub enum PortRequirement {
     /// when the board is added (`faber-bridge`); a part on such a connector can only be simulated
     /// (`simulate = "manual"` or `"world"` in parts.toml).
     Bridge,
+    /// One device on an I²C bus, at one of `addresses` (7-bit); a new part starts at `default`.
+    /// Two parts can share a bus at different addresses.
+    I2c { addresses: Vec<u8>, default: u8 },
+    /// One SPI device: a bus and a chip select.
+    Spi,
+    /// One GPIO line on the header.
+    Gpio,
+}
+
+impl PortRequirement {
+    /// The port kinds it can use, as port ids start: `serial` (any serial port), `i2c`, `spi`,
+    /// `gpio`, or `bridge`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            PortRequirement::Serial { .. } => "serial",
+            PortRequirement::Bridge => "bridge",
+            PortRequirement::I2c { .. } => "i2c",
+            PortRequirement::Spi => "spi",
+            PortRequirement::Gpio => "gpio",
+        }
+    }
 }
 
 /// One capability instance a part offers. Its signal address is `<part>/<name>`.
@@ -110,6 +132,13 @@ pub trait Context {
     /// Publishes a reading on one of the manifest's `provides` names.
     fn publish(&mut self, name: &str, reading: Reading);
     fn set_health(&mut self, health: Health);
+
+    /// The device the core lent this part: its I²C address, SPI device or GPIO line
+    /// ([`bus`]). `None` for a part on a serial port, which gets bytes through
+    /// [`Connector::on_bytes`] instead.
+    fn port(&mut self) -> Option<bus::PortAccess<'_>> {
+        None
+    }
 }
 
 /// What a part did with a command: the command as it was applied (after clamping).

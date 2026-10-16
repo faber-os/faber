@@ -7,6 +7,8 @@ mod apps;
 mod arduino;
 #[cfg(test)]
 mod bridge_tests;
+#[cfg(test)]
+mod bus_tests;
 mod flash;
 mod packages;
 mod safety;
@@ -39,9 +41,9 @@ use crate::leases::{EndReason, Leases};
 use crate::names::{PartName, SignalAddress};
 use crate::notices::Notices;
 use crate::ports::{
-    Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortProblem, PortReader, PortWriter,
-    ReplayLibrary, SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME, SerialDiscovery, UsbProblemDiscovery, catalog,
-    port_problem, spawn_reader,
+    BusSupport, Claimant, Claims, Hardware, PortEntry, PortEvent, PortId, PortOpener, PortProblem,
+    PortReader, PortWriter, ReplayLibrary, SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME, SerialDiscovery,
+    UsbProblemDiscovery, catalog, port_problem, spawn_reader,
 };
 use crate::router::Router;
 use crate::runtime::{self, PartStatus, RunDeps, RunSpec, StatusBoard, Timing};
@@ -81,6 +83,8 @@ pub struct MachineOptions {
     /// Finds USB sticks and SD cards, so Files can show them.
     pub disks: Arc<dyn DiskDiscovery>,
     pub opener: Arc<dyn PortOpener>,
+    /// The I²C, SPI and GPIO buses: the machine's own, fake ones, or none.
+    pub hardware: Arc<dyn Hardware>,
     pub replays: ReplayLibrary,
     /// The connectors that come with the core (built-in). Those installed in
     /// `<data>/connectors/` are added by the machine itself, and reloaded when a package is
@@ -163,6 +167,8 @@ pub struct PartView {
     pub connector: String,
     /// A sub-part shows its bridge's source: the board's port.
     pub source: Source,
+    /// Its address on its I²C bus.
+    pub address: Option<u8>,
     pub mount: Mount,
     pub status: PartStatus,
     pub signals: Vec<SignalView>,
@@ -203,7 +209,10 @@ pub struct SignalView {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PortView {
     pub entry: PortEntry,
+    /// Who holds the whole port.
     pub claimed_by: Option<String>,
+    /// On an I²C bus: who holds which address, lowest first.
+    pub addresses: Vec<(u8, String)>,
     pub suggestions: Vec<Suggestion>,
     /// The Arduino board its USB ids name, for the flasher.
     pub board: faber_flash::Detected,
@@ -231,6 +240,22 @@ pub struct About {
     pub time_zone: String,
 }
 
+/// What an I²C scan found ([`Machine::scan_i2c`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct I2cScan {
+    pub port: String,
+    /// The addresses that answered or that a part uses, lowest first.
+    pub found: Vec<I2cFound>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct I2cFound {
+    pub address: u8,
+    /// The part that uses it (not probed), or `None`: something answered.
+    pub used_by: Option<String>,
+    pub suggestions: Vec<crate::suggest::I2cSuggestion>,
+}
+
 /// A request to add a part.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewPart {
@@ -238,6 +263,8 @@ pub struct NewPart {
     pub connector: String,
     /// The real part's port. Exactly one of `port` and `simulate`.
     pub port: Option<String>,
+    /// Its address, on an I²C bus. Left out: the connector's default address.
+    pub address: Option<u8>,
     pub simulate: Option<Simulate>,
     pub mount: Mount,
     pub settings: Settings,
@@ -281,6 +308,7 @@ pub struct Machine {
     usb_problems: Arc<dyn UsbProblemDiscovery>,
     disks: Arc<dyn DiskDiscovery>,
     opener: Arc<dyn PortOpener>,
+    hardware: Arc<dyn Hardware>,
     replays: ReplayLibrary,
     /// The connectors that come with the core ([`MachineOptions::connectors`]).
     base_connectors: Vec<Definition>,
@@ -378,6 +406,7 @@ impl Machine {
             usb_problems: opts.usb_problems,
             disks: opts.disks,
             opener: opts.opener,
+            hardware: opts.hardware,
             replays: opts.replays,
             base_connectors: opts.connectors,
             connectors: RwLock::new(connectors),
@@ -549,6 +578,7 @@ impl Machine {
                     mount: cfg.mount,
                     status: PartStatus::Paused,
                     signals,
+                    address: cfg.address,
                     bridge: None,
                     board: None,
                     code: None, // a paused board isn't heard, so nothing says what it runs
@@ -563,6 +593,7 @@ impl Machine {
                 name: name.clone(),
                 connector: cfg.connector.clone(),
                 source: cfg.source.clone(),
+                address: cfg.address,
                 mount: cfg.mount,
                 status: self.status.get(name).unwrap_or(PartStatus::Starting),
                 signals,
@@ -594,6 +625,7 @@ impl Machine {
             name,
             connector: cfg.connector.clone(),
             source: cfg.source.clone(),
+            address: None,
             status,
             signals,
             bridge: Some(bridge.clone()),
@@ -652,6 +684,12 @@ impl Machine {
                 PortView {
                     entry: entry.clone(),
                     claimed_by: st.claims.holder(&entry.id).map(|c| c.to_string()),
+                    addresses: st
+                        .claims
+                        .addresses(&entry.id)
+                        .into_iter()
+                        .map(|(a, c)| (a, c.to_string()))
+                        .collect(),
                     suggestions,
                     board: flash::guess(entry),
                 }
@@ -669,7 +707,7 @@ impl Machine {
     pub fn refresh_ports(&self) {
         self.refresh_disks();
         self.replays.sync_dir(&self.recordings_dir());
-        let found = catalog(&self.discovery.list(), &self.replays.names());
+        let found = catalog(&self.discovery.list(), &self.hardware.list(), &self.replays.names());
         let mut failed = self.usb_problems.list();
         failed.sort(); // the OS's order isn't stable; only a real change may send `ports`
         let problems: Vec<PortProblem> = failed.iter().filter_map(port_problem).collect();
@@ -745,6 +783,7 @@ impl Machine {
         };
         (definition.create)(&new.settings).map_err(invalid_settings)?;
         (definition.provides)(&definition.manifest, &new.settings).map_err(invalid_settings)?;
+        let mut address = None;
         let source = match (new.port, new.simulate) {
             (Some(_), Some(_)) => {
                 return Err(MachineError::new(
@@ -795,13 +834,50 @@ impl Machine {
                             "Check that it is plugged in, then pick it from the list of ports. Or tick Simulated to try the part without hardware.",
                         )
                     })?;
-                if let Some(holder) = st.claims.holder(&port.id) {
-                    return Err(port_claimed(&port, &holder.to_string()));
+                if let Some(p) = port_unusable(&port, &definition.manifest) {
+                    return Err(MachineError::new(ErrorKind::BadRequest, "wrong-port", p.message, p.hint));
                 }
+                address = match (&definition.manifest.port, new.address) {
+                    (PortRequirement::I2c { addresses, default }, a) => {
+                        let a = a.unwrap_or(*default);
+                        if !addresses.contains(&a) {
+                            return Err(MachineError::new(
+                                ErrorKind::BadRequest,
+                                "unknown-address",
+                                format!("The {} can't be at address 0x{a:02x}.", definition.manifest.name),
+                                format!(
+                                    "It can be at {}. Its datasheet says how to pick one (usually by wiring a pin).",
+                                    hex_list(addresses)
+                                ),
+                            ));
+                        }
+                        if let Some(holder) = st.claims.address_holder(&port.id, a) {
+                            return Err(address_claimed(&port, a, &holder.to_string()));
+                        }
+                        Some(a)
+                    }
+                    (_, Some(_)) => {
+                        return Err(MachineError::new(
+                            ErrorKind::BadRequest,
+                            "address-not-used",
+                            format!(
+                                "The {} isn't on an I²C bus, so it has no address.",
+                                definition.manifest.name
+                            ),
+                            "Leave out the address.",
+                        ));
+                    }
+                    (_, None) => {
+                        if let Some(holder) = st.claims.holder(&port.id) {
+                            return Err(port_claimed(&port, &holder.to_string()));
+                        }
+                        None
+                    }
+                };
                 Source::Port(port.id.to_string())
             }
         };
-        let cfg = PartConfig::new(new.connector, source, new.mount, new.settings);
+        let cfg = PartConfig::new(new.connector, source, new.mount, new.settings).at_address(address);
         let text = config::add_part(&st.text, &name, &cfg).map_err(config_write_error)?;
         self.save(&mut st, text)?;
         self.reconcile(&mut st);
@@ -1126,10 +1202,32 @@ impl Machine {
             );
             return None;
         };
-        if let Err(crate::ports::ClaimError::Taken(holder)) =
-            st.claims.claim(&port.id, Claimant::Part(name.clone()))
-        {
-            let e = port_claimed(&port, &holder.to_string());
+        if let Some(p) = port_unusable(&port, &definition.manifest) {
+            self.status.set(name, PartStatus::Conflict(p));
+            return None;
+        }
+        let me = Claimant::Part(name.clone());
+        let claim = match (&definition.manifest.port, cfg.address) {
+            (PortRequirement::I2c { .. }, None) => {
+                self.status.set(
+                    name,
+                    PartStatus::Invalid(Problem::new(
+                        format!("\"{name}\" is on an I²C bus but has no address."),
+                        "Add its address to the part in parts.toml, e.g. address = 0x48.",
+                    )),
+                );
+                return None;
+            }
+            (PortRequirement::I2c { .. }, Some(a)) => st
+                .claims
+                .claim_address(&port.id, a, me)
+                .map_err(|crate::ports::ClaimError::Taken(h)| address_claimed(&port, a, &h.to_string())),
+            _ => st
+                .claims
+                .claim(&port.id, me)
+                .map_err(|crate::ports::ClaimError::Taken(h)| port_claimed(&port, &h.to_string())),
+        };
+        if let Err(e) = claim {
             self.status.set(name, PartStatus::Conflict(Problem::new(e.message, e.hint)));
             return None;
         }
@@ -1153,12 +1251,13 @@ impl Machine {
             let spec = BridgeSpec { name: name.clone(), port };
             return Some(Runner::Bridge(bridge::start(spec, deps, estop)));
         }
-        let spec = RunSpec::new(name.clone(), definition, cfg.settings.clone(), port);
+        let spec = RunSpec::new(name.clone(), definition, cfg.settings.clone(), port).at_address(cfg.address);
         Some(Runner::Real(runtime::start(
             spec,
             RunDeps {
                 clock: self.clock.clone(),
                 opener: Arc::clone(&self.opener),
+                hardware: Arc::clone(&self.hardware),
                 router: Arc::clone(&self.router),
                 status: Arc::clone(&self.status),
                 timing: self.timing,
@@ -1248,7 +1347,11 @@ impl Machine {
                 }
             }
             if let Some(id) = r.config.source.port().and_then(PortId::parse) {
-                st.claims.release(&id, &Claimant::Part(name.clone()));
+                let me = Claimant::Part(name.clone());
+                match r.config.address {
+                    Some(a) => st.claims.release_address(&id, a, &me),
+                    None => st.claims.release(&id, &me),
+                }
                 self.ports_changed.send_modify(|n| *n += 1);
             }
         }
@@ -1360,6 +1463,69 @@ impl Machine {
     fn display_zone(&self) -> String {
         let zone = self.settings.get().time.time_zone;
         if zone.is_empty() { host::time_zone() } else { zone }
+    }
+
+    /// Where the I²C, SPI and GPIO buses come from.
+    pub fn bus_support(&self) -> BusSupport {
+        self.hardware.support()
+    }
+
+    /// Scans an I²C bus for devices, safely (reads only, the reserved addresses skipped, a part's
+    /// address never touched; [`crate::ports::scan`]), and says what each might be. Only when
+    /// someone asks: Faber never scans by itself.
+    pub fn scan_i2c(&self, port: &str) -> Result<I2cScan, MachineError> {
+        let (bus, used) = {
+            let st = self.state.lock().expect("machine lock");
+            let entry = PortId::parse(port)
+                .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
+                .ok_or_else(|| {
+                    MachineError::new(
+                        ErrorKind::BadRequest,
+                        "unknown-port",
+                        format!("There is no port called \"{port}\" right now."),
+                        "Pick an I²C bus from the list. On a Pi, switch I²C on first (raspi-config, Interface Options).",
+                    )
+                })?;
+            let PortId::I2c(bus) = entry.id else {
+                return Err(MachineError::new(
+                    ErrorKind::BadRequest,
+                    "not-an-i2c-bus",
+                    format!("{} is not an I²C bus, so there is nothing to scan.", entry.label),
+                    "Pick an I²C bus (i2c-…).",
+                ));
+            };
+            if let Some(holder) = st.claims.holder(&entry.id) {
+                return Err(port_claimed(&entry, &holder.to_string()));
+            }
+            let used: Vec<(u8, String)> =
+                st.claims.addresses(&entry.id).into_iter().map(|(a, c)| (a, c.to_string())).collect();
+            (bus, used)
+        };
+        let mut handle = self.hardware.open_i2c(bus).map_err(|e| {
+            MachineError::new(
+                ErrorKind::Conflict,
+                "port-unavailable",
+                format!("Could not open I²C bus {bus}: {e}"),
+                "Check that I²C is switched on (raspi-config, Interface Options).",
+            )
+        })?;
+        let seen = crate::ports::scan::scan(handle.as_mut(), &used);
+        tracing::info!(target: "core::ports", "scanned i2c-{bus}: {} address(es) answered or in use", seen.len());
+        let manifests = self.connectors();
+        Ok(I2cScan {
+            port: PortId::I2c(bus).to_string(),
+            found: seen
+                .into_iter()
+                .map(|(address, seen)| I2cFound {
+                    address,
+                    used_by: match seen {
+                        crate::ports::scan::Seen::Used(who) => Some(who),
+                        crate::ports::scan::Seen::Found => None,
+                    },
+                    suggestions: crate::suggest::i2c_suggestions(address, &manifests),
+                })
+                .collect(),
+        })
     }
 
     pub fn about(&self) -> About {
@@ -1955,6 +2121,7 @@ fn paused_sub_part_views(bridge: &PartName, cfg: &PartConfig, had: &[PartName]) 
             source: cfg.source.clone(),
             status: PartStatus::Paused,
             signals: Vec::new(),
+            address: None,
             bridge: Some(bridge.clone()),
             board: None,
             code: None,
@@ -2073,6 +2240,62 @@ fn scan_ports(machine: Weak<Machine>, stop: Arc<AtomicBool>, every: Duration) {
             None => return,
         }
     }
+}
+
+/// Why a connector can't use a port: the wrong kind ("needs an I²C bus"), or the port belongs to
+/// something outside Faber. `None`: it can.
+fn port_unusable(port: &PortEntry, manifest: &Manifest) -> Option<Problem> {
+    use crate::ports::PortKind;
+    let (fits, needs) = match manifest.port {
+        PortRequirement::Serial { .. } => (
+            matches!(
+                port.kind,
+                PortKind::UsbSerial | PortKind::Serial | PortKind::Bluetooth | PortKind::Replay
+            ),
+            "a serial port",
+        ),
+        PortRequirement::I2c { .. } => (port.kind == PortKind::I2c, "an I²C bus (i2c-…)"),
+        PortRequirement::Spi => (port.kind == PortKind::Spi, "an SPI device (spi-…)"),
+        PortRequirement::Gpio => (port.kind == PortKind::Gpio, "a GPIO line (gpio-…)"),
+        PortRequirement::Bridge => (false, "a FaberLink board"),
+    };
+    if !fits {
+        return Some(Problem::new(
+            format!("The {} needs {needs}, and {} is not one.", manifest.name, port.label),
+            format!("Pick {needs} from the list of ports."),
+        ));
+    }
+    port.reserved.as_ref().map(|why| {
+        Problem::new(
+            format!("{} is {why}, so no part can use it.", port.label),
+            "Pick another port. A pin that belongs to a bus is free again once the bus is switched off (raspi-config, Interface Options).",
+        )
+    })
+}
+
+/// "0x48, 0x49, 0x4a or 0x4b".
+fn hex_list(addresses: &[u8]) -> String {
+    let all: Vec<String> = addresses.iter().map(|a| format!("0x{a:02x}")).collect();
+    match all.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+        _ => all.join(""),
+    }
+}
+
+fn address_claimed(port: &PortEntry, address: u8, holder: &str) -> MachineError {
+    let (message, hint) = match holder.strip_prefix("tool:") {
+        Some(tool) => (
+            format!("{} is open in the {}.", port.label, tool.replace('-', " ")),
+            "Close it there first.".to_string(),
+        ),
+        None => (
+            format!("Address 0x{address:02x} on {} is used by the part \"{holder}\".", port.label),
+            format!(
+                "Two parts on one bus need different addresses. Move one of them (most sensors have a pin that picks another address), or remove \"{holder}\" first."
+            ),
+        ),
+    };
+    MachineError::new(ErrorKind::Conflict, "port-claimed", message, hint)
 }
 
 fn port_claimed(port: &PortEntry, holder: &str) -> MachineError {
@@ -2233,6 +2456,7 @@ mod tests {
             usb_problems,
             disks: Arc::new(FakeDisks::default()),
             opener: Arc::new(SystemOpener::new(replays.clone())),
+            hardware: Arc::new(crate::ports::NoHardware),
             replays,
             connectors: crate::connectors::built_in(),
             timing: Timing {
@@ -2269,6 +2493,7 @@ mod tests {
             usb_problems: Arc::new(FakeUsbProblems::default()),
             disks: Arc::new(FakeDisks::default()),
             opener: Arc::new(SystemOpener::new(replays.clone())),
+            hardware: Arc::new(crate::ports::NoHardware),
             replays,
             connectors: vec![ldrobot_ld19::definition()],
             timing: Timing::default(),
@@ -2365,6 +2590,7 @@ mod tests {
 
     fn demo(name: &str) -> NewPart {
         NewPart {
+            address: None,
             name: name.into(),
             connector: "ldrobot-ld19".into(),
             port: Some("replay:demo-ld19".into()),
@@ -2508,6 +2734,7 @@ mod tests {
         let mut settings = Settings::new();
         settings.insert("max-vx".into(), (-1.0).into());
         let req = NewPart {
+            address: None,
             connector: "generic-planar-base".into(),
             port: None,
             simulate: Some(Simulate::Manual),
@@ -2893,6 +3120,7 @@ connector =
             usb_problems: Arc::new(FakeUsbProblems::default()),
             disks: Arc::clone(&disks) as Arc<dyn DiskDiscovery>,
             opener: Arc::new(SystemOpener::new(replays.clone())),
+            hardware: Arc::new(crate::ports::NoHardware),
             replays,
             connectors: vec![ldrobot_ld19::definition()],
             timing: Timing::default(),
@@ -2930,6 +3158,7 @@ connector =
 
     fn sim(m: &Machine, name: &str, connector: &str, mode: Simulate, settings: &str) -> PartView {
         m.add_part(NewPart {
+            address: None,
             name: name.into(),
             connector: connector.into(),
             port: None,
@@ -3206,6 +3435,7 @@ connector =
         assert_eq!(m.world().footprint.map(|f| (f.length, f.width)), Some((0.8, 0.65)));
         let e = m
             .add_part(NewPart {
+                address: None,
                 connector: "generic-planar-base".into(),
                 port: None,
                 simulate: Some(Simulate::World),
@@ -3310,6 +3540,7 @@ connector =
             usb_problems: Arc::new(FakeUsbProblems::default()),
             disks: Arc::new(FakeDisks::default()),
             opener: Arc::new(SystemOpener::new(replays.clone())),
+            hardware: Arc::new(crate::ports::NoHardware),
             replays,
             connectors: crate::connectors::built_in(),
             timing: Timing::default(),

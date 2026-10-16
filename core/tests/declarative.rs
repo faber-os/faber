@@ -49,6 +49,15 @@ impl Drop for TestCore {
 /// A core whose data folder has `connectors` installed (`(id, faber.toml text)`) and whose
 /// replay ports are `replays` (`(name, chunks)`).
 pub fn core(connectors: &[(&str, &str)], replays: Vec<(&str, Vec<Chunk>)>) -> TestCore {
+    core_on(connectors, replays, Arc::new(faber_core::ports::NoHardware))
+}
+
+/// The same, with these I²C, SPI and GPIO buses.
+pub fn core_on(
+    connectors: &[(&str, &str)],
+    replays: Vec<(&str, Vec<Chunk>)>,
+    hardware: Arc<dyn faber_core::ports::Hardware>,
+) -> TestCore {
     let dir = tempfile::tempdir().unwrap();
     for (id, text) in connectors {
         let folder = dir.path().join("connectors").join(id);
@@ -67,6 +76,7 @@ pub fn core(connectors: &[(&str, &str)], replays: Vec<(&str, Vec<Chunk>)>) -> Te
         usb_problems: Arc::new(NoUsbProblems),
         disks: Arc::new(NoDisks),
         opener: Arc::new(SystemOpener::new(library.clone())),
+        hardware,
         replays: library,
         connectors: faber_core::connectors::built_in(),
         timing: faber_core::runtime::Timing::default(),
@@ -378,5 +388,99 @@ mod examples {
             [Health::Starting, Health::Running],
             "running from the first good sentence, before a fix"
         );
+    }
+}
+
+/// I²C register maps (docs/connectors-declarative.md): the TMP102 example on a fake bus.
+mod i2c {
+    use super::*;
+    use faber_core::ports::fake::{FakeHardware, Tmp102};
+    use std::path::Path;
+
+    fn example() -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/connectors/ti-tmp102/faber.toml");
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    /// The TMP102 manifest in docs/architecture.md §4, as written there.
+    fn architecture_example() -> String {
+        let doc =
+            std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/architecture.md"))
+                .unwrap()
+                .replace("\r\n", "\n");
+        let from = doc.find("**Declarative example**").expect("the section is there");
+        let block = &doc[from..];
+        let start = block.find("```toml\n").unwrap() + "```toml\n".len();
+        block[start..start + block[start..].find("```").unwrap()].to_string()
+    }
+
+    #[test]
+    fn the_architecture_example_is_the_tested_example() {
+        let doc = faber_core::declarative::manifest::parse(&architecture_example())
+            .expect("it is a valid connector");
+        let file = faber_core::declarative::manifest::parse(&example()).unwrap();
+        assert_eq!(doc.manifest.port, file.manifest.port);
+        assert_eq!(doc.rules, file.rules, "the same register read, the same scale");
+    }
+
+    #[tokio::test]
+    async fn a_tmp102_on_the_bus_reads_the_right_celsius() {
+        let celsius = Arc::new(std::sync::Mutex::new(21.5_f32));
+        let knob = Arc::clone(&celsius);
+        let hw = FakeHardware::new().with_i2c(1, 0x48, Tmp102::new(move || *knob.lock().unwrap()));
+        let core = core_on(&[("ti-tmp102", &example())], vec![], Arc::new(hw));
+
+        let (status, connectors) = call(&core.app, "GET", "/api/v0/connectors", None).await;
+        assert_eq!(status, StatusCode::OK);
+        let tmp = connectors.as_array().unwrap().iter().find(|c| c["id"] == "ti-tmp102").unwrap();
+        assert_eq!(
+            tmp["port"],
+            json!({"kind": "i2c", "addresses": [0x48, 0x49, 0x4a, 0x4b], "default": 0x48})
+        );
+
+        let part = json!({"name": "cabin_temp", "connector": "ti-tmp102", "port": "i2c-1"});
+        let (status, added) = call(&core.app, "POST", "/api/v0/parts", Some(part)).await;
+        assert_eq!(status, StatusCode::CREATED, "{added}");
+        assert_eq!(added["address"], 0x48, "the connector's default");
+        let r = first_reading(&core.app, "cabin_temp/temperature").await;
+        assert_eq!(r["capability"], "temperature@1");
+        assert_eq!(r["reading"]["celsius"], 21.5);
+
+        // −10.25 °C: a negative value keeps its sign through the shift.
+        *celsius.lock().unwrap() = -10.25;
+        let start = std::time::Instant::now();
+        loop {
+            let (_, v) = call(&core.app, "GET", "/api/v0/signals/cabin_temp/temperature", None).await;
+            if v["reading"]["reading"]["celsius"] == -10.25 {
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_secs(5), "{v}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let (_, ports) = call(&core.app, "GET", "/api/v0/ports", None).await;
+        let bus = ports.as_array().unwrap().iter().find(|p| p["id"] == "i2c-1").unwrap();
+        assert_eq!(bus["addresses"], json!([{"address": 0x48, "claimedBy": "cabin_temp"}]));
+    }
+
+    #[tokio::test]
+    async fn a_sensor_that_does_not_answer_says_what_to_check() {
+        let hw = FakeHardware::new().with_empty_i2c(1);
+        let core = core_on(&[("ti-tmp102", &example())], vec![], Arc::new(hw));
+        let part = json!({"name": "cabin_temp", "connector": "ti-tmp102", "port": "i2c-1", "address": 0x49});
+        let (status, added) = call(&core.app, "POST", "/api/v0/parts", Some(part)).await;
+        assert_eq!(status, StatusCode::CREATED, "{added}");
+        let start = std::time::Instant::now();
+        loop {
+            let (_, parts) = call(&core.app, "GET", "/api/v0/parts", None).await;
+            let state = &parts[0]["state"];
+            if state["kind"] == "failed" {
+                let message = state["message"].as_str().unwrap();
+                assert!(message.contains("didn't answer") && message.contains("0x49"), "{state}");
+                assert!(state["hint"].as_str().unwrap().contains("I2C scanner"), "{state}");
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_secs(8), "{state}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 }

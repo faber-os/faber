@@ -1,6 +1,8 @@
 import { t } from '../i18n';
 import type { ApiError } from './generated/ApiError';
 import type { BoardCheck } from './generated/BoardCheck';
+import type { HeaderPin } from './generated/HeaderPin';
+import type { I2cScan } from './generated/I2cScan';
 import type { ConnectorInfo } from './generated/ConnectorInfo';
 import type { ConnectorProblem } from './generated/ConnectorProblem';
 import type { PackageInfo } from './generated/PackageInfo';
@@ -103,6 +105,10 @@ export interface CoreHttp {
    * opening a port restarts most Arduino boards. `409 port-claimed` for a port in use.
    */
   checkBoard(port: string): Promise<BoardCheck>;
+  /** A safe scan of an I²C bus (reads only), only when the user asks (docs/api.md, "I²C scan"). */
+  scanI2c(port: string): Promise<I2cScan>;
+  /** The Raspberry Pi's 40-pin header, pin by pin. */
+  getHeader(): Promise<HeaderPin[]>;
   /** The boards the Arduino flasher can program (docs/api.md, "The Arduino flasher"). */
   getFlasherBoards(): Promise<FlashBoard[]>;
   /**
@@ -327,6 +333,8 @@ export function createHttp(
       request('GET', `/signals/${address.split('/').map(encodeURIComponent).join('/')}`),
     getPorts: () => request('GET', '/ports'),
     checkBoard: (port) => request('POST', '/ports/check-board', { port }),
+    scanI2c: (port) => request('POST', '/ports/scan-i2c', { port }),
+    getHeader: () => request('GET', '/ports/header'),
     getFlasherBoards: () => request('GET', '/flasher/boards'),
     flash: (port, req) => request('POST', `/ports/${encodeURIComponent(port)}/flash`, req),
     getArduino: () => request('GET', '/arduino'),

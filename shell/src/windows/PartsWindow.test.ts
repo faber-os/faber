@@ -829,6 +829,51 @@ describe('Adding a part from another window', () => {
   });
 });
 
+describe('Adding an I²C part from the scanner', () => {
+  it('starts on the bus, the connector and the address the scan found, and sends the address', async () => {
+    const tmp102 = {
+      id: 'ti-tmp102',
+      name: 'TI TMP102 temperature sensor',
+      version: '1.0.0',
+      kind: 'declarative',
+      port: { kind: 'i2c' as const, addresses: [0x48, 0x49], default: 0x48 },
+      provides: [{ name: 'temperature', capability: 'temperature@1' as const }],
+      settings: [],
+    };
+    const shell = fakeShell([{ path: '/api/v0/connectors', body: [LD19, tmp102] }]);
+    const id = shell.desktop.open('parts');
+    shell.desktop.update(id, {
+      params: { addPort: 'i2c-1', addConnector: 'ti-tmp102', addAddress: '73' },
+    });
+    const win = shell.desktop.state.windows[0]!;
+    render(PartsWindow, { props: { win, visible: true }, context: shell.context });
+    shell.pushPorts([{ id: 'i2c-1', kind: 'i2c', label: 'I²C bus 1', suggestions: [] }]);
+    shell.pushParts([]);
+    const form = await screen.findByRole('form', { name: 'Add part' });
+    await waitFor(() => expect(within(form).getByRole('radio', { name: /i2c-1/ })).toBeChecked());
+    await waitFor(() =>
+      expect(within(form).getByRole('radio', { name: /ti-tmp102/ })).toBeChecked(),
+    );
+    expect(within(form).getByText('On an I²C bus')).toBeInTheDocument();
+    expect(within(form).getByRole('radio', { name: '0x49' })).toBeChecked();
+    shell.fetch.route({
+      method: 'POST',
+      path: '/api/v0/parts',
+      status: 201,
+      body: part('cabin_temp', { connector: 'ti-tmp102', port: 'i2c-1', address: 0x49 }),
+    });
+    await userEvent.type(within(form).getByLabelText('Name'), 'cabin_temp');
+    await userEvent.click(within(form).getByRole('button', { name: 'Add part' }));
+    const posted = shell.fetch.calls.find((c) => c.method === 'POST' && c.path === '/api/v0/parts');
+    expect(posted?.body).toEqual({
+      name: 'cabin_temp',
+      connector: 'ti-tmp102',
+      port: 'i2c-1',
+      address: 0x49,
+    });
+  });
+});
+
 describe('Port problems', () => {
   it('explains hardware that is plugged in but never became a port, grouped by kind', async () => {
     const shell = setup();

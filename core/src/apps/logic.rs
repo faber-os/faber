@@ -334,6 +334,9 @@ impl sandbox::bindings::faber::capabilities::distance::Host for AppHost {}
 impl sandbox::bindings::faber::capabilities::pose::Host for AppHost {}
 impl sandbox::bindings::faber::capabilities::position::Host for AppHost {}
 impl sandbox::bindings::faber::capabilities::battery::Host for AppHost {}
+impl sandbox::bindings::faber::capabilities::temperature::Host for AppHost {}
+impl sandbox::bindings::faber::capabilities::digital_in::Host for AppHost {}
+impl sandbox::bindings::faber::capabilities::analog_in::Host for AppHost {}
 
 // The capability interfaces also declare commands with lease ids. Apps drive through `drive`
 // instead: `compile` refuses a component that imports these, and they refuse here too.
@@ -353,6 +356,18 @@ impl sandbox::bindings::faber::capabilities::motor::Host for AppHost {
 
 impl sandbox::bindings::faber::capabilities::planar_base::Host for AppHost {
     fn set_velocity(&mut self, _: LeaseId, _: Twist2d) -> Result<(), CommandError> {
+        Err(CommandError::BadCommand)
+    }
+}
+
+impl sandbox::bindings::faber::capabilities::digital_out::Host for AppHost {
+    fn set(&mut self, _: LeaseId, _: bool) -> Result<(), CommandError> {
+        Err(CommandError::BadCommand)
+    }
+}
+
+impl sandbox::bindings::faber::capabilities::pwm_out::Host for AppHost {
+    fn set_duty(&mut self, _: LeaseId, _: f32) -> Result<(), CommandError> {
         Err(CommandError::BadCommand)
     }
 }

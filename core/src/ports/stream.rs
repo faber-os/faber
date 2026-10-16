@@ -179,6 +179,7 @@ mod tests {
     fn opening_a_missing_replay_explains_why() {
         let opener = SystemOpener::new(ReplayLibrary::default());
         let port = PortEntry {
+            reserved: None,
             id: PortId::Replay("nope".into()),
             kind: super::super::PortKind::Replay,
             label: "x".into(),

@@ -40,6 +40,7 @@
   let addPort = $state<string | null>(null);
   let addSimulate = $state<Simulate | null>(null);
   let addConnector = $state<string | null>(null);
+  let addAddress = $state<number | null>(null);
   /** A fresh form each time another window asks for one, even while one is open. */
   let formKey = $state(0);
 
@@ -47,11 +48,17 @@
   // recording": `addPort`), from the World window ("Add a simulated base": `addSimulate`
   // and `addConnector`), or after installing a package (`addConnector`). Start the form there.
   $effect(() => {
-    const { addPort: port, addSimulate: simulate, addConnector: connector } = win.params;
+    const {
+      addPort: port,
+      addSimulate: simulate,
+      addConnector: connector,
+      addAddress: address,
+    } = win.params;
     if (!port && !simulate && !connector) return;
     addPort = port ?? null;
     addSimulate = simulate === 'world' || simulate === 'manual' ? simulate : null;
     addConnector = connector ?? null;
+    addAddress = address ? Number(address) : null;
     untrack(() => formKey++);
     adding = true;
     desktop.update(win.id, { params: {} });
@@ -207,6 +214,7 @@
       initialPort={addPort}
       initialSimulate={addSimulate}
       initialConnector={addConnector}
+      initialAddress={addAddress}
       onadded={added}
       oncancel={closeForm}
     />

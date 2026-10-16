@@ -20,6 +20,13 @@ import PropertiesWindow from './PropertiesWindow.svelte';
 import SerialMonitorWindow from './SerialMonitorWindow.svelte';
 import SettingsWindow from './SettingsWindow.svelte';
 import WorldWindow from './WorldWindow.svelte';
+import TemperatureWindow from './TemperatureWindow.svelte';
+import LevelWindow from './LevelWindow.svelte';
+import FractionWindow from './FractionWindow.svelte';
+import I2cScannerWindow from './I2cScannerWindow.svelte';
+import GpioPanelWindow from './GpioPanelWindow.svelte';
+import PortsWindow from './PortsWindow.svelte';
+import SignalPlotterWindow from './SignalPlotterWindow.svelte';
 
 /** Every kind of window the shell can open. Titles and descriptions are getters, so they follow the language. */
 export const WINDOW_DEFS: WindowDef[] = [
@@ -244,6 +251,126 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 880, h: 540 },
     minSize: { w: 380, h: 340 },
     component: ArduinoWindow,
+  },
+  {
+    kind: 'temperature',
+    get title() {
+      return t('programs.temperature.title');
+    },
+    get description() {
+      return t('programs.temperature.description');
+    },
+    icon: 'thermometer',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 440, h: 380 },
+    minSize: { w: 300, h: 260 },
+    component: TemperatureWindow,
+  },
+  {
+    kind: 'level',
+    get title() {
+      return t('programs.level.title');
+    },
+    get description() {
+      return t('programs.level.description');
+    },
+    icon: 'digital',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 380, h: 400 },
+    minSize: { w: 300, h: 260 },
+    component: LevelWindow,
+  },
+  {
+    kind: 'fraction',
+    get title() {
+      return t('programs.fraction.title');
+    },
+    get description() {
+      return t('programs.fraction.description');
+    },
+    icon: 'gauge',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 440, h: 380 },
+    minSize: { w: 300, h: 260 },
+    component: FractionWindow,
+  },
+  {
+    // An i2cdetect-style scan of one I²C bus, with suggestions (docs/api.md, "I²C scan").
+    kind: 'i2c-scanner',
+    get title() {
+      return t('programs.i2cScanner.title');
+    },
+    get description() {
+      return t('programs.i2cScanner.description');
+    },
+    icon: 'search',
+    menu: 'tools',
+    program: 'tool:i2c-scanner',
+    colour: 'serial',
+    multiple: false,
+    defaultSize: { w: 600, h: 620 },
+    minSize: { w: 340, h: 300 },
+    component: I2cScannerWindow,
+  },
+  {
+    // The Pi's 40-pin header: live inputs, outputs switched with a lease.
+    kind: 'gpio-panel',
+    get title() {
+      return t('programs.gpioPanel.title');
+    },
+    get description() {
+      return t('programs.gpioPanel.description');
+    },
+    icon: 'header',
+    menu: 'tools',
+    program: 'tool:gpio-panel',
+    colour: 'drive',
+    multiple: false,
+    defaultSize: { w: 760, h: 680 },
+    minSize: { w: 340, h: 300 },
+    component: GpioPanelWindow,
+  },
+  {
+    // Every port of every kind and who uses it (docs/architecture.md §10).
+    kind: 'ports',
+    get title() {
+      return t('programs.ports.title');
+    },
+    get description() {
+      return t('programs.ports.description');
+    },
+    icon: 'plug',
+    menu: 'tools',
+    program: 'tool:ports',
+    colour: 'parts',
+    multiple: false,
+    defaultSize: { w: 640, h: 480 },
+    minSize: { w: 340, h: 300 },
+    component: PortsWindow,
+  },
+  {
+    // Any number in any signal, scrolling, with pause and CSV export.
+    kind: 'signal-plotter',
+    get title() {
+      return t('programs.plotter.title');
+    },
+    get description() {
+      return t('programs.plotter.description');
+    },
+    icon: 'plot',
+    menu: 'tools',
+    program: 'tool:signal-plotter',
+    colour: 'logs',
+    multiple: false,
+    defaultSize: { w: 640, h: 480 },
+    minSize: { w: 340, h: 300 },
+    component: SignalPlotterWindow,
   },
   {
     kind: 'logs',

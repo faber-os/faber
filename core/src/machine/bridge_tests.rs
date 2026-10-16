@@ -51,6 +51,7 @@ fn machine_on<B: Board>(dir: &Path, board: B) -> (Arc<Machine>, Wire<B>, Arc<One
         usb_problems: Arc::new(NoUsbProblems),
         disks: Arc::new(NoDisks),
         opener: Arc::new(wire.clone()),
+        hardware: Arc::new(crate::ports::NoHardware),
         replays: ReplayLibrary::default(),
         connectors: crate::connectors::built_in(),
         timing: Timing {
@@ -75,6 +76,7 @@ impl UsbProblemDiscovery for NoUsbProblems {
 
 fn add_bridge(m: &Machine) -> PartView {
     m.add_part(NewPart {
+        address: None,
         name: "mega".into(),
         connector: BRIDGE_CONNECTOR.into(),
         port: Some(PORT.into()),
@@ -343,6 +345,7 @@ fn a_board_can_not_be_simulated() {
     let (m, _wire) = machine_with(dir.path(), FakeBoard::mega(250));
     let e = m
         .add_part(NewPart {
+            address: None,
             name: "mega".into(),
             connector: BRIDGE_CONNECTOR.into(),
             port: None,

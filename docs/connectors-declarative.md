@@ -1,6 +1,7 @@
 # Writing a declarative connector
 
-Status: **first cut** (Phase 3c, 2026-10-15): serial devices that send text lines. Design:
+Status: serial devices that send text lines (Phase 3c, 2026-10-15) and I²C sensors read
+register by register (Phase 6b, section 10). Design:
 [packages.md §6](packages.md#6-the-declarative-engine-first-cut).
 
 A **declarative connector** is a connector without code: one `faber.toml` file that says which
@@ -13,12 +14,14 @@ It is the easiest kind of connector, the next step after printing values from an
 up to a **wasm** connector when the device speaks binary packets, needs commands sent to it, or
 needs logic a pattern can't express (packages.md §2).
 
-Two complete, tested examples:
+Three complete, tested examples:
 
 - [`examples/connectors/line-distance`](../examples/connectors/line-distance/): an Arduino with an
   HC-SR04 printing `D:123`. Start here.
 - [`examples/connectors/nmea-gps`](../examples/connectors/nmea-gps/): a GPS module, through the
   built-in NMEA reader.
+- [`examples/connectors/ti-tmp102`](../examples/connectors/ti-tmp102/): a TMP102 temperature
+  sensor on the Pi's I²C bus, read register by register (section 10).
 
 ## 1. A first connector
 
@@ -71,7 +74,8 @@ still reads format 1; an older Faber refuses a newer format and says so.
 ### `[ports]`
 
 `serial = { baud = 9600 }`: the part uses one serial port (UART or USB serial) at this baud rate,
-the same as `Serial.begin(9600)` on an Arduino. I²C and SPI come with the buses in Phase 6.
+the same as `Serial.begin(9600)` on an Arduino. Or `i2c = { addresses = [0x48, 0x49], default = 0x48 }`:
+the part is one device on an I²C bus (section 10). SPI is not declarative yet.
 
 ### `[lines]` (optional)
 
@@ -113,7 +117,8 @@ One table per signal the part publishes. Several may read the same stream.
 | `capability` | The capability and its version: `"distance@1"`. |
 | `name` | The signal's name, when there is more than one of a capability (`"front"`, `"rear"`). Default: the capability's name. |
 | `info` | What the sensor can do, once (docs/capabilities.md rule 4), from its datasheet. Optional. |
-| `line` | How to read it: a `pattern`, or `format = "nmea"`. |
+| `line` | How to read it: a `pattern`, or `format = "nmea"`. For a serial sensor. |
+| `read`, `poll` | Which register to read, and how often. For an I²C sensor (section 10). |
 
 ## 3. Patterns
 
@@ -261,7 +266,58 @@ test), not recorded from hardware.
 
 ## 9. Not yet
 
-- I²C and SPI register maps (the TMP102 example in architecture.md §4): Phase 6, with the buses.
+- SPI register maps, and writing a register (a sensor that must be configured before it measures).
+- Several registers combined into one value (a BME280's calibration): write a wasm connector once
+  wasm connectors can reach a bus.
 - Text values (a field that reads `ok` or `ERR`) and true/false fields.
 - Binary protocols and commands to the device: write a wasm connector.
 - Installing from a `.faberpkg` file: the package installer (packages.md §5).
+
+## 10. I²C registers
+
+An I²C sensor is a small set of registers at an address on the bus. Its datasheet has a
+**register map**: which register holds the value, how many bytes it is, and what one bit is worth.
+That is all a declarative connector needs. The TMP102 (the whole connector,
+[`examples/connectors/ti-tmp102`](../examples/connectors/ti-tmp102/faber.toml)):
+
+```toml
+[ports]
+i2c = { addresses = [0x48, 0x49, 0x4A, 0x4B], default = 0x48 }
+
+[[provides]]
+capability = "temperature@1"
+poll = { default-hz = 1 }
+read = { register = 0x00, bytes = 2, format = "i16be", shift = 4, scale = 0.0625, unit = "celsius" }
+```
+
+**`[ports] i2c`**: `addresses` are the addresses the sensor can have (most have a pin that picks
+one), from 0x08 to 0x77; `default` (optional, the first one otherwise) is where a new part starts,
+usually what the sensor has out of the box. A part is one device: two parts share a bus at
+different addresses, never at the same one.
+
+**`read`**, one register per provide:
+
+| Key | Meaning |
+|---|---|
+| `register` | The register's number, 0x00–0xff. |
+| `format` | How its bytes make a number: `u8`, `i8`, `u16be`, `i16be`, `u16le`, `i16le`, `u32be`, `i32be`, `u32le`, `i32le` (`u` unsigned, `i` signed two's complement, `be` most significant byte first, `le` least). |
+| `bytes` | Optional, a check: how many bytes the format reads. |
+| `shift` | Optional: bits to drop on the right first, for a value left-justified in its bytes. A signed value keeps its sign. |
+| `scale`, `offset` | Optional: `value = (raw >> shift) × scale + offset`. A number, or `{ setting = "…" }`. |
+| `unit` | The reading field the value fills, named after its unit as in the reading: `celsius`, `meters`, `volts`, `fraction`. |
+| `set` | Optional: fixed reading fields, as for lines (section 4). |
+
+**`poll = { default-hz = 1 }`**: how many times a second the register is read, more than 0 and at
+most 100; once a second when it is left out.
+
+Every read is one bus transaction: Faber writes the register's number, then reads its bytes (a
+repeated start, `I2C_RDWR` on Linux). It never writes anything else, so a connector can't change
+a sensor's settings; a sensor that must be configured first isn't declarative yet (section 9).
+
+**Health:** the part is `running` while reads succeed. A read nobody answers makes it `degraded`
+with what went wrong; three in a row make it `failed` ("The sensor didn't answer"), with a hint to
+check the wiring and the address and to run the I2C scanner.
+
+**Testing without the sensor:** start the core with `--fake-hardware`. Its `i2c-1` has a TMP102
+at 0x48 that encodes temperatures as the datasheet says, so the example runs as it would on a Pi.
+`core/tests/declarative.rs` runs the example against it on every build.
