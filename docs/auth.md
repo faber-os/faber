@@ -171,7 +171,8 @@ last failure. The limiter remembers at most 10 000 names and addresses (the olde
 ## API tokens (programs)
 
 Programs such as `examples/drive-square.py` use **personal API tokens**: Settings → Users → API
-tokens → "New token", with a name and a role up to your own. The token (`faber_` + 43 characters)
+tokens → "Make token", with a name and a role up to your own. Only someone who signed in with a
+password makes tokens (not a token, and not the attached screen). The token (`faber_` + 43 characters)
 is **shown once**; the core keeps only its SHA-256 and compares in constant time. A program sends it
 as `Authorization: Bearer faber_…`.
 
@@ -187,11 +188,37 @@ Restoring keeps this machine's own users by default. "Also restore users and API
 them with the backup's, and then **ends every session**: the person restoring signs in again with an
 account from the backup. A backup without a users file leaves the users as they are either way.
 
+## In the shell
+
+- **Sign-in screen:** "Sign in to *machine name*", a name and a password, and a **Stop** button
+  (it works without signing in). The shell asks `GET /api/v0/session` before it connects to
+  anything else, and shows it whenever nobody is signed in. It speaks the machine's language.
+- **First run:** while there are no users, the same screen is "Create the admin": a name, a
+  password and the password again.
+- **User menu** on the taskbar (a person icon; with the large taskbar, the name too): who is
+  signed in and their role, "Password and API tokens…" (Settings → Users) and "Sign out". On the
+  attached screen it offers "Sign in as someone…" instead (and "Create the admin…" on a fresh
+  machine); the page starts again as that person, and signing out returns it to the screen's role.
+- **Settings → Users:** change your password; as an admin, the users (add, role, set password,
+  remove); and your API tokens (make one, shown once with Copy; revoke). Settings → Name has the
+  attached screen's role.
+- **Disabled, never hidden:** what the role can't do stays visible and disabled, with the reason
+  ("Needs the operator role") as its tooltip or beside it: Add part and removing parts, the Apps
+  switches, roles and uninstall, installing, the flasher, Drive (no "Start driving?" question for a
+  viewer), the serial monitor, manual simulated values, the world, Release on the taskbar, backups
+  and restore, and the settings the role can't change. Stop is never disabled.
+- **Signed out elsewhere** (another tab, a password change, the user removed, the session ran
+  out): the next request or the closed WebSocket tells the shell, and the page starts again at the
+  sign-in screen, with nothing of the last user's left in it.
+- `--no-auth` shows a bar at the top: "Sign-in is off".
+
 ## App windows
 
 App UIs keep talking only through the shell (docs/apps.md §9), so they act with the role of the
-person using the shell: a viewer can open an app's window and see it, but its drive is refused and
-the shell says why. An app's UI files (`/apps/{id}/ui/…`) are public like the shell's own files:
+person using the shell: a viewer can open an app's window and see it, but its `drive` and
+`drive-via` are refused by the shell with `not-allowed` ("Needs the operator role") before the
+D46 question, and by the core too (its messages to the logic and its state changes need an
+operator). An app's UI files (`/apps/{id}/ui/…`) are public like the shell's own files:
 they are the package's code, not data, and a sandboxed frame may not send the cookie.
 
 ## What Mikkel must confirm
@@ -206,3 +233,8 @@ they are the package's code, not data, and a sandboxed frame may not send the co
    (D40); only admins change the machine's name, time and screen role.
 5. The host-name check (`421 unknown-host`) and its list of accepted names.
 6. Removing yourself, or the last admin, and demoting the last admin, are refused.
+7. A request without an `Origin` header is not checked for it (only programs leave it out; the
+   cookie is `SameSite=Strict` anyway). Requiring it would break `curl` with a cookie, nothing else.
+8. Adding and removing parts needs an **admin** (it changes the machine), not an operator. An
+   operator drives, simulates and edits files, but can't change what the machine is made of.
+9. Viewers may make API tokens for themselves (viewer tokens only), e.g. for a dashboard script.

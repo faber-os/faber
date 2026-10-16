@@ -60,9 +60,12 @@ connector = "generic-planar-base"
 simulate = "manual"
 ```
 
-Then let a program drive it in a 0.8 m square. It needs only Python's standard library:
+Then let a program drive it in a 0.8 m square. It needs only Python's standard library, and an
+**API token** so Faber knows who drives: in the shell, **Settings → Users → API tokens**, make one
+with the role *Operator* and copy it (it is shown once).
 
 ```bash
+export FABER_TOKEN=faber_…          # PowerShell: $env:FABER_TOKEN = "faber_…"
 python examples/drive-square.py
 ```
 

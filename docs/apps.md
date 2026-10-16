@@ -204,8 +204,13 @@ A `source` is `{role, index?}` (a role's part, `index` for a `1..` role) or `{pu
 (the app's own derived signal). Events, unasked: `signal`, `signal-ended`, `status`, `theme`,
 `lease-ended` (`role`, `index`, `reason`, `error`). Error codes: `bad-request`, `unknown-request`,
 `unsupported-version`, `unknown-role`, `unknown-signal`, `no-part`, `not-commandable`, `app-off`,
-`not-confirmed`, `lease-required`, `bad-command`, `too-many-requests` (over 200 a second),
+`not-confirmed`, `not-allowed` (the person using the shell is a viewer: docs/auth.md),
+`lease-required`, `bad-command`, `too-many-requests` (over 200 a second),
 `too-many-subscriptions`, `app-gone`, and the core's own (`lease-held`, `estop-engaged`, …).
+
+**Roles.** A window acts with the role of whoever uses the shell (docs/auth.md): a viewer's window
+opens, reads and subscribes, but its `drive` and `drive-via` are refused with `not-allowed`
+(before the confirm), and the core refuses its messages to the logic and its state changes too.
 
 **The sandbox, as built.**
 
