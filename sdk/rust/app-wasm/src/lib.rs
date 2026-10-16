@@ -39,7 +39,7 @@ pub mod bindings {
     });
 }
 
-pub use faber_capabilities::{Command, Reading};
+pub use faber_capabilities::{Command, Mount, Reading};
 use std::cell::RefCell;
 
 /// The prefix of the error log line an app writes just before it traps on a panic. The core
@@ -94,6 +94,9 @@ pub trait Host {
     fn latest(&mut self, role: &str, index: u32) -> Option<Reading>;
     /// Like [`Host::latest`], but only a reading this app hasn't polled before.
     fn poll(&mut self, role: &str, index: u32) -> Option<Reading>;
+    /// Where the part at `index` in `role` sits on the machine (x forward, y left; m, rad). Its
+    /// readings are in its own frame: apply this to put them in the machine's.
+    fn mount(&mut self, role: &str, index: u32) -> Option<Mount>;
     /// Takes (or renews) the lease on a role declared with `command = true`.
     fn acquire(&mut self, role: &str, index: u32) -> Result<(), DriveError>;
     fn renew(&mut self, role: &str, index: u32) -> Result<(), DriveError>;
@@ -163,6 +166,10 @@ impl Host for Imports {
 
     fn poll(&mut self, role: &str, index: u32) -> Option<Reading> {
         roles::poll(role, index).map(convert::reading_from_wit)
+    }
+
+    fn mount(&mut self, role: &str, index: u32) -> Option<Mount> {
+        roles::mount_of(role, index).map(convert::mount_from_wit)
     }
 
     fn acquire(&mut self, role: &str, index: u32) -> Result<(), DriveError> {

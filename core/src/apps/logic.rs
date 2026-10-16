@@ -4,6 +4,7 @@
 
 use super::session::{DriveError, Session};
 use crate::sandbox::app_bindings::faber::app as wit_app;
+use crate::sandbox::bindings::faber::capabilities as cap;
 use crate::sandbox::bindings::faber::connector::types as wit;
 use crate::sandbox::{
     self, Limits, LogLimit, MemoryLimit, PANIC_PREFIX, app_bindings, convert, engine, ticks,
@@ -197,6 +198,10 @@ impl wit_app::roles::Host for AppHost {
 
     fn poll(&mut self, role: String, index: u32) -> Option<wit::Reading> {
         self.session.poll(&role, index).map(convert::reading_to_wit)
+    }
+
+    fn mount_of(&mut self, role: String, index: u32) -> Option<cap::types::Mount> {
+        self.session.mount(&role, index).map(convert::mount_to_wit)
     }
 }
 

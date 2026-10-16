@@ -41,6 +41,8 @@ const APP: AppInfo = {
   ui: '/apps/wall-follower/ui/index.html',
 };
 
+const ORIGIN = { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0 };
+
 const GO = {
   capability: 'planar-base@1',
   command: { kind: 'set-velocity', vx: 0.2, vy: 0, omega: 0 },
@@ -54,7 +56,12 @@ function setup(options: { confirm?: boolean } = {}) {
   const frame = { name: 'the app frame' };
   const posted: Record<string, unknown>[] = [];
   let app: AppInfo | null = structuredClone(APP);
-  const parts = [part('lidar1'), simBase('base1'), simDistance('front'), simDistance('back')];
+  const parts = [
+    part('lidar1'),
+    simBase('base1'),
+    simDistance('front', { mount: { ...ORIGIN, x: 0.4, yaw: 0.8 } }),
+    simDistance('back'),
+  ];
   const watches: {
     address: string;
     hz: number;
@@ -300,15 +307,25 @@ describe('the app window host: hostile messages', () => {
 });
 
 describe('the app window host: what an app may do', () => {
-  it('says hello with the app’s roles but never which parts fill them', async () => {
+  it('says hello with the app’s roles and where their parts sit, but never which parts', async () => {
     const s = setup();
     const r = await s.ask({ type: 'hello' });
+    const role = (role: string, capability: string, command: boolean, count: string) => ({
+      role,
+      capability,
+      command,
+      count,
+    });
     expect(r.value).toEqual({
       app: { id: 'wall-follower', name: 'Wall follower', version: '0.1.0' },
       roles: [
-        { role: 'scanner', capability: 'laser-scan@1', command: false, count: '1', parts: 1 },
-        { role: 'wheels', capability: 'planar-base@1', command: true, count: '1', parts: 1 },
-        { role: 'ring', capability: 'distance@1', command: false, count: '1..', parts: 2 },
+        { ...role('scanner', 'laser-scan@1', false, '1'), parts: 1, mounts: [ORIGIN] },
+        { ...role('wheels', 'planar-base@1', true, '1'), parts: 1, mounts: [ORIGIN] },
+        {
+          ...role('ring', 'distance@1', false, '1..'),
+          parts: 2,
+          mounts: [{ ...ORIGIN, x: 0.4, yaw: 0.8 }, ORIGIN],
+        },
       ],
       published: [{ name: 'wall-distance', capability: 'distance@1' }],
       status: { enabled: true, state: 'running' },

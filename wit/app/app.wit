@@ -4,6 +4,7 @@ package faber:app@0.1.0;
 /// `[[requires]]`, never the parts behind them, their ports or their connectors.
 interface roles {
   use faber:connector/types@0.1.0.{reading};
+  use faber:capabilities/types@0.1.0.{mount};
 
   /// One `[[requires]]` entry, and how many parts fill it now.
   record role {
@@ -26,6 +27,10 @@ interface roles {
   /// Like `latest`, but only a reading this app hasn't polled before: call it every tick to
   /// follow a signal ("subscribe by polling").
   poll: func(role: string, index: u32) -> option<reading>;
+  /// Where the part at `index` in `role` sits on the machine (x forward, y left, z up; m and rad):
+  /// its readings are in its own frame, and an app applies this (docs/capabilities.md, rule 3).
+  /// None when there is no such role or part. Never the part's name.
+  mount-of: func(role: string, index: u32) -> option<mount>;
 }
 
 /// Driving the roles declared with `command = true`. The core holds the lease for the app (as

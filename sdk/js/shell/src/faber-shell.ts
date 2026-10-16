@@ -23,6 +23,7 @@ import type {
   CommandResult,
   ErrorBody,
   Hello,
+  Mount,
   PublishedInfo,
   Reading,
   ReplyValues,

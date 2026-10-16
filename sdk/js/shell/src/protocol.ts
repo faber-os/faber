@@ -48,6 +48,21 @@ export interface RoleInfo {
   count: string;
   /** How many parts fill it now (0: none picked yet). */
   parts: number;
+  /**
+   * Where each of those parts sits on the machine, by index: readings are in the part's own
+   * frame, and an app applies its mount to put them in the machine's (x forward, y left; m, rad).
+   */
+  mounts: Mount[];
+}
+
+/** Where a part sits on the machine (m, rad), as in parts.toml. */
+export interface Mount {
+  x: number;
+  y: number;
+  z: number;
+  roll: number;
+  pitch: number;
+  yaw: number;
 }
 
 /** A derived signal the app publishes. */

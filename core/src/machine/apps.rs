@@ -15,7 +15,7 @@
 
 use super::safety::provides_of;
 use super::{ErrorKind, Machine, MachineError, State, write_atomically};
-use crate::apps::manifest::{AppManifest, Count};
+use crate::apps::manifest::AppManifest;
 use crate::apps::{
     self, AppDefinition, AppHandle, AppStatus, BoundPart, BoundRole, DriveError, Driver, RunDeps,
 };
@@ -23,7 +23,7 @@ use crate::connectors::LoadProblem;
 use crate::names::{PartName, SignalAddress};
 use crate::packages;
 use crate::roles::{self, AppsConfig, RolesError};
-use faber_capabilities::Command;
+use faber_capabilities::{Command, Mount};
 use faber_connector::Problem;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -613,9 +613,23 @@ fn desired(st: &State, d: &AppDefinition, config: &Result<AppsConfig, RolesError
                     "Check the part in Parts, or pick another part for the role.",
                 )));
             };
-            role_parts.push(BoundPart { signal: SignalAddress::new(part.clone(), provide.name), part });
+            let mount = mount_of(st, &part);
+            role_parts.push(BoundPart {
+                signal: SignalAddress::new(part.clone(), provide.name),
+                part,
+                mount,
+            });
         }
         bound.push(BoundRole { spec: spec.clone(), parts: role_parts });
     }
     Desired::Run(bound)
+}
+
+/// Where a part sits on the machine, from parts.toml (a sub-part's under its bridge's entry).
+fn mount_of(st: &State, part: &PartName) -> Mount {
+    match part.bridge() {
+        None => st.config.parts.get(part).map(|c| c.mount),
+        Some(b) => st.config.parts.get(&b).and_then(|c| c.parts.get(part.local())).map(|c| c.mount),
+    }
+    .unwrap_or_default()
 }

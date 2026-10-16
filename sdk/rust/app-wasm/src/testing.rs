@@ -1,7 +1,7 @@
 //! A [`Host`] for testing an app's logic on the PC, without wasm or a core: set the readings its
 //! roles see, then look at what it commanded, published, stored and logged.
 
-use crate::{Command, DriveError, Host, LogLevel, Reading, Role};
+use crate::{Command, DriveError, Host, LogLevel, Mount, Reading, Role};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Plays the core for an app under test.
@@ -10,6 +10,9 @@ pub struct TestHost {
     pub roles: Vec<Role>,
     /// The newest reading of each `(role, index)`.
     pub readings: BTreeMap<(String, u32), Reading>,
+    /// Where each `(role, index)` sits on the machine; a part of a role without one is at the
+    /// origin, as in parts.toml.
+    pub mounts: BTreeMap<(String, u32), Mount>,
     /// What `poll` already handed out, so it hands each reading out once.
     polled: BTreeSet<(String, u32)>,
     /// The roles the app holds a lease on.
@@ -48,6 +51,11 @@ impl Host for TestHost {
 
     fn latest(&mut self, role: &str, index: u32) -> Option<Reading> {
         self.readings.get(&(role.to_string(), index)).cloned()
+    }
+
+    fn mount(&mut self, role: &str, index: u32) -> Option<Mount> {
+        let filled = self.roles.iter().any(|r| r.name == role && index < r.parts);
+        filled.then(|| self.mounts.get(&(role.to_string(), index)).copied().unwrap_or_default())
     }
 
     fn poll(&mut self, role: &str, index: u32) -> Option<Reading> {
@@ -123,6 +131,15 @@ mod tests {
 
     fn base() -> Role {
         Role { name: "base".into(), capability: "planar-base@1".into(), command: true, parts: 1 }
+    }
+
+    #[test]
+    fn mounts_are_answered_for_filled_roles_only() {
+        let mut h = TestHost::with_roles(vec![base()]);
+        h.mounts.insert(("base".into(), 0), Mount { x: 0.2, ..Mount::default() });
+        assert_eq!(h.mount("base", 0).map(|m| m.x), Some(0.2));
+        assert_eq!(h.mount("base", 1), None);
+        assert_eq!(h.mount("lidar", 0), None);
     }
 
     #[test]
