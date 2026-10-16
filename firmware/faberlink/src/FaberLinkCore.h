@@ -52,6 +52,7 @@ const uint8_t HELLO = 0x01;
 const uint8_t HELLO_ACK = 0x02;
 const uint8_t DESCRIBE = 0x03;
 const uint8_t PART = 0x04;
+const uint8_t PINS = 0x05;
 const uint8_t HEARTBEAT = 0x10;
 const uint8_t STATUS = 0x11;
 const uint8_t READING = 0x20;
@@ -86,6 +87,24 @@ enum Fault : uint8_t {
 };
 
 enum LogLevel : uint8_t { LOG_INFO = 0, LOG_WARN = 1, LOG_ERROR = 2 };
+
+// What a pin does for its part (PINS). One table for every part class, so Faber can name a pin
+// without knowing the class. New roles get new codes; an older Faber shows them as a plain pin.
+enum PinRole : uint8_t {
+  ROLE_PWM = 1,     // a motor driver's speed input, beside a direction pin
+  ROLE_DIR = 2,     // a motor driver's direction input
+  ROLE_EN = 3,      // a motor driver's enable input (PWM), beside IN1 and IN2
+  ROLE_IN1 = 4,     // a motor driver's first input
+  ROLE_IN2 = 5,     // a motor driver's second input
+  ROLE_STBY = 6,    // a motor driver's standby input
+  ROLE_TRIG = 7,    // a range finder's trigger
+  ROLE_ECHO = 8,    // a range finder's echo
+  ROLE_SIGNAL = 9,  // a sensor's output, read by the board
+  ROLE_SENSE = 10,  // a battery's voltage, through a divider
+};
+
+// "No pin": an optional pin that isn't wired, or (as the analog base) "not known".
+const uint8_t NO_PIN = 0xFF;
 
 // CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF).
 uint16_t crc16(const uint8_t* data, size_t len, uint16_t crc = 0xFFFF);
@@ -158,6 +177,11 @@ class Part {
   virtual uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped);
   // Actuators: go to the safe state now. Writes the safe command's layout and returns its length.
   virtual uint8_t enterSafeState(uint8_t* out);
+  // The pins it uses, as (role, pin) byte pairs (a PinRole, then the Arduino pin number), at
+  // most MAX_PINS of them. Returns the number of bytes written; 0 says nothing, and the board
+  // then sends no PINS for it (a part whose pins the library doesn't know).
+  virtual uint8_t writePins(uint8_t* out) const;
+  static const uint8_t MAX_PINS = 8;
 
  protected:
   ~Part() {}
@@ -189,6 +213,9 @@ class Motor : public Part {
         uint16_t leaseMs = DEFAULT_LEASE_MS);
   // The output now, -1..1.
   float duty() const { return duty_; }
+  // Its speed at full duty (rad/s): with it the motor takes set-velocity too. 0 = unknown.
+  // Set it before Faber asks for the parts (in setup() is fine).
+  void setMaxVelocity(float radS) { maxVelocity_ = radS > 0 && isFinite(radS) ? radS : 0; }
 
   uint8_t writeInfo(uint8_t* out) const override;
   uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
@@ -283,6 +310,9 @@ class Board {
   }
   // Clamped to 100..1000 ms.
   void setHeartbeatTimeout(uint16_t ms);
+  // The pin number of A0 on this board (14 on an Uno, 54 on a Mega), so Faber can name pins
+  // from it on A0, A1, ...; NO_PIN (the default) when it isn't known.
+  void setAnalogBase(uint8_t pin) { analogBase_ = pin; }
   // For tests: answer HELLO as if this library spoke only versions lo..hi.
   void speakVersions(uint8_t lo, uint8_t hi) {
     minVersion_ = lo;
@@ -322,6 +352,7 @@ class Board {
   void sendApplied(Part& part, Cause cause, bool clamped, const uint8_t* cmd, uint8_t len);
   void sendStatus(uint32_t nowMs);
   void sendPart(Part& part);
+  void sendPins(const Part& part);
   void sendEstop(bool engaged);
   Part* find(uint8_t id);
   // Builds a frame in tx_ and writes it COBS-encoded.
@@ -352,6 +383,7 @@ class Board {
   uint8_t lastFault_;
   uint8_t minVersion_;
   uint8_t maxVersion_;
+  uint8_t analogBase_;
   bool rxSeqKnown_;
   bool haveHeartbeat_;
   bool failsafe_;

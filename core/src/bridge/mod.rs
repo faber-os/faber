@@ -22,7 +22,8 @@ pub(crate) mod testboard;
 #[cfg(test)]
 mod tests;
 
-pub use board::{LinkState, SubPart};
+pub use board::{BoardPin, LinkState, SubPart};
+pub use faberlink::message::PinRole;
 pub use probe::{ProbeOutcome, ProbeTiming, probe};
 
 use crate::clock::SharedClock;
@@ -511,7 +512,7 @@ impl<'a> Run<'a> {
                 l.state = LinkState::Describing;
                 self.last_status_us = now;
             }
-            Event::Described(parts) => self.described(l, board::sub_parts(bridge, &parts)),
+            Event::Described { parts, pins } => self.described(l, board::sub_parts(bridge, &parts, &pins)),
             Event::Reading { part, reading } => {
                 if let Some(s) = l.subs.iter().find(|s| s.id == part)
                     && let Some(p) = &s.provide

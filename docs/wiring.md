@@ -133,9 +133,11 @@ sketch calls `userSetup()` and `userLoop()` (and checks they don't block; `delay
 
 - **Guided boards**: from `board.toml`, before anything is uploaded.
 - **Code-mode boards**: the library knows each part's pins, so the board can tell Faber. This
-  needs a small protocol addition: an optional **`PINS`** message after each `PART`
+  needs a small protocol addition: an optional **`PINS`** message with each `PART`
   (`part u8 · (role u8 · pin u8)*`), sent only by a library that has it. An older core ignores
-  the message type, and an older library just doesn't send it. Faber then shows the pins a
+  the message type, and an older library just doesn't send it. *Built 2026-10-16*: it comes just
+  before its `PART` and also says where the analog pins start; see
+  [faberlink.md](faberlink.md) §3. Faber then shows the pins a
   code-mode board uses in Parts and on the drawing, and the editor's completion could warn when a
   new declaration takes a pin already in use.
 - **Boards without FaberLink**: Faber can't know, and says "Unknown: this board doesn't run

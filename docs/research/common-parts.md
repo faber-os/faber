@@ -231,7 +231,7 @@ often than about once per 1 s (DHT11) / 2 s (DHT22). The DHT library disables in
 - **Driver pin shapes differ**, and that matters for FaberLink (§3): `FaberMotor` today is PWM + DIR,
   which fits Cytron-style drivers directly but none of the most common hobby drivers. L298N/L293D/
   TB6612 need **EN(PWM) + IN1 + IN2**; L9110/DRV8833/BTS7960 need **two PWM inputs** (IN1/IN2 or
-  RPWM/LPWM).
+  RPWM/LPWM). *Built 2026-10-16: `FaberMotor` takes all three shapes ([faberlink.md](../faberlink.md) §7).*
 - L298N: users leave the ENA/ENB jumpers on (full speed, no PWM), forget the common ground between the
   motor supply and the Arduino, or feed >12 V with the 5 V jumper fitted.
 - Servos from the Arduino 5 V pin: one SG90 idling may work; two moving, or any MG996R, brown out the

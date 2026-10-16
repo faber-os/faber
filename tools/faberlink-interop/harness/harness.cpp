@@ -25,12 +25,30 @@ class BufferOutput : public faberlink::Output {
   bool overflowed;
 };
 
-// A motor whose "hardware" is a variable, reporting its open-loop velocity as a reading.
+// Pins as a part reports them in PINS: (role, pin) pairs.
+uint8_t putPins(uint8_t* out, uint8_t role1, uint8_t pin1, uint8_t role2 = 0, uint8_t pin2 = 0) {
+  out[0] = role1;
+  out[1] = pin1;
+  if (role2 == 0) return 2;
+  out[2] = role2;
+  out[3] = pin2;
+  return 4;
+}
+
+// A motor whose "hardware" is a variable, reporting its open-loop velocity as a reading. It says
+// it is on a PWM + DIR driver on pwmPin and dirPin.
 class SimMotor : public faberlink::Motor {
  public:
-  SimMotor(const char* name, uint16_t leaseMs)
-      : faberlink::Motor(name, 10.0f, faberlink::MOTOR_DC, leaseMs), driven(0), driveCalls(0) {
+  SimMotor(const char* name, uint16_t leaseMs, uint8_t pwmPin, uint8_t dirPin)
+      : faberlink::Motor(name, 10.0f, faberlink::MOTOR_DC, leaseMs),
+        driven(0),
+        driveCalls(0),
+        pwmPin_(pwmPin),
+        dirPin_(dirPin) {
     setReadingPeriod(50);
+  }
+  uint8_t writePins(uint8_t* out) const override {
+    return putPins(out, faberlink::ROLE_PWM, pwmPin_, faberlink::ROLE_DIR, dirPin_);
   }
   uint8_t writeReading(uint8_t* out, uint32_t) override {
     out[0] = 1;  // velocity present
@@ -47,13 +65,20 @@ class SimMotor : public faberlink::Motor {
     driven = duty;
     driveCalls++;
   }
+
+ private:
+  uint8_t pwmPin_, dirPin_;
 };
 
 class SimBattery : public faberlink::Battery {
  public:
-  SimBattery(faberlink::BatteryChemistry chemistry, uint8_t cells, float capacityAh)
-      : faberlink::Battery("battery", chemistry, cells, capacityAh, 100), volts(12.0f) {}
+  SimBattery(faberlink::BatteryChemistry chemistry, uint8_t cells, float capacityAh, uint8_t pin)
+      : faberlink::Battery("battery", chemistry, cells, capacityAh, 100), volts(12.0f), pin_(pin) {}
+  uint8_t writePins(uint8_t* out) const override { return putPins(out, faberlink::ROLE_SENSE, pin_); }
   float volts;
+
+ private:
+  uint8_t pin_;
 
  protected:
   float measureVolts() override { return volts; }
@@ -61,9 +86,13 @@ class SimBattery : public faberlink::Battery {
 
 class SimDistance : public faberlink::Distance {
  public:
-  explicit SimDistance(const char* name)
-      : faberlink::Distance(name, faberlink::DISTANCE_INFRARED, 0.1f, 0.8f, 0.1f, 50), meters(0.5f) {}
+  SimDistance(const char* name, uint8_t pin)
+      : faberlink::Distance(name, faberlink::DISTANCE_INFRARED, 0.1f, 0.8f, 0.1f, 50), meters(0.5f), pin_(pin) {}
+  uint8_t writePins(uint8_t* out) const override { return putPins(out, faberlink::ROLE_SIGNAL, pin_); }
   float meters;
+
+ private:
+  uint8_t pin_;
 
  protected:
   float measure() override { return meters; }
@@ -136,6 +165,11 @@ const float SimPlanarBase::kMaxOmega = 1.5f;
 // The Mega also hosts `right` (part 1) and `rear` (part 3): motors left, right, then distances
 // front, rear. SENNEP's Mega hosts a planar base `base` (part 0), distances `front` and `rear`
 // (parts 1 and 2) and a 3S Li-ion `battery` (part 3).
+//
+// Pins (PINS): the small board is an Uno (A0 is pin 14): left on PWM 9 and DIR 8, front on A0,
+// the battery on A1. The Mega and SENNEP's Mega (A0 is pin 54): left on 9 and 8, right on 10 and
+// 7, front on A0, rear on A1, the battery on A2. The planar base says nothing about its pins, as a
+// custom part that doesn't override writePins().
 enum Kind { SMALL, MEGA, SENNEP };
 
 struct Harness {
@@ -143,15 +177,16 @@ struct Harness {
           faberlink::BatteryChemistry chemistry = faberlink::BATTERY_LI_ION, uint8_t cells = 3,
           float capacityAh = 0)
       : board(out),
-        motor("left", leaseMs),
-        motor2("right", leaseMs),
-        distance("front"),
-        distance2("rear"),
-        battery(chemistry, cells, capacityAh),
+        motor("left", leaseMs, 9, 8),
+        motor2("right", leaseMs, 10, 7),
+        distance("front", kind == SMALL ? 14 : 54),
+        distance2("rear", 55),
+        battery(chemistry, cells, capacityAh, kind == SMALL ? 15 : 56),
         base("base", leaseMs) {
     board.setIdentity(kind == SENNEP ? "sim-sennep-mega" : kind == MEGA ? "sim-mega" : "sim-board",
                       "faberlink-harness", "0.1.0");
     board.setHeartbeatTimeout(heartbeatTimeoutMs);
+    board.setAnalogBase(kind == SMALL ? 14 : 54);
     if (kind == SENNEP) {
       board.add(base);
       board.add(distance);

@@ -160,6 +160,28 @@ describe('A FaberLink board in Parts', () => {
     expect(viewer?.params).toEqual({ address: 'mega.front/distance', part: 'mega.front' });
   });
 
+  it('shows the pins a part on the board uses, when the board says', async () => {
+    const shell = setup();
+    shell.pushParts([
+      bridgePart('mega'),
+      boardMotor('mega', 'left', {
+        pins: [
+          { role: 'pwm', pin: 9, label: 'D9' },
+          { role: 'dir', pin: 8, label: 'D8' },
+        ],
+      }),
+      boardMotor('mega', 'right'),
+    ]);
+    const left = (await screen.findByText('PWM D9 · DIR D8')).closest('li')!;
+    expect(left).toHaveAttribute('data-part', 'mega.left');
+    expect(within(left).getByTitle('The board’s pins this part uses')).toHaveTextContent(
+      'PWM D9 · DIR D8',
+    );
+    // A board with an older library doesn't say: nothing is shown, not "no pins".
+    const right = document.querySelector<HTMLElement>('li[data-part="mega.right"]')!;
+    expect(within(right).queryByTitle('The board’s pins this part uses')).not.toBeInTheDocument();
+  });
+
   it('shows a latched stop button on the board, and what to do', async () => {
     const shell = setup();
     shell.pushParts([bridgePart('mega', { hardwareEstop: true }), boardMotor('mega', 'left')]);

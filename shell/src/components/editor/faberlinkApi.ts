@@ -56,18 +56,25 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
   },
   {
     name: 'FaberMotor',
-    doc: 'A DC motor on an H-bridge: a PWM pin sets the speed and a pin the direction. Give maxVelocityRadS (its speed at full power, in rad/s) to drive it by speed as well as by power.',
+    doc: 'A DC motor on a motor driver (H-bridge). With two pins: a PWM pin sets the speed and a pin the direction (Cytron MD10C). For other drivers pass the driver first: faberlink::DRIVER_EN_IN1_IN2 with EN, IN1, IN2 and an optional STBY pin (L298N, L293D, TB6612), or faberlink::DRIVER_TWO_PWM with two PWM pins and an optional enable pin (L9110, DRV8833, BTS7960). Stopped, every speed and direction pin is LOW. Give maxVelocityRadS or call setMaxVelocity() (its speed at full power, in rad/s) to drive it by speed as well as by power.',
     library: 'faberlink',
     include: 'FaberLink.h',
     constructors: [
       parseSignature(
         'FaberMotor(const char* name, uint8_t pwmPin, uint8_t directionPin, float maxVelocityRadS = 0)',
       ).overload,
+      parseSignature(
+        'FaberMotor(const char* name, faberlink::MotorDriver driver, uint8_t pin1, uint8_t pin2, uint8_t pin3 = faberlink::NO_PIN, uint8_t pin4 = faberlink::NO_PIN)',
+      ).overload,
     ],
     members: [
       f('void begin()', 'Sets up its pins; FaberLink calls it from begin().'),
       ...inherited([
         ...PART_MEMBERS,
+        f(
+          'void setMaxVelocity(float radS)',
+          'Its speed at full power, in rad/s: Faber can then drive it by speed as well as by power. Call it in setup().',
+        ),
         f(
           'bool active() const',
           'True while it runs on a command from Faber, false while it is stopped (its safe state).',
@@ -144,6 +151,19 @@ export const FABERLINK_CONSTANTS: ApiConstant[] = [
   k('BATTERY_LIFEPO4', 'FaberBattery: lithium iron phosphate cells.'),
   k('BATTERY_NIMH', 'FaberBattery: nickel-metal hydride cells.'),
   k('BATTERY_LEAD_ACID', 'FaberBattery: a lead-acid battery.'),
+  k(
+    'DRIVER_PWM_DIR',
+    'FaberMotor: a driver with a PWM (speed) pin and a direction pin, such as a Cytron MD10C. Pins: PWM, DIR.',
+  ),
+  k(
+    'DRIVER_EN_IN1_IN2',
+    'FaberMotor: a driver with EN (speed, PWM) and IN1/IN2 (direction), such as an L298N, L293D or TB6612. Pins: EN, IN1, IN2, then STBY if it has one.',
+  ),
+  k(
+    'DRIVER_TWO_PWM',
+    'FaberMotor: a driver with two PWM inputs, one per direction, such as an L9110, DRV8833 or BTS7960. Pins: IN1, IN2, then an enable pin if it has one.',
+  ),
+  k('NO_PIN', 'A pin that isn’t connected, for an optional pin you leave out.'),
   k('BATTERY_OK', 'FaberBattery level: charged enough.'),
   k('BATTERY_LOW', 'FaberBattery level: low, charge it soon.'),
   k('BATTERY_CRITICAL', 'FaberBattery level: very low; stop and charge it.'),

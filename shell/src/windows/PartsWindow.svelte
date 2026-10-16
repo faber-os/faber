@@ -11,6 +11,7 @@
     linkText,
     localName,
     mayNeedPauseForUpload,
+    pinsText,
     removable,
   } from '../lib/state/bridges';
   import { partCodeText } from '../lib/state/arduino';
@@ -325,6 +326,10 @@
                     <span class="sep" aria-hidden="true">·</span>
                     <code>{s.capability}</code>
                   {/each}
+                  {#if pinsText(p)}
+                    <span class="sep" aria-hidden="true">·</span>
+                    <span class="pins" title={t('parts.pins.title')}>{pinsText(p)}</span>
+                  {/if}
                 {:else}
                   <span>{connectorName(p.connector)}</span>
                   <span class="sep" aria-hidden="true">·</span>
@@ -642,6 +647,9 @@
   }
   .meta code {
     color: var(--text);
+  }
+  .pins {
+    font-variant-numeric: tabular-nums;
   }
   .sep {
     color: var(--text-faint);

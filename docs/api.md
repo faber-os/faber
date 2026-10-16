@@ -289,6 +289,11 @@ In `GET /api/v0/parts`, a bridge is followed by its sub-parts.
   [The Arduino editor](#the-arduino-editor).
 - A sub-part's `PartInfo` has `bridge` (its bridge's name), the bridge's `port`, its `mount` from
   `[parts.<bridge>.parts.<name>]`, and its one signal with the info the board gave (limits).
+  `pins?` (`BoardPinInfo[]`) is the board's pins it uses, when the board says (a FaberLink
+  library from 2026-10-16 on, for its own part classes; [faberlink.md](faberlink.md) §3): `role`
+  (`pwm`, `dir`, `en`, `in1`, `in2`, `stby`, `trig`, `echo`, `signal`, `sense`, or `other` for a
+  role a newer library added), `pin` (the Arduino pin number, `A0` is 14 on an Uno and 54 on a
+  Mega) and `label` (as printed on the board: `D7`, `A0`). Absent when the board doesn't say.
   While the board is out of reach, every sub-part is `failed` ("Stopped: …") and its leases end
   (`part-failed`). One that parts.toml names but the board doesn't have is `degraded` with
   "Not on the board".

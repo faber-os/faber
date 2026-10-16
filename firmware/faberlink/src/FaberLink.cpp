@@ -12,23 +12,94 @@ uint8_t pendingCount = 0;
 void enqueue(faberlink::Part* p) {
   if (pendingCount < MAX_AUTO_PARTS) pending[pendingCount++] = p;
 }
+
+// One pin in PINS: (role, pin). Returns the bytes written: none for a pin that isn't wired.
+uint8_t putPin(uint8_t* out, uint8_t role, uint8_t pin) {
+  if (pin == faberlink::NO_PIN) return 0;
+  out[0] = role;
+  out[1] = pin;
+  return 2;
+}
+
+void output(uint8_t pin) {
+  if (pin != faberlink::NO_PIN) pinMode(pin, OUTPUT);
+}
 }  // namespace
 
 FaberMotor::FaberMotor(const char* name, uint8_t pwmPin, uint8_t directionPin, float maxVelocityRadS)
-    : faberlink::Motor(name, maxVelocityRadS), pwmPin_(pwmPin), directionPin_(directionPin) {
+    : faberlink::Motor(name, maxVelocityRadS),
+      a_(pwmPin),
+      b_(directionPin),
+      c_(faberlink::NO_PIN),
+      standby_(faberlink::NO_PIN),
+      driver_(faberlink::DRIVER_PWM_DIR) {
   enqueue(this);
 }
 
-void FaberMotor::begin() {
-  pinMode(pwmPin_, OUTPUT);
-  pinMode(directionPin_, OUTPUT);
-  analogWrite(pwmPin_, 0);
+FaberMotor::FaberMotor(const char* name, faberlink::MotorDriver driver, uint8_t pin1, uint8_t pin2,
+                       uint8_t pin3, uint8_t pin4)
+    : faberlink::Motor(name),
+      a_(pin1),
+      b_(pin2),
+      c_(driver == faberlink::DRIVER_EN_IN1_IN2 ? pin3 : faberlink::NO_PIN),
+      standby_(driver == faberlink::DRIVER_EN_IN1_IN2 ? pin4
+               : driver == faberlink::DRIVER_TWO_PWM  ? pin3
+                                                      : faberlink::NO_PIN),
+      driver_(driver) {
+  enqueue(this);
 }
 
+bool FaberMotor::wired() const {
+  if (a_ == faberlink::NO_PIN || b_ == faberlink::NO_PIN) return false;
+  return driver_ != faberlink::DRIVER_EN_IN1_IN2 || c_ != faberlink::NO_PIN;
+}
+
+void FaberMotor::begin() {
+  output(a_);
+  output(b_);
+  output(c_);
+  if (standby_ != faberlink::NO_PIN) {
+    pinMode(standby_, OUTPUT);
+    digitalWrite(standby_, HIGH);
+  }
+  drive(0);
+}
+
+uint8_t FaberMotor::apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped) {
+  if (!wired()) return 0;  // refused: the board reports it, and the motor stays stopped
+  return faberlink::Motor::apply(command, len, out, clamped);
+}
+
+// Every change writes the input that goes LOW before the one that goes HIGH, so the driver never
+// sees both inputs HIGH (a brake) on the way from one direction to the other.
 void FaberMotor::drive(float duty) {
-  digitalWrite(directionPin_, duty < 0 ? HIGH : LOW);
+  if (!wired()) return;
   float magnitude = duty < 0 ? -duty : duty;
-  analogWrite(pwmPin_, static_cast<int>(magnitude * 255.0f + 0.5f));
+  int speed = static_cast<int>(magnitude * 255.0f + 0.5f);
+  if (driver_ == faberlink::DRIVER_TWO_PWM) {
+    analogWrite(duty < 0 ? a_ : b_, 0);
+    analogWrite(duty < 0 ? b_ : a_, speed);
+    return;
+  }
+  if (driver_ == faberlink::DRIVER_EN_IN1_IN2) {
+    uint8_t low = duty > 0 ? c_ : b_;  // forward: IN1 HIGH, IN2 LOW; reverse the other way
+    digitalWrite(low, LOW);
+    digitalWrite(low == b_ ? c_ : b_, duty == 0 ? LOW : HIGH);
+  } else {
+    digitalWrite(b_, duty < 0 ? HIGH : LOW);
+  }
+  analogWrite(a_, speed);
+}
+
+uint8_t FaberMotor::writePins(uint8_t* out) const {
+  using namespace faberlink;
+  const bool en = driver_ == DRIVER_EN_IN1_IN2, two = driver_ == DRIVER_TWO_PWM;
+  const uint8_t pins[4] = {a_, b_, c_, standby_};
+  const uint8_t roles[4] = {en ? ROLE_EN : two ? ROLE_IN1 : ROLE_PWM, en ? ROLE_IN1 : two ? ROLE_IN2 : ROLE_DIR,
+                            ROLE_IN2, ROLE_STBY};
+  uint8_t n = 0;
+  for (uint8_t i = 0; i < 4; i++) n += putPin(out + n, roles[i], pins[i]);
+  return n;
 }
 
 FaberDistance::FaberDistance(const char* name, uint8_t analogPin, float minM, float maxM,
@@ -36,6 +107,8 @@ FaberDistance::FaberDistance(const char* name, uint8_t analogPin, float minM, fl
     : faberlink::Distance(name, kind, minM, maxM, 0.1f), toMeters_(toMeters), maxM_(maxM), pin_(analogPin) {
   enqueue(this);
 }
+
+uint8_t FaberDistance::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_SIGNAL, pin_); }
 
 float FaberDistance::measure() {
   int raw = analogRead(pin_);
@@ -54,6 +127,11 @@ FaberUltrasonic::FaberUltrasonic(const char* name, uint8_t triggerPin, uint8_t e
       triggerPin_(triggerPin),
       echoPin_(echoPin) {
   enqueue(this);
+}
+
+uint8_t FaberUltrasonic::writePins(uint8_t* out) const {
+  uint8_t n = putPin(out, faberlink::ROLE_TRIG, triggerPin_);
+  return n + putPin(out + n, faberlink::ROLE_ECHO, echoPin_);
 }
 
 void FaberUltrasonic::begin() {
@@ -82,6 +160,8 @@ FaberBattery::FaberBattery(const char* name, uint8_t analogPin, float dividerRat
   enqueue(this);
 }
 
+uint8_t FaberBattery::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_SENSE, pin_); }
+
 // The average of a few reads: a battery's voltage is noisy while motors run. Under a millisecond
 // twice a second, so loop() stays fast.
 float FaberBattery::measureVolts() {
@@ -105,6 +185,12 @@ void FaberLink::begin(unsigned long baud, const char* board, const char* firmwar
   board_.setBuildId(static_cast<uint64_t>(FABER_BUILD_ID));
 #endif
   board_.setHeartbeatTimeout(heartbeatTimeoutMs);
+#if defined(ARDUINO_ARCH_AVR) && defined(PIN_A0)
+  // On every AVR board the analog pins are numbered on from A0 (14 on an Uno, 54 on a Mega), so
+  // Faber can show pin 14 as A0. Elsewhere that isn't always so (an ESP32's A4 is below its A0),
+  // and Faber shows plain pin numbers.
+  board_.setAnalogBase(PIN_A0);
+#endif
   for (uint8_t i = 0; i < pendingCount; i++) board_.add(*pending[i]);
   pendingCount = 0;
   board_.begin();

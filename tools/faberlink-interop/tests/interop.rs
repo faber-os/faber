@@ -4,7 +4,7 @@
 
 use faber_capabilities::{Command, Info, Reading, battery, distance, estop, motor};
 use faberlink::frame;
-use faberlink::message::{Applied, Cause, HelloAck, PartInfo, Status, kind};
+use faberlink::message::{Applied, Cause, HelloAck, PartInfo, PartPins, PinRole, PinUse, Status, kind};
 use faberlink::session::{Event, Session, SessionConfig, SessionError, State};
 use faberlink::{Message, frame::Decoder};
 use faberlink_interop::FakeBoard;
@@ -767,4 +767,72 @@ fn the_mega_hosts_two_motors_and_two_distance_sensors_each_on_its_own() {
         _ => None,
     });
     assert_eq!(rear, Some(0.3));
+}
+
+/// Every frame in `bytes`, decoded with the Rust messages.
+fn messages(bytes: &[u8]) -> Vec<Message> {
+    let mut d = frame::Decoder::new();
+    bytes
+        .iter()
+        .filter_map(|&x| {
+            d.push(x).and_then(Result::ok).map(|f| Message::decode(1, f.kind, f.payload).unwrap())
+        })
+        .collect()
+}
+
+fn pins(part: u8, analog_base: u8, list: &[(PinRole, u8)]) -> PartPins {
+    PartPins {
+        part,
+        analog_base: Some(analog_base),
+        pins: list.iter().map(|&(role, pin)| PinUse { role, pin }).collect(),
+    }
+}
+
+#[test]
+fn each_part_says_its_pins_just_before_it() {
+    let mut b = FakeBoard::new(250);
+    let hello =
+        Message::Hello(faberlink::message::Hello { min_version: 1, max_version: 1, max_payload: 250 });
+    b.feed(&hello.to_wire(1, 0).unwrap(), 1);
+    b.take_output();
+    b.feed(&Message::Describe.to_wire(1, 1).unwrap(), 2);
+    let kinds: Vec<(u8, u8)> = messages(&b.take_output())
+        .iter()
+        .map(|m| match m {
+            Message::Pins(p) => (kind::PINS, p.part),
+            Message::Part(p) => (kind::PART, p.id),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(kinds, [(kind::PINS, 0), (kind::PART, 0), (kind::PINS, 1), (kind::PART, 1)]);
+}
+
+#[test]
+fn the_session_gets_each_parts_pins_with_the_parts() {
+    let l = Link::ready(250);
+    // An Uno: A0 is pin 14.
+    assert_eq!(
+        l.session.pins(),
+        [pins(0, 14, &[(PinRole::Pwm, 9), (PinRole::Dir, 8)]), pins(1, 14, &[(PinRole::Signal, 14)])]
+    );
+    assert_eq!(l.session.pins()[1].label(14), "A0");
+    assert_eq!(l.session.stats().rx_undecodable, 0, "every PINS was understood");
+
+    let mut l = Link::on(FakeBoard::mega(250));
+    l.run(20);
+    let all: Vec<_> = l.session.pins().iter().map(|p| (p.part, p.pins.len())).collect();
+    assert_eq!(all, [(0, 2), (1, 2), (2, 1), (3, 1)]);
+    let rear = &l.session.pins()[3];
+    assert_eq!((rear.analog_base, rear.label(rear.pins[0].pin)), (Some(54), "A1".to_string()));
+}
+
+#[test]
+fn a_part_that_doesnt_know_its_pins_sends_none() {
+    // SENNEP's planar base is a custom part without writePins(): no PINS, and nothing breaks.
+    let mut l = Link::on(FakeBoard::sennep(250, 250));
+    l.run(20);
+    assert_eq!(l.session.state(), State::Ready);
+    let said: Vec<u8> = l.session.pins().iter().map(|p| p.part).collect();
+    assert_eq!(said, [1, 2, 3], "the distances and the battery, not the base (part 0)");
+    assert_eq!(l.session.pins()[2].pins, [PinUse { role: PinRole::Sense, pin: 56 }]);
 }

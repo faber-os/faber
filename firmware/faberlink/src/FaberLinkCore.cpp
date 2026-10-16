@@ -146,6 +146,8 @@ uint8_t Part::apply(const uint8_t*, uint8_t, uint8_t*, bool*) { return 0; }
 
 uint8_t Part::enterSafeState(uint8_t*) { return 0; }
 
+uint8_t Part::writePins(uint8_t*) const { return 0; }
+
 // motor@1 command layout: kind (0 set-velocity, 1 set-position, 2 set-duty), value f32.
 Motor::Motor(const char* name, float maxVelocityRadS, MotorKind kind, uint16_t leaseMs)
     : Part(name, MOTOR, leaseMs == 0 ? DEFAULT_LEASE_MS : leaseMs, 0),
@@ -336,6 +338,7 @@ Board::Board(Output& out)
       lastFault_(FAULT_NONE),
       minVersion_(MIN_VERSION),
       maxVersion_(MAX_VERSION),
+      analogBase_(NO_PIN),
       rxSeqKnown_(false),
       haveHeartbeat_(false),
       failsafe_(false),
@@ -420,7 +423,11 @@ void Board::handle(uint8_t k, const uint8_t* p, size_t len, uint32_t nowMs) {
   if (!connected()) return;
   switch (k) {
     case kind::DESCRIBE:
-      for (Part* part = first_; part; part = part->next_) sendPart(*part);
+      // Each part's pins just before it, so Faber has them when the last PART completes the list.
+      for (Part* part = first_; part; part = part->next_) {
+        sendPins(*part);
+        sendPart(*part);
+      }
       break;
     case kind::HEARTBEAT:
       if (len != 1 || (p[0] & 0xFE)) return;
@@ -588,6 +595,18 @@ void Board::sendPart(Part& part) {
   n += putStr(o + n, part.name_, room);
   memcpy(o + n, info, infoLen);
   send(kind::PART, n + infoLen);
+}
+
+// PINS: part u8, analog base u8 (NO_PIN = unknown), then (role u8, pin u8) per pin.
+void Board::sendPins(const Part& part) {
+  uint8_t pins[2 * Part::MAX_PINS];
+  uint8_t n = part.writePins(pins);
+  if (n == 0 || n > sizeof(pins) || n % 2 != 0) return;
+  uint8_t* o = payload();
+  o[0] = part.id_;
+  o[1] = analogBase_;
+  memcpy(o + 2, pins, n);
+  send(kind::PINS, 2 + n);
 }
 
 void Board::sendStatus(uint32_t nowMs) {
