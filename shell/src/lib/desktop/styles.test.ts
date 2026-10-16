@@ -1,4 +1,7 @@
+/// <reference types="node" />
+// Node's types: this test reads a stylesheet from disk (Vitest empties CSS imports, even `?raw`).
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { contrast } from './contrast';
 import {
   APP_COLOURS,
@@ -8,6 +11,7 @@ import {
   resolveStyle,
   styleSwatch,
   styleTokens,
+  type ContrastLevel,
   type ThemeName,
 } from './styles';
 
@@ -172,4 +176,80 @@ describe('higher contrast', () => {
       });
     },
   );
+});
+
+describe('status colours (ok, warn, danger, info) on their soft backgrounds', () => {
+  const STATUS = ['ok', 'warn', 'danger', 'info'] as const;
+  // Notices and badges sit in a window (surface) or on a card or a sunken pane.
+  const BASES = ['--surface', '--surface-2', '--surface-3', '--surface-sunken'];
+  const LEVELS: ContrastLevel[] = ['normal', 'more'];
+
+  describe.each(
+    STYLES.flatMap((s) => THEMES.flatMap((t) => LEVELS.map((l) => [s.id, t, l] as const))),
+  )('%s, %s, %s contrast', (id, theme, level) => {
+    const k = styleTokens(resolveStyle(id), theme, level);
+    const t = (name: string) => {
+      const v = k[name];
+      if (!v) throw new Error(`${id} ${theme} has no ${name}`);
+      return v;
+    };
+
+    it.each(STATUS)('%s: its text colour, the text and muted text read at 4.5:1', (s) => {
+      for (const base of BASES) {
+        const soft = [t(base), t(`--${s}-soft`)];
+        expect(
+          contrast(t(`--${s}-text`), t(base)),
+          `--${s}-text on ${base}`,
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrast(t(`--${s}-text`), soft),
+          `--${s}-text on --${s}-soft`,
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(t('--text'), soft), `--text on --${s}-soft`).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrast(t('--text-muted'), soft),
+          `--text-muted on --${s}-soft`,
+        ).toBeGreaterThanOrEqual(4.5);
+        expect(
+          contrast(t('--accent-ink'), soft),
+          `--accent-ink on --${s}-soft`,
+        ).toBeGreaterThanOrEqual(4.5);
+        // An icon or a dot in the status colour: a graphic, so 3:1.
+        expect(contrast(t(`--${s}`), soft), `--${s} on --${s}-soft`).toBeGreaterThanOrEqual(3);
+      }
+    });
+
+    it('neutral text on its soft background, and text on a solid danger button', () => {
+      for (const base of BASES) {
+        expect(contrast(t('--neutral'), [t(base), t('--neutral-soft')])).toBeGreaterThanOrEqual(
+          4.5,
+        );
+      }
+      expect(contrast(t('--surface'), t('--danger'))).toBeGreaterThanOrEqual(4.5);
+    });
+  });
+});
+
+describe('tokens.css', () => {
+  // Read from disk (Vitest runs in shell/): it empties CSS imports, even `?raw` ones.
+  const tokensCss = readFileSync('src/styles/tokens.css', 'utf8');
+
+  /** The custom properties of the first block whose selector is `selector`. */
+  function block(selector: string): Record<string, string> {
+    const start = tokensCss.indexOf(`${selector} {`);
+    expect(start, selector).toBeGreaterThanOrEqual(0);
+    const body = tokensCss.slice(start, tokensCss.indexOf('\n}', start));
+    const out: Record<string, string> = {};
+    for (const m of body.matchAll(/(--[\w-]+):\s*([^;]+);/g)) out[m[1]!] = m[2]!.trim();
+    return out;
+  }
+
+  it('holds every colour token Aluminium has, with the same value, so the page starts right', () => {
+    const css = { light: block(':root'), dark: block(":root[data-theme='dark']") };
+    for (const theme of THEMES) {
+      for (const [name, value] of Object.entries(styleTokens(resolveStyle('aluminium'), theme))) {
+        expect(css[theme][name], `${name} (${theme})`).toBe(value);
+      }
+    }
+  });
 });

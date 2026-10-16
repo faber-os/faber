@@ -51,6 +51,8 @@ pub enum EndReason {
     PartRestarted,
     /// The part stopped working.
     PartFailed,
+    /// The part was paused (`paused = true`), e.g. to free its port for another program.
+    PartPaused,
     /// The core is stopping.
     Shutdown,
 }
@@ -65,6 +67,7 @@ impl EndReason {
             EndReason::PartRemoved => "part-removed",
             EndReason::PartRestarted => "part-restarted",
             EndReason::PartFailed => "part-failed",
+            EndReason::PartPaused => "part-paused",
             EndReason::Shutdown => "shutdown",
         }
     }

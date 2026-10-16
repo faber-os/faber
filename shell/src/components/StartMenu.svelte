@@ -18,7 +18,7 @@
   import { openEntry } from './fileOps';
   import Icon from './Icon.svelte';
   import { menuTrigger, useMenu, type MenuRequest } from './menuController.svelte';
-  import { appProgram, pinItem, runPinItem } from './programs';
+  import { appProgram, desktopItem, pinItem, runDesktopItem, runPinItem } from './programs';
   import { openAppWindow } from './appWindow';
   import type { AppInfo } from '../lib/state/types';
   import type { WindowDef } from './windowDefs';
@@ -163,9 +163,11 @@
       entries: [
         item('open', t('menu.open'), { icon: 'open' }),
         !!d.program && pinItem(core, d.program),
+        !!d.program && desktopItem(core, d.program),
       ],
       onSelect: (id) => {
         if (d.program && runPinItem(core, d.program, id)) return;
+        if (d.program && runDesktopItem(core, d.program, id)) return;
         if (id === 'open') open(d.kind);
       },
     };

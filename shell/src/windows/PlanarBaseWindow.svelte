@@ -152,7 +152,7 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
-    color: var(--warn);
+    color: var(--warn-text);
     font-weight: 600;
     font-size: var(--text-sm);
   }

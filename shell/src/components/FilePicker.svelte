@@ -222,7 +222,7 @@
   }
   .warn {
     font-size: var(--text-sm);
-    color: var(--warn);
+    color: var(--warn-text);
     font-weight: 600;
   }
 </style>

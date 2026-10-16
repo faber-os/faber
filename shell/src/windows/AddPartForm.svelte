@@ -60,6 +60,10 @@
   let settingsProblem = $state<{ key: string; message: string } | null>(null);
 
   const desktop = useDesktop();
+  /** The installed connectors that didn't load, one item each, for dismissing their notice. */
+  const connectorProblems = $derived(
+    core.connectorProblems.map((p) => `${p.folder}: ${p.message}`),
+  );
   const ports = $derived(core.ports);
 
   // A fresh look each time the form opens: another browser may have installed a package.
@@ -336,8 +340,9 @@
       {:else if connectors === null}
         <p class="muted">{t('addPart.connector.loading')}</p>
       {/if}
-      {#if core.connectorProblems.length > 0}
+      {#if connectorProblems.length > 0 && !desktop.isDismissed('connectorProblems', connectorProblems)}
         <ErrorNotice
+          ondismiss={() => desktop.dismiss('connectorProblems', connectorProblems)}
           tone="warn"
           error={{
             message: t('addPart.connector.problems', { count: core.connectorProblems.length }),
@@ -669,10 +674,10 @@
   .pill {
     font-size: var(--text-xs);
     font-weight: 650;
-    color: var(--ok);
+    color: var(--ok-text);
   }
   .pill.busy {
-    color: var(--warn);
+    color: var(--warn-text);
   }
   .suggest {
     font-size: var(--text-sm);
@@ -685,7 +690,7 @@
   }
   .check-result.found {
     font-weight: 600;
-    color: var(--ok);
+    color: var(--ok-text);
   }
   .check-help {
     margin-top: var(--space-2);
@@ -700,7 +705,7 @@
     padding: 1px 6px;
     border-radius: var(--radius-sm);
     background: var(--info-soft);
-    color: var(--info);
+    color: var(--info-text);
     font-size: var(--text-xs);
     font-weight: 700;
   }
@@ -713,7 +718,7 @@
     color: var(--text-muted);
   }
   .help.bad {
-    color: var(--danger);
+    color: var(--danger-text);
     font-weight: 560;
   }
   .muted {

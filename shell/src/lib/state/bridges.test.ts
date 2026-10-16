@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { boardMotor, bridgePart, part } from '../../test/fakeShell';
 import {
+  mayNeedPauseForUpload,
   boardCheckText,
   isBridge,
   isSubPart,
@@ -49,5 +50,20 @@ describe('bridges', () => {
         parts: 2,
       }),
     ).toBe('FaberLink board: b (f 1)');
+  });
+
+  it('suggests pausing a board for an upload only when its link or state shows trouble', () => {
+    expect(mayNeedPauseForUpload(bridgePart('mega'))).toBe(false);
+    for (const link of ['no-answer', 'lost', 'incompatible'] as const) {
+      expect(mayNeedPauseForUpload(bridgePart('mega', { link })), link).toBe(true);
+    }
+    const failed = { ...bridgePart('mega'), state: { kind: 'failed' as const } };
+    expect(mayNeedPauseForUpload(failed)).toBe(true);
+    const paused = { ...bridgePart('mega', { link: 'lost' }), state: { kind: 'paused' as const } };
+    expect(mayNeedPauseForUpload(paused)).toBe(false);
+    expect(mayNeedPauseForUpload(boardMotor('mega', 'left', { state: { kind: 'failed' } }))).toBe(
+      false,
+    );
+    expect(mayNeedPauseForUpload(part('lidar', { state: { kind: 'failed' } }))).toBe(false);
   });
 });

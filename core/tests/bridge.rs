@@ -421,6 +421,36 @@ async fn unplugging_the_board_fails_the_bridge_stops_its_parts_and_ends_every_le
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn pausing_the_board_frees_its_port_for_the_arduino_ide_and_resuming_starts_it_again() {
+    let c = core();
+    add_mega(&c).await;
+    let program = Program::start(&c, "mega.left", 0.5).await;
+    let (s, paused) = call(&c.app, "POST", "/api/v0/parts/mega/pause", None).await;
+    assert_eq!(s, StatusCode::OK, "{paused}");
+    assert_eq!(paused["state"]["kind"], "paused", "{paused}");
+    drop(program);
+    assert_eq!(left(&c), 0.0, "its motors stopped");
+    assert_eq!(call(&c.app, "GET", "/api/v0/leases", None).await.1, json!([]), "its leases ended");
+    for sub in ["mega.left", "mega.right", "mega.front", "mega.rear"] {
+        assert_eq!(part(&c, sub).await["state"]["kind"], "paused", "{sub}");
+    }
+    let ports = call(&c.app, "GET", "/api/v0/ports", None).await.1;
+    assert_eq!(ports[0]["claimedBy"], Value::Null, "{ports}");
+    let (s, e) = call(&c.app, "POST", "/api/v0/parts/mega.left/lease", Some(json!({"holder": "x"}))).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::CONFLICT, Some("part-paused")), "{e}");
+    let (s, e) = call(&c.app, "POST", "/api/v0/parts/mega.left/pause", None).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::CONFLICT, Some("pause-the-board")), "{e}");
+    let (s, _) = call(&c.app, "POST", "/api/v0/parts/nope/pause", None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, resumed) = call(&c.app, "POST", "/api/v0/parts/mega/resume", None).await;
+    assert_eq!(s, StatusCode::OK, "{resumed}");
+    until("the Mega's parts", async || part(&c, "mega.rear").await["state"]["kind"] == "running").await;
+    let ports = call(&c.app, "GET", "/api/v0/ports", None).await.1;
+    assert_eq!(ports[0]["claimedBy"], "mega", "{ports}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_free_port_is_checked_for_a_board_only_when_asked() {
     let c = core();
     let (_, ports) = call(&c.app, "GET", "/api/v0/ports", None).await;

@@ -65,7 +65,7 @@
     box-shadow: 0 0 0 3px var(--ok-soft);
   }
   .warn {
-    color: var(--warn);
+    color: var(--warn-text);
   }
   .warn .dot,
   .wait .dot {

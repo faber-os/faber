@@ -56,6 +56,6 @@
 
 <style>
   .problem {
-    color: var(--danger);
+    color: var(--danger-text);
   }
 </style>

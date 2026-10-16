@@ -1,6 +1,6 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
-  import { portAvailability } from '../lib/state/portHints';
+  import { labelNamesId, portAvailability } from '../lib/state/portHints';
   import { boardCheckText } from '../lib/state/bridges';
   import {
     boardGuessText,
@@ -197,7 +197,9 @@
           {#each ports as p (p.id)}
             {@const a = portAvailability(p)}
             {@const g = boardGuessText(p, boards)}
-            {@const name = t('flasher.port.option', { label: p.label, id: p.id })}
+            {@const name = labelNamesId(p)
+              ? p.label
+              : t('flasher.port.option', { label: p.label, id: p.id })}
             {@const shown = g ? t('flasher.port.optionGuess', { option: name, guess: g }) : name}
             <option value={p.id}
               >{a.free

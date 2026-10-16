@@ -53,6 +53,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v0/ports/check-board", post(check_board))
         .route("/api/v0/parts", get(parts).post(add_part))
         .route("/api/v0/parts/{name}", delete(remove_part))
+        .route("/api/v0/parts/{name}/pause", post(pause_part))
+        .route("/api/v0/parts/{name}/resume", post(resume_part))
         .route("/api/v0/signals/{part}/{name}", get(signal_value))
         .route("/api/v0/ws", get(ws::upgrade))
         .merge(files::routes())
@@ -255,4 +257,22 @@ async fn add_part(
 async fn remove_part(State(s): State<AppState>, Path(name): Path<String>) -> Result<StatusCode, Failure> {
     blocking(move || s.machine.remove_part(&name)).await??;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Pauses a part: it stops and frees its port (`paused = true` in parts.toml).
+async fn pause_part(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<dto::PartInfo>, Failure> {
+    let view = blocking(move || s.machine.pause_part(&name)).await??;
+    Ok(Json(convert::part(&view)))
+}
+
+/// Resumes a paused part: it starts again.
+async fn resume_part(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<dto::PartInfo>, Failure> {
+    let view = blocking(move || s.machine.resume_part(&name)).await??;
+    Ok(Json(convert::part(&view)))
 }

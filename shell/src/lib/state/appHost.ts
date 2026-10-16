@@ -711,7 +711,10 @@ export class AppHost {
   private status(): AppStatus {
     const app = this.deps.app();
     if (!app) return { enabled: false, state: 'stopped' };
-    const s: AppStatus = { enabled: app.enabled, state: app.state.kind };
+    // An app shares a part's states but is never paused (only parts are); were it ever sent,
+    // stopped is what an app's window can tell its user.
+    const kind = app.state.kind === 'paused' ? 'stopped' : app.state.kind;
+    const s: AppStatus = { enabled: app.enabled, state: kind };
     if (app.state.message) s.message = app.state.message;
     return s;
   }

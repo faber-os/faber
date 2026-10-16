@@ -169,13 +169,13 @@
   }
   .error .lvl,
   .error .msg {
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .error {
     background: var(--danger-soft);
   }
   .warn .lvl {
-    color: var(--warn);
+    color: var(--warn-text);
   }
   .debug .msg {
     color: var(--text-muted);

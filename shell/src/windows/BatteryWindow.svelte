@@ -193,7 +193,7 @@
   }
   [data-level='critical'] .level {
     background: var(--danger-soft);
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .volts {
     font-size: var(--text-xl);

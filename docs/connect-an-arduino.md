@@ -51,7 +51,9 @@ The motor's own power goes to the H-bridge, never through the Arduino.
    is known, put it in rad/s in `FaberMotor left("left", 9, 8, 15.0)`; then Faber can drive it by
    speed as well as by duty (the Drive window drives by speed, so it needs this number). *(tested: compiles for an Uno and a Mega)*
 3. **Upload it** to the board (Sketch → Upload). Then **close the Arduino IDE's Serial Monitor**:
-   only one program can use the port at a time. *(needs hardware)* Or **flash it from Faber**
+   only one program can use the port at a time. *(needs hardware)* Uploading again later, once the
+   board is a part in Faber? **Pause** it in Parts first, or the IDE says "Access denied"; see
+   [If it doesn't work](#if-it-doesnt-work). Or **flash it from Faber**
    instead, see [Flash from Faber](#flash-from-faber). *(tested on simulated bootloaders only;
    needs hardware)*
 4. **Find the board in Faber.** Open Parts → Add part. Under the board's port, press **Check for
@@ -85,6 +87,8 @@ The motor's own power goes to the H-bridge, never through the Arduino.
 |---|---|
 | "No FaberLink answer from COM5" | Is the FaberLink sketch uploaded? Is the baud 115200 (`link.begin(115200, …)`)? Faber keeps asking, so fixing it is enough. |
 | "Could not open COM5" | Close the Arduino IDE's Serial Monitor (or any other program using the port), then wait: Faber retries. |
+| The Arduino IDE can't upload: "Access denied" (on Danish Windows "Adgang nægtet"), or "can't open device" | Faber holds the port while the board is a part. In Parts, press **Pause** on the board: it stops, its motors stop, and the port is free. Upload, then press **Resume**. A paused board stays paused (also when you unplug it or restart Faber) until you resume it. *(tested with a fake board; the IDE side needs hardware)* |
+| The Serial monitor says the port "is used by the part …" | The same: pause the board from the message's **Pause** button (or in Parts), and resume it when you're done. |
 | "speaks FaberLink version …, but this Faber speaks …" | Use the FaberLink library from the same Faber version, and upload again. |
 | "The board stopped answering" | Check the USB cable and the board's power. Keep `loop()` free of `delay()`: `link.poll()` must run often. |
 | "The board stopped its motors: Faber's heartbeat didn't reach it in time" | A loose cable, or a very busy computer. The motor starts again with the next command. |

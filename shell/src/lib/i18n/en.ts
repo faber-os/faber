@@ -106,6 +106,11 @@ export const en = {
   // Program menus (start menu, taskbar, desktop icons)
   'menu.open': 'Open',
   'programs.menu.pin': 'Pin to taskbar',
+  'programs.menu.removeFromDesktop': 'Remove from desktop',
+  // A folder dropped on the desktop in a browser that hands over folders as unreadable files
+  'desktop.drop.noFolders':
+    "Folders can't be dropped here in this browser, so {names} wasn't uploaded. Drop the files inside it instead, or use Upload in Files.",
+  'programs.menu.addToDesktop': 'Add to desktop',
   'programs.menu.unpin': 'Unpin from taskbar',
 
   // Taskbar
@@ -270,6 +275,18 @@ export const en = {
   'parts.menu.monitorKind': 'Open {kind} port in serial monitor',
   'parts.menu.monitor': 'Open port in serial monitor',
   'parts.menu.remove': 'Remove',
+  'parts.menu.pause': 'Pause',
+  'parts.menu.resume': 'Resume',
+  // Pausing a part (docs/glossary.md, Paused): it stops and frees its port until it is resumed
+  'parts.list.pauseNamed': 'Pause {name}',
+  'parts.list.pause': 'Pause',
+  'parts.list.resumeNamed': 'Resume {name}',
+  'parts.list.resume': 'Resume',
+  'parts.list.paused.hint':
+    'Paused. Its port is free for other programs, such as the Arduino IDE, until you resume it.',
+  'parts.list.paused.onBoard': 'Paused with its board. Resume the board to use it again.',
+  'parts.board.uploadHint':
+    'Uploading from the Arduino IDE? Pause this board first, so the IDE can use its port.',
   'parts.menu.busy.self':
     '"{part}" is using this port, and a port can only be open once. Remove the part to talk to the port directly.',
   'parts.menu.busy.other': 'The port is in use by {owner}.',
@@ -434,6 +451,9 @@ export const en = {
   // Port problems (USB devices that never became a port); the count shows only above 1
   'portProblems.count': { one: '({count} times)', other: '({count} times)' },
   'portProblems.whatToTry': 'What to try',
+  // The × on a notice about a lasting problem; it comes back when something new goes wrong
+  'notice.dismiss': 'Dismiss',
+  'notice.dismiss.tooltip': 'Hide this until something new happens',
 
   // Part state badge
   'partState.running': 'Running',
@@ -443,6 +463,7 @@ export const en = {
   'partState.conflict': 'Conflict',
   'partState.invalid': 'Invalid',
   'partState.stopped': 'Stopped',
+  'partState.paused': 'Paused',
 
   // ---- Driving: the Drive window, the e-stop, simulated parts ----------------------------------
 
@@ -456,6 +477,8 @@ export const en = {
   'drive.ended.partRestarted':
     '{part} restarted because its settings changed. Drive again once it is running.',
   'drive.ended.partFailed': '{part} stopped working. Parts says what went wrong.',
+  'drive.ended.partPaused':
+    '{part} was paused, so it stopped. Resume it in Parts to drive it again.',
   'drive.ended.shutdown': 'The Faber core is shutting down, so everything stopped.',
   'drive.ended.unknown': 'Driving {part} ended.',
 
@@ -1036,6 +1059,9 @@ export const en = {
   'serial.port.none': 'No ports found',
   'serial.port.option': '{label} ({id})',
   'serial.port.optionBluetooth': 'Bluetooth: {label} ({id})',
+  'serial.port.optionBluetoothNoId': 'Bluetooth: {label}',
+  // On a "port is used by the part …" error: pauses that part, which frees the port, and opens it
+  'serial.pausePart': 'Pause {part}',
   'serial.port.optionBusy': '{option} · {reason}',
   'serial.baud.label': 'Baud',
   'serial.close': 'Close port',

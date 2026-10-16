@@ -67,10 +67,40 @@ describe('Desktop icons', () => {
     const shell = setup();
     shell.pushSettings({
       ...DEFAULT_SETTINGS,
-      desktop: { icons: [{ key: 'accessory:notes', x: 380, y: 300 }] },
+      desktop: { icons: [{ key: 'accessory:notes', x: 380, y: 300 }], removed: [] },
     });
     await waitFor(() => expect(icon('Notes').style.left).toBe('380px'));
     expect(icon('Notes').style.top).toBe('300px');
+  });
+
+  it('has an icon for every program, also those a saved layout never had', async () => {
+    const shell = setup();
+    // A layout saved by an older Faber, before World, the flasher and Apps existed.
+    shell.pushSettings({
+      ...DEFAULT_SETTINGS,
+      desktop: { icons: [{ key: 'tool:parts', x: 12, y: 12 }], removed: [] },
+    });
+    for (const d of WINDOW_DEFS.filter((d) => d.program)) {
+      expect(icon(d.title), d.kind).toBeInTheDocument();
+    }
+    expect(icon('World')).toBeInTheDocument();
+    expect(icon('Arduino flasher')).toBeInTheDocument();
+    expect(icon('Apps')).toBeInTheDocument();
+    expect(icon('Parts').style.left).toBe('12px');
+  });
+
+  it('removes a program from the desktop for good, and only that one', async () => {
+    const saved = { ...DEFAULT_SETTINGS, desktop: { icons: [], removed: ['tool:logs'] } };
+    const shell = setup([{ method: 'PUT', path: '/api/v0/settings', body: saved }]);
+    await fireEvent.contextMenu(icon('Logs'), { clientX: 50, clientY: 50 });
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Remove from desktop' }));
+    await waitFor(() => expect(shell.fetch.calls.some((c) => c.method === 'PUT')).toBe(true));
+    const put = shell.fetch.calls.find((c) => c.method === 'PUT')!.body as typeof DEFAULT_SETTINGS;
+    expect(put.desktop.removed).toEqual(['tool:logs']);
+    expect(within(desktopList()).queryByRole('option', { name: 'Logs' })).toBeNull();
+    shell.pushSettings(put);
+    expect(within(desktopList()).queryByRole('option', { name: 'Logs' })).toBeNull();
+    expect(icon('Parts')).toBeInTheDocument();
   });
 
   it('lists the Desktop folder again when the core says it changed', async () => {
@@ -190,5 +220,195 @@ describe('Context menus', () => {
     await fireEvent.contextMenu(task, { clientX: 100, clientY: 580 });
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Minimise' }));
     expect(shell.desktop.state.windows[0]!.minimised).toBe(true);
+  });
+});
+
+describe('Selecting several icons', () => {
+  function setupFiles(routes: Parameters<typeof fakeShell>[0] = []) {
+    const shell = fakeShell([
+      listing('home:/Desktop', [
+        { name: 'a.txt', size: 1 },
+        { name: 'b.txt', size: 1 },
+      ]),
+      ...routes,
+    ]);
+    shell.pushSettings({
+      ...DEFAULT_SETTINGS,
+      desktop: {
+        icons: [
+          { key: 'home:/Desktop/a.txt', x: 380, y: 12 },
+          { key: 'home:/Desktop/b.txt', x: 380, y: 108 },
+        ],
+        removed: [],
+      },
+    });
+    render(Desktop, { props: { defs: WINDOW_DEFS }, context: shell.context });
+    return shell;
+  }
+  const selected = () =>
+    within(desktopList())
+      .getAllByRole('option')
+      .filter((o) => o.getAttribute('aria-selected') === 'true')
+      .map((o) => o.textContent?.trim());
+
+  it('adds to the selection with Ctrl+click and Shift+click', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(icon('Parts'));
+    await user.keyboard('{Control>}');
+    await user.click(icon('Files'));
+    await user.keyboard('{/Control}');
+    expect(selected()).toEqual(expect.arrayContaining(['Parts', 'Files']));
+    expect(selected()).toHaveLength(2);
+    await user.click(icon('Notes'));
+    expect(selected()).toEqual(['Notes']);
+  });
+
+  it('selects the icons a rubber band is drawn over', async () => {
+    setupFiles();
+    await within(desktopList()).findByRole('option', { name: 'b.txt' });
+    const list = desktopList();
+    // From an empty spot above the two files, down past both of them.
+    await fireEvent.pointerDown(list, { button: 0, clientX: 370, clientY: 5, pointerId: 1 });
+    await fireEvent.pointerMove(list, { clientX: 420, clientY: 150, pointerId: 1 });
+    expect(screen.getByTestId('rubber-band')).toBeInTheDocument();
+    await fireEvent.pointerUp(list, { clientX: 420, clientY: 150, pointerId: 1 });
+    expect(screen.queryByTestId('rubber-band')).toBeNull();
+    expect(selected()).toEqual(['a.txt', 'b.txt']);
+  });
+
+  it('moves the selected icons together', async () => {
+    const user = userEvent.setup();
+    const shell = setupFiles([{ method: 'PUT', path: '/api/v0/settings', body: DEFAULT_SETTINGS }]);
+    const a = await within(desktopList()).findByRole('option', { name: 'a.txt' });
+    await user.click(a);
+    await user.keyboard('{Control>}');
+    await user.click(icon('b.txt'));
+    await user.keyboard('{/Control}');
+    await fireEvent.pointerDown(a, { button: 0, clientX: 400, clientY: 30, pointerId: 1 });
+    await fireEvent.pointerMove(a, { clientX: 584, clientY: 30, pointerId: 1 });
+    await fireEvent.pointerUp(a, { clientX: 584, clientY: 30, pointerId: 1 });
+    await waitFor(() => expect(shell.fetch.calls.some((c) => c.method === 'PUT')).toBe(true));
+    const put = shell.fetch.calls.find((c) => c.method === 'PUT')!.body as typeof DEFAULT_SETTINGS;
+    const at = (key: string) => put.desktop.icons.find((p) => p.key === key);
+    expect(at('home:/Desktop/a.txt')).toEqual({ key: 'home:/Desktop/a.txt', x: 564, y: 12 });
+    expect(at('home:/Desktop/b.txt')).toEqual({ key: 'home:/Desktop/b.txt', x: 564, y: 108 });
+  });
+
+  it('opens every selected icon with Enter, and trashes the selected files with Delete', async () => {
+    const user = userEvent.setup();
+    const shell = setupFiles([{ method: 'POST', path: '/api/v0/files/trash', status: 204 }]);
+    const a = await within(desktopList()).findByRole('option', { name: 'a.txt' });
+    await user.click(a);
+    await user.keyboard('{Control>}');
+    await user.click(icon('b.txt'));
+    await user.click(icon('Settings'));
+    await user.keyboard('{/Control}');
+    await user.keyboard('{Enter}');
+    // Both text files open in Notes (as its tabs), and Settings opens too.
+    expect(shell.desktop.state.windows.map((w) => w.kind).sort()).toEqual(['notes', 'settings']);
+
+    await user.click(icon('a.txt'));
+    await user.keyboard('{Control>}');
+    await user.click(icon('b.txt'));
+    await user.click(icon('Settings'));
+    await user.keyboard('{/Control}');
+    await user.keyboard('{Delete}');
+    await waitFor(() =>
+      expect(shell.fetch.calls.find((c) => c.path === '/api/v0/files/trash')?.body).toEqual({
+        paths: ['home:/Desktop/a.txt', 'home:/Desktop/b.txt'],
+      }),
+    );
+  });
+});
+
+describe('Dropping files on the desktop', () => {
+  const put = (path: string, mode?: 'create') =>
+    `/api/v0/files/content?path=${encodeURIComponent(`home:/Desktop/${path}`)}${mode ? '&mode=create' : ''}`;
+  const EXISTS = {
+    status: 409,
+    body: { error: { code: 'already-exists', message: 'It is already there.', hint: 'Pick.' } },
+  };
+  const file = (name: string, text = 'hi') => new File([text], name, { type: 'text/plain' });
+  const drop = (dataTransfer: unknown) =>
+    fireEvent.drop(desktopList(), {
+      dataTransfer: { types: ['Files'], ...(dataTransfer as object) },
+    });
+  const puts = (shell: ReturnType<typeof fakeShell>) =>
+    shell.fetch.calls
+      .filter((c) => c.method === 'PUT' && c.path.includes('/files/'))
+      .map((c) => c.path);
+
+  it('uploads every dropped file to the desktop, asking about a name that is taken', async () => {
+    const shell = setup([
+      { method: 'PUT', path: put('new.txt', 'create'), status: 204 },
+      { method: 'PUT', path: put('todo.txt', 'create'), ...EXISTS },
+      { method: 'PUT', path: put('todo 2.txt', 'create'), status: 204 },
+    ]);
+    await within(desktopList()).findByRole('option', { name: 'todo.txt' });
+    await drop({ files: [file('new.txt'), file('todo.txt')] });
+    const dialog = await screen.findByRole('alertdialog', {
+      name: '“todo.txt” is already in Desktop',
+    });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Keep both' }));
+    await waitFor(() =>
+      expect(puts(shell)).toEqual([
+        put('new.txt', 'create'),
+        put('todo.txt', 'create'),
+        put('todo 2.txt', 'create'),
+      ]),
+    );
+    expect(await screen.findByText(/todo\.txt → todo 2\.txt/)).toBeInTheDocument();
+  });
+
+  it('opens a dropped connector package in Install, and uploads nothing for it', async () => {
+    const shell = setup();
+    await drop({ files: [new File([new Uint8Array([1])], 'acme-0.1.0.faberpkg')] });
+    await waitFor(() =>
+      expect(shell.desktop.state.windows.map((w) => w.kind)).toContain('install-package'),
+    );
+    expect(puts(shell)).toEqual([]);
+  });
+
+  it('uploads a dropped folder with what is in it', async () => {
+    const shell = setup([
+      { method: 'POST', path: '/api/v0/files/folder', status: 204 },
+      { method: 'PUT', path: put('photos/a.txt', 'create'), status: 204 },
+    ]);
+    const a = file('a.txt');
+    const fileEntry = {
+      isFile: true,
+      isDirectory: false,
+      name: 'a.txt',
+      file: (ok: (f: File) => void) => ok(a),
+    };
+    let read = false;
+    const dir = {
+      isFile: false,
+      isDirectory: true,
+      name: 'photos',
+      createReader: () => ({
+        readEntries: (ok: (e: unknown[]) => void) => {
+          ok(read ? [] : [fileEntry]);
+          read = true;
+        },
+      }),
+    };
+    await drop({ files: [], items: [{ kind: 'file', webkitGetAsEntry: () => dir }] });
+    await waitFor(() => expect(puts(shell)).toEqual([put('photos/a.txt', 'create')]));
+    const folder = shell.fetch.calls.find((c) => c.path === '/api/v0/files/folder');
+    expect(folder?.body).toEqual({ path: 'home:/Desktop/photos' });
+  });
+
+  it('says so when the browser gives a folder it can not read', async () => {
+    const shell = setup();
+    const folder = new File([], 'photos');
+    // A browser without folder entries hands over a folder as a File that can't be read.
+    Object.defineProperty(folder, 'slice', {
+      value: () => ({ arrayBuffer: () => Promise.reject(new Error('NotFoundError')) }),
+    });
+    await drop({ files: [folder] });
+    expect(await screen.findByText(/Folders can't be dropped here/)).toBeInTheDocument();
+    expect(puts(shell)).toEqual([]);
   });
 });

@@ -235,7 +235,7 @@
   }
   .item.danger,
   .item.danger .glyph {
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .item.danger:focus {
     background: var(--danger-soft);

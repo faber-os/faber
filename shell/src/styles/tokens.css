@@ -79,6 +79,11 @@
   --danger-soft: oklch(0.62 0.19 27 / 0.11);
   --info: oklch(0.47 0.08 245);
   --info-soft: oklch(0.6 0.09 245 / 0.13);
+  /* Status-coloured text, on a surface or on its own soft background (styles.ts, STATUS). */
+  --ok-text: oklch(0.43 0.1 152);
+  --warn-text: oklch(0.45 0.095 68);
+  --danger-text: oklch(0.47 0.17 27);
+  --info-text: oklch(0.43 0.08 245);
   --neutral: oklch(0.46 0.008 250);
   --neutral-soft: oklch(0.5 0.008 250 / 0.11);
 
@@ -110,6 +115,9 @@
   --app-settings: oklch(0.37 0.015 248);
   --app-logs: oklch(0.5 0.1 296);
   --app-viewer: oklch(0.48 0.1 160);
+  --app-drive: oklch(0.5 0.13 40);
+  --app-world: oklch(0.5 0.11 128);
+  --app-flasher: oklch(0.5 0.12 340);
   --app-about: oklch(0.45 0.02 250);
 
   /* File-type icons (components/FileIcon.svelte). The same in every style. */
@@ -148,7 +156,7 @@
 
   --accent: oklch(0.74 0.095 184);
   --accent-hover: oklch(0.79 0.09 184);
-  --accent-text: oklch(0.2 0.03 186);
+  --accent-text: oklch(0.2 0.03 184);
   --accent-soft: oklch(0.74 0.095 184 / 0.14);
   --accent-ink: oklch(0.8 0.085 184);
   --selected: oklch(0.74 0.095 184 / 0.22);
@@ -162,6 +170,10 @@
   --danger-soft: oklch(0.65 0.17 25 / 0.18);
   --info: oklch(0.8 0.08 245);
   --info-soft: oklch(0.7 0.09 245 / 0.17);
+  --ok-text: oklch(0.84 0.11 152);
+  --warn-text: oklch(0.87 0.11 84);
+  --danger-text: oklch(0.82 0.11 25);
+  --info-text: oklch(0.84 0.07 245);
   --neutral: oklch(0.76 0.006 250);
   --neutral-soft: oklch(0.8 0.006 250 / 0.11);
 
@@ -190,6 +202,9 @@
   --app-settings: oklch(0.86 0.01 248);
   --app-logs: oklch(0.78 0.09 296);
   --app-viewer: oklch(0.8 0.1 160);
+  --app-drive: oklch(0.78 0.12 45);
+  --app-world: oklch(0.8 0.11 128);
+  --app-flasher: oklch(0.79 0.11 340);
   --app-about: oklch(0.82 0.02 250);
 
   --file-folder: oklch(0.74 0.13 82);

@@ -19,6 +19,12 @@ import {
   type WindowState,
 } from '../lib/desktop/windows';
 import { TASKBAR_HEIGHTS } from '../lib/desktop/taskbar';
+import {
+  hiddenBy,
+  loadDismissals,
+  saveDismissals,
+  type Dismissals,
+} from '../lib/desktop/dismissals';
 import type { TabsState } from '../lib/desktop/tabs';
 import {
   addRecent,
@@ -71,6 +77,8 @@ export class DesktopController {
   /** Files opened lately (this browser only), newest first, for the start menu. */
   recent = $state.raw<RecentFile[]>([]);
   compact = $derived(isCompactScreen(this.viewport));
+  /** Notices closed with × (this browser only): see lib/desktop/dismissals. */
+  dismissals = $state.raw<Dismissals>({});
 
   readonly kinds: Record<string, WindowKind>;
   private readonly storage: StorageLike | null;
@@ -83,7 +91,19 @@ export class DesktopController {
     this.storage = storage;
     this.geometry = loadGeometry(storage);
     this.recent = loadRecent(storage);
+    this.dismissals = loadDismissals(storage);
     this.viewport = viewport;
+  }
+
+  /** Whether the notice `id`, now showing `items`, was dismissed and has nothing new. */
+  isDismissed(id: string, items: readonly string[]): boolean {
+    return hiddenBy(this.dismissals[id], items);
+  }
+
+  /** Hide the notice `id` until it shows something that isn't in `items`. */
+  dismiss(id: string, items: readonly string[]): void {
+    this.dismissals = { ...this.dismissals, [id]: [...items] };
+    saveDismissals(this.storage, this.dismissals);
   }
 
   /** A file was opened: it goes to the top of the recent files. */

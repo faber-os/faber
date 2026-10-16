@@ -91,6 +91,6 @@
   }
   .problem {
     font-size: var(--text-sm);
-    color: var(--danger);
+    color: var(--danger-text);
   }
 </style>

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
-  import { portAvailability } from '../lib/state/portHints';
+  import { labelNamesId, portAvailability } from '../lib/state/portHints';
   import { defaultRecordingName, validateRecordingName } from '../lib/state/recordingName';
   import { wallParts } from '../lib/desktop/wallClock';
   import {
@@ -61,6 +61,29 @@
   let pre: HTMLPreElement | undefined = $state();
 
   const ports = $derived(core.ports ?? []);
+  /**
+   * The part that holds the port this window tried to open, when the core said so: it can be
+   * paused from here (a tool's claim, like the flasher's, can't).
+   */
+  const holder = $derived.by(() => {
+    if (error?.code !== 'port-claimed' || !openedOn) return null;
+    const by = ports.find((p) => p.id === openedOn?.port)?.claimedBy;
+    return by == null || by.startsWith('tool:') ? null : by;
+  });
+  let pausing = $state(false);
+
+  /** Pauses the part on the port (it frees the port), then opens the port here. */
+  async function pauseAndOpen(part: string) {
+    pausing = true;
+    const r = await core.pausePart(part);
+    pausing = false;
+    if (!r.ok) {
+      error = r.error;
+      return;
+    }
+    if (openedOn) port = openedOn.port;
+    open();
+  }
 
   // Opened for one port (Parts → "Open port in serial monitor"): pick it, if nothing is open.
   $effect(() => {
@@ -196,13 +219,14 @@
         {#if ports.length === 0}<option value="">{t('serial.port.none')}</option>{/if}
         {#each ports as p (p.id)}
           {@const a = portAvailability(p)}
-          {@const name = t(
-            p.kind === 'bluetooth' ? 'serial.port.optionBluetooth' : 'serial.port.option',
-            {
-              label: p.label,
-              id: p.id,
-            },
-          )}
+          {@const name = labelNamesId(p)
+            ? p.kind === 'bluetooth'
+              ? t('serial.port.optionBluetoothNoId', { label: p.label })
+              : p.label
+            : t(p.kind === 'bluetooth' ? 'serial.port.optionBluetooth' : 'serial.port.option', {
+                label: p.label,
+                id: p.id,
+              })}
           <option value={p.id}
             >{a.free ? name : t('serial.port.optionBusy', { option: name, reason: a.text })}</option
           >
@@ -232,7 +256,17 @@
   {/if}
 
   {#if error}
-    <div class="pad"><ErrorNotice {error} /></div>
+    <div class="pad">
+      <ErrorNotice {error}>
+        {#snippet actions()}
+          {#if holder}
+            <button class="btn" disabled={pausing} onclick={() => pauseAndOpen(holder)}
+              >{t('serial.pausePart', { part: holder })}</button
+            >
+          {/if}
+        {/snippet}
+      </ErrorNotice>
+    </div>
   {/if}
 
   {#if status === 'open' && rec === 'naming'}
@@ -475,7 +509,7 @@
     color: var(--text-muted);
   }
   .record .help.bad {
-    color: var(--danger);
+    color: var(--danger-text);
     font-weight: 600;
   }
   .live-rec,

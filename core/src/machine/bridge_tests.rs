@@ -10,10 +10,17 @@ use faberlink::Message;
 use faberlink_interop::{FakeBoard, Motor};
 use std::time::Instant;
 
-struct OnePort;
+/// The board's port, which can be pulled out (gone from the system's list) and put back.
+#[derive(Default)]
+struct OnePort {
+    gone: AtomicBool,
+}
 
 impl SerialDiscovery for OnePort {
     fn list(&self) -> Vec<Discovered> {
+        if self.gone.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
         vec![Discovered { path: "FAKE".into(), usb: None, bluetooth: false }]
     }
 }
@@ -29,12 +36,18 @@ impl DiskDiscovery for NoDisks {
 const PORT: &str = "serial:FAKE";
 
 fn machine_with<B: Board>(dir: &Path, board: B) -> (Arc<Machine>, Wire<B>) {
+    let (m, wire, _port) = machine_on(dir, board);
+    (m, wire)
+}
+
+fn machine_on<B: Board>(dir: &Path, board: B) -> (Arc<Machine>, Wire<B>, Arc<OnePort>) {
     let clock: SharedClock = Arc::new(MonotonicClock::new());
     let wire = Wire::new(board, Arc::clone(&clock));
+    let port = Arc::new(OnePort::default());
     let m = Machine::start(MachineOptions {
         data_dir: dir.to_path_buf(),
         clock,
-        discovery: Arc::new(OnePort),
+        discovery: Arc::clone(&port) as Arc<dyn SerialDiscovery>,
         usb_problems: Arc::new(NoUsbProblems),
         disks: Arc::new(NoDisks),
         opener: Arc::new(wire.clone()),
@@ -49,7 +62,7 @@ fn machine_with<B: Board>(dir: &Path, board: B) -> (Arc<Machine>, Wire<B>) {
         world: Arc::new(simparts::SimWorld::new()),
     })
     .unwrap();
-    (m, wire)
+    (m, wire, port)
 }
 
 struct NoUsbProblems;
@@ -374,4 +387,103 @@ fn a_port_in_use_is_never_checked() {
     assert_eq!(e.code, "port-claimed");
     assert_eq!(wire.opens(), opens);
     assert_eq!(m.check_for_board("serial:NOPE").unwrap_err().code, "unknown-port");
+}
+
+fn parts_toml(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join("config/parts.toml")).unwrap()
+}
+
+#[test]
+fn pausing_a_bridge_frees_its_port_ends_its_leases_and_pauses_its_board_parts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (m, wire) = mega(dir.path());
+    let before = parts_toml(dir.path());
+    let lease = m.request_lease("mega.left", "test", false).unwrap();
+    m.command("mega.left", &lease.id, duty(0.5)).unwrap();
+    let mut events = m.lease_events();
+
+    let paused = m.pause_part("mega").unwrap();
+    assert_eq!(paused.status, PartStatus::Paused);
+    assert_eq!(left(&wire), 0.0, "the lease ended (SAFE) before the port closed");
+    let ended = loop {
+        match events.try_recv() {
+            Ok(LeaseEvent::Ended(e)) => break e,
+            Ok(_) => {}
+            Err(e) => panic!("no lease end: {e:?}"),
+        }
+    };
+    assert_eq!((ended.lease.part.as_str(), ended.reason), ("mega.left", EndReason::PartPaused));
+    assert_eq!(m.ports()[0].claimed_by, None, "the port is free for the Arduino IDE");
+    // The board's parts stay in the list, paused, so it is clear where they went.
+    let names: Vec<_> = m.parts().into_iter().map(|p| (p.name.to_string(), p.status)).collect();
+    assert_eq!(
+        names,
+        ["mega", "mega.left", "mega.right", "mega.front", "mega.rear"]
+            .map(|n| (n.to_string(), PartStatus::Paused))
+    );
+    let e = m.request_lease("mega.left", "test", false).unwrap_err();
+    assert_eq!((e.kind, e.code), (ErrorKind::Conflict, "part-paused"));
+    assert!(e.hint.contains("Resume \"mega\""), "{e:?}");
+    // The serial monitor can open the port now.
+    drop(m.open_serial(PORT, 115_200).unwrap());
+
+    // parts.toml says so, and nothing else in it changed.
+    let text = parts_toml(dir.path());
+    assert_eq!(
+        text.replace(
+            "paused = true
+",
+            ""
+        ),
+        before,
+        "{text}"
+    );
+    assert_eq!(m.pause_part("mega").unwrap().status, PartStatus::Paused, "pausing twice is fine");
+
+    let opens = wire.opens();
+    let resumed = m.resume_part("mega").unwrap();
+    assert_ne!(resumed.status, PartStatus::Paused);
+    status(&m, "mega.left", |s| *s == PartStatus::Running);
+    assert_eq!(wire.opens(), opens + 1);
+    assert_eq!(m.ports()[0].claimed_by.as_deref(), Some("mega"));
+    assert_eq!(parts_toml(dir.path()), before);
+}
+
+#[test]
+fn a_paused_bridge_stays_paused_when_its_port_goes_and_comes_back_and_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let (m, wire, port) = machine_on(dir.path(), FakeBoard::mega(250));
+    add_bridge(&m);
+    status(&m, "mega.left", |s| *s == PartStatus::Running);
+    m.pause_part("mega").unwrap();
+    let opens = wire.opens();
+    port.gone.store(true, Ordering::Relaxed);
+    m.refresh_ports();
+    assert_eq!(view(&m, "mega").unwrap().status, PartStatus::Paused, "not \"port missing\"");
+    port.gone.store(false, Ordering::Relaxed);
+    m.refresh_ports();
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(view(&m, "mega").unwrap().status, PartStatus::Paused);
+    assert_eq!(wire.opens(), opens, "the port was never opened again");
+    assert_eq!(m.ports()[0].claimed_by, None);
+    m.shutdown();
+    drop(m);
+
+    let (m, wire) = machine_with(dir.path(), FakeBoard::mega(250));
+    assert_eq!(view(&m, "mega").unwrap().status, PartStatus::Paused, "parts.toml remembers it");
+    assert_eq!(wire.opens(), 0);
+    m.resume_part("mega").unwrap();
+    status(&m, "mega.left", |s| *s == PartStatus::Running);
+}
+
+#[test]
+fn a_board_part_is_paused_with_its_board_and_unknown_parts_are_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let (m, _wire) = mega(dir.path());
+    let e = m.pause_part("mega.left").unwrap_err();
+    assert_eq!((e.kind, e.code), (ErrorKind::Conflict, "pause-the-board"));
+    assert!(e.hint.contains("\"mega\""), "{e:?}");
+    assert_eq!(m.pause_part("nope").unwrap_err().code, "unknown-part");
+    assert_eq!(m.resume_part("nope").unwrap_err().code, "unknown-part");
+    assert_eq!(view(&m, "mega.left").unwrap().status, PartStatus::Running);
 }

@@ -122,12 +122,74 @@ function ok({ l, c, h }: Oklch, alpha?: number): string {
     : `oklch(${n(l)} ${n(c)} ${n(h)} / ${n(alpha)})`;
 }
 
+/**
+ * The status colours: the same hue in every style, so a warning always looks like a warning.
+ * `base` is for icons, dots and borders (3:1); `soft` is a translucent background for a notice
+ * or a badge; `text` is status-coloured text, on the surfaces and on its own soft background
+ * (4.5:1, and further with higher contrast). Text on a soft background that isn't in the status
+ * colour uses `--text` or `--text-muted`, which styles.test.ts checks there too.
+ */
+const STATUS: Record<
+  'ok' | 'warn' | 'danger' | 'info',
+  Record<ThemeName, { base: Oklch; soft: [Oklch, number]; text: Oklch }>
+> = {
+  ok: {
+    light: {
+      base: { l: 0.47, c: 0.11, h: 152 },
+      soft: [{ l: 0.62, c: 0.12, h: 152 }, 0.14],
+      text: { l: 0.43, c: 0.1, h: 152 },
+    },
+    dark: {
+      base: { l: 0.8, c: 0.12, h: 152 },
+      soft: [{ l: 0.7, c: 0.12, h: 152 }, 0.16],
+      text: { l: 0.84, c: 0.11, h: 152 },
+    },
+  },
+  warn: {
+    light: {
+      base: { l: 0.5, c: 0.11, h: 70 },
+      soft: [{ l: 0.8, c: 0.13, h: 80 }, 0.24],
+      text: { l: 0.45, c: 0.095, h: 68 },
+    },
+    dark: {
+      base: { l: 0.84, c: 0.12, h: 82 },
+      soft: [{ l: 0.8, c: 0.13, h: 82 }, 0.16],
+      text: { l: 0.87, c: 0.11, h: 84 },
+    },
+  },
+  danger: {
+    light: {
+      base: { l: 0.5, c: 0.18, h: 27 },
+      soft: [{ l: 0.62, c: 0.19, h: 27 }, 0.11],
+      text: { l: 0.47, c: 0.17, h: 27 },
+    },
+    dark: {
+      base: { l: 0.76, c: 0.14, h: 25 },
+      soft: [{ l: 0.65, c: 0.17, h: 25 }, 0.18],
+      text: { l: 0.82, c: 0.11, h: 25 },
+    },
+  },
+  info: {
+    light: {
+      base: { l: 0.47, c: 0.08, h: 245 },
+      soft: [{ l: 0.6, c: 0.09, h: 245 }, 0.13],
+      text: { l: 0.43, c: 0.08, h: 245 },
+    },
+    dark: {
+      base: { l: 0.8, c: 0.08, h: 245 },
+      soft: [{ l: 0.7, c: 0.09, h: 245 }, 0.17],
+      text: { l: 0.84, c: 0.07, h: 245 },
+    },
+  },
+};
+
 /** `more`: Settings → Accessibility → Higher contrast. */
 export type ContrastLevel = 'normal' | 'more';
 
 /**
  * Every colour token of one style in one theme, as CSS custom properties (`--surface` …).
- * Status colours (ok, warn, danger, info) are not part of a style: they mean the same everywhere.
+ * Status colours (ok, warn, danger, info) are the same in every style (STATUS), but are made here
+ * too, so each style is checked with the status colours laid over its own surfaces.
  *
  * With `more` contrast, text, lines, the focus ring and accent text move further from the
  * backgrounds (styles.test.ts holds them to a stricter bar); the backgrounds stay, so every style
@@ -214,6 +276,15 @@ export function styleTokens(
           '--focus-ring': at(0.02, 0.005),
           '--scan-origin': at(0),
         };
+
+  for (const [name, colours] of Object.entries(STATUS)) {
+    const { base, soft, text } = colours[theme];
+    // Higher contrast moves status text further from the backgrounds, like the other text.
+    const dl = level === 'more' ? (theme === 'light' ? -0.1 : 0.07) : 0;
+    tokens[`--${name}`] = ok(base);
+    tokens[`--${name}-soft`] = ok(soft[0], soft[1]);
+    tokens[`--${name}-text`] = ok({ ...text, l: Math.min(0.96, text.l + dl) });
+  }
 
   if (level === 'more') {
     const clampL = (l: number) => Math.min(0.96, Math.max(0.2, l));

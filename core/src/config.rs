@@ -26,12 +26,22 @@ pub struct PartConfig {
     /// (`left` in `[parts.mega.parts.left]`). The board says which parts it has; this only sets
     /// where they sit. Empty for every other part.
     pub parts: BTreeMap<String, SubPartConfig>,
+    /// `paused = true`: the part stays in parts.toml but doesn't run, so its port is free for
+    /// another program (the Arduino IDE uploading a sketch, say) until it is resumed.
+    pub paused: bool,
 }
 
 impl PartConfig {
-    /// A part with no sub-parts.
+    /// A running part with no sub-parts.
     pub fn new(connector: impl Into<String>, source: Source, mount: Mount, settings: toml::Table) -> Self {
-        PartConfig { connector: connector.into(), source, mount, settings, parts: BTreeMap::new() }
+        PartConfig {
+            connector: connector.into(),
+            source,
+            mount,
+            settings,
+            parts: BTreeMap::new(),
+            paused: false,
+        }
     }
 
     /// True when `other` runs the same way: everything but the sub-parts' mounts, which change
@@ -41,6 +51,7 @@ impl PartConfig {
             && self.source == other.source
             && self.mount == other.mount
             && self.settings == other.settings
+            && self.paused == other.paused
     }
 }
 
@@ -170,6 +181,8 @@ struct RawPart {
     settings: toml::Table,
     #[serde(default)]
     parts: BTreeMap<String, SubPartConfig>,
+    #[serde(default)]
+    paused: bool,
 }
 
 /// 1-based line and column of a byte offset.
@@ -231,6 +244,7 @@ pub fn parse(text: &str) -> Result<PartsConfig, ConfigError> {
                 mount: p.mount,
                 settings: p.settings,
                 parts: p.parts,
+                paused: p.paused,
             },
         );
     }
@@ -398,6 +412,31 @@ pub fn add_part(text: &str, name: &PartName, cfg: &PartConfig) -> Result<String,
     move_trailing_comments_above(&mut doc, &mut t);
     let parts = doc.get_mut("parts").and_then(|p| p.as_table_mut()).expect("checked above");
     parts.insert(name.as_str(), toml_edit::Item::Table(t));
+    Ok(doc.to_string())
+}
+
+/// Pauses (`paused = true`) or resumes (the line goes) `[parts.<name>]`, keeping everything else
+/// in the file as it was, comments included. Pausing a paused part changes nothing.
+pub fn set_paused(text: &str, name: &PartName, paused: bool) -> Result<String, ConfigError> {
+    let mut doc = edit_doc(text)?;
+    let Some(part) =
+        doc.get_mut("parts").and_then(|p| p.get_mut(name.as_str())).and_then(|t| t.as_table_like_mut())
+    else {
+        return Err(ConfigError {
+            line: None,
+            column: None,
+            message: format!("There is no part called \"{name}\" in parts.toml."),
+            hint: "Refresh the parts list; it may have been removed.".into(),
+        });
+    };
+    if part.get("paused").and_then(|v| v.as_bool()) == Some(paused) {
+        return Ok(text.to_string());
+    }
+    if paused {
+        set_value(part, "paused", true.into());
+    } else {
+        part.remove("paused");
+    }
     Ok(doc.to_string())
 }
 
@@ -853,6 +892,73 @@ port = "usb:10c4:ea60"
         assert!(parse(&out).unwrap().parts[&name("mega")].parts.is_empty(), "{out}");
         assert!(!out.contains("parts.mega.parts"), "{out}");
         assert_eq!(remove_sub_part(&out, &name("mega"), "nope").unwrap(), out);
+    }
+
+    #[test]
+    fn a_part_is_paused_with_paused_true_and_resumed_without_it() {
+        let c = parse(BRIDGE).unwrap();
+        assert!(!c.parts[&name("mega")].paused, "not paused unless it says so");
+        let paused = set_paused(BRIDGE, &name("mega"), true).unwrap();
+        let c = parse(&paused).unwrap();
+        assert!(c.parts[&name("mega")].paused);
+        assert!(!c.parts[&name("lidar")].paused, "only that part");
+        assert!(!c.parts[&name("mega")].runs_like(&parse(BRIDGE).unwrap().parts[&name("mega")]));
+        // Everything else in the file stays as it was, the comments too.
+        for kept in [
+            "# My robot",
+            "# the Mega, on the left USB port",
+            "# the left wheel's motor",
+            "# the IR sensor",
+            "# keep me",
+        ] {
+            assert!(
+                paused.contains(kept),
+                "{kept} is gone:
+{paused}"
+            );
+        }
+        let line = paused.lines().position(|l| l == "paused = true").expect("written as paused = true");
+        let port = paused.lines().position(|l| l == "port = \"usb:2341:0042\"").unwrap();
+        assert_eq!(
+            line,
+            port + 1,
+            "in the part's own table, after its port:
+{paused}"
+        );
+        assert_eq!(
+            set_paused(&paused, &name("mega"), true).unwrap(),
+            paused,
+            "pausing twice changes nothing"
+        );
+        assert_eq!(
+            set_paused(&paused, &name("mega"), false).unwrap(),
+            BRIDGE,
+            "resuming takes the line out again"
+        );
+    }
+
+    #[test]
+    fn a_paused_comment_survives_a_resume_and_a_pause() {
+        let text = "[parts.a]
+connector = \"x\"
+port = \"p\"
+paused = true # while I use the Arduino IDE
+";
+        assert!(parse(text).unwrap().parts[&name("a")].paused);
+        let out = set_paused(text, &name("a"), true).unwrap();
+        assert_eq!(out, text);
+        let wrong = "[parts.a]
+connector = \"x\"
+port = \"p\"
+paused = \"yes\"
+";
+        let e = parse(wrong).unwrap_err();
+        assert_eq!(e.line, Some(4), "{e:?}");
+    }
+
+    #[test]
+    fn pausing_an_unknown_part_is_an_error() {
+        assert!(set_paused(BRIDGE, &name("nope"), true).is_err());
     }
 
     #[test]

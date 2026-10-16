@@ -18,8 +18,6 @@ export interface WindowDef extends WindowKind {
    * pinned to the taskbar and have a desktop icon. Viewers and dialogs have none.
    */
   program?: string;
-  /** Shown as an icon on the desktop. */
-  onDesktop?: boolean;
   /** Its icon colour: `--app-<colour>` (src/lib/desktop/styles.ts, APP_COLOURS). */
   colour: string;
   /** One line for the start menu. */

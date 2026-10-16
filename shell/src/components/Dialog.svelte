@@ -125,7 +125,7 @@
     letter-spacing: -0.005em;
   }
   .danger .title {
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .body {
     display: grid;
