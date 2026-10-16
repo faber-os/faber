@@ -62,6 +62,18 @@ pub struct Flashed {
     pub pages: u32,
 }
 
+/// What reading a program back found ([`read_back`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadBack {
+    /// Pages read.
+    pub pages: u32,
+    /// The first address where the board differs from the program, or `None`: the same.
+    pub first_difference: Option<u32>,
+    /// Every byte read, page after page in address order: the pages the program would be
+    /// written in, exactly as [`flash()`] writes them (unused bytes of a page are erased, `0xFF`).
+    pub read: Vec<u8>,
+}
+
 /// One bootloader protocol.
 pub(crate) trait Bootloader {
     /// Tries to get the bootloader's attention. `false`: it never answered.
@@ -92,22 +104,7 @@ pub fn flash(
     report(progress, Stage::Connecting, 0);
 
     let mut link = Link::new(port);
-    let mut boot: Box<dyn Bootloader> = match board.protocol {
-        Protocol::Stk500v1 => Box::new(Stk500v1::new(*timing)),
-        Protocol::Stk500v2 => Box::new(Stk500v2::new(*timing)),
-    };
-    link.drain(timing.quiet)?;
-    link.reset()?;
-    link.drain(timing.quiet)?;
-    if !boot.sync(&mut link)? {
-        return Err(FlashError::NoSync { board: board.name });
-    }
-    boot.enter(&mut link)?;
-    let found = boot.signature(&mut link)?;
-    if found != board.signature {
-        let _ = boot.leave(&mut link);
-        return Err(FlashError::wrong_signature(board, found));
-    }
+    let mut boot = connect(&mut link, board, timing)?;
 
     let result = (|| {
         let page = board.page_bytes;
@@ -140,4 +137,69 @@ pub fn flash(
     }
     report(progress, Stage::Done, total);
     Ok(Flashed { bytes: image.end(), pages: pages.len() as u32 })
+}
+
+/// Resets the board into its bootloader, gets its attention and checks the chip. Nothing is read
+/// or written before the chip is known to be the board's.
+fn connect(link: &mut Link, board: &Board, timing: &Timing) -> Result<Box<dyn Bootloader>, FlashError> {
+    let mut boot: Box<dyn Bootloader> = match board.protocol {
+        Protocol::Stk500v1 => Box::new(Stk500v1::new(*timing)),
+        Protocol::Stk500v2 => Box::new(Stk500v2::new(*timing)),
+    };
+    link.drain(timing.quiet)?;
+    link.reset()?;
+    link.drain(timing.quiet)?;
+    if !boot.sync(link)? {
+        return Err(FlashError::NoSync { board: board.name });
+    }
+    boot.enter(link)?;
+    let found = boot.signature(link)?;
+    if found != board.signature {
+        let _ = boot.leave(link);
+        return Err(FlashError::wrong_signature(board, found));
+    }
+    Ok(boot)
+}
+
+/// Reads back the pages `image` would be written in, from the `board` on `port`, and compares
+/// them with it. It writes nothing, but it resets the board (the sketch restarts) to reach the
+/// bootloader, like [`flash()`] does. The progress goes Connecting → Verifying → Done.
+pub fn read_back(
+    port: &mut dyn Port,
+    board: &Board,
+    image: &Image,
+    timing: &Timing,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<ReadBack, FlashError> {
+    if image.end() > board.room {
+        return Err(FlashError::TooLarge { board: board.name, end: image.end(), room: board.room });
+    }
+    let page = board.page_bytes;
+    let pages = image.pages(page);
+    let total = pages.len() as u32 * page;
+    progress(Progress { stage: Stage::Connecting, done: 0, total });
+    let mut link = Link::new(port);
+    let mut boot = connect(&mut link, board, timing)?;
+    let mut read = Vec::with_capacity(total as usize);
+    let mut first_difference = None;
+    for (i, &address) in pages.iter().enumerate() {
+        let got = match boot.read_page(&mut link, address, page as usize) {
+            Ok(got) => got,
+            Err(e) => {
+                let _ = boot.leave(&mut link);
+                return Err(e);
+            }
+        };
+        let wanted = image.page(address, page);
+        if first_difference.is_none()
+            && let Some(k) = (0..wanted.len()).find(|&k| got.get(k) != Some(&wanted[k]))
+        {
+            first_difference = Some(address + k as u32);
+        }
+        read.extend_from_slice(&got);
+        progress(Progress { stage: Stage::Verifying, done: (i as u32 + 1) * page, total });
+    }
+    boot.leave(&mut link)?;
+    progress(Progress { stage: Stage::Done, done: total, total });
+    Ok(ReadBack { pages: pages.len() as u32, first_difference, read })
 }

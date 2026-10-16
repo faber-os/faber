@@ -6,6 +6,8 @@
 //! - [`stk500v1`] (Optiboot on the Uno and Nano) and [`stk500v2`] (the Mega 2560's bootloader)
 //!   speak the two bootloader protocols.
 //! - [`flash()`] puts an image on a board: reset, sync, check the signature, write, read back.
+//! - [`read_back()`] reads the pages of an image back from a board and compares them, writing
+//!   nothing: how Faber checks which program a board still runs.
 //! - [`sim`] holds simulated bootloaders, written from the protocol specs (AVR061, AVR068), so
 //!   everything above is tested without a board.
 //!
@@ -22,7 +24,7 @@ pub mod stk500v2;
 
 pub use board::{BOARDS, Board, Detected, Protocol, detect};
 pub use error::FlashError;
-pub use flasher::{Flashed, Progress, Stage, Timing, flash};
+pub use flasher::{Flashed, Progress, ReadBack, Stage, Timing, flash, read_back};
 pub use hex::{HexError, Image};
 pub use port::Port;
 

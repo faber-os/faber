@@ -3,7 +3,7 @@
 
 use crate::board::{self, MEGA2560, NANO_OLD, Protocol, UNO};
 use crate::sim::{Faults, SimBoard, SimPort};
-use crate::{FlashError, Flashed, Image, Progress, Stage, Timing, flash};
+use crate::{FlashError, Flashed, Image, Progress, Stage, Timing, flash, read_back};
 
 /// A program of `len` bytes that isn't all one value, so a page in the wrong place shows.
 fn program(len: usize) -> Image {
@@ -202,4 +202,70 @@ fn optiboot_answers_byte_for_byte_as_avr061_says() {
     assert_eq!(port.sent[14 + 128], 0x20);
     // And it ends with LEAVE_PROGMODE.
     assert_eq!(&port.sent[port.sent.len() - 2..], &[0x51, 0x20]);
+}
+
+/// Flashes `image` on a fresh simulated board, then hands back the port for the next step.
+fn flashed(board: &board::Board, image: &Image) -> SimPort {
+    let mut port = SimPort::new(SimBoard::new(board));
+    flash(&mut port, board, image, &Timing::default(), &mut |_| {}).unwrap();
+    port
+}
+
+#[test]
+fn reading_back_the_same_program_finds_no_difference_and_writes_nothing() {
+    for board in [&UNO, &MEGA2560] {
+        let image = program(3000);
+        let mut port = flashed(board, &image);
+        let written = port.board.pages_written();
+        let mut seen = Vec::new();
+        let r = read_back(&mut port, board, &image, &Timing::default(), &mut |p| seen.push(p)).unwrap();
+        let pages = image.pages(board.page_bytes).len() as u32;
+        assert_eq!(r.pages, pages, "{}", board.id);
+        assert_eq!(r.first_difference, None);
+        let expected: Vec<u8> =
+            image.pages(board.page_bytes).iter().flat_map(|&a| image.page(a, board.page_bytes)).collect();
+        assert_eq!(r.read, expected, "every byte of every page the program was written in");
+        assert_eq!(port.board.pages_written(), written, "reading back never writes");
+        assert_eq!(port.board.resets(), 2, "it resets the board, like flashing does");
+        assert!(port.board.started_new_sketch(), "and leaves the bootloader, so the sketch runs again");
+        assert_eq!(seen.first().map(|p| p.stage), Some(Stage::Connecting));
+        assert_eq!(seen.iter().filter(|p| p.stage == Stage::Verifying).count() as u32, pages);
+        assert_eq!(seen.last().map(|p| p.stage), Some(Stage::Done));
+    }
+}
+
+#[test]
+fn reading_back_other_code_finds_the_first_difference() {
+    let on_board = program(3000);
+    let mut port = flashed(&UNO, &on_board);
+    let mut recorded = on_board.bytes().to_vec();
+    recorded[0x345] ^= 0x10;
+    let recorded = Image::from_bytes(&recorded);
+    let r = read_back(&mut port, &UNO, &recorded, &Timing::default(), &mut |_| {}).unwrap();
+    assert_eq!(r.first_difference, Some(0x345));
+
+    // A shorter recorded program: the board's longer one differs in the padding of the last page.
+    let mut port = flashed(&UNO, &on_board);
+    let r = read_back(&mut port, &UNO, &program(1000), &Timing::default(), &mut |_| {}).unwrap();
+    assert_eq!(r.first_difference, Some(1000), "erased flash is 0xFF; the board has code there");
+}
+
+#[test]
+fn reading_back_a_board_that_does_not_answer_says_so() {
+    let sim = SimBoard::new(&UNO).with_faults(Faults { no_bootloader: true, ..Faults::default() });
+    let mut port = SimPort::new(sim);
+    let r = read_back(&mut port, &UNO, &program(300), &Timing::default(), &mut |_| {});
+    assert_eq!(r.unwrap_err(), FlashError::NoSync { board: "Arduino Uno" });
+    // The wrong chip is refused before anything is read.
+    let mut port = SimPort::new(SimBoard::with_chip(Protocol::Stk500v1, [0x1E, 0x94, 0x06], 16_384));
+    let r = read_back(&mut port, &UNO, &program(300), &Timing::default(), &mut |_| {});
+    assert!(matches!(r, Err(FlashError::WrongSignature { .. })), "{r:?}");
+}
+
+#[test]
+fn reading_back_a_program_too_big_for_the_board_is_refused_untouched() {
+    let mut port = SimPort::new(SimBoard::new(&UNO));
+    let r = read_back(&mut port, &UNO, &program(32_257), &Timing::default(), &mut |_| {});
+    assert!(matches!(r, Err(FlashError::TooLarge { .. })), "{r:?}");
+    assert!(port.sent.is_empty() && port.board.resets() == 0);
 }
