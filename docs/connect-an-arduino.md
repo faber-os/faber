@@ -25,8 +25,10 @@ tested against simulated bootloaders only: it still needs a run on a real Uno an
 - A DC motor on an H-bridge (motor driver) with a PWM input for speed and an input for direction,
   e.g. an L298N or a TB6612, with its own motor power supply.
 - An analog distance sensor, here a Sharp GP2Y0A21 infrared sensor (10–80 cm).
-- The Arduino IDE, once, to compile the sketch and upload it. Or compile it there and put it on
-  the board with Faber's own [Arduino flasher](#flash-from-faber).
+- Faber's own [Arduino editor](arduino-editor.md) (Start → Arduino), which compiles the sketch on
+  the machine and uploads it, with the FaberLink library built in. Or the Arduino IDE, once, to
+  compile the sketch and upload it (or compile it there and put it on the board with Faber's
+  [Arduino flasher](#flash-from-faber)).
 - A computer running Faber.
 
 ## Wiring
@@ -42,6 +44,11 @@ tested against simulated bootloaders only: it still needs a run on a real Uno an
 The motor's own power goes to the H-bridge, never through the Arduino.
 
 ## Steps
+
+**With Faber's Arduino editor** (Start → Arduino), steps 1–3 are: New sketch → "FaberLink: motor
+and distance sensor" → Upload. The library is built in, nothing to install. See
+[arduino-editor.md](arduino-editor.md). *(tested with a stand-in compiler and simulated
+bootloaders; needs hardware)* With the Arduino IDE:
 
 1. **Install the library.** Copy the folder `firmware/faberlink` from the Faber repository into
    your Arduino libraries folder (`Documents/Arduino/libraries/`) and rename it `FaberLink`.
@@ -71,7 +78,9 @@ The motor's own power goes to the H-bridge, never through the Arduino.
 ## What you should see
 
 - In Parts: `arduino` with "Connected" and the board's name and firmware, and below it
-  `arduino.left` and `arduino.front`, each Running.
+  `arduino.left` and `arduino.front`, each Running. A sketch uploaded from Faber's Arduino editor
+  also shows "Code from Faber: <sketch>" (its build id says so); one from the Arduino IDE shows
+  "Code not flashed from Faber (unknown)".
 - Opening `arduino.front` shows the distance as a bar and a plot, about 20 times a second.
 - A program can drive the motor too: take the lease with
   `POST /api/v0/parts/arduino.left/lease` and send commands
@@ -98,7 +107,9 @@ sends a line to Faber's log instead.
 ## Flash from Faber
 
 Faber can put the compiled sketch on the board itself, over the board's USB cable, so the board can
-be plugged into the robot's computer and never into the PC with the Arduino IDE. It talks to the
+be plugged into the robot's computer and never into the PC with the Arduino IDE. To write and
+compile the sketch on the machine too, use the [Arduino editor](arduino-editor.md): its Upload goes
+through this same flasher. The flasher below is for a `.hex` you already have. It talks to the
 bootloader every Arduino comes with: Optiboot on the Uno and Nano, and the Mega 2560's own. It works
 for any sketch, not only FaberLink ones.
 

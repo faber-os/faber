@@ -424,6 +424,9 @@ second to start after the reset, then closes the port.
   ways, no answer, another version, unplug and reconnect, new firmware, a board fault, status
   silence, a base's built-from, and the probe.
 - `core/src/machine/bridge_tests.rs`: leases, commands, Not on the board, removing, mounts.
+- `core/tests/arduino.rs`: a sketch uploaded from the Arduino editor, then run as the C++ board
+  with that build id: Parts and `GET /api/v0/arduino/boards/{port}/code` prove the code live; the
+  same sketch without a build id is "different" ([arduino-editor.md](arduino-editor.md)).
 - `core/tests/bridge.rs`: **the roadmap's proof**, through the HTTP API with the C++ board.
   The Mega shows two motors and two distance sensors; a program with a lease drives a motor;
   killing it stops the motor within the lease time through `SAFE` (with the board's own lease set

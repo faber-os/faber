@@ -217,7 +217,7 @@ pub fn install_cli(
             InstallError::new(
                 "download-failed",
                 format!("Faber could not download {what}: {e}."),
-                "Check that this machine is on the internet (Settings → Network), then try again.",
+                "Check that this machine is on the internet (its network cable or Wi-Fi), then try again.",
             )
         };
         let sums_file = staging.join("checksums.txt");
