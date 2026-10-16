@@ -136,7 +136,11 @@ impl AppHandle {
     fn shutdown(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(t) = self.thread.take() {
-            let _ = t.join();
+            // Dropped on the app's own thread (it held the machine's last reference): it sees the
+            // stop flag and ends by itself once this returns; waiting for it here never would.
+            if t.thread().id() != std::thread::current().id() {
+                let _ = t.join();
+            }
         }
     }
 }
@@ -387,6 +391,22 @@ mod tests {
         assert_eq!(router.latest(&addr), None, "its signals go with it");
         let log = driver.log.lock().unwrap().clone();
         assert_eq!(log, ["acquire base as app:wf", "release base lease-base"]);
+    }
+
+    /// An app's thread can end up dropping its own handle: a driver call holds the machine
+    /// alive, and when that was the last reference the machine (and every app handle in it) is
+    /// dropped on that thread. Joining itself would wait forever.
+    #[test]
+    fn a_handle_dropped_on_its_own_thread_doesnt_wait_for_itself() {
+        let (tx, rx) = std::sync::mpsc::channel::<AppHandle>();
+        let done = Arc::new(AtomicBool::new(false));
+        let d = Arc::clone(&done);
+        let thread = std::thread::spawn(move || {
+            drop(rx.recv().unwrap());
+            d.store(true, Ordering::Relaxed);
+        });
+        tx.send(AppHandle { stop: Arc::new(AtomicBool::new(false)), thread: Some(thread) }).unwrap();
+        wait_until("the thread to let go of its own handle", || done.load(Ordering::Relaxed));
     }
 
     /// A restart (other parts, an update) must never be reported as the old run's Running: the
