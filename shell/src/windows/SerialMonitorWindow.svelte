@@ -59,6 +59,29 @@
   let pre: HTMLPreElement | undefined = $state();
 
   const ports = $derived(core.ports ?? []);
+  /**
+   * The part that holds the port this window tried to open, when the core said so: it can be
+   * paused from here (a tool's claim, like the flasher's, can't).
+   */
+  const holder = $derived.by(() => {
+    if (error?.code !== 'port-claimed' || !openedOn) return null;
+    const by = ports.find((p) => p.id === openedOn?.port)?.claimedBy;
+    return by == null || by.startsWith('tool:') ? null : by;
+  });
+  let pausing = $state(false);
+
+  /** Pauses the part on the port (it frees the port), then opens the port here. */
+  async function pauseAndOpen(part: string) {
+    pausing = true;
+    const r = await core.pausePart(part);
+    pausing = false;
+    if (!r.ok) {
+      error = r.error;
+      return;
+    }
+    if (openedOn) port = openedOn.port;
+    open();
+  }
 
   // Opened for one port (Parts → "Open port in serial monitor"): pick it, if nothing is open.
   $effect(() => {
@@ -228,7 +251,17 @@
   {/if}
 
   {#if error}
-    <div class="pad"><ErrorNotice {error} /></div>
+    <div class="pad">
+      <ErrorNotice {error}>
+        {#snippet actions()}
+          {#if holder}
+            <button class="btn" disabled={pausing} onclick={() => pauseAndOpen(holder)}
+              >{t('serial.pausePart', { part: holder })}</button
+            >
+          {/if}
+        {/snippet}
+      </ErrorNotice>
+    </div>
   {/if}
 
   {#if status === 'open' && rec === 'naming'}

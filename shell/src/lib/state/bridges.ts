@@ -41,6 +41,23 @@ export function nameFromBoard(board: string): string {
   return /^[a-z]/.test(name) ? name : '';
 }
 
+/**
+ * A board Faber can't talk to properly: often a sketch is being uploaded from the Arduino IDE,
+ * which can't open the port while Faber holds it. Faber can't see the IDE, so Parts suggests
+ * pausing the board whenever its link or its state says something is wrong.
+ */
+export function mayNeedPauseForUpload(p: PartInfo): boolean {
+  if (!isBridge(p) || p.state.kind === 'paused') return false;
+  const link = p.board?.link;
+  return (
+    link === 'no-answer' ||
+    link === 'lost' ||
+    link === 'incompatible' ||
+    p.state.kind === 'failed' ||
+    p.state.kind === 'conflict'
+  );
+}
+
 /** Where the link to a board stands, in a few words. */
 export function linkText(link: LinkState): string {
   switch (link) {

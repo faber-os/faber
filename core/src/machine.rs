@@ -2029,7 +2029,7 @@ fn port_claimed(port: &PortEntry, holder: &str) -> MachineError {
         ),
         None => (
             format!("{} is used by the part \"{holder}\".", port.label),
-            format!("Remove \"{holder}\" first, or pick another port."),
+            format!("Pause or remove \"{holder}\" in Parts first, or pick another port."),
         ),
     };
     MachineError::new(ErrorKind::Conflict, "port-claimed", message, hint)

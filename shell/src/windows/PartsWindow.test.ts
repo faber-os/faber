@@ -208,6 +208,95 @@ describe('A FaberLink board in Parts', () => {
   });
 });
 
+describe('Pausing a part', () => {
+  it('pauses any part from its menu, and shows Paused with Resume', async () => {
+    const shell = setup([
+      { method: 'POST', path: '/api/v0/parts/lidar/pause', body: part('lidar') },
+      { method: 'POST', path: '/api/v0/parts/lidar/resume', body: part('lidar') },
+    ]);
+    shell.pushParts([part('lidar')]);
+    const row = (await screen.findByText('lidar')).closest('li')!;
+    fireEvent.contextMenu(row);
+    const items = shell.menu.current!.entries.flatMap((e) => (e.kind === 'item' ? [e] : []));
+    expect(items.map((i) => i.id)).toContain('pause');
+    shell.menu.choose('pause');
+    await waitFor(() =>
+      expect(
+        shell.fetch.calls.some((c) => c.method === 'POST' && c.path.endsWith('/lidar/pause')),
+      ).toBe(true),
+    );
+
+    // The core says it is paused: the row says so, offers Resume, and nothing to view or drive.
+    shell.pushParts([part('lidar', { state: { kind: 'paused' } })]);
+    const paused = await screen.findByText('Paused');
+    const li = paused.closest('li')!;
+    expect(within(li).getByText(/Its port is free for other programs/)).toBeInTheDocument();
+    expect(within(li).queryByRole('button', { name: /^View/ })).not.toBeInTheDocument();
+    fireEvent.contextMenu(li);
+    const again = shell.menu.current!.entries.flatMap((e) => (e.kind === 'item' ? [e] : []));
+    expect(again.map((i) => i.id)).toContain('resume');
+    expect(again.map((i) => i.id)).not.toContain('pause');
+    shell.menu.close(false);
+    await userEvent.click(within(li).getByRole('button', { name: 'Resume lidar' }));
+    await waitFor(() =>
+      expect(
+        shell.fetch.calls.some((c) => c.method === 'POST' && c.path.endsWith('/lidar/resume')),
+      ).toBe(true),
+    );
+  });
+
+  it("pauses a board's parts with it: they show Paused, and only the board resumes", async () => {
+    const shell = setup();
+    shell.pushParts([
+      part('mega', { connector: 'faber-bridge', port: MEGA_PORT.id, state: { kind: 'paused' } }),
+      boardMotor('mega', 'left', { signals: [], state: { kind: 'paused' } }),
+    ]);
+    await screen.findAllByText('Paused');
+    const left = document.querySelector<HTMLElement>('li[data-part="mega.left"]')!;
+    expect(within(left).getByText('Paused')).toBeInTheDocument();
+    expect(within(left).queryByRole('button', { name: /Resume/ })).not.toBeInTheDocument();
+    expect(within(left).queryByRole('button', { name: /Drive/ })).not.toBeInTheDocument();
+    const mega = document.querySelector<HTMLElement>('li[data-part="mega"]')!;
+    expect(within(mega).getByRole('button', { name: 'Resume mega' })).toBeInTheDocument();
+  });
+
+  it('suggests pausing a board that has trouble, for an upload from the Arduino IDE', async () => {
+    const shell = setup([
+      { method: 'POST', path: '/api/v0/parts/mega/pause', body: bridgePart('mega') },
+    ]);
+    shell.pushParts([bridgePart('mega', { link: 'no-answer' })]);
+    const hint = await screen.findByText(/Uploading from the Arduino IDE\? Pause this board first/);
+    const li = hint.closest('li')!;
+    await userEvent.click(within(li).getByRole('button', { name: 'Pause mega' }));
+    await waitFor(() =>
+      expect(
+        shell.fetch.calls.some((c) => c.method === 'POST' && c.path.endsWith('/mega/pause')),
+      ).toBe(true),
+    );
+    // A board that works doesn't get the hint.
+    shell.pushParts([bridgePart('mega')]);
+    await waitFor(() => expect(screen.queryByText(/Uploading from the Arduino IDE/)).toBeNull());
+  });
+
+  it('says why the core refused to pause', async () => {
+    const shell = setup([
+      {
+        method: 'POST',
+        path: '/api/v0/parts/lidar/pause',
+        status: 409,
+        body: {
+          error: { code: 'config-broken', message: 'parts.toml has a problem.', hint: 'Fix it.' },
+        },
+      },
+    ]);
+    shell.pushParts([part('lidar')]);
+    const row = (await screen.findByText('lidar')).closest('li')!;
+    fireEvent.contextMenu(row);
+    shell.menu.choose('pause');
+    expect(await screen.findByText('parts.toml has a problem.')).toBeInTheDocument();
+  });
+});
+
 describe('Adding a FaberLink board', () => {
   async function openForm(check: unknown) {
     const shell = setup([
@@ -657,6 +746,7 @@ describe('Parts menus and recordings', () => {
     expect(items.map((i) => i.label)).toEqual([
       'Open viewer',
       'Open recording port in serial monitor',
+      'Pause',
       'Remove',
     ]);
     expect(items[1]!.disabledReason).toContain('"lidar" is using this port');

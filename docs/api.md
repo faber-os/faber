@@ -21,7 +21,7 @@ access, in Phase 6).
   *what to try* (docs/principles.md):
 
   ```json
-  { "error": { "code": "port-claimed", "message": "COM3 is used by the part \"lidar\".", "hint": "Remove or stop \"lidar\" first, or pick another port." } }
+  { "error": { "code": "port-claimed", "message": "COM3 is used by the part \"lidar\".", "hint": "Pause or remove \"lidar\" in Parts first, or pick another port." } }
   ```
 
 ## REST (JSON)

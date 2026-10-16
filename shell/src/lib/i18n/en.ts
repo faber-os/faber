@@ -240,6 +240,18 @@ export const en = {
   'parts.menu.monitorKind': 'Open {kind} port in serial monitor',
   'parts.menu.monitor': 'Open port in serial monitor',
   'parts.menu.remove': 'Remove',
+  'parts.menu.pause': 'Pause',
+  'parts.menu.resume': 'Resume',
+  // Pausing a part (docs/glossary.md, Paused): it stops and frees its port until it is resumed
+  'parts.list.pauseNamed': 'Pause {name}',
+  'parts.list.pause': 'Pause',
+  'parts.list.resumeNamed': 'Resume {name}',
+  'parts.list.resume': 'Resume',
+  'parts.list.paused.hint':
+    'Paused. Its port is free for other programs, such as the Arduino IDE, until you resume it.',
+  'parts.list.paused.onBoard': 'Paused with its board. Resume the board to use it again.',
+  'parts.board.uploadHint':
+    'Uploading from the Arduino IDE? Pause this board first, so the IDE can use its port.',
   'parts.menu.busy.self':
     '"{part}" is using this port, and a port can only be open once. Remove the part to talk to the port directly.',
   'parts.menu.busy.other': 'The port is in use by {owner}.',
@@ -1011,6 +1023,8 @@ export const en = {
   'serial.port.option': '{label} ({id})',
   'serial.port.optionBluetooth': 'Bluetooth: {label} ({id})',
   'serial.port.optionBluetoothNoId': 'Bluetooth: {label}',
+  // On a "port is used by the part …" error: pauses that part, which frees the port, and opens it
+  'serial.pausePart': 'Pause {part}',
   'serial.port.optionBusy': '{option} · {reason}',
   'serial.baud.label': 'Baud',
   'serial.close': 'Close port',

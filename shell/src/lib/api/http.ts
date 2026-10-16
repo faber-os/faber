@@ -96,6 +96,9 @@ export interface CoreHttp {
   getParts(): Promise<PartInfo[]>;
   addPart(part: NewPart): Promise<PartInfo>;
   removePart(name: string): Promise<void>;
+  /** Stops the part and frees its port until it is resumed (`paused = true` in parts.toml). */
+  pausePart(name: string): Promise<PartInfo>;
+  resumePart(name: string): Promise<PartInfo>;
 
   getRoots(): Promise<FileRoot[]>;
   listFolder(path: string): Promise<FolderListing>;
@@ -278,6 +281,8 @@ export function createHttp(
     getParts: () => request('GET', '/parts'),
     addPart: (part) => request('POST', '/parts', part),
     removePart: (name) => request('DELETE', `/parts/${encodeURIComponent(name)}`),
+    pausePart: (name) => request('POST', `/parts/${encodeURIComponent(name)}/pause`),
+    resumePart: (name) => request('POST', `/parts/${encodeURIComponent(name)}/resume`),
 
     getRoots: () => request('GET', '/files/roots'),
     listFolder: (path) => request('GET', `/files/list${q(path)}`),

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen, within } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { decode } from '@msgpack/msgpack';
-import { SAMPLE_PORT, USB_PORT, fakeShell } from '../test/fakeShell';
+import { SAMPLE_PORT, USB_PORT, fakeShell, part } from '../test/fakeShell';
 import SerialMonitorWindow from './SerialMonitorWindow.svelte';
 import type { WindowState } from '../lib/desktop/windows';
 
@@ -74,6 +74,54 @@ describe('Serial monitor', () => {
       within(alert).getByText('Remove or stop "lidar" first, or pick another port.'),
     ).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Open port' })).toBeInTheDocument();
+  });
+
+  it('offers to pause the part that uses the port, then opens it', async () => {
+    const shell = await setup();
+    shell.fetch.route({
+      method: 'POST',
+      path: '/api/v0/parts/lidar/pause',
+      body: { ...part('lidar'), state: { kind: 'paused' } },
+    });
+    await userEvent.selectOptions(screen.getByLabelText('Port'), 'usb:10c4:ea60');
+    await userEvent.click(screen.getByRole('button', { name: 'Open port' }));
+    shell.receive({
+      type: 'error',
+      id: lastSent(shell).id,
+      error: {
+        code: 'port-claimed',
+        message: 'usb:10c4:ea60 is used by the part "lidar".',
+        hint: 'Pause or remove "lidar" first, or pick another port.',
+      },
+    });
+    const alert = await screen.findByRole('alert');
+    await userEvent.click(within(alert).getByRole('button', { name: 'Pause lidar' }));
+    await waitFor(() =>
+      expect(lastSent(shell)).toMatchObject({ type: 'serial-open', port: 'usb:10c4:ea60' }),
+    );
+    expect(
+      shell.fetch.calls.some((c) => c.method === 'POST' && c.path.endsWith('/lidar/pause')),
+    ).toBe(true);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('offers no pause when a tool has the port', async () => {
+    const shell = fakeShell();
+    shell.pushPorts([{ ...USB_PORT, claimedBy: 'tool:arduino-flasher' }]);
+    render(SerialMonitorWindow, { props: { win, visible: true }, context: shell.context });
+    await screen.findByRole('option', { name: /usb:10c4:ea60/ });
+    await userEvent.click(screen.getByRole('button', { name: 'Open port' }));
+    shell.receive({
+      type: 'error',
+      id: lastSent(shell).id,
+      error: {
+        code: 'port-claimed',
+        message: 'It is open in the arduino flasher.',
+        hint: 'Close it.',
+      },
+    });
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).queryByRole('button', { name: /Pause/ })).not.toBeInTheDocument();
   });
 
   it('shows received bytes as text or hex, and sends a line', async () => {

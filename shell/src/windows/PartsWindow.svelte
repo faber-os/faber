@@ -5,7 +5,14 @@
   import { portKindLabel } from '../lib/state/portHints';
   import type { ErrorBody, PartInfo, SignalInfo, Simulate } from '../lib/state/types';
   import { canMove } from '../lib/state/driving';
-  import { isBridge, isSubPart, linkText, localName, removable } from '../lib/state/bridges';
+  import {
+    isBridge,
+    isSubPart,
+    linkText,
+    localName,
+    mayNeedPauseForUpload,
+    removable,
+  } from '../lib/state/bridges';
   import { isManualSensor } from '../lib/state/simulation';
   import { item, separator } from '../lib/desktop/contextMenu';
   import { menuTrigger, useMenu } from '../components/menuController.svelte';
@@ -49,6 +56,9 @@
   let confirming = $state<string | null>(null);
   let removing = $state<string | null>(null);
   let removeError = $state<{ part: string; error: ErrorBody } | null>(null);
+  /** A pause or resume the core refused, shown on the part's row. */
+  let pauseError = $state<{ part: string; error: ErrorBody } | null>(null);
+  let pausing = $state<string | null>(null);
   let justAdded = $state<string | null>(null);
 
   const parts = $derived(core.parts);
@@ -75,7 +85,9 @@
     const row = target.closest<HTMLElement>('[data-part]');
     const p = parts?.find((x) => x.name === row?.dataset.part);
     if (!p) return null;
-    const signals = viewable(p);
+    const paused = p.state.kind === 'paused';
+    // A paused part draws nothing and can't be driven until it is resumed.
+    const signals = paused ? [] : viewable(p);
     const port = core.ports?.find((x) => x.id === p.port);
     const busy = p.simulate
       ? t('parts.menu.simulatedNoPort')
@@ -91,10 +103,11 @@
     return {
       label: p.name,
       entries: [
-        item('view', t('parts.menu.view'), {
-          disabledReason: signals.length ? undefined : t('parts.menu.noSignal'),
-        }),
-        canMove(p) && item('drive', t('parts.menu.drive'), { icon: 'drive' }),
+        !paused &&
+          item('view', t('parts.menu.view'), {
+            disabledReason: signals.length ? undefined : t('parts.menu.noSignal'),
+          }),
+        canMove(p) && !paused && item('drive', t('parts.menu.drive'), { icon: 'drive' }),
         !sub &&
           item(
             'monitor',
@@ -105,16 +118,28 @@
               disabledReason: busy,
             },
           ),
+        !sub && !paused && item('pause', t('parts.menu.pause')),
+        !sub && paused && item('resume', t('parts.menu.resume')),
         removable(p) && separator(),
         removable(p) && item('remove', t('parts.menu.remove'), { danger: true }),
       ],
       onSelect: (id: string) => {
-        if (id === 'view' && signals[0]) openViewer(p, signals[0]);
+        if (id === 'pause' || id === 'resume') void setPaused(p.name, id === 'pause');
+        else if (id === 'view' && signals[0]) openViewer(p, signals[0]);
         else if (id === 'drive') openDrive(desktop, p.name);
         else if (id === 'monitor' && p.port) openInMonitor(p.port);
         else if (id === 'remove') confirming = p.name;
       },
     };
+  }
+
+  /** Pause or resume; the parts topic then shows the new state. */
+  async function setPaused(name: string, paused: boolean) {
+    pausing = name;
+    pauseError = null;
+    const r = paused ? await core.pausePart(name) : await core.resumePart(name);
+    pausing = null;
+    if (!r.ok) pauseError = { part: name, error: r.error };
   }
 
   function openViewer(p: PartInfo, s: SignalInfo) {
@@ -238,7 +263,8 @@
         use:menuTrigger={{ menu, build: partMenu }}
       >
         {#each parts as p (p.name)}
-          {@const signals = viewable(p)}
+          {@const paused = p.state.kind === 'paused'}
+          {@const signals = paused ? [] : viewable(p)}
           {@const label = portLabel(p.port)}
           {@const sub = isSubPart(p)}
           <li
@@ -287,7 +313,7 @@
                     <span>{label ?? t('parts.list.port')} <code>{p.port}</code></span>
                   {/if}
                 {/if}
-                {#if canMove(p)}
+                {#if canMove(p) && !paused}
                   {@const lease = core.leaseOn(p.name)}
                   <span class="sep" aria-hidden="true">·</span>
                   <span class:driven={lease}
@@ -320,7 +346,25 @@
                   <p class="hint estop-hint">{t('parts.board.hardwareEstop.hint')}</p>
                 {/if}
               {/if}
-              {#if isManualSensor(p)}<ManualSimulation part={p} />{/if}
+              {#if paused}
+                <p class="hint paused-hint">
+                  {sub ? t('parts.list.paused.onBoard') : t('parts.list.paused.hint')}
+                </p>
+              {:else if mayNeedPauseForUpload(p)}
+                <p class="hint upload-hint">
+                  {t('parts.board.uploadHint')}
+                  <button
+                    class="btn"
+                    disabled={pausing === p.name}
+                    aria-label={t('parts.list.pauseNamed', { name: p.name })}
+                    onclick={() => setPaused(p.name, true)}>{t('parts.list.pause')}</button
+                  >
+                </p>
+              {/if}
+              {#if pauseError?.part === p.name}
+                <ErrorNotice error={pauseError.error} />
+              {/if}
+              {#if isManualSensor(p) && !paused}<ManualSimulation part={p} />{/if}
               {#if p.state.message}
                 <div
                   class="state-msg"
@@ -349,7 +393,17 @@
                   >{t('parts.list.keep')}</button
                 >
               {:else}
-                {#if canMove(p)}
+                {#if paused && !sub}
+                  <button
+                    class="btn primary"
+                    disabled={pausing === p.name}
+                    aria-label={t('parts.list.resumeNamed', { name: p.name })}
+                    onclick={() => setPaused(p.name, false)}
+                  >
+                    {t('parts.list.resume')}
+                  </button>
+                {/if}
+                {#if canMove(p) && !paused}
                   <button
                     class="btn"
                     onclick={() => openDrive(desktop, p.name)}

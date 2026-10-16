@@ -458,6 +458,15 @@ export class CoreState {
     return this.call(() => this.http.removePart(name));
   }
 
+  /** Pauses a part: it stops and its port is free (e.g. for the Arduino IDE) until resumed. */
+  pausePart(name: string): Promise<Result<PartInfo>> {
+    return this.call(() => this.http.pausePart(name));
+  }
+
+  resumePart(name: string): Promise<Result<PartInfo>> {
+    return this.call(() => this.http.resumePart(name));
+  }
+
   /** Asks a free port whether a FaberLink board is on it; a board found is suggested for it. */
   checkBoard(port: string): Promise<Result<BoardCheck>> {
     return this.call(() => this.http.checkBoard(port));
