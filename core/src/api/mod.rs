@@ -4,8 +4,8 @@
 
 pub mod access;
 mod apps;
-pub mod auth;
 mod arduino;
+pub mod auth;
 mod convert;
 mod driving;
 pub mod dto;

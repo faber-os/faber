@@ -1039,10 +1039,10 @@
     gap: var(--space-2);
   }
   .status.ok {
-    color: var(--ok);
+    color: var(--ok-text);
   }
   .status.bad {
-    color: var(--danger);
+    color: var(--danger-text);
     font-weight: 600;
   }
   .size {
@@ -1082,10 +1082,10 @@
     font-weight: 600;
   }
   .diagnostics .error .kind {
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .diagnostics .warning .kind {
-    color: var(--warn);
+    color: var(--warn-text);
   }
   .progress {
     display: grid;
@@ -1167,12 +1167,12 @@
     font-weight: 600;
   }
   .verdict[data-kind='different'] {
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .verdict[data-kind='same'] {
-    color: var(--ok);
+    color: var(--ok-text);
   }
   .caveat {
-    color: var(--warn);
+    color: var(--warn-text);
   }
 </style>

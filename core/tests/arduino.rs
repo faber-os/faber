@@ -8,7 +8,6 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use faber_core::api;
 use faber_core::arduino::fake::{FakeFinder, FakeToolchain};
 use faber_core::arduino::install::{Downloader, Release};
 use faber_core::clock::{MonotonicClock, SharedClock};
@@ -32,6 +31,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tower::ServiceExt;
+
+mod support;
 
 /// What runs on a board after its bootloader: a FaberLink sketch with (or without) a build id,
 /// or anything else (nothing on the wire).
@@ -240,7 +241,7 @@ fn core_without_tools() -> TestCore {
         toolchain: Arc::clone(&cli),
         installed_in: Some(dir.path().to_path_buf()),
     }));
-    let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+    let app = support::signed_in_api(&machine, LogBook::new(clock));
     TestCore { app, machine, cli, uno, clone, mega, dir }
 }
 
