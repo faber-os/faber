@@ -66,11 +66,11 @@ pub fn part(p: &PartView) -> dto::PartInfo {
             .collect(),
         mount: p.mount,
         bridge: p.bridge.as_ref().map(ToString::to_string),
-        board: p.board.as_ref().map(board_link),
+        board: p.board.as_ref().map(|b| board_link(b, p.code.as_ref())),
     }
 }
 
-pub fn board_link(b: &BoardView) -> dto::BoardLink {
+pub fn board_link(b: &BoardView, code: Option<&crate::machine::FlashedCode>) -> dto::BoardLink {
     let info = b.board.as_ref();
     dto::BoardLink {
         link: match b.link {
@@ -88,6 +88,10 @@ pub fn board_link(b: &BoardView) -> dto::BoardLink {
         heartbeat_timeout_ms: info.map(|i| i.heartbeat_timeout_ms),
         hardware_estop: b.hardware_estop,
         failsafe: b.failsafe,
+        code: code.map(|c| dto::BoardCodeLink {
+            build_id: c.build_id.clone(),
+            record: c.record.as_ref().map(super::arduino::flash_record),
+        }),
     }
 }
 

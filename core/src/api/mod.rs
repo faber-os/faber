@@ -3,6 +3,7 @@
 //! blocking pool so they never stall the async runtime.
 
 mod apps;
+mod arduino;
 mod convert;
 mod driving;
 pub mod dto;
@@ -48,6 +49,7 @@ pub fn router(state: AppState) -> Router {
         .merge(apps::routes())
         .merge(driving::routes())
         .merge(flash::routes())
+        .merge(arduino::routes())
         .merge(translations::routes())
         .merge(world::routes())
         .fallback(shell::serve)

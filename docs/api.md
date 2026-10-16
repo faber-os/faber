@@ -38,6 +38,7 @@ access, in Phase 6).
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
 | `POST /api/v0/ports/check-board` | `{"port": "usb:2341:0042"}` → `200 BoardCheck`, after up to 2.5 s: is a FaberLink board on this port? See [FaberLink boards](#faberlink-boards-bridges). |
 | `GET /api/v0/flasher/boards`, `POST /api/v0/ports/{id}/flash` | The Arduino flasher: puts a program on an Uno, Nano or Mega. See [The Arduino flasher](#the-arduino-flasher). |
+| `GET /api/v0/arduino`, `POST /api/v0/arduino/…` | The Arduino editor: sketches, compiling, uploading and "what's on this board". See [The Arduino editor](#the-arduino-editor). |
 | `GET /api/v0/parts` | `PartInfo[]` |
 | `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name` (including `world`, the simulated world's own name), `400 unknown-connector`, `400 unknown-port`, `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: add the FaberLink board it sits on instead), `400 bridge-not-simulated` (a `faber-bridge` with `simulate`: a board is real hardware), `409 name-taken`, `409 port-claimed`, `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
 | `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`); removing a bridge ends those on its sub-parts too. For a sub-part (`mega.arm`) it removes `[parts.mega.parts.arm]` from parts.toml, which works only while the board doesn't have that part: `409 part-on-board` otherwise. |
@@ -98,14 +99,15 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `estop` | — | an `estop` message (`status`: `engaged`, `engagedBy?`) now and on every engage and release. Every-message: none is lost. |
 | `packages` | — | a `packages` message (`packages`: `PackageInfo[]`, as `GET /api/v0/packages`) now and after every install, uninstall or reload of the connectors, so every browser tab sees an install at once. If `packages.toml` can't be read, an `error` (`io-error`) instead. |
 | `world` | — | a `world` message 20 times a second for as long as the subscription lasts, and `world-changed` (`name`) whenever the world is switched. See [The simulated world](#the-simulated-world). |
-| `flash` | — | a `flash` message (`port`, `stage`, `done`, `total`) after every page the Arduino flasher writes or reads back, on any port. See [The Arduino flasher](#the-arduino-flasher). |
+| `flash` | — | a `flash` message (`port`, `stage`, `done`, `total`) after every page the Arduino flasher writes or reads back, on any port (the Arduino editor's uploads and code checks too). See [The Arduino flasher](#the-arduino-flasher). |
+| `arduino-tools` | — | an `arduino-tools` message (`step`: `downloading`, `verifying`, `unpacking`, `installing-core`, `done`; `done?` and `total?` bytes while downloading; `line?`: what `arduino-cli` printed last while installing the core) at every step of "Install Arduino tools". See [The Arduino editor](#the-arduino-editor). |
 | `apps` | — | an `apps` message (`apps`: `AppInfo[]`, as `GET /api/v0/apps`) now and whenever an app is installed, removed, turned on or off, gets other parts, or changes state. See [Apps](#apps). |
 | `notices` | — | a `notice` message (`notice`: `Notice`) for each thing worth telling the user, as it happens. Nothing is replayed. See [Notices](#notices). |
 | `app-state` | `app` | an `app-state` message (`app`, `values`) now, then `app-state-changed` (`app`, `key`, `value?`) for every change to that app's state. `error` `unknown-app` if there is no such app. See [Apps](#apps). |
 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
 `serial-opened`, `serial-data`, `serial-closed`, `leases`, `lease-granted`, `lease-ended`, `estop`,
-`packages`, `apps`, `world`, `world-changed`, `flash`, `notice`, `app-state`, `app-state-changed`,
+`packages`, `apps`, `world`, `world-changed`, `flash`, `arduino-tools`, `notice`, `app-state`, `app-state-changed`,
 `app-window-opened`, `app-window-message`, `app-window-driving`, `app-window-drive-refused`,
 `app-window-drive-ended`, `app-window-closed`, `error`. Each carries the `id` of the subscription,
 serial session or app window link it belongs to. `error` may come without an `id`.
@@ -258,7 +260,12 @@ In `GET /api/v0/parts`, a bridge is followed by its sub-parts.
   `no-answer`, `lost`, `incompatible`), and once the board has answered `board` (its name),
   `firmware`, `firmwareVersion`, `protocol` (the FaberLink version) and `heartbeatTimeoutMs`; plus
   `hardwareEstop` (its stop button is latched) and `failsafe` (it stopped its actuators because the
-  heartbeat didn't reach it). Its `state` says what is wrong and what to try.
+  heartbeat didn't reach it). Its `state` says what is wrong and what to try. Once the board has
+  answered, `code` (`BoardCodeLink`) says what code it runs as far as its build id tells:
+  `buildId?` (the id it said in `HELLO_ACK`; missing for a sketch not compiled by Faber's editor)
+  and `record?` (the `FlashRecord` of the upload with that build id). Parts shows "Code from
+  Faber: <sketch>", or without a record "Code not flashed from Faber (unknown)". See
+  [The Arduino editor](#the-arduino-editor).
 - A sub-part's `PartInfo` has `bridge` (its bridge's name), the bridge's `port`, its `mount` from
   `[parts.<bridge>.parts.<name>]`, and its one signal with the info the board gave (limits).
   While the board is out of reach, every sub-part is `failed` ("Stopped: …") and its leases end
@@ -335,6 +342,44 @@ comes as the `POST`'s answer.
 in its `faber.toml` as `[[firmware]]` with `board = "uno"`. Installing checks that every declared
 file is there and valid HEX that fits the board, and that no undeclared one is. `PackageInfo`
 lists the boards in `firmware`.
+
+## The Arduino editor
+
+Write a sketch in Files, compile it with `arduino-cli` on the machine, and put it on the board with
+Faber's own flasher ([arduino-editor.md](arduino-editor.md)). After every upload the core records
+what it flashed on which board, so it can later prove which code a board still runs. Sketches are
+ordinary files, `home:/Arduino/<name>/<name>.ino` plus any `.h`/`.cpp` tabs, read and saved with
+the [Files](#files) API.
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/arduino` | `ArduinoInfo`: `tools` (`ArduinoTools`: `state` `ready`, `no-avr-core`, `missing`, or `broken` with `problem`; `cli?` with `path`, `source` (`faber`, `path`, `arduino-ide` or `fake`) and `version?`; `installing`; `install?` with `cliVersion`, `url` (the release file on Arduino's GitHub), `core` (`arduino:avr`) and `approxMb`, missing where Arduino publishes no `arduino-cli` for the computer), `boards` (`ArduinoBoard[]`: `id`, `name`, `chip`, `fqbn`, `room`; the flasher's boards), `templates` (`SketchTemplate[]`: `id`, `name`, `description`, `faberlink`) and `sketchbook` (`home:/Arduino`). |
+| `POST /api/v0/arduino/tools/install` | → `200 ArduinoTools` when done (minutes). Downloads `arduino-cli` into `<data>/tools/arduino-cli/` if none is found, checking its SHA-256 against the release's published checksums before unpacking anything, then runs `arduino-cli core install arduino:avr` if the AVR core is missing. Only ever on a request (the editor asks first, showing `install`). The `arduino-tools` topic follows it. Errors: `409 already-installing`, `409 download-failed` (offline; the hint says what to check), `422 checksum-missing`, `422 checksum-mismatch` (nothing was installed), `422 download-damaged`, `422 no-arduino-cli-for-this-computer`, `409 core-install-failed`, `500 io-error`. |
+| `POST /api/v0/arduino/sketches` | `NewSketchRequest` `{"name": "Rover", "template": "faberlink-board"}` → `201 SketchRef` (`path`: `home:/Arduino/Rover/Rover.ino`, `copy`: false). Errors: `400 invalid-sketch-name` (Arduino's rule: a letter or digit first, then letters, digits, `_`, `-` and `.`, at most 63), `400 unknown-template`, `409 already-exists`. |
+| `POST /api/v0/arduino/compile` | `CompileRequest` `{"sketch": …, "board": "uno"}` (`sketch`: the `.ino`, another file of the sketch, or its folder) → `200 CompileResult`: `ok`, `board`, `sketch` (its `.ino`), `sketchName`, `buildId` (16 hex digits, compiled in as `FABER_BUILD_ID`), `size?` (`flash`, `flashMax`, `ram`, `ramMax`, in bytes), `diagnostics` (`SketchDiagnostic[]`: `severity` `error` or `warning`, `file?` (in the sketch folder, or a library file's name), `inSketch`, `line?`, `column?`, `message`) and `message?` (what went wrong when no error names a file). A sketch with errors is a `200` with `ok` false. Errors: `400 unknown-board`, `400 not-a-sketch` (no `<folder>/<folder>.ino`), `400 invalid-sketch-name`, `400 not-in-home`, `409 arduino-tools-missing` and `409 arduino-core-missing` (both: press Install Arduino tools), `422 sketch-too-big`, `500 arduino-tools-broken`. |
+| `POST /api/v0/arduino/upload` | `UploadRequest` (`sketch`, `board`, `port`, `stopPart?`) → `200 UploadResult`: `compile` (a `CompileResult`) and, when it compiled, `flashed` (a `FlashResult`, as the flasher's) and `record?` (a `FlashRecord`, below). It compiles, then flashes through [the Arduino flasher](#the-arduino-flasher), with its claims, refusals (`409 port-used-by-bridge` until `stopPart` is true) and errors; the `flash` topic follows it. A failed compile flashes nothing. |
+| `GET /api/v0/arduino/boards/{port}/code` | → `200 BoardCodeInfo` (`port`, `identity`, `code`): what is on the board, from what can be known without touching it. It never resets anything. Errors: `400 unknown-port`. |
+| `POST /api/v0/arduino/boards/{port}/check` | `CheckCodeRequest` `{}` or `{"stopPart": true}` → `200 BoardCodeInfo`: reads the recorded program back through the bootloader and compares it. **It resets the board** (the sketch starts again); `FlashRecord.checkMs` says about how long it takes. A board Faber never flashed is answered `never` without being touched. Errors as for the flasher: `409 port-used-by-bridge` (the hint says checking stops the board), `409 port-claimed`, `422 board-not-answering`, … |
+| `POST /api/v0/arduino/flashed/{id}/open` | `OpenFlashedRequest` `{}` or `{"copy": true}` → `200 SketchRef`, a sketch to open for that record: if the sketch in Files is still exactly the flashed files (and no copy is asked for), its own path with `copy` false; otherwise the flashed files are copied to `home:/Arduino/<name>-on-board/` (`-2`, `-3`, … if taken), with `copy` true. Errors: `404 unknown-flash`. |
+
+`BoardCodeInfo.identity` (`BoardIdentityInfo`) is `serial?` (the board's USB serial number), `port`
+and `unique` (false without a serial number: an identical board on the same port can't be told
+apart). `code` (`CodeCheck`) is tagged by `result`:
+
+| `result` | Fields | Meaning |
+|---|---|---|
+| `same` | `record`, `proof` | The board runs exactly this flash. |
+| `different` | `record`, `proof` | The board runs other code now; `record` is the last thing Faber flashed on it. |
+| `needs-check` | `record` | Faber flashed this board, but only reading it back can tell what runs now. |
+| `never` | — | Faber has never flashed this board. |
+
+`proof` (`CodeProof`, tagged by `method`) is `build-id` (a connected FaberLink board said its build
+id) or `read-back` (with `elapsedMs`). A `FlashRecord` has `id`, `board`, `boardName`, `sketch`,
+`sketchName`, `buildId`, `sha256` (of the programmed bytes: every page written, as written),
+`bytes`, `flashedAt` (RFC 3339, UTC), `identity` and `checkMs`.
+
+The records are in `<data>/arduino/boards.toml`, with an exact copy of each board's last sketch and
+program in `<data>/arduino/flashed/<id>/`.
 
 ## The simulated world
 

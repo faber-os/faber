@@ -4,6 +4,7 @@
 //! running parts match it.
 
 mod apps;
+mod arduino;
 #[cfg(test)]
 mod bridge_tests;
 mod flash;
@@ -12,6 +13,10 @@ mod safety;
 mod world;
 
 pub use apps::{AppView, AppWindowLink};
+pub use arduino::{
+    ArduinoStatus, BoardCode, CodeResult, CompileReport, FlashedCode, OpenedSketch, Proof, SKETCHBOOK,
+    ToolsProgress, ToolsState, UploadReport,
+};
 pub use flash::{FirmwareSource, FlashProgress, FlashRequest, Flashed};
 pub use packages::{PackagePreview, PackagePreviewOf, PackageView, installed_connectors};
 pub use safety::{CommandReply, EstopView, LeaseEvent};
@@ -163,6 +168,8 @@ pub struct PartView {
     pub bridge: Option<PartName>,
     /// For a bridge: its board and the link to it.
     pub board: Option<BoardView>,
+    /// For a bridge whose board has answered: the code it says it runs (docs/arduino-editor.md).
+    pub code: Option<FlashedCode>,
 }
 
 /// What checking a port for a FaberLink board found.
@@ -314,6 +321,8 @@ pub struct Machine {
     app_channels: Mutex<BTreeMap<String, Arc<crate::apps::Channel>>>,
     /// This machine, for what it hands out that must not keep it alive (apps' lease driver).
     me: OnceLock<Weak<Machine>>,
+    /// The Arduino editor: its toolchain, its records of what was flashed.
+    arduino: arduino::Workshop,
 }
 
 impl Machine {
@@ -399,6 +408,7 @@ impl Machine {
             app_states: Mutex::new(BTreeMap::new()),
             app_channels: Mutex::new(BTreeMap::new()),
             me: OnceLock::new(),
+            arduino: arduino::Workshop::new(&opts.data_dir),
         });
         let _ = machine.me.set(Arc::downgrade(&machine));
         machine.refresh_ports();
@@ -521,6 +531,10 @@ impl Machine {
                 signals,
                 bridge: None,
                 board: handle.map(BridgeHandle::view),
+                code: handle
+                    .map(BridgeHandle::view)
+                    .and_then(|v| v.board)
+                    .map(|b| self.flashed_code(b.build_id)),
             });
             if cfg.connector == BRIDGE_CONNECTOR {
                 out.extend(self.sub_part_views(name, cfg, handle));
@@ -547,6 +561,7 @@ impl Machine {
             signals,
             bridge: Some(bridge.clone()),
             board: None,
+            code: None,
         };
         let mut out: Vec<PartView> = subs
             .iter()

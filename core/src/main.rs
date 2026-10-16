@@ -21,6 +21,10 @@ struct Args {
     /// Address to listen on. Phase 1 only allows this machine (127.0.0.1 or ::1).
     #[arg(long, default_value = "127.0.0.1:7878")]
     listen: SocketAddr,
+    /// Use a stand-in for arduino-cli that compiles any sketch to a made-up program (the
+    /// end-to-end tests; docs/arduino-editor.md). Never for real boards.
+    #[arg(long)]
+    fake_arduino_cli: bool,
 }
 
 fn main() -> ExitCode {
@@ -62,6 +66,10 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        if args.fake_arduino_cli {
+            tracing::warn!(target: "core", "--fake-arduino-cli: sketches compile to made-up programs");
+            core.machine.use_fake_arduino_cli();
+        }
         let shutdown = async {
             let _ = tokio::signal::ctrl_c().await;
             tracing::info!(target: "core", "stopping");

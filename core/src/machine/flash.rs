@@ -22,6 +22,13 @@ use std::time::{Duration, Instant};
 /// The flasher's claim on a port: `tool:arduino-flasher`.
 pub const FLASHER: &str = "arduino-flasher";
 
+/// What the port is taken for, so a refusal says what would happen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Use {
+    Flash,
+    ReadBack,
+}
+
 /// Where the program comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FirmwareSource {
@@ -29,6 +36,8 @@ pub enum FirmwareSource {
     File(String),
     /// An installed package's `firmware/<board>.hex`.
     Package(String),
+    /// A program the Arduino editor just compiled (docs/arduino-editor.md).
+    Compiled(Image),
 }
 
 /// A request to flash.
@@ -65,7 +74,7 @@ fn bad_request(code: &'static str, message: String, hint: impl Into<String>) -> 
     MachineError::new(ErrorKind::BadRequest, code, message, hint)
 }
 
-fn from_flash(e: &FlashError) -> MachineError {
+pub(super) fn from_flash(e: &FlashError) -> MachineError {
     let kind = match e {
         FlashError::Port(_) => ErrorKind::Conflict,
         _ => ErrorKind::Unprocessable,
@@ -113,10 +122,10 @@ pub fn guess(port: &PortEntry) -> Detected {
 
 /// The serial port, as `faber-flash` sees it: the port manager's reader and writer, and the
 /// real clock (the bootloader keeps real time, whatever the core's clock does).
-struct FlashPort {
-    reader: Box<dyn PortReader>,
-    writer: Box<dyn PortWriter>,
-    start: Instant,
+pub(super) struct FlashPort {
+    pub(super) reader: Box<dyn PortReader>,
+    pub(super) writer: Box<dyn PortWriter>,
+    pub(super) start: Instant,
 }
 
 impl faber_flash::Port for FlashPort {
@@ -182,6 +191,7 @@ impl Machine {
                     .map_err(|_| from_flash(&FlashError::BadHex(faber_flash::HexError::NotHex { line: 1 })))?
             }
             FirmwareSource::Package(id) => Store::new(&self.data_dir).firmware(id, board.id)?,
+            FirmwareSource::Compiled(image) => image.to_hex(),
         };
         let image = Image::parse(&text).map_err(|e| from_flash(&FlashError::BadHex(e)))?;
         if image.end() > board.room {
@@ -193,7 +203,7 @@ impl Machine {
         }
 
         let me = Claimant::Tool(FLASHER);
-        let stopped = self.claim_for_flashing(&entry, &me, req.stop_part)?;
+        let stopped = self.claim_for_flashing(&entry, &me, req.stop_part, Use::Flash)?;
         let result = match self.opener.open(&entry, board.baud) {
             Ok((reader, writer)) => {
                 let mut port = FlashPort { reader, writer, start: Instant::now() };
@@ -230,13 +240,15 @@ impl Machine {
         Ok(Flashed { port: entry.id.to_string(), board, bytes: f.bytes, pages: f.pages, stopped })
     }
 
-    /// Takes the port for the flasher. A part on it is refused, except a bridge when `stop_part`
-    /// says so: it is stopped (its leases end, its motors get `SAFE`) and waits for the port.
-    fn claim_for_flashing(
+    /// Takes the port for the flasher (or for reading a program back). A part on it is refused,
+    /// except a bridge when `stop_part` says so: it is stopped (its leases end, its motors get
+    /// `SAFE`) and waits for the port.
+    pub(super) fn claim_for_flashing(
         &self,
         entry: &PortEntry,
         me: &Claimant,
         stop_part: bool,
+        why: Use,
     ) -> Result<Option<PartName>, MachineError> {
         let mut st = self.state.lock().expect("machine lock");
         let mut stopped = None;
@@ -252,9 +264,14 @@ impl Machine {
                         ErrorKind::Conflict,
                         "port-used-by-bridge",
                         format!("{} is used by the FaberLink board \"{name}\".", entry.label),
-                        format!(
-                            "Flashing stops \"{name}\" (its motors stop) and it starts again on the new firmware. Ask again with stopPart to go ahead."
-                        ),
+                        match why {
+                            Use::Flash => format!(
+                                "Flashing stops \"{name}\" (its motors stop) and it starts again on the new firmware. Ask again with stopPart to go ahead."
+                            ),
+                            Use::ReadBack => format!(
+                                "Checking the code stops \"{name}\" (its motors stop) and resets the board; it starts again afterwards. Ask again with stopPart to go ahead."
+                            ),
+                        },
                     ));
                 }
                 tracing::info!(target: "core::flash", part = %name, "stopping the board's bridge to flash it");
