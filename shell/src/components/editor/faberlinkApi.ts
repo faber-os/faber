@@ -114,6 +114,38 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
     ],
   },
   {
+    name: 'FaberButton',
+    doc: 'A button, switch or end stop on a digital pin, debounced. Wired between the pin and GND it needs nothing else (the pin’s pull-up holds it HIGH, pressed is LOW); pass faberlink::ACTIVE_HIGH for a part that drives the pin HIGH, such as a TTP223 touch pad. Faber sees it as an on/off input (digital-in).',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberButton(const char* name, uint8_t pin, faberlink::InputLevel active = faberlink::ACTIVE_LOW, uint16_t debounceMs = 20)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pin; FaberLink calls it from begin().'),
+      f('bool pressed() const', 'True while it is pressed (debounced), Faber or not.'),
+      ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
+    name: 'FaberObstacle',
+    doc: 'A bumper, whisker, limit switch or digital infrared obstacle module (FC-51, E18-D80NK) on a digital pin, debounced: it says whether something is in the way. Faber sees it as an obstacle sensor, so apps looking for a button never pick it.',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberObstacle(const char* name, uint8_t pin, faberlink::ObstacleKind kind = faberlink::OBSTACLE_BUMPER, faberlink::InputLevel active = faberlink::ACTIVE_LOW, float triggerDistanceM = 0)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pin; FaberLink calls it from begin().'),
+      f('bool detected() const', 'True while something is in the way (debounced), Faber or not.'),
+      ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
     name: 'FaberBattery',
     doc: 'A battery measured through a voltage divider (battery + to R1 to the pin to R2 to GND). dividerRatio is (R1 + R2) / R2; keep the pin below referenceVolts when the battery is full.',
     library: 'faberlink',
@@ -164,6 +196,17 @@ export const FABERLINK_CONSTANTS: ApiConstant[] = [
     'FaberMotor: a driver with two PWM inputs, one per direction, such as an L9110, DRV8833 or BTS7960. Pins: IN1, IN2, then an enable pin if it has one.',
   ),
   k('NO_PIN', 'A pin that isn’t connected, for an optional pin you leave out.'),
+  k(
+    'ACTIVE_LOW',
+    'FaberButton, FaberObstacle: LOW means pressed or detected, and the pin’s pull-up is on (a switch to GND). The default.',
+  ),
+  k(
+    'ACTIVE_HIGH',
+    'FaberButton, FaberObstacle: HIGH means pressed or detected, no pull-up (a TTP223 touch pad).',
+  ),
+  k('OBSTACLE_BUMPER', 'FaberObstacle: a bumper or whisker that something presses (the default).'),
+  k('OBSTACLE_INFRARED', 'FaberObstacle: a digital infrared obstacle module (FC-51, E18-D80NK).'),
+  k('OBSTACLE_LIMIT', 'FaberObstacle: a limit switch at the edge of where the machine may go.'),
   k('BATTERY_OK', 'FaberBattery level: charged enough.'),
   k('BATTERY_LOW', 'FaberBattery level: low, charge it soon.'),
   k('BATTERY_CRITICAL', 'FaberBattery level: very low; stop and charge it.'),

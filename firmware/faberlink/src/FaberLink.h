@@ -31,6 +31,16 @@ enum MotorDriver : uint8_t {
   DRIVER_TWO_PWM = 2,
 };
 
+// Which level of an input pin means "active" (pressed, detected).
+enum InputLevel : uint8_t {
+  // LOW is active, and the pin's internal pull-up is on: a button or a switch between the pin and
+  // GND, or a module that pulls its output low (FC-51, E18-D80NK). The default.
+  ACTIVE_LOW = 0,
+  // HIGH is active, and no pull-up: a module that drives its output high (a TTP223 touch pad).
+  // A plain switch to 5V needs a pull-down resistor (10 kOhm) from the pin to GND.
+  ACTIVE_HIGH = 1,
+};
+
 }  // namespace faberlink
 
 // A DC motor on a motor driver (H-bridge). The pins depend on the driver:
@@ -112,6 +122,53 @@ class FaberUltrasonic : public faberlink::Distance {
   uint8_t triggerPin_, echoPin_;
 };
 
+// A button, switch or end stop on a digital pin (digital-in@1), debounced by the library. Wired
+// between the pin and GND it needs nothing else: the pin's pull-up holds it HIGH, pressed is LOW.
+//
+//   FaberButton start("start", 4);                                   // a button to GND
+//   FaberButton touch("touch", 5, faberlink::ACTIVE_HIGH);           // a TTP223 touch pad
+//
+// pressed() is the debounced state, for your own code too; Faber sees every change.
+class FaberButton : public faberlink::DigitalIn {
+ public:
+  FaberButton(const char* name, uint8_t pin, faberlink::InputLevel active = faberlink::ACTIVE_LOW,
+              uint16_t debounceMs = 20);
+  void begin() override;
+  bool pressed() const { return level(); }
+
+ protected:
+  uint8_t writePins(uint8_t* out) const override;
+  bool readLevel() override;
+
+ private:
+  uint8_t pin_;
+  faberlink::InputLevel active_;
+};
+
+// A bumper, whisker, limit switch or digital infrared obstacle module (obstacle@1): it only says
+// whether something is in the way. Debounced like a button.
+//
+//   FaberObstacle bumper("bumper", 4);                                          // a micro switch to GND
+//   FaberObstacle ir("ir", 5, faberlink::OBSTACLE_INFRARED, faberlink::ACTIVE_LOW, 0.1f);  // FC-51
+//
+// triggerDistanceM: how close something must come (an infrared module's potentiometer sets it);
+// 0 if you don't know. detected() is the debounced state, for your own code too.
+class FaberObstacle : public faberlink::Obstacle {
+ public:
+  FaberObstacle(const char* name, uint8_t pin, faberlink::ObstacleKind kind = faberlink::OBSTACLE_BUMPER,
+                faberlink::InputLevel active = faberlink::ACTIVE_LOW, float triggerDistanceM = 0);
+  void begin() override;
+  bool detected() const { return level(); }
+
+ protected:
+  uint8_t writePins(uint8_t* out) const override;
+  bool readLevel() override;
+
+ private:
+  uint8_t pin_;
+  faberlink::InputLevel active_;
+};
+
 // A battery measured through a voltage divider on an analog pin: battery + -> R1 -> pin -> R2 -> GND.
 // dividerRatio is (R1 + R2) / R2, e.g. 3.0 for 20 kOhm over 10 kOhm, which brings a 3S pack's
 // 12.6 V down to 4.2 V, safely under a 5 V board's reference. Pick resistors that keep the pin
@@ -146,8 +203,8 @@ class FaberLink {
   // Call it in every loop(), and keep loop() fast: delay() stops the protocol too.
   void poll();
 
-  // Adds a custom part (your own faberlink::Part); call it before begin(). FaberMotor,
-  // FaberDistance, FaberUltrasonic and FaberBattery add themselves.
+  // Adds a custom part (your own faberlink::Part); call it before begin(). The library's own
+  // parts (FaberMotor, FaberButton, ...) add themselves.
   bool add(faberlink::Part& part);
   // A hardware stop button: engageEstop() stops everything and latches; the motors may only run
   // again after resetEstop() here AND a release in Faber.

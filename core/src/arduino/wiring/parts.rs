@@ -22,6 +22,9 @@ const FILES: &[(&str, &str)] = &[
     ("ir-distance", include_str!("parts/ir-distance.toml")),
     ("battery", include_str!("parts/battery.toml")),
     ("motor", include_str!("parts/motor.toml")),
+    ("button", include_str!("parts/button.toml")),
+    ("bumper", include_str!("parts/bumper.toml")),
+    ("ir-obstacle", include_str!("parts/ir-obstacle.toml")),
 ];
 
 /// What a pin must be able to do for a role.

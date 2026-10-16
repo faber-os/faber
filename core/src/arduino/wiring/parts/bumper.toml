@@ -1,0 +1,41 @@
+# A bumper, whisker or limit switch on a digital pin: FaberObstacle
+# (firmware/faberlink/src/FaberLink.h), obstacle@1, debounced by the library.
+# Part facts: docs/research/common-parts.md §2.4 and §4.1 (a micro switch to GND with the pin's
+# pull-up; a bumper is an obstacle, not a button, so apps looking for a button never pick it).
+
+faber-part = 1
+id = "bumper"
+name = "Bumper (micro switch)"
+description = "Tells Faber when the robot bumps into something: a micro switch behind a bumper or a whisker."
+covers = ["micro switch", "limit switch", "whisker"]
+capability = "obstacle"
+class = "FaberObstacle"
+include = "FaberLink.h"
+default-name = "bumper"
+warnings = [
+  "Faber stops the robot from the computer: a bumper alone doesn't stop the motors on the board yet.",
+]
+
+[power]
+supply = "none"
+
+[[settings]]
+id = "kind"
+name = "Kind"
+type = "choice"
+default = "bumper"
+apply = "build"
+help = "A bumper or whisker that something presses, or a limit switch at the edge of where the machine may go."
+options = [
+  { id = "bumper", name = "Bumper or whisker", code = "faberlink::OBSTACLE_BUMPER" },
+  { id = "limit", name = "Limit switch", code = "faberlink::OBSTACLE_LIMIT" },
+]
+
+[[shapes]]
+id = "pin"
+name = "One digital pin"
+args = ["name", "pin:signal", "setting:kind"]
+wiring = ["Switch COM → {pin:signal}", "Switch NO (normally open) → GND"]
+roles = [
+  { id = "signal", name = "Switch", needs = "digital-in", help = "Reads the switch: LOW while it is pressed." },
+]

@@ -14,6 +14,7 @@
 #define LOW 0x0
 #define INPUT 0x0
 #define OUTPUT 0x1
+#define INPUT_PULLUP 0x2
 
 #define PIN_A0 (14)
 #define PIN_A1 (15)

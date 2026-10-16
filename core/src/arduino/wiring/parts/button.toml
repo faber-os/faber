@@ -1,0 +1,52 @@
+# A push button, toggle switch, end stop or touch pad on a digital pin: FaberButton
+# (firmware/faberlink/src/FaberLink.h), digital-in@1, debounced by the library.
+# Part facts: docs/research/common-parts.md §2.4 (a button between the pin and GND with the pin's
+# pull-up; the TTP223's output is active high).
+
+faber-part = 1
+id = "button"
+name = "Button or switch"
+description = "Tells Faber when a button is pressed or a switch is on: push buttons, toggle switches, end stops, touch pads."
+covers = ["push button", "tactile switch", "toggle switch", "micro switch as an end stop", "TTP223"]
+capability = "digital-in"
+class = "FaberButton"
+include = "FaberLink.h"
+default-name = "start"
+warnings = [
+  "A bumper that should tell the robot it hit something is an obstacle sensor: add it as a bumper instead, so apps looking for a button never pick it.",
+]
+
+[power]
+supply = "none"
+
+[[settings]]
+id = "wiring"
+name = "Wiring"
+type = "choice"
+default = "to-gnd"
+apply = "build"
+help = "A button or switch between the pin and GND needs nothing else: the pin's pull-up does the rest. A touch pad (TTP223) drives its output high when touched."
+options = [
+  { id = "to-gnd", name = "To GND (pressed is LOW)", code = "faberlink::ACTIVE_LOW" },
+  { id = "active-high", name = "Drives the pin HIGH when pressed (TTP223)", code = "faberlink::ACTIVE_HIGH" },
+]
+
+[[settings]]
+id = "debounce-ms"
+name = "Debounce"
+unit = "ms"
+type = "integer"
+default = 20
+min = 0
+max = 1000
+apply = "build"
+help = "A new state counts once it has held this long: a switch bounces for a few ms as it closes."
+
+[[shapes]]
+id = "pin"
+name = "One digital pin"
+args = ["name", "pin:signal", "setting:wiring", "setting:debounce-ms"]
+wiring = ["One leg → {pin:signal}", "The other leg → GND (or, for a TTP223: VCC → 5V, GND → GND, I/O → {pin:signal})"]
+roles = [
+  { id = "signal", name = "Signal", needs = "digital-in", help = "Reads the button." },
+]

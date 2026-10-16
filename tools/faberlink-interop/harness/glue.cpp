@@ -35,10 +35,14 @@ struct Pins {
       state[i].kind = 0;
       state[i].value = 0;
       analogIn[i] = 0;
+      digitalIn[i] = -1;
     }
   }
   PinState state[256];
   int analogIn[256];
+  // What drives an input pin from outside: 0 LOW, 1 HIGH, -1 nothing (it floats, or its pull-up
+  // holds it HIGH).
+  int digitalIn[256];
   std::vector<PinWrite> log;
   unsigned long nowMs;
   unsigned long echoUs;
@@ -65,7 +69,9 @@ class FakeSerial : public HardwareSerial {
 
 // One part of a sketch, as the Rust side describes it. type: 0 FaberMotor(name, pwm, dir, max),
 // 1 FaberMotor(name, driver, pins[0..4]), 2 FaberDistance(name, pin), 3 FaberUltrasonic(name,
-// trig, echo), 4 FaberBattery(name, pin, 3.0, 3).
+// trig, echo), 4 FaberBattery(name, pin, 3.0, 3), 5 FaberButton(name, pin, driver as the active
+// level), 6 FaberObstacle(name, pin, pins[1] as the kind, driver as the active level,
+// maxVelocity as the trigger distance).
 struct PartSpec {
   uint8_t type;
   const char* name;
@@ -84,6 +90,8 @@ struct Sketch {
   std::vector<std::unique_ptr<FaberDistance>> distances;
   std::vector<std::unique_ptr<FaberUltrasonic>> ultrasonics;
   std::vector<std::unique_ptr<FaberBattery>> batteries;
+  std::vector<std::unique_ptr<FaberButton>> buttons;
+  std::vector<std::unique_ptr<FaberObstacle>> obstacles;
 };
 
 // Parts register themselves in a global table until the next FaberLink::begin(), as globals in a
@@ -112,7 +120,14 @@ void pinMode(uint8_t pin, uint8_t mode) {
 
 void digitalWrite(uint8_t pin, uint8_t value) { record(pin, 1, value ? 1 : 0); }
 
-int digitalRead(uint8_t pin) { return current && current->state[pin].kind == 1 ? current->state[pin].value : 0; }
+// An output reads what was written to it; an input what drives it, or HIGH from its pull-up.
+int digitalRead(uint8_t pin) {
+  if (!current) return 0;
+  const PinState& s = current->state[pin];
+  if (s.mode == OUTPUT) return s.kind == 1 ? s.value : 0;
+  if (current->digitalIn[pin] >= 0) return current->digitalIn[pin];
+  return s.mode == INPUT_PULLUP ? 1 : 0;
+}
 
 // As on an AVR: 0 and 255 are plain digital levels there too, but the value is what the sketch
 // asked for, which is what the tests check.
@@ -165,6 +180,17 @@ void* fla_new(const PartSpec* parts, size_t n) {
         break;
       case 3:
         s->ultrasonics.emplace_back(new FaberUltrasonic(name, p.pins[0], p.pins[1]));
+        break;
+      case 5:
+        if (p.driver == faberlink::ACTIVE_LOW) {
+          s->buttons.emplace_back(new FaberButton(name, p.pins[0]));  // the shortest call
+        } else {
+          s->buttons.emplace_back(new FaberButton(name, p.pins[0], static_cast<faberlink::InputLevel>(p.driver)));
+        }
+        break;
+      case 6:
+        s->obstacles.emplace_back(new FaberObstacle(name, p.pins[0], static_cast<faberlink::ObstacleKind>(p.pins[1]),
+                                                    static_cast<faberlink::InputLevel>(p.driver), p.maxVelocity));
         break;
       default:
         s->batteries.emplace_back(new FaberBattery(name, p.pins[0], 3.0f, 3));
@@ -226,4 +252,6 @@ void fla_clear_log(void* h) { use(h)->pins.log.clear(); }
 void fla_set_analog(void* h, uint8_t pin, int32_t value) { use(h)->pins.analogIn[pin] = value; }
 
 void fla_set_echo_us(void* h, uint32_t us) { use(h)->pins.echoUs = us; }
+
+void fla_set_digital(void* h, uint8_t pin, int32_t level) { use(h)->pins.digitalIn[pin] = level; }
 }

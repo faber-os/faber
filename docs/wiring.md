@@ -264,6 +264,11 @@ What exists, and where it differs in detail from the design above. The decisions
   ids are the `PINS` message's role names (`pwm`, `dir`, `en`, `in1`, `in2`, `stby`, `trig`,
   `echo`, `signal`, `sense`), so a plan and a code-mode board's report speak of pins the same way. Every setting of these four is a **build** setting: the library takes
   them in constructors and has no runtime settings yet, so nothing is `live`.
+- **The first wave of parts** (research/common-parts.md §3, 2026-10-16) adds templates as their
+  library classes land: `button` (`FaberButton`, `digital-in`: push buttons, toggles, end stops,
+  TTP223), `bumper` (`FaberObstacle`, `obstacle`: a micro switch behind a bumper, or a limit
+  switch) and `ir-obstacle` (`FaberObstacle` of kind infrared: FC-51, E18-D80NK). Buttons and
+  bumpers are separate on purpose (capabilities.md, `obstacle`).
 - **Pin providers**: a template's `provides` adds pins named `<part>.<pin>` (`servos.ch3`) while
   that part is in the plan; only a role marked `provided` may take one. No provider template
   exists yet (tested with a test PCA9685).

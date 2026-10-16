@@ -1,9 +1,9 @@
 //! The library's Arduino glue, pin by pin: whole sketches (`FaberMotor` in each driver shape,
-//! `FaberDistance`, `FaberUltrasonic`, `FaberBattery`) on a stand-in Arduino core, driven from the
-//! Rust session. What passes here is the glue that runs on the board; only `digitalWrite()` and
+//! `FaberDistance`, `FaberUltrasonic`, `FaberBattery`, `FaberButton`, `FaberObstacle`) on a
+//! stand-in Arduino core, driven from the Rust session. What passes here is the glue that runs on the board; only `digitalWrite()` and
 //! friends are stand-ins.
 
-use faber_capabilities::{Command, Info, motor};
+use faber_capabilities::{Command, Info, Reading, motor, obstacle};
 use faberlink::message::{Applied, Cause, PartInfo, PartPins, PinRole, PinUse};
 use faberlink::session::{Event, Session, SessionConfig, State};
 use faberlink_interop::{Driver, NO_PIN, PinMode, PinOut, Sketch, SketchPart};
@@ -276,6 +276,8 @@ fn every_part_class_reports_its_pins() {
         SketchPart::Distance { name: "ir", pin: 14 },
         SketchPart::Ultrasonic { name: "sonar", trig: 7, echo: 2 },
         SketchPart::Battery { name: "battery", pin: 15 },
+        SketchPart::Button { name: "start", pin: 3, active_high: false },
+        SketchPart::Obstacle { name: "bumper", pin: 16, kind: 0, active_high: false, trigger_m: 0.0 },
     ]);
     use PinRole::*;
     assert_eq!(
@@ -287,6 +289,8 @@ fn every_part_class_reports_its_pins() {
             pins(3, &[(Signal, 14)]),
             pins(4, &[(Trig, 7), (Echo, 2)]),
             pins(5, &[(Sense, 15)]),
+            pins(6, &[(Signal, 3)]),
+            pins(7, &[(Signal, 16)]),
         ]
     );
     let sonar = &l.session.pins()[4];
@@ -319,4 +323,97 @@ fn the_ultrasonic_and_the_analog_parts_still_measure() {
     assert!((last(0) - 1.0).abs() < 0.01, "{meters:?}");
     assert!((last(1) - 0.4).abs() < 0.01, "512 of 1023 on a 0.8 m linear sensor: {meters:?}");
     assert_eq!(l.sketch.baud(), 115_200);
+}
+
+/// The digital levels part `part` reported, in order.
+fn levels(l: &Link, part: u8) -> Vec<bool> {
+    l.events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Reading { part: p, reading: Reading::DigitalIn(r) } if *p == part => Some(r.level),
+            Event::Reading { part: p, reading: Reading::Obstacle(r) } if *p == part => Some(r.detected),
+            _ => None,
+        })
+        .collect()
+}
+
+fn button(active_high: bool) -> SketchPart {
+    SketchPart::Button { name: "start", pin: 4, active_high }
+}
+
+#[test]
+fn a_button_to_gnd_needs_only_its_pull_up_and_reads_pressed_when_low() {
+    let mut l = Link::ready(&[button(false)]);
+    assert_eq!(l.sketch.pin_mode(4), PinMode::InputPullup);
+    assert_eq!(l.session.parts()[0].capability, "digital-in@1");
+    assert_eq!(l.session.parts()[0].info, PartInfo::Empty);
+    l.sketch.set_input(4, Some(false));
+    l.run(40);
+    assert_eq!(levels(&l, 0), [true], "pressed");
+}
+
+#[test]
+fn a_bouncing_button_is_one_press_once_it_has_held_for_the_debounce_time() {
+    let mut l = Link::ready(&[button(false)]);
+    l.run(20);
+    l.events.clear();
+    // A switch closing bounces for a few ms (on and off every millisecond here).
+    for i in 0..8 {
+        l.sketch.set_input(4, Some(i % 2 == 1));
+        l.run(1);
+    }
+    l.sketch.set_input(4, Some(false));
+    l.run(15);
+    assert!(levels(&l, 0).is_empty(), "not yet: it has held for less than 20 ms");
+    l.run(15);
+    assert_eq!(levels(&l, 0), [true], "one press, no bounces");
+    l.events.clear();
+    l.sketch.set_input(4, None); // released: the pull-up takes it HIGH again
+    l.run(30);
+    assert_eq!(levels(&l, 0), [false]);
+}
+
+#[test]
+fn an_unchanged_level_is_repeated_once_a_second() {
+    let mut l = Link::ready(&[button(false)]);
+    l.run(20);
+    l.events.clear();
+    l.run(2000);
+    assert_eq!(levels(&l, 0), [false, false], "a Faber that connects late learns the level");
+}
+
+#[test]
+fn an_active_high_input_has_no_pull_up_and_reads_high_as_pressed() {
+    let mut l = Link::ready(&[button(true)]);
+    assert_eq!(l.sketch.pin_mode(4), PinMode::Input);
+    l.sketch.set_input(4, Some(true));
+    l.run(40);
+    assert_eq!(levels(&l, 0).last(), Some(&true));
+}
+
+#[test]
+fn an_obstacle_says_its_kind_and_trigger_distance_and_when_it_is_detected() {
+    let ir = SketchPart::Obstacle { name: "ir", pin: 5, kind: 1, active_high: false, trigger_m: 0.1 };
+    let bumper = SketchPart::Obstacle { name: "bumper", pin: 6, kind: 0, active_high: false, trigger_m: 0.0 };
+    let mut l = Link::ready(&[ir, bumper]);
+    assert_eq!(
+        l.session.parts()[0].info,
+        PartInfo::Known(Info::Obstacle(obstacle::Info {
+            kind: obstacle::Kind::Infrared,
+            trigger_distance_m: Some(0.1)
+        }))
+    );
+    assert_eq!(
+        l.session.parts()[1].info,
+        PartInfo::Known(Info::Obstacle(obstacle::Info {
+            kind: obstacle::Kind::Bumper,
+            trigger_distance_m: None
+        }))
+    );
+    l.run(20);
+    l.events.clear();
+    l.sketch.set_input(6, Some(false)); // the bumper's switch closes to GND
+    l.run(30);
+    assert_eq!(levels(&l, 1), [true]);
+    assert!(levels(&l, 0).is_empty(), "the infrared module saw nothing");
 }

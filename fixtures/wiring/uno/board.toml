@@ -11,6 +11,12 @@ shape = "divider"
 pins = { sense = "A1" }
 settings = { r1-ohm = 20000, r2-ohm = 10000, cells = 3, chemistry = "li-ion", capacity-ah = 0 }
 
+[parts.bumper]
+template = "bumper"
+shape = "pin"
+pins = { signal = "A3" }
+settings = { kind = "bumper" }
+
 [parts.front]
 template = "ultrasonic"
 shape = "trig-echo"
@@ -22,6 +28,12 @@ template = "ir-distance"
 shape = "analog"
 pins = { signal = "A0" }
 settings = { min-m = 0.1, max-m = 0.8 }
+
+[parts.front_3]
+template = "ir-obstacle"
+shape = "out"
+pins = { signal = "A4" }
+settings = { trigger-distance-m = 0 }
 
 [parts.left]
 template = "motor"
@@ -40,3 +52,9 @@ template = "motor"
 shape = "two-pwm"
 pins = { in1 = 11, in2 = 10 }
 settings = { max-velocity-rad-s = 0 }
+
+[parts.start]
+template = "button"
+shape = "pin"
+pins = { signal = "A2" }
+settings = { wiring = "to-gnd", debounce-ms = 20 }

@@ -155,7 +155,7 @@ pins one part uses, so Faber can show them for a board whose sketch was written 
 | 6 | `stby` | STBY | `FaberMotor`: a standby or enable pin held high (TB6612 STBY, DRV8833 nSLEEP) |
 | 7 | `trig` | Trig | `FaberUltrasonic` |
 | 8 | `echo` | Echo | `FaberUltrasonic` |
-| 9 | `signal` | Signal | `FaberDistance`: the sensor's output |
+| 9 | `signal` | Signal | `FaberDistance`: the sensor's output; `FaberButton`, `FaberObstacle`: the switch's or module's pin |
 | 10 | `sense` | Sense | `FaberBattery`: the divider's middle |
 
 - **Compatibility, both ways.** An older library never sends `PINS`; Faber then shows no pins
@@ -330,13 +330,26 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   `FaberUltrasonic front("front", 7, 6);` (trigger, echo; 2 cm to 4 m by default, the HC-SR04
   datasheet's range). One measurement per 60 ms, as the datasheet asks; each waits at most about
   24 ms for the echo (for 4 m), and the speed of sound is taken at about 20 °C (343 m/s).
+- `FaberButton` (`digital-in@1`) and `FaberObstacle` (`obstacle@1`, 2026-10-16) read a switch or
+  a digital module on one pin, debounced in the library (`faberlink::Debouncer`: a new level counts
+  once it has held for 20 ms, 10 ms for an obstacle). `faberlink::ACTIVE_LOW` (the default) turns
+  the pin's pull-up on and reads LOW as pressed, so a switch between the pin and GND needs nothing
+  else; `faberlink::ACTIVE_HIGH` is for a part that drives its pin high (a TTP223), with no
+  pull-up. A change goes to Faber within 5 ms, an unchanged level once a second (a Faber that
+  connects later learns it). `pressed()` / `detected()` work in the sketch's own code too, with or
+  without Faber: parts now have an `update(nowMs)` hook that `poll()` calls whether Faber is
+  connected or not. Plain buttons, switches and end stops are `FaberButton`; a bumper, whisker or
+  infrared obstacle module is `FaberObstacle` (`faberlink::OBSTACLE_BUMPER`, `_INFRARED`,
+  `_LIMIT`, and the trigger distance set on the module), so an app looking for a button is never
+  offered a bumper. Neither stops the motors on the board by itself yet: Faber does that from the
+  computer.
 - Examples: `examples/MotorAndDistance`, `examples/MotorL298N` (two motors on an L298N),
-  `examples/Ultrasonic` and `examples/BatteryMonitor`. CI compiles every example for an Uno and a
+  `examples/Ultrasonic`, `examples/BatteryMonitor` and `examples/ButtonAndBumper`. CI compiles every example for an Uno and a
   Mega.
 - **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
   does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
   sends it at the end of every `HELLO_ACK` (§3). Faber then shows which sketch the board runs.
-- Not built yet: `FaberServo`, digital in/out, VL53L0X, encoders, a planar-base part with
+- Not built yet: `FaberServo`, digital out, VL53L0X, encoders, a planar-base part with
   on-board ramp-down (the interop harness has a plain test one, for SENNEP's fake Mega:
   `FakeBoard::sennep`), and negotiating 1 Mbaud.
 - **Where it lives:** inside the Faber repo for now. Moving it to its own repo
@@ -407,6 +420,18 @@ capabilities to the library costs a sketch that doesn't use them nothing. Measur
 | `MotorL298N` | 8 426 B (−56) | 588 B (−50) | 9 504 B (−52) | 960 B (−50) |
 | `BatteryMonitor` | 7 026 B (−56) | 552 B (−50) | 7 434 B (−52) | 924 B (−50) |
 | `Ultrasonic` | 6 980 B (−54) | 553 B (−48) | 7 768 B (−50) | 925 B (−48) |
+
+**Buttons and obstacles** (2026-10-16). The `update()` hook costs every sketch about 46 B of
+flash and 2 B of RAM (a virtual table entry per part class, and the loop in `poll()`). A
+`FaberButton` or `FaberObstacle` is 38 B of RAM, plus its name:
+
+| Example | Uno flash | Uno globals | Mega flash | Mega globals |
+|---|---|---|---|---|
+| `MotorAndDistance` | 10 074 B | 636 B | 11 208 B | 1 008 B |
+| `MotorL298N` | 8 472 B | 590 B | 9 554 B | 962 B |
+| `BatteryMonitor` | 7 072 B | 554 B | 7 484 B | 926 B |
+| `Ultrasonic` | 7 026 B | 555 B | 7 818 B | 927 B |
+| `ButtonAndBumper` (new) | 6 556 B | 635 B | 7 370 B | 1 007 B |
 
 ## 8. Interop tests (`tools/faberlink-interop`)
 

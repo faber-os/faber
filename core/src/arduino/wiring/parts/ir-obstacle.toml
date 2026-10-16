@@ -1,0 +1,45 @@
+# A digital infrared obstacle module: FaberObstacle (firmware/faberlink/src/FaberLink.h),
+# obstacle@1 of kind infrared.
+# Part facts: docs/research/common-parts.md §2.1 (FC-51 / KY-032 / E18-D80NK: one digital output,
+# active low, 3.3-5 V; the E18-D80NK is an NPN open collector that needs a pull-up, which the
+# pin's own pull-up gives). The distance is set on the module (its potentiometer), not in the
+# sketch: the trigger distance setting only tells Faber what it is.
+
+faber-part = 1
+id = "ir-obstacle"
+name = "Infrared obstacle sensor (FC-51, E18-D80NK)"
+description = "Tells Faber when something is closer than the distance set on the module, with infrared light."
+covers = ["FC-51", "KY-032", "E18-D80NK"]
+capability = "obstacle"
+class = "FaberObstacle"
+include = "FaberLink.h"
+default-name = "front"
+warnings = [
+  "Set the distance with the module's small potentiometer, watching its LED; then tell Faber the distance below.",
+  "Sunlight and black surfaces fool infrared sensors: test it where the robot will drive.",
+]
+
+[power]
+supply = "5V"
+# Its output is pulled up to its supply voltage (general knowledge of these modules, verify).
+logic-volts = 5.0
+
+[[settings]]
+id = "trigger-distance-m"
+name = "Detects within"
+unit = "m"
+type = "number"
+default = 0
+min = 0
+max = 1
+apply = "build"
+help = "The distance set on the module's potentiometer, so Faber can show it. 0 if you don't know it."
+
+[[shapes]]
+id = "out"
+name = "Digital output (OUT)"
+args = ["name", "pin:signal", "code:faberlink::OBSTACLE_INFRARED", "code:faberlink::ACTIVE_LOW", "setting:trigger-distance-m"]
+wiring = ["VCC → 5V", "GND → GND", "OUT → {pin:signal}"]
+roles = [
+  { id = "signal", name = "OUT", needs = "digital-in", help = "LOW while it sees something." },
+]

@@ -58,14 +58,17 @@ roles = [{roles}]
     ))
 }
 
-/// The built-in templates and the test ones.
+/// The built-in templates, and test templates for what the library may not have yet. A test
+/// template stands in for a built-in one with its id, so these tests keep their own pin roles as
+/// the library grows.
 fn catalog() -> Vec<Template> {
-    let mut all: Vec<Template> = templates().to_vec();
-    all.push(simple("servo", &["signal:digital-out"], "uses = [\"servo\"]"));
-    all.push(simple("buzzer", &["out:digital-out"], "uses = [\"tone\"]"));
-    all.push(simple("encoder", &["a:interrupt", "b:interrupt"], ""));
-    all.push(simple("strip", &["din:digital-out"], "uses = [\"interrupts-off\"]"));
-    all.push(simple("button", &["in:digital-in"], ""));
+    let mut all: Vec<Template> = vec![
+        simple("servo", &["signal:digital-out"], "uses = [\"servo\"]"),
+        simple("buzzer", &["out:digital-out"], "uses = [\"tone\"]"),
+        simple("encoder", &["a:interrupt", "b:interrupt"], ""),
+        simple("strip", &["din:digital-out"], "uses = [\"interrupts-off\"]"),
+        simple("button", &["in:digital-in"], ""),
+    ];
     // A shape the library can't drive yet (a template may land before its class does).
     let mut relay = simple("relay", &["coil:digital-out"], "");
     let mut latching = relay.shapes[0].clone();
@@ -94,7 +97,9 @@ fn catalog() -> Vec<Template> {
     let mut heater = simple("heater", &["on:digital-out"], "");
     heater.power.current_ma = Some(300);
     all.push(heater);
-    all
+    let built_in: Vec<Template> =
+        templates().iter().filter(|t| !all.iter().any(|x| x.id == t.id)).cloned().collect();
+    built_in.into_iter().chain(all).collect()
 }
 
 fn board(id: &str) -> PinMap {

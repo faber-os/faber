@@ -24,6 +24,15 @@ uint8_t putPin(uint8_t* out, uint8_t role, uint8_t pin) {
 void output(uint8_t pin) {
   if (pin != faberlink::NO_PIN) pinMode(pin, OUTPUT);
 }
+
+// An input with its pull-up on for an active-low part (a switch to GND, an open-collector output).
+void input(uint8_t pin, faberlink::InputLevel active) {
+  pinMode(pin, active == faberlink::ACTIVE_LOW ? INPUT_PULLUP : INPUT);
+}
+
+bool isActive(uint8_t pin, faberlink::InputLevel level) {
+  return (digitalRead(pin) == HIGH) == (level == faberlink::ACTIVE_HIGH);
+}
 }  // namespace
 
 FaberMotor::FaberMotor(const char* name, uint8_t pwmPin, uint8_t directionPin, float maxVelocityRadS)
@@ -151,6 +160,29 @@ float FaberUltrasonic::measure() {
   if (echoUs == 0) return -1;  // no echo in time: nothing in range
   return echoUs * METERS_PER_ECHO_US;
 }
+
+FaberButton::FaberButton(const char* name, uint8_t pin, faberlink::InputLevel active, uint16_t debounceMs)
+    : faberlink::DigitalIn(name, debounceMs), pin_(pin), active_(active) {
+  enqueue(this);
+}
+
+void FaberButton::begin() { input(pin_, active_); }
+
+uint8_t FaberButton::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_SIGNAL, pin_); }
+
+bool FaberButton::readLevel() { return isActive(pin_, active_); }
+
+FaberObstacle::FaberObstacle(const char* name, uint8_t pin, faberlink::ObstacleKind kind,
+                             faberlink::InputLevel active, float triggerDistanceM)
+    : faberlink::Obstacle(name, kind, triggerDistanceM), pin_(pin), active_(active) {
+  enqueue(this);
+}
+
+void FaberObstacle::begin() { input(pin_, active_); }
+
+uint8_t FaberObstacle::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_SIGNAL, pin_); }
+
+bool FaberObstacle::readLevel() { return isActive(pin_, active_); }
 
 FaberBattery::FaberBattery(const char* name, uint8_t analogPin, float dividerRatio, uint8_t cellsInSeries,
                            faberlink::BatteryChemistry chemistry, float referenceVolts, float capacityAh)

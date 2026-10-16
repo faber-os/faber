@@ -214,6 +214,59 @@ uint8_t Distance::writeReading(uint8_t* out, uint32_t) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Digital inputs
+
+bool Debouncer::update(bool raw, uint32_t nowMs) {
+  if (!started_) {
+    started_ = true;
+    raw_ = level_ = raw;
+    sinceMs_ = nowMs;
+    return true;
+  }
+  if (raw != raw_) {
+    raw_ = raw;
+    sinceMs_ = nowMs;
+  }
+  if (raw_ != level_ && static_cast<uint32_t>(nowMs - sinceMs_) >= ms_) {
+    level_ = raw_;
+    return true;
+  }
+  return false;
+}
+
+// A change goes out within 5 ms (the reading period); an unchanged level once a second.
+static const uint16_t INPUT_POLL_MS = 5;
+static const uint16_t INPUT_REPEAT_MS = 1000;
+
+DebouncedInput::DebouncedInput(const char* name, Capability capability, uint16_t debounceMs)
+    : Part(name, capability, 0, INPUT_POLL_MS), debouncer_(debounceMs), lastSentMs_(0), changed_(false) {}
+
+void DebouncedInput::update(uint32_t nowMs) {
+  if (debouncer_.update(readLevel(), nowMs)) changed_ = true;
+}
+
+// digital-in@1 and obstacle@1 reading layout: the level u8.
+uint8_t DebouncedInput::writeReading(uint8_t* out, uint32_t nowMs) {
+  if (!debouncer_.known()) return 0;
+  if (!changed_ && static_cast<uint32_t>(nowMs - lastSentMs_) < INPUT_REPEAT_MS) return 0;
+  changed_ = false;
+  lastSentMs_ = nowMs;
+  out[0] = debouncer_.level() ? 1 : 0;
+  return 1;
+}
+
+// obstacle@1 info layout: kind u8, trigger distance f32 (NaN = unknown).
+uint8_t Obstacle::writeInfo(uint8_t* out) const {
+  out[0] = kind_;
+  if (trigger_ > 0 && isFinite(trigger_)) {
+    putF32(out + 1, trigger_);
+  } else {
+    putU32(out + 1, 0x7FC00000UL);
+  }
+  return 5;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Battery
 
 namespace {
@@ -617,6 +670,7 @@ void Board::sendEstop(bool engaged) {
 
 void Board::tick(uint32_t nowMs) {
   checkSafety(nowMs);
+  for (Part* part = first_; part; part = part->next_) part->update(nowMs);
   if (!connected()) return;
   if (static_cast<uint32_t>(nowMs - lastStatusMs_) >= STATUS_PERIOD_MS) {
     lastStatusMs_ = nowMs;

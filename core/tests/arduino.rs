@@ -796,7 +796,8 @@ async fn pin_maps_and_part_templates_are_served() {
     assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("unknown-board")));
     let (_, parts) = call(&c.app, "GET", "/api/v0/arduino/parts", None).await;
     let ids: Vec<&str> = parts.as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["ultrasonic", "ir-distance", "battery", "motor"]);
+    assert_eq!(ids[..4], ["ultrasonic", "ir-distance", "battery", "motor"]);
+    assert!(ids.contains(&"button") && ids.contains(&"bumper"), "{ids:?}");
     let motor = parts.as_array().unwrap().iter().find(|t| t["id"] == "motor").unwrap();
     assert_eq!(motor["shapes"].as_array().unwrap().len(), 3, "FaberMotor's three driver shapes");
     assert_eq!(motor["shapes"][0]["roles"][0]["needs"], "pwm");

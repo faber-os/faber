@@ -61,6 +61,7 @@ mod ffi {
         pub fn fla_clear_log(h: *mut c_void);
         pub fn fla_set_analog(h: *mut c_void, pin: u8, value: i32);
         pub fn fla_set_echo_us(h: *mut c_void, us: u32);
+        pub fn fla_set_digital(h: *mut c_void, pin: u8, level: i32);
     }
 
     /// `PartSpec` in glue.cpp.
@@ -145,6 +146,11 @@ mod ffi {
         pub fn set_echo_us(&mut self, us: u32) {
             // SAFETY: self.0 is a live sketch.
             unsafe { fla_set_echo_us(self.0, us) }
+        }
+
+        pub fn set_digital(&mut self, pin: u8, level: i32) {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_set_digital(self.0, pin, level) }
         }
     }
 
@@ -471,6 +477,10 @@ pub enum SketchPart {
     Ultrasonic { name: &'static str, trig: u8, echo: u8 },
     /// `FaberBattery name(name, pin, 3.0, 3)`.
     Battery { name: &'static str, pin: u8 },
+    /// `FaberButton name(name, pin)`, or with `faberlink::ACTIVE_HIGH`.
+    Button { name: &'static str, pin: u8, active_high: bool },
+    /// `FaberObstacle name(name, pin, kind, active, trigger)`; `kind` is `faberlink::ObstacleKind`.
+    Obstacle { name: &'static str, pin: u8, kind: u8, active_high: bool, trigger_m: f32 },
 }
 
 impl SketchPart {
@@ -480,7 +490,9 @@ impl SketchPart {
             | SketchPart::DriverMotor { name, .. }
             | SketchPart::Distance { name, .. }
             | SketchPart::Ultrasonic { name, .. }
-            | SketchPart::Battery { name, .. } => name,
+            | SketchPart::Battery { name, .. }
+            | SketchPart::Button { name, .. }
+            | SketchPart::Obstacle { name, .. } => name,
         }
     }
 }
@@ -528,6 +540,7 @@ pub enum PinMode {
     Unset,
     Input,
     Output,
+    InputPullup,
 }
 
 /// A whole sketch: `FaberLink link(Serial)` and `parts` declared as globals, after
@@ -555,6 +568,12 @@ impl Sketch {
                     SketchPart::Distance { pin, .. } => (2, 0, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0),
                     SketchPart::Ultrasonic { trig, echo, .. } => (3, 0, [trig, echo, NO_PIN, NO_PIN], 0.0),
                     SketchPart::Battery { pin, .. } => (4, 0, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0),
+                    SketchPart::Button { pin, active_high, .. } => {
+                        (5, active_high as u8, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0)
+                    }
+                    SketchPart::Obstacle { pin, kind, active_high, trigger_m, .. } => {
+                        (6, active_high as u8, [pin, kind, NO_PIN, NO_PIN], trigger_m)
+                    }
                 };
                 ffi::PartSpec { kind, name: name.as_ptr(), driver, pins, max_velocity }
             })
@@ -592,6 +611,7 @@ impl Sketch {
         match self.handle.pin(pin).0 {
             0 => PinMode::Input,
             1 => PinMode::Output,
+            2 => PinMode::InputPullup,
             _ => PinMode::Unset,
         }
     }
@@ -608,6 +628,12 @@ impl Sketch {
     /// What `analogRead(pin)` returns from now on (0..1023).
     pub fn set_analog(&mut self, pin: u8, value: i32) {
         self.handle.set_analog(pin, value);
+    }
+
+    /// What drives input `pin` from outside from now on: `Some(true)` HIGH, `Some(false)` LOW,
+    /// `None` nothing (its pull-up, if on, holds it HIGH).
+    pub fn set_input(&mut self, pin: u8, level: Option<bool>) {
+        self.handle.set_digital(pin, level.map_or(-1, i32::from));
     }
 
     /// What `pulseIn()` measures from now on (0: no echo).

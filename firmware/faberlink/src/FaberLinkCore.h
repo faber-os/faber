@@ -64,7 +64,15 @@ const uint8_t LOG = 0x40;
 }  // namespace kind
 
 // Capability codes in READING, COMMAND and APPLIED.
-enum Capability : uint8_t { DISTANCE = 1, MOTOR = 2, PLANAR_BASE = 3, ESTOP_CAP = 4, BATTERY = 5 };
+enum Capability : uint8_t {
+  DISTANCE = 1,
+  MOTOR = 2,
+  PLANAR_BASE = 3,
+  ESTOP_CAP = 4,
+  BATTERY = 5,
+  DIGITAL_IN = 6,
+  OBSTACLE = 7,
+};
 
 // Why an actuator's output changed (APPLIED.cause).
 enum Cause : uint8_t {
@@ -99,7 +107,7 @@ enum PinRole : uint8_t {
   ROLE_STBY = 6,    // a motor driver's standby input
   ROLE_TRIG = 7,    // a range finder's trigger
   ROLE_ECHO = 8,    // a range finder's echo
-  ROLE_SIGNAL = 9,  // a sensor's output, read by the board
+  ROLE_SIGNAL = 9,  // a sensor's output read by the board (also a button's or a module's pin)
   ROLE_SENSE = 10,  // a battery's voltage, through a divider
 };
 
@@ -168,6 +176,9 @@ class Part {
 
   // Called once when the board starts (set pins up here, not in the constructor).
   virtual void begin() {}
+  // Called on every poll(), connected to Faber or not: for parts that must watch their pins all
+  // the time (a button's debounce), so the sketch can use them without Faber too.
+  virtual void update(uint32_t nowMs) { (void)nowMs; }
   // The versioned capability id PART sends ("motor@1"). Each capability's class gives its own,
   // so a sketch carries only the ids of the capabilities it uses (on an AVR every string literal
   // takes RAM). A part that derives from Part directly returns its own ("planar-base@1").
@@ -299,6 +310,74 @@ class Battery : public Part {
   BatteryChemistry chemistry_;
   uint8_t cells_;
   uint8_t level_;
+};
+
+// A digital input's level, debounced: a new level counts once the pin has held it for
+// debounceMs (a mechanical switch bounces for a few ms when it closes or opens). The first sample
+// counts at once.
+class Debouncer {
+ public:
+  explicit Debouncer(uint16_t debounceMs) : sinceMs_(0), ms_(debounceMs), raw_(false), level_(false), started_(false) {}
+  // Feeds the raw level at nowMs. True when the debounced level changed (or was first known).
+  bool update(bool raw, uint32_t nowMs);
+  bool level() const { return level_; }
+  bool known() const { return started_; }
+
+ private:
+  uint32_t sinceMs_;
+  uint16_t ms_;
+  bool raw_, level_, started_;
+};
+
+// A debounced digital input sent as a one-byte level on every change, and again every second so
+// a Faber that connects later learns it. Subclasses give the capability (digital-in@1, obstacle@1).
+class DebouncedInput : public Part {
+ public:
+  // The debounced logical level: true while active (pressed, detected).
+  bool level() const { return debouncer_.level(); }
+  void update(uint32_t nowMs) override;
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+
+ protected:
+  DebouncedInput(const char* name, Capability capability, uint16_t debounceMs);
+  ~DebouncedInput() {}
+  // The logical level now, undebounced: true is active (an active-low input inverts its pin).
+  virtual bool readLevel() = 0;
+
+ private:
+  Debouncer debouncer_;
+  uint32_t lastSentMs_;
+  bool changed_;
+};
+
+// digital-in@1: a button, a switch, an end stop. No info.
+class DigitalIn : public DebouncedInput {
+ public:
+  explicit DigitalIn(const char* name, uint16_t debounceMs = 20) : DebouncedInput(name, DIGITAL_IN, debounceMs) {}
+  const char* capabilityId() const override { return "digital-in@1"; }
+  uint8_t writeInfo(uint8_t*) const override { return 0; }
+
+ protected:
+  ~DigitalIn() {}
+};
+
+enum ObstacleKind : uint8_t { OBSTACLE_BUMPER = 0, OBSTACLE_INFRARED = 1, OBSTACLE_LIMIT = 2 };
+
+// obstacle@1: something is in the way (a bumper, a whisker, an infrared obstacle module).
+// triggerDistanceM: how close something must come, 0 or less when not known.
+class Obstacle : public DebouncedInput {
+ public:
+  Obstacle(const char* name, ObstacleKind kind, float triggerDistanceM = 0, uint16_t debounceMs = 10)
+      : DebouncedInput(name, OBSTACLE, debounceMs), trigger_(triggerDistanceM), kind_(kind) {}
+  const char* capabilityId() const override { return "obstacle@1"; }
+  uint8_t writeInfo(uint8_t* out) const override;
+
+ protected:
+  ~Obstacle() {}
+
+ private:
+  float trigger_;
+  ObstacleKind kind_;
 };
 
 // The board's side of the protocol.
