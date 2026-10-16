@@ -45,6 +45,8 @@ export type { I2cSuggestion } from '../api/generated/I2cSuggestion';
 export type { TemperatureReading } from '../api/generated/TemperatureReading';
 export type { DigitalInReading } from '../api/generated/DigitalInReading';
 export type { DigitalOutReading } from '../api/generated/DigitalOutReading';
+export type { EncoderReading } from '../api/generated/EncoderReading';
+export type { ImuReading } from '../api/generated/ImuReading';
 export type { AnalogInReading } from '../api/generated/AnalogInReading';
 export type { PwmOutReading } from '../api/generated/PwmOutReading';
 export type { BoardLink } from '../api/generated/BoardLink';

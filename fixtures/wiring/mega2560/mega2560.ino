@@ -5,19 +5,42 @@
 // Board: Arduino Mega 2560 (mega2560)
 //
 // Wiring:
+//   arm: Servo signal (orange or yellow) → D29, Servo V+ (red) → its own 5-6 V supply, Servo GND (brown or black) → the supply's - and the board's GND
 //   battery: Battery + → R1 (20000 Ω) → A1, A1 → R2 (10000 Ω) → GND, Battery - → GND
+//   bumper: Switch COM → D25, Switch NO (normally open) → GND
+//   fan: Module SIG → D10, Module GND → GND, Module V+/V− (or VIN/GND) → the load's own supply, Load → the module's output terminals
 //   front: VCC → 5V, GND → GND, Trig → D22, Echo → D23
 //   front_2: Vcc → 5V, GND → GND, Vo → A0
+//   front_3: VCC → 5V, GND → GND, OUT → D26
+//   imu: VCC → 5V, GND → GND, SDA → the board's SDA, SCL → the board's SCL, AD0 → open for 0x68, VCC for 0x69
+//   knob: One end → 5V, The other end → GND, Middle (wiper, VRx, VRy, or the divider's middle) → A2
+//   led: D27 → 220 Ω resistor → LED's long leg (+), LED's short leg (−) → GND
+//   led_2: D9 → 220 Ω resistor → LED's long leg (+), LED's short leg (−) → GND
 //   left: Driver PWM → D4, Driver DIR → D5, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
 //   left_2: Driver EN (ENA, PWMA) → D6 (on an L298N, take the jumper off ENA), Driver IN1 → D7, Driver IN2 → D8, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
 //   left_3: Driver IN1 (IA, AIN1, RPWM) → D11, Driver IN2 (IB, AIN2, LPWM) → D12, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
+//   relay: Module VCC → 5V, Module GND → GND, Module IN → D28
+//   start: One leg → D24, The other leg → GND (or, for a TTP223: VCC → 5V, GND → GND, I/O → D24)
+//   wheel: Encoder VCC → 5V, Encoder GND → GND, Encoder A (C1, CLK) → D2, Encoder B (C2, DT) → D14
 
 #include <FaberLink.h>
+#include <FaberServo.h>
+#include <FaberImu.h>
+#include <FaberEncoder.h>
 
 FaberLink link(Serial);
 
+// arm: Servo, Signal D29
+FaberServo arm("arm", 29, 0.0, 180.0, faberlink::SERVO_HOLD, 544, 2400);
+
 // battery: Battery voltage (divider), Sense A1
 FaberBattery battery("battery", A1, 3.0, 3, faberlink::BATTERY_LI_ION, 5.0, 0.0);
+
+// bumper: Bumper (micro switch), Switch D25
+FaberObstacle bumper("bumper", 25, faberlink::OBSTACLE_BUMPER);
+
+// fan: MOSFET module (PWM), SIG D10
+FaberOutput fan("fan", 10, faberlink::OUTPUT_PWM);
 
 // front: Ultrasonic distance sensor, Trig D22, Echo D23
 FaberUltrasonic front("front", 22, 23, 0.02, 4.0);
@@ -33,6 +56,21 @@ float front_2ToMeters(int raw) {
 // front_2: Infrared distance sensor (Sharp GP2Y0A21), Signal A0
 FaberDistance front_2("front_2", A0, 0.1, 0.8, faberlink::DISTANCE_INFRARED, front_2ToMeters);
 
+// front_3: Infrared obstacle sensor (FC-51, E18-D80NK), OUT D26
+FaberObstacle front_3("front_3", 26, faberlink::OBSTACLE_INFRARED, faberlink::ACTIVE_LOW, 0.0);
+
+// imu: IMU (MPU6050, GY-521), 
+FaberImu imu("imu", faberlink::IMU_ADDRESS_68, 20.0);
+
+// knob: Potentiometer or analog sensor, Signal A2
+FaberAnalogIn knob("knob", A2, 10.0, 5.0);
+
+// led: LED, LED D27
+FaberOutput led("led", 27);
+
+// led_2: LED, LED D9
+FaberOutput led_2("led_2", 9, faberlink::OUTPUT_PWM);
+
 // left: DC motor with a driver, PWM D4, DIR D5
 FaberMotor left("left", 4, 5, 0.0);
 
@@ -41,6 +79,15 @@ FaberMotor left_2("left_2", faberlink::DRIVER_EN_IN1_IN2, 6, 7, 8);
 
 // left_3: DC motor with a driver, IN1 D11, IN2 D12
 FaberMotor left_3("left_3", faberlink::DRIVER_TWO_PWM, 11, 12);
+
+// relay: Relay module, IN D28
+FaberOutput relay("relay", 28, faberlink::OUTPUT_ON_OFF, faberlink::ACTIVE_LOW);
+
+// start: Button or switch, Signal D24
+FaberButton start("start", 24, faberlink::ACTIVE_LOW, 20);
+
+// wheel: Quadrature encoder, A D2, B D14
+FaberEncoder wheel("wheel", 2, 14, 0.0, 1.0);
 
 #include "my_code.h"
 

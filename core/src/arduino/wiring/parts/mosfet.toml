@@ -1,0 +1,33 @@
+# A MOSFET module driven by PWM (a fan, a lamp, an LED strip without data, a pump): FaberOutput
+# (firmware/faberlink/src/FaberLink.h), pwm-out@1.
+# Part facts: docs/research/common-parts.md §2.5 (IRF520 boards are not logic-level: poor at 5 V,
+# useless at 3.3 V; logic-level AO3400 / IRLZ44N modules are fine; the load has its own supply).
+
+faber-part = 1
+id = "mosfet"
+name = "MOSFET module (PWM)"
+description = "Sets the power of a fan, lamp or pump on its own supply, from 0 to full, through a MOSFET module."
+covers = ["AO3400 module", "IRLZ44N module", "IRF520 module"]
+capability = "pwm-out"
+class = "FaberOutput"
+include = "FaberLink.h"
+default-name = "fan"
+warnings = [
+  "The load needs its own supply: never power it from the board's 5V pin. Join the supply's − to the board's GND.",
+  "IRF520 modules are not logic-level MOSFETs: at 5 V they only partly switch on and get hot. A logic-level module (AO3400, IRLZ44N) switches fully.",
+  "A motor or a pump needs a flyback diode across it; most modules for motors have one.",
+  "Faber leases an output like a motor: it goes off when nobody has commanded it for a second.",
+]
+
+[power]
+supply = "own"
+own-supply = true
+
+[[shapes]]
+id = "sig"
+name = "SIG pin (PWM)"
+args = ["name", "pin:out", "code:faberlink::OUTPUT_PWM"]
+wiring = ["Module SIG → {pin:out}", "Module GND → GND", "Module V+/V− (or VIN/GND) → the load's own supply", "Load → the module's output terminals"]
+roles = [
+  { id = "out", name = "SIG", needs = "pwm", help = "Sets the power." },
+]

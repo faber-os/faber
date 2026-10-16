@@ -56,6 +56,25 @@ as its sub-parts by themselves (Phase 4, [faberlink.md §9](faberlink.md)). So t
   moving current times the largest share of top speed on any axis; its voltage is the resting
   voltage at its charge (no sag under load), and it reports `amps` (negative: discharging) and
   `charge`. Reset position doesn't recharge it; restarting the part does.
+- `generic-obstacle` (`obstacle@1`, added with the first wave of parts, 2026-10-16): settings
+  `kind` (bumper / infrared / limit), `trigger-distance-m` (default 0.01 m, a bumper) and, for the
+  world, `fov-rad` (0.5 rad). Manual, it is a two-stop slider, clear or detected, with the
+  patterns steady and **step** (detected every other two seconds). In the world it casts a cone
+  like a distance sensor, without noise, and is detected while anything is within its trigger
+  distance plus 5 mm (the world stops a bumping machine a hair short of the wall, never on it).
+- `generic-servo` (`servo@1`): settings `min-angle`, `max-angle` (rad, 0 to π by default) and
+  `safe-state` (hold / release, default hold, D29). Manual only: it reports the angle it was told,
+  none while released (as it starts); its safe state holds the angle or lets go, as set up. The
+  world has no use for a servo yet.
+- `generic-encoder` (`encoder@1`): setting `counts-per-rev` (0: not known). Manual only: the slider
+  is its speed in counts per second (two turns a second either way when the counts per turn are
+  known, else ±1000), and the count is that speed integrated; with counts per turn it reports its
+  speed in rad/s too. The world has no wheels to count.
+- `generic-imu` (`imu@1`, no info): manual, the slider is its turn about z (±3 rad/s), lying flat
+  and still (gravity, 9.80665 m/s², straight up). In the world it feels the machine turn and speed
+  up: `angular-velocity.z` is the machine's turn, `linear-acceleration` the change of its velocity
+  plus the turn's share (`dv/dt + ω × v`) turned by the mount's yaw, and gravity up. The world is
+  flat (no roll or pitch) and the IMU is taken to sit at the machine's turning centre.
 - Existing real connectors (`ldrobot-ld19`) can be simulated too: their manifest gives the
   capability and info (range limits), the world gives the values.
 

@@ -1,5 +1,5 @@
-//! Generic connectors (docs/simulation.md, section 3): a motor, a drive base, a distance sensor
-//! and a battery described by their settings alone. Real ones sit on a FaberLink board and appear as its
+//! Generic connectors (docs/simulation.md, section 3): a motor, a drive base, a distance sensor,
+//! a battery, an obstacle sensor, a servo, an encoder and an IMU described by their settings alone. Real ones sit on a FaberLink board and appear as its
 //! sub-parts by themselves (`faber-bridge`), so a generic part is only ever simulated; their
 //! manifests say so with [`PortRequirement::Bridge`].
 //!
@@ -7,7 +7,9 @@
 //! command to them, and simulations respect them. Each manifest declares its settings
 //! ([`SettingSpec`]); the shell builds its form from them and a [`Reader`] reads them.
 
-use faber_capabilities::{Info, Twist2d, battery, distance, motor, planar_base};
+use faber_capabilities::{
+    Capability, Info, Twist2d, battery, distance, encoder, motor, obstacle, planar_base, servo,
+};
 use faber_connector::settings::Reader;
 use faber_connector::{
     Choice, Connector, Context, Definition, Manifest, PortRequirement, Provide, SettingSpec, Settings,
@@ -18,6 +20,10 @@ pub const PLANAR_BASE: &str = "generic-planar-base";
 pub const MOTOR: &str = "generic-motor";
 pub const DISTANCE: &str = "generic-distance";
 pub const BATTERY: &str = "generic-battery";
+pub const OBSTACLE: &str = "generic-obstacle";
+pub const SERVO: &str = "generic-servo";
+pub const ENCODER: &str = "generic-encoder";
+pub const IMU: &str = "generic-imu";
 
 pub fn definitions() -> Vec<Definition> {
     vec![
@@ -25,6 +31,10 @@ pub fn definitions() -> Vec<Definition> {
         definition(MOTOR, "Generic motor", motor_settings(), motor_provides),
         definition(DISTANCE, "Generic distance sensor", distance_settings(), distance_provides),
         definition(BATTERY, "Generic battery", battery_settings(), battery_provides),
+        definition(OBSTACLE, "Generic obstacle sensor (bumper)", obstacle_settings(), obstacle_provides),
+        definition(SERVO, "Generic servo", servo_settings(), servo_provides),
+        definition(ENCODER, "Generic encoder", encoder_settings(), encoder_provides),
+        definition(IMU, "Generic IMU", imu_settings(), imu_provides),
     ]
 }
 
@@ -48,6 +58,10 @@ fn definition(
         PLANAR_BASE => create_base,
         MOTOR => create_motor,
         BATTERY => create_battery,
+        OBSTACLE => create_obstacle,
+        SERVO => create_servo,
+        ENCODER => create_encoder,
+        IMU => create_imu,
         _ => create_distance,
     };
     Definition::new(manifest, create).with_provides(provides)
@@ -197,6 +211,82 @@ fn distance_settings() -> Vec<SettingSpec> {
     ]
 }
 
+/// A bumper by default: something touches it. An infrared module's trigger distance is set with
+/// its potentiometer; the simulated world uses it.
+fn obstacle_settings() -> Vec<SettingSpec> {
+    vec![
+        SettingSpec::choice(
+            "kind",
+            "Kind of sensor",
+            "How it senses; shown in its info.",
+            "bumper",
+            vec![
+                Choice::new("bumper", "Bumper or whisker"),
+                Choice::new("infrared", "Infrared obstacle module"),
+                Choice::new("limit", "Limit switch"),
+            ],
+        ),
+        SettingSpec::number(
+            "trigger-distance-m",
+            "Detects within",
+            "How close something must come before it is detected: about 0.01 m for a bumper, what its potentiometer is set to for an infrared module.",
+            "m",
+            0.01,
+        )
+        .at_least(0.0),
+        SettingSpec::number(
+            "fov-rad",
+            "Field of view",
+            "How wide the area it watches is (0.5 rad is about 29°). Used by the simulated world.",
+            "rad",
+            0.5,
+        )
+        .positive()
+        .advanced(),
+        rate(10.0),
+    ]
+}
+
+/// An SG90-sized servo: 0 to 180°, holding its angle when its lease ends (D29).
+fn servo_settings() -> Vec<SettingSpec> {
+    vec![
+        SettingSpec::number("min-angle", "Smallest angle", "The angle it may go down to.", "rad", 0.0),
+        SettingSpec::number(
+            "max-angle",
+            "Largest angle",
+            "The angle it may go up to (3.14 rad is 180°).",
+            "rad",
+            std::f64::consts::PI,
+        ),
+        SettingSpec::choice(
+            "safe-state",
+            "When nobody drives it",
+            "What it does when its lease ends or the e-stop is pressed.",
+            "hold",
+            vec![Choice::new("hold", "Hold its angle"), Choice::new("release", "Go limp (release)")],
+        ),
+        rate(10.0),
+    ]
+}
+
+fn encoder_settings() -> Vec<SettingSpec> {
+    vec![
+        SettingSpec::number(
+            "counts-per-rev",
+            "Counts per turn",
+            "Counts for one turn of the shaft it measures, gearbox included. 0 if you don't know: then its speed is in counts per second only.",
+            "",
+            0.0,
+        )
+        .at_least(0.0),
+        rate(20.0),
+    ]
+}
+
+fn imu_settings() -> Vec<SettingSpec> {
+    vec![rate(20.0)]
+}
+
 /// The defaults are a 3S Li-ion pack of 2.2 Ah, a common size for small robots. The currents
 /// only matter in the simulated world, where the battery drains as the machine drives.
 fn battery_settings() -> Vec<SettingSpec> {
@@ -302,6 +392,40 @@ fn create_battery(s: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
     battery_info(s).map(|_| Box::new(Generic) as Box<dyn Connector>)
 }
 
+fn create_obstacle(s: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
+    obstacle_info(s).map(|_| Box::new(Generic) as Box<dyn Connector>)
+}
+
+fn create_servo(s: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
+    servo_info(s).map(|_| Box::new(Generic) as Box<dyn Connector>)
+}
+
+fn create_encoder(s: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
+    encoder_info(s).map(|_| Box::new(Generic) as Box<dyn Connector>)
+}
+
+fn create_imu(s: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
+    imu_check(s).map(|_| Box::new(Generic) as Box<dyn Connector>)
+}
+
+fn obstacle_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, SettingsError> {
+    Ok(vec![Provide::with_info(Info::Obstacle(obstacle_info(s)?))])
+}
+
+fn servo_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, SettingsError> {
+    Ok(vec![Provide::with_info(Info::Servo(servo_info(s)?))])
+}
+
+fn encoder_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, SettingsError> {
+    Ok(vec![Provide::with_info(Info::Encoder(encoder_info(s)?))])
+}
+
+/// An IMU has no info: what it measures is all in its readings.
+fn imu_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, SettingsError> {
+    imu_check(s)?;
+    Ok(vec![Provide::default_for(Capability::Imu)])
+}
+
 fn base_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, SettingsError> {
     Ok(vec![Provide::with_info(Info::PlanarBase(base_info(s)?))])
 }
@@ -384,6 +508,56 @@ fn battery_info(s: &Settings) -> Result<battery::Info, SettingsError> {
     })
 }
 
+fn obstacle_info(s: &Settings) -> Result<obstacle::Info, SettingsError> {
+    let specs = obstacle_settings();
+    let r = Reader::new(s, &specs, "a generic obstacle sensor")?;
+    r.number("rate-hz")?;
+    r.number("fov-rad")?;
+    let kind = r.choice("kind")?;
+    Ok(obstacle::Info {
+        kind: obstacle::Kind::ALL.iter().copied().find(|k| k.id() == kind).expect("declared kinds exist"),
+        trigger_distance_m: Some(r.number("trigger-distance-m")? as f32),
+    })
+}
+
+fn servo_info(s: &Settings) -> Result<servo::Info, SettingsError> {
+    let specs = servo_settings();
+    let r = Reader::new(s, &specs, "a generic servo")?;
+    r.number("rate-hz")?;
+    let (min, max) = (r.number("min-angle")? as f32, r.number("max-angle")? as f32);
+    if min >= max {
+        return Err(SettingsError {
+            key: "min-angle".into(),
+            message: format!("min-angle ({min} rad) must be less than max-angle ({max} rad)."),
+            hint: "A 180° servo goes from min-angle = 0 to max-angle = 3.14159.".into(),
+        });
+    }
+    let safe = r.choice("safe-state")?;
+    Ok(servo::Info {
+        min_angle_rad: min,
+        max_angle_rad: max,
+        safe_state: servo::SafeState::ALL
+            .iter()
+            .copied()
+            .find(|k| k.id() == safe)
+            .expect("declared states exist"),
+    })
+}
+
+fn encoder_info(s: &Settings) -> Result<encoder::Info, SettingsError> {
+    let specs = encoder_settings();
+    let r = Reader::new(s, &specs, "a generic encoder")?;
+    r.number("rate-hz")?;
+    let cpr = r.number("counts-per-rev")? as f32;
+    Ok(encoder::Info { counts_per_rev: (cpr > 0.0).then_some(cpr) })
+}
+
+fn imu_check(s: &Settings) -> Result<(), SettingsError> {
+    let specs = imu_settings();
+    Reader::new(s, &specs, "a generic IMU")?.number("rate-hz")?;
+    Ok(())
+}
+
 fn distance_info(s: &Settings) -> Result<distance::Info, SettingsError> {
     let specs = distance_settings();
     let r = Reader::new(s, &specs, "a generic distance sensor")?;
@@ -408,7 +582,6 @@ fn distance_info(s: &Settings) -> Result<distance::Info, SettingsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use faber_capabilities::Capability;
 
     fn settings(text: &str) -> Settings {
         toml::from_str(text).unwrap()
@@ -425,12 +598,22 @@ mod tests {
         for d in definitions() {
             assert_eq!(d.manifest.port, PortRequirement::Bridge, "{}", d.manifest.id);
             assert_eq!(d.manifest.validate(), Ok(()));
-            assert!(d.manifest.provides[0].info.is_some(), "{}", d.manifest.id);
+            let has_info = d.manifest.provides[0].info.is_some();
+            assert_eq!(has_info, d.manifest.id != IMU, "only the IMU has no info: {}", d.manifest.id);
         }
         let caps: Vec<_> = definitions().iter().map(|d| d.manifest.provides[0].capability).collect();
         assert_eq!(
             caps,
-            [Capability::PlanarBase, Capability::Motor, Capability::Distance, Capability::Battery]
+            [
+                Capability::PlanarBase,
+                Capability::Motor,
+                Capability::Distance,
+                Capability::Battery,
+                Capability::Obstacle,
+                Capability::Servo,
+                Capability::Encoder,
+                Capability::Imu
+            ]
         );
     }
 
@@ -486,6 +669,12 @@ mod tests {
             (BATTERY, "cells-in-series = 0", "cells-in-series"),
             (BATTERY, "start-charge = 1.5", "start-charge"),
             (BATTERY, "capacity-ah = 0", "capacity-ah"),
+            (OBSTACLE, "kind = \"radar\"", "kind"),
+            (OBSTACLE, "trigger-distance-m = -1", "trigger-distance-m"),
+            (SERVO, "min-angle = 2\nmax-angle = 1", "min-angle"),
+            (SERVO, "safe-state = \"drop\"", "safe-state"),
+            (ENCODER, "counts-per-rev = -5", "counts-per-rev"),
+            (IMU, "rate-hz = 0", "rate-hz"),
         ];
         for (id, text, key) in cases {
             let e = info_of(id, &settings(text)).unwrap_err();
@@ -547,6 +736,8 @@ mod tests {
             let faber_connector::SettingKind::Choice { choices, .. } = spec.kind else { panic!() };
             choices.into_iter().map(|c| c.value).collect()
         };
+        let obstacles: Vec<_> = obstacle::Kind::ALL.iter().map(|k| k.id().to_string()).collect();
+        assert_eq!(choices(OBSTACLE), obstacles);
         let motors: Vec<_> = motor::Kind::ALL.iter().map(|k| k.id().to_string()).collect();
         let sensors: Vec<_> = distance::Kind::ALL.iter().map(|k| k.id().to_string()).collect();
         assert_eq!(choices(MOTOR), motors);
@@ -579,9 +770,31 @@ mod tests {
 
     #[test]
     fn every_generic_part_accepts_a_rate() {
-        for id in [PLANAR_BASE, MOTOR, DISTANCE, BATTERY] {
+        for id in [PLANAR_BASE, MOTOR, DISTANCE, BATTERY, OBSTACLE, SERVO, ENCODER] {
             assert!(info_of(id, &settings("rate-hz = 5")).is_ok(), "{id}");
         }
+        let imu = definitions().into_iter().find(|d| d.manifest.id == IMU).unwrap();
+        assert!((imu.create)(&settings("rate-hz = 50")).is_ok());
+    }
+
+    #[test]
+    fn obstacle_servo_and_encoder_settings_become_their_info() {
+        let Info::Obstacle(o) = info_of(OBSTACLE, &Settings::new()).unwrap() else { panic!() };
+        assert_eq!(o, obstacle::Info { kind: obstacle::Kind::Bumper, trigger_distance_m: Some(0.01) });
+        let s = settings("kind = \"infrared\"\ntrigger-distance-m = 0.15\n");
+        let Info::Obstacle(o) = info_of(OBSTACLE, &s).unwrap() else { panic!() };
+        assert_eq!((o.kind, o.trigger_distance_m), (obstacle::Kind::Infrared, Some(0.15)));
+        let Info::Servo(v) = info_of(SERVO, &Settings::new()).unwrap() else { panic!() };
+        assert_eq!((v.min_angle_rad, v.safe_state), (0.0, servo::SafeState::Hold), "D29: hold by default");
+        assert!((v.max_angle_rad - std::f32::consts::PI).abs() < 1e-6);
+        let Info::Servo(v) = info_of(SERVO, &settings("safe-state = \"release\"")).unwrap() else { panic!() };
+        assert_eq!(v.safe_state, servo::SafeState::Release);
+        let Info::Encoder(e) = info_of(ENCODER, &Settings::new()).unwrap() else { panic!() };
+        assert_eq!(e.counts_per_rev, None, "0 means not known");
+        let Info::Encoder(e) = info_of(ENCODER, &settings("counts-per-rev = 1496.9")).unwrap() else {
+            panic!()
+        };
+        assert_eq!(e.counts_per_rev, Some(1496.9));
     }
 
     #[test]

@@ -17,6 +17,10 @@ interface types {
   use faber:capabilities/digital-out@0.1.0.{reading as digital-out-reading, command as digital-out-command};
   use faber:capabilities/analog-in@0.1.0.{reading as analog-in-reading};
   use faber:capabilities/pwm-out@0.1.0.{reading as pwm-out-reading, command as pwm-out-command};
+  use faber:capabilities/obstacle@0.1.0.{reading as obstacle-reading};
+  use faber:capabilities/servo@0.1.0.{reading as servo-reading, command as servo-command};
+  use faber:capabilities/encoder@0.1.0.{reading as encoder-reading};
+  use faber:capabilities/imu@0.1.0.{reading as imu-reading};
 
   /// One reading of any capability a connector can publish.
   variant reading {
@@ -33,6 +37,10 @@ interface types {
     digital-out(digital-out-reading),
     analog-in(analog-in-reading),
     pwm-out(pwm-out-reading),
+    obstacle(obstacle-reading),
+    servo(servo-reading),
+    encoder(encoder-reading),
+    imu(imu-reading),
   }
 
   /// One command for an actuator, already lease-checked and clamped by the core.
@@ -41,6 +49,7 @@ interface types {
     planar-base(planar-base-command),
     digital-out(digital-out-command),
     pwm-out(pwm-out-command),
+    servo(servo-command),
   }
 
   /// What the part did with a command: the command as it was applied (after its own clamping).

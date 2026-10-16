@@ -129,9 +129,10 @@ impl Machine {
         })
     }
 
-    /// The part templates (`GET /api/v0/arduino/parts`).
-    pub fn part_templates(&self) -> &'static [Template] {
-        crate::arduino::wiring::parts::templates()
+    /// The part templates that can be used now (`GET /api/v0/arduino/parts`): not one whose every
+    /// shape still waits for the library (a VL53L0X needs a library Faber can't install yet).
+    pub fn part_templates(&self) -> Vec<Template> {
+        crate::arduino::wiring::parts::templates().iter().filter(|t| !t.shapes.is_empty()).cloned().collect()
     }
 
     /// Pins in use on the board from outside its plan. Empty for now: a guided board's own

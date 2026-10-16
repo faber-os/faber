@@ -3,9 +3,10 @@ import type { DigitalOutCommand } from "./DigitalOutCommand";
 import type { MotorCommand } from "./MotorCommand";
 import type { PlanarBaseCommand } from "./PlanarBaseCommand";
 import type { PwmOutCommand } from "./PwmOutCommand";
+import type { ServoCommand } from "./ServoCommand";
 
 /**
  * One command to an actuator, tagged with its capability like a [`Reading`]:
  * `{"capability": "planar-base@1", "command": {"kind": "set-velocity", "vx": 0.2, "vy": 0, "omega": 0}}`.
  */
-export type Command = { "capability": "motor@1", "command": MotorCommand } | { "capability": "planar-base@1", "command": PlanarBaseCommand } | { "capability": "digital-out@1", "command": DigitalOutCommand } | { "capability": "pwm-out@1", "command": PwmOutCommand };
+export type Command = { "capability": "motor@1", "command": MotorCommand } | { "capability": "planar-base@1", "command": PlanarBaseCommand } | { "capability": "digital-out@1", "command": DigitalOutCommand } | { "capability": "pwm-out@1", "command": PwmOutCommand } | { "capability": "servo@1", "command": ServoCommand };

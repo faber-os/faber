@@ -100,3 +100,39 @@ describe('manual sensors', () => {
     expect(sensorRange(p('manual', 'distance@1'))).toEqual(FOUR);
   });
 });
+
+describe('manual obstacles, encoders and IMUs', () => {
+  const p = (capability: string, info?: unknown) =>
+    ({
+      connector: 'c',
+      simulate: 'manual',
+      signals: [{ address: 'x/y', capability, info }],
+    }) as PartInfo;
+
+  it('are manual sensors too', () => {
+    for (const c of ['obstacle@1', 'encoder@1', 'imu@1']) expect(isManualSensor(p(c))).toBe(true);
+    expect(isManualSensor(p('servo@1'))).toBe(false);
+  });
+
+  it('switch an obstacle between clear and detected, or bump it every other two seconds', () => {
+    const range = sensorRange(p('obstacle@1'));
+    expect(range).toEqual({ min: 0, max: 1, quantity: 'detected' });
+    expect(patternKinds(p('obstacle@1'))).toEqual(['steady', 'step']);
+    expect(patternFor('step', 0, range)).toEqual({ kind: 'step', low: 0, high: 1, periodS: 4 });
+  });
+
+  it('turn an encoder up to two turns a second either way, in counts', () => {
+    const known = { capability: 'encoder@1', info: { countsPerRev: 1000 } };
+    expect(sensorRange(p('encoder@1', known))).toEqual({
+      min: -2000,
+      max: 2000,
+      quantity: 'counts',
+    });
+    expect(sensorRange(p('encoder@1'))).toEqual({ min: -1000, max: 1000, quantity: 'counts' });
+  });
+
+  it('turn an IMU about z', () => {
+    expect(sensorRange(p('imu@1'))).toEqual({ min: -3, max: 3, quantity: 'turn-rate' });
+    expect(patternKinds(p('imu@1'))).toEqual(PATTERN_KINDS);
+  });
+});

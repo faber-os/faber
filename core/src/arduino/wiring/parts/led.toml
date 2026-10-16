@@ -1,0 +1,40 @@
+# An LED on a pin, on/off or dimmable: FaberOutput (firmware/faberlink/src/FaberLink.h),
+# digital-out@1 or pwm-out@1. Also an active buzzer (on/off).
+# Part facts: docs/research/common-parts.md §2.5 and §5 (a 220 Ohm - 1 kOhm series resistor; an
+# AVR pin: 20 mA recommended, 40 mA absolute maximum).
+
+faber-part = 1
+id = "led"
+name = "LED"
+description = "An LED that Faber switches on and off, or dims. An active buzzer works the same way, on and off."
+covers = ["LED with a resistor", "active buzzer"]
+capability = "digital-out"
+class = "FaberOutput"
+include = "FaberLink.h"
+default-name = "led"
+warnings = [
+  "An LED always needs its resistor (220 Ω to 1 kΩ) in series: without it the LED and the pin burn out.",
+  "Faber leases an output like a motor: it goes off when nobody has commanded it for a second.",
+]
+
+[power]
+supply = "none"
+
+[[shapes]]
+id = "on-off"
+name = "On or off"
+args = ["name", "pin:out"]
+wiring = ["{pin:out} → 220 Ω resistor → LED's long leg (+)", "LED's short leg (−) → GND"]
+roles = [
+  { id = "out", name = "LED", needs = "digital-out", help = "Drives the LED through its resistor." },
+]
+
+[[shapes]]
+id = "dimmable"
+name = "Dimmable (PWM)"
+description = "Faber sets its brightness; it needs a PWM pin. Faber sees it as a PWM output."
+args = ["name", "pin:out", "code:faberlink::OUTPUT_PWM"]
+wiring = ["{pin:out} → 220 Ω resistor → LED's long leg (+)", "LED's short leg (−) → GND"]
+roles = [
+  { id = "out", name = "LED", needs = "pwm", help = "Dims the LED through its resistor." },
+]

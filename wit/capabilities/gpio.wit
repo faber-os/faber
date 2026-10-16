@@ -48,8 +48,14 @@ interface servo {
     safe-state: safe-state,
     lease-ms: u32,
   }
-  /// The commanded angle; most servos give no feedback.
-  record reading { t-us: timestamp, angle-rad: f32 }
-  /// Leased.
+  /// The angles it may be told (the core clamps commands to them) and what it does when its lease
+  /// ends (D29: hold by default).
+  record info { min-angle-rad: f32, max-angle-rad: f32, safe-state: safe-state }
+  /// The commanded angle; most servos give no feedback. None while it is released (no pulses).
+  record reading { t-us: timestamp, angle-rad: option<f32> }
+  /// One command as data, as a connector receives it (the core has checked the lease and clamped
+  /// the angle). `safe`: go to the safe state the part is set up for (hold or release).
+  variant command { set-angle(f32), release, safe }
+  /// Leased (1 s). Safe state: hold or release, per part.
   set-angle: func(lease: lease-id, angle-rad: f32) -> result<_, command-error>;
 }

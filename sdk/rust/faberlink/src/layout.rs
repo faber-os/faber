@@ -1,13 +1,16 @@
 //! Fixed binary layouts for each capability's reading, command and info (docs/faberlink.md §4).
 //!
 //! They map 1:1 onto the types in `faber-capabilities`. Every number is little-endian, every
-//! float an IEEE-754 `f32`. A capability that has no layout yet can't travel over FaberLink.
+//! float an IEEE-754 `f32`. A capability that has no layout yet can't travel over FaberLink. A
+//! capability without info (`digital-in@1`) has an empty info layout.
 
 use crate::bytes::{Reader, Writer};
 use crate::{DecodeError, EncodeError};
 use faber_capabilities::{
-    Capability, Command, Info, Reading, Timestamp, Twist2d, battery, distance, estop, motor, planar_base,
+    Capability, Command, Info, Reading, Timestamp, Twist2d, analog_in, battery, digital_in, digital_out,
+    distance, encoder, estop, imu, motor, obstacle, planar_base, pwm_out, servo,
 };
+use faber_capabilities::{Quaternion, Vec3};
 
 /// The one-byte code a capability has in `READING`, `COMMAND` and `APPLIED` (protocol v1).
 pub fn code(capability: Capability) -> Option<u8> {
@@ -17,15 +20,18 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::PlanarBase => 3,
         Capability::Estop => 4,
         Capability::Battery => 5,
+        Capability::DigitalIn => 6,
+        Capability::Obstacle => 7,
+        Capability::DigitalOut => 8,
+        Capability::PwmOut => 9,
+        Capability::Servo => 10,
+        Capability::Encoder => 11,
+        Capability::AnalogIn => 12,
+        Capability::Imu => 13,
         // No layout yet: the board side (the Arduino library) has none either.
-        Capability::LaserScan
-        | Capability::Pose
-        | Capability::Position
-        | Capability::Temperature
-        | Capability::DigitalIn
-        | Capability::DigitalOut
-        | Capability::AnalogIn
-        | Capability::PwmOut => return None,
+        Capability::LaserScan | Capability::Pose | Capability::Position | Capability::Temperature => {
+            return None;
+        }
     })
 }
 
@@ -42,6 +48,17 @@ fn twist(w: &mut Writer, t: Twist2d) {
     w.f32(t.vx);
     w.f32(t.vy);
     w.f32(t.omega);
+}
+
+fn vec3(w: &mut Writer, v: Vec3) {
+    w.f32(v.x);
+    w.f32(v.y);
+    w.f32(v.z);
+}
+
+fn read_vec3(r: &mut Reader, field: &'static str) -> Result<Vec3, DecodeError> {
+    let v = Vec3 { x: r.f32()?, y: r.f32()?, z: r.f32()? };
+    if [v.x, v.y, v.z].iter().all(|c| c.is_finite()) { Ok(v) } else { Err(DecodeError::BadValue { field }) }
 }
 
 fn read_twist(r: &mut Reader) -> Result<Twist2d, DecodeError> {
@@ -71,6 +88,9 @@ const DISTANCE_STATUS: &[distance::Status] = &[
 ];
 const ESTOP_SOURCE: &[estop::Source] = &[estop::Source::Part, estop::Source::App, estop::Source::Shell];
 const BATTERY_LEVEL: &[battery::Level] = &[battery::Level::Ok, battery::Level::Low, battery::Level::Critical];
+const OBSTACLE_KIND: &[obstacle::Kind] =
+    &[obstacle::Kind::Bumper, obstacle::Kind::Infrared, obstacle::Kind::Limit];
+const SERVO_SAFE: &[servo::SafeState] = &[servo::SafeState::Hold, servo::SafeState::Release];
 const CHEMISTRY: &[battery::Chemistry] = &[
     battery::Chemistry::LiIon,
     battery::Chemistry::Lipo,
@@ -123,6 +143,46 @@ pub fn encode_reading(reading: &Reading, out: &mut Vec<u8>) -> Result<(), Encode
             for &v in cells {
                 w.f32(v);
             }
+        }
+        Reading::DigitalIn(r) => w.bool(r.level),
+        Reading::Obstacle(r) => w.bool(r.detected),
+        Reading::DigitalOut(r) => w.bool(r.level),
+        Reading::PwmOut(r) => w.f32(r.duty),
+        Reading::Servo(r) => {
+            w.bool(r.angle_rad.is_some());
+            w.f32(r.angle_rad.unwrap_or(0.0));
+        }
+        Reading::Imu(r) => {
+            w.u8(r.orientation.is_some() as u8
+                | (r.orientation_variance.is_some() as u8) << 1
+                | (r.angular_velocity_variance.is_some() as u8) << 2
+                | (r.linear_acceleration_variance.is_some() as u8) << 3);
+            vec3(w, r.angular_velocity);
+            vec3(w, r.linear_acceleration);
+            if let Some(q) = r.orientation {
+                w.f32(q.x);
+                w.f32(q.y);
+                w.f32(q.z);
+                w.f32(q.w);
+            }
+            for v in [r.orientation_variance, r.angular_velocity_variance, r.linear_acceleration_variance]
+                .into_iter()
+                .flatten()
+            {
+                vec3(w, v);
+            }
+        }
+        Reading::AnalogIn(r) => {
+            w.bool(r.volts.is_some());
+            w.f32(r.fraction);
+            w.f32(r.volts.unwrap_or(0.0));
+        }
+        Reading::Encoder(r) => {
+            w.bool(r.velocity_rad_s.is_some());
+            w.u64(r.count as u64);
+            w.u32(r.delta as u32);
+            w.f32(r.counts_per_s);
+            w.f32(r.velocity_rad_s.unwrap_or(0.0));
         }
         other => return Err(unsupported(other.capability())),
     }
@@ -194,6 +254,73 @@ pub fn decode_reading(capability: Capability, t_us: Timestamp, bytes: &[u8]) -> 
                 level,
             })
         }
+        Capability::DigitalIn => Reading::DigitalIn(digital_in::Reading { t_us, level: r.bool("level")? }),
+        Capability::Obstacle => Reading::Obstacle(obstacle::Reading { t_us, detected: r.bool("detected")? }),
+        Capability::DigitalOut => Reading::DigitalOut(digital_out::Reading { t_us, level: r.bool("level")? }),
+        Capability::PwmOut => {
+            let duty = r.f32()?;
+            if !duty.is_finite() {
+                return Err(DecodeError::BadValue { field: "duty" });
+            }
+            Reading::PwmOut(pwm_out::Reading { t_us, duty })
+        }
+        Capability::Servo => {
+            let holding = r.bool("holding")?;
+            let angle = r.f32()?;
+            if holding && !angle.is_finite() {
+                return Err(DecodeError::BadValue { field: "angleRad" });
+            }
+            Reading::Servo(servo::Reading { t_us, angle_rad: holding.then_some(angle) })
+        }
+        Capability::Imu => {
+            let present = flags(r, 0b1111, "present")?;
+            let angular_velocity = read_vec3(r, "angularVelocity")?;
+            let linear_acceleration = read_vec3(r, "linearAcceleration")?;
+            let orientation = if present & 1 != 0 {
+                let q = Quaternion { x: r.f32()?, y: r.f32()?, z: r.f32()?, w: r.f32()? };
+                if ![q.x, q.y, q.z, q.w].iter().all(|c| c.is_finite()) {
+                    return Err(DecodeError::BadValue { field: "orientation" });
+                }
+                Some(q)
+            } else {
+                None
+            };
+            let mut variance = |bit: u8, field| -> Result<Option<Vec3>, DecodeError> {
+                if present & bit != 0 { Ok(Some(read_vec3(r, field)?)) } else { Ok(None) }
+            };
+            Reading::Imu(imu::Reading {
+                t_us,
+                orientation,
+                angular_velocity,
+                linear_acceleration,
+                orientation_variance: variance(2, "orientationVariance")?,
+                angular_velocity_variance: variance(4, "angularVelocityVariance")?,
+                linear_acceleration_variance: variance(8, "linearAccelerationVariance")?,
+            })
+        }
+        Capability::AnalogIn => {
+            let has_volts = r.bool("present")?;
+            let (fraction, volts) = (r.f32()?, r.f32()?);
+            if !fraction.is_finite() || (has_volts && !volts.is_finite()) {
+                return Err(DecodeError::BadValue { field: "fraction" });
+            }
+            Reading::AnalogIn(analog_in::Reading { t_us, fraction, volts: has_volts.then_some(volts) })
+        }
+        Capability::Encoder => {
+            let has_velocity = r.bool("present")?;
+            let (count, delta) = (r.u64()? as i64, r.u32()? as i32);
+            let (counts_per_s, velocity) = (r.f32()?, r.f32()?);
+            if !counts_per_s.is_finite() || (has_velocity && !velocity.is_finite()) {
+                return Err(DecodeError::BadValue { field: "countsPerS" });
+            }
+            Reading::Encoder(encoder::Reading {
+                t_us,
+                count,
+                delta,
+                counts_per_s,
+                velocity_rad_s: has_velocity.then_some(velocity),
+            })
+        }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
     r.end()?;
@@ -217,7 +344,23 @@ pub fn encode_command(command: &Command, out: &mut Vec<u8>) -> Result<(), Encode
             w.u8(0);
             twist(w, t);
         }
-        Command::DigitalOut(_) | Command::PwmOut(_) => return Err(unsupported(command.capability())),
+        Command::DigitalOut(digital_out::Command::Set { level }) => {
+            w.u8(0);
+            w.bool(level);
+        }
+        Command::PwmOut(pwm_out::Command::SetDuty { duty }) => {
+            w.u8(0);
+            w.f32(duty);
+        }
+        Command::Servo(c) => {
+            let (kind, angle) = match c {
+                servo::Command::SetAngle { angle_rad } => (0, angle_rad),
+                servo::Command::Release => (1, 0.0),
+                servo::Command::Safe => (2, 0.0),
+            };
+            w.u8(kind);
+            w.f32(angle);
+        }
     }
     Ok(())
 }
@@ -240,6 +383,28 @@ pub fn decode_command(capability: Capability, bytes: &[u8]) -> Result<Command, D
                 return Err(DecodeError::BadValue { field: "kind" });
             }
             Command::PlanarBase(planar_base::Command::SetVelocity(read_twist(r)?))
+        }
+        Capability::DigitalOut => {
+            if r.u8()? != 0 {
+                return Err(DecodeError::BadValue { field: "kind" });
+            }
+            Command::DigitalOut(digital_out::Command::Set { level: r.bool("level")? })
+        }
+        Capability::PwmOut => {
+            if r.u8()? != 0 {
+                return Err(DecodeError::BadValue { field: "kind" });
+            }
+            Command::PwmOut(pwm_out::Command::SetDuty { duty: r.f32()? })
+        }
+        Capability::Servo => {
+            let kind = r.u8()?;
+            let angle = r.f32()?;
+            Command::Servo(match kind {
+                0 => servo::Command::SetAngle { angle_rad: angle },
+                1 => servo::Command::Release,
+                2 => servo::Command::Safe,
+                _ => return Err(DecodeError::BadValue { field: "kind" }),
+            })
         }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
@@ -284,29 +449,45 @@ pub fn encode_info(info: &Info, out: &mut Vec<u8>) -> Result<(), EncodeError> {
             w.u8(i.cells_in_series);
             w.f32(i.capacity_ah.unwrap_or(f32::NAN));
         }
+        Info::Obstacle(i) => {
+            w.u8(enum_index(OBSTACLE_KIND, i.kind));
+            w.f32(i.trigger_distance_m.unwrap_or(f32::NAN));
+        }
+        Info::Servo(i) => {
+            w.f32(i.min_angle_rad);
+            w.f32(i.max_angle_rad);
+            w.u8(enum_index(SERVO_SAFE, i.safe_state));
+        }
+        Info::Encoder(i) => w.f32(i.counts_per_rev.unwrap_or(f32::NAN)),
         other => return Err(unsupported(other.capability())),
     }
     Ok(())
 }
 
-pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Info, DecodeError> {
+/// Reads a part's info layout: `None` for a capability that has no info, whose layout is empty.
+pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Option<Info>, DecodeError> {
     let r = &mut Reader::new(bytes);
     let info = match capability {
-        Capability::Distance => Info::Distance(distance::Info {
+        Capability::DigitalIn
+        | Capability::DigitalOut
+        | Capability::PwmOut
+        | Capability::AnalogIn
+        | Capability::Imu => None,
+        Capability::Distance => Some(Info::Distance(distance::Info {
             min_m: r.f32()?,
             max_m: r.f32()?,
             field_of_view_rad: r.f32()?,
             kind: enum_at(DISTANCE_KIND, r.u8()?, "kind")?,
-        }),
+        })),
         Capability::Motor => {
             let kind = enum_at(MOTOR_KIND, r.u8()?, "kind")?;
             let m = flags(r, 0b111, "modes")?;
             let max = r.f32()?;
-            Info::Motor(motor::Info {
+            Some(Info::Motor(motor::Info {
                 kind,
                 modes: motor::Modes { velocity: m & 1 != 0, position: m & 2 != 0, duty: m & 4 != 0 },
                 max_velocity_rad_s: (!max.is_nan()).then_some(max),
-            })
+            }))
         }
         Capability::PlanarBase => {
             let holonomic = r.bool("holonomic")?;
@@ -314,9 +495,16 @@ pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Info, DecodeE
             let max_acceleration = read_twist(r)?;
             let n = r.u8()?;
             let built_from = (0..n).map(|_| r.str8("builtFrom")).collect::<Result<_, _>>()?;
-            Info::PlanarBase(planar_base::Info { holonomic, max_velocity, max_acceleration, built_from })
+            Some(Info::PlanarBase(planar_base::Info {
+                holonomic,
+                max_velocity,
+                max_acceleration,
+                built_from,
+            }))
         }
-        Capability::Estop => Info::Estop(estop::Info { hardware_latching: r.bool("hardwareLatching")? }),
+        Capability::Estop => {
+            Some(Info::Estop(estop::Info { hardware_latching: r.bool("hardwareLatching")? }))
+        }
         Capability::Battery => {
             let chemistry = enum_at(CHEMISTRY, r.u8()?, "chemistry")?;
             let cells_in_series = r.u8()?;
@@ -324,11 +512,28 @@ pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Info, DecodeE
                 return Err(DecodeError::BadValue { field: "cellsInSeries" });
             }
             let capacity = r.f32()?;
-            Info::Battery(battery::Info {
+            Some(Info::Battery(battery::Info {
                 chemistry,
                 cells_in_series,
                 capacity_ah: (!capacity.is_nan()).then_some(capacity),
-            })
+            }))
+        }
+        Capability::Obstacle => {
+            let kind = enum_at(OBSTACLE_KIND, r.u8()?, "kind")?;
+            let trigger = r.f32()?;
+            Some(Info::Obstacle(obstacle::Info {
+                kind,
+                trigger_distance_m: (!trigger.is_nan()).then_some(trigger),
+            }))
+        }
+        Capability::Servo => Some(Info::Servo(servo::Info {
+            min_angle_rad: r.f32()?,
+            max_angle_rad: r.f32()?,
+            safe_state: enum_at(SERVO_SAFE, r.u8()?, "safeState")?,
+        })),
+        Capability::Encoder => {
+            let cpr = r.f32()?;
+            Some(Info::Encoder(encoder::Info { counts_per_rev: (!cpr.is_nan()).then_some(cpr) }))
         }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
@@ -343,6 +548,10 @@ pub(crate) mod tests {
 
     pub fn finite() -> impl Strategy<Value = f32> {
         -1.0e6f32..1.0e6
+    }
+
+    fn vec3() -> impl Strategy<Value = Vec3> {
+        (finite(), finite(), finite()).prop_map(|(x, y, z)| Vec3 { x, y, z })
     }
 
     fn twist() -> impl Strategy<Value = Twist2d> {
@@ -380,6 +589,40 @@ pub(crate) mod tests {
             (t.clone(), any::<bool>(), 0..3u8, "[ -~]{0,60}").prop_map(|(t_us, engaged, s, reason)| {
                 Reading::Estop(estop::Reading { t_us, engaged, source: ESTOP_SOURCE[s as usize], reason })
             }),
+            (t.clone(), any::<bool>())
+                .prop_map(|(t_us, level)| Reading::DigitalIn(digital_in::Reading { t_us, level })),
+            (t.clone(), any::<bool>())
+                .prop_map(|(t_us, detected)| Reading::Obstacle(obstacle::Reading { t_us, detected })),
+            (t.clone(), any::<bool>())
+                .prop_map(|(t_us, level)| Reading::DigitalOut(digital_out::Reading { t_us, level })),
+            (t.clone(), finite()).prop_map(|(t_us, duty)| Reading::PwmOut(pwm_out::Reading { t_us, duty })),
+            (t.clone(), proptest::option::of(finite()))
+                .prop_map(|(t_us, angle_rad)| Reading::Servo(servo::Reading { t_us, angle_rad })),
+            (t.clone(), finite(), proptest::option::of(finite())).prop_map(|(t_us, fraction, volts)| {
+                Reading::AnalogIn(analog_in::Reading { t_us, fraction, volts })
+            }),
+            (
+                t.clone(),
+                proptest::option::of((finite(), finite(), finite(), finite())),
+                (vec3(), vec3()),
+                (proptest::option::of(vec3()), proptest::option::of(vec3()), proptest::option::of(vec3())),
+            )
+                .prop_map(|(t_us, q, (av, la), (ov, avv, lav))| {
+                    Reading::Imu(imu::Reading {
+                        t_us,
+                        orientation: q.map(|(x, y, z, w)| Quaternion { x, y, z, w }),
+                        angular_velocity: av,
+                        linear_acceleration: la,
+                        orientation_variance: ov,
+                        angular_velocity_variance: avv,
+                        linear_acceleration_variance: lav,
+                    })
+                }),
+            (t.clone(), any::<i64>(), any::<i32>(), finite(), proptest::option::of(finite())).prop_map(
+                |(t_us, count, delta, counts_per_s, velocity_rad_s)| {
+                    Reading::Encoder(encoder::Reading { t_us, count, delta, counts_per_s, velocity_rad_s })
+                }
+            ),
             (
                 (t, finite(), 0..3u8),
                 proptest::option::of(finite()),
@@ -407,6 +650,11 @@ pub(crate) mod tests {
             finite().prop_map(|v| Command::Motor(motor::Command::SetPosition { position_rad: v })),
             finite().prop_map(|v| Command::Motor(motor::Command::SetDuty { duty: v })),
             twist().prop_map(|t| Command::PlanarBase(planar_base::Command::SetVelocity(t))),
+            any::<bool>().prop_map(|level| Command::DigitalOut(digital_out::Command::Set { level })),
+            finite().prop_map(|duty| Command::PwmOut(pwm_out::Command::SetDuty { duty })),
+            finite().prop_map(|angle_rad| Command::Servo(servo::Command::SetAngle { angle_rad })),
+            Just(Command::Servo(servo::Command::Release)),
+            Just(Command::Servo(servo::Command::Safe)),
         ]
     }
 
@@ -445,6 +693,14 @@ pub(crate) mod tests {
                     capacity_ah,
                 })
             }),
+            (0..3u8, proptest::option::of(0.0f32..10.0)).prop_map(|(k, trigger_distance_m)| {
+                Info::Obstacle(obstacle::Info { kind: OBSTACLE_KIND[k as usize], trigger_distance_m })
+            }),
+            (finite(), finite(), 0..2u8).prop_map(|(min_angle_rad, max_angle_rad, s)| {
+                Info::Servo(servo::Info { min_angle_rad, max_angle_rad, safe_state: SERVO_SAFE[s as usize] })
+            }),
+            proptest::option::of(0.0f32..1.0e5)
+                .prop_map(|counts_per_rev| Info::Encoder(encoder::Info { counts_per_rev })),
         ]
     }
 
@@ -507,6 +763,63 @@ pub(crate) mod tests {
         });
         encode_info(&i, &mut out).unwrap();
         assert_eq!(out, [2, 4, 0x00, 0x00, 0xC0, 0x7F]);
+
+        out.clear();
+        encode_reading(&Reading::DigitalIn(digital_in::Reading { t_us: 0, level: true }), &mut out).unwrap();
+        assert_eq!(out, [1], "digital-in: the level");
+
+        out.clear();
+        encode_reading(&Reading::Obstacle(obstacle::Reading { t_us: 0, detected: true }), &mut out).unwrap();
+        assert_eq!(out, [1], "obstacle: detected");
+
+        out.clear();
+        let i = Info::Obstacle(obstacle::Info { kind: obstacle::Kind::Infrared, trigger_distance_m: None });
+        encode_info(&i, &mut out).unwrap();
+        assert_eq!(out, [1, 0x00, 0x00, 0xC0, 0x7F], "obstacle: kind, then the trigger distance (NaN)");
+
+        out.clear();
+        encode_command(&Command::DigitalOut(digital_out::Command::Set { level: true }), &mut out).unwrap();
+        assert_eq!(out, [0, 1], "digital-out: set, the level");
+
+        out.clear();
+        encode_command(&Command::PwmOut(pwm_out::Command::SetDuty { duty: 0.5 }), &mut out).unwrap();
+        assert_eq!(out, [0, 0x00, 0x00, 0x00, 0x3F], "pwm-out: set-duty, the duty");
+
+        out.clear();
+        encode_command(&Command::Servo(servo::Command::Release), &mut out).unwrap();
+        assert_eq!(out, [1, 0, 0, 0, 0], "servo: release, the angle unused");
+
+        out.clear();
+        encode_reading(&Reading::Servo(servo::Reading { t_us: 0, angle_rad: None }), &mut out).unwrap();
+        assert_eq!(out, [0, 0, 0, 0, 0], "servo: released");
+
+        out.clear();
+        let i = Info::Servo(servo::Info {
+            min_angle_rad: 0.0,
+            max_angle_rad: 2.0,
+            safe_state: servo::SafeState::Release,
+        });
+        encode_info(&i, &mut out).unwrap();
+        assert_eq!(out, [0, 0, 0, 0, 0x00, 0x00, 0x00, 0x40, 1], "servo: min, max, safe state");
+
+        out.clear();
+        let e = Reading::Encoder(encoder::Reading {
+            t_us: 0,
+            count: -2,
+            delta: -1,
+            counts_per_s: 0.0,
+            velocity_rad_s: None,
+        });
+        encode_reading(&e, &mut out).unwrap();
+        assert_eq!(out.len(), 21, "encoder: present, count i64, delta i32, counts/s, rad/s");
+
+        assert_eq!(out[..13], [0, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        out.clear();
+        let raw = imu::Reading::raw(0, Vec3 { x: 0.0, y: 0.0, z: 1.0 }, Vec3 { x: 0.0, y: 0.0, z: 9.0 });
+        encode_reading(&Reading::Imu(raw), &mut out).unwrap();
+        assert_eq!(out.len(), 25, "imu without fusion: present, then the rates and accelerations");
+        assert_eq!(out[0], 0);
     }
 
     #[test]
@@ -533,6 +846,35 @@ pub(crate) mod tests {
             Err(DecodeError::BadValue { field: "hardwareLatching" })
         );
         assert_eq!(decode_info(Capability::Estop, &[1, 0]), Err(DecodeError::TrailingBytes));
+        assert_eq!(
+            decode_reading(Capability::DigitalIn, 0, &[2]),
+            Err(DecodeError::BadValue { field: "level" })
+        );
+        assert_eq!(decode_info(Capability::DigitalIn, &[]), Ok(None), "digital-in has no info");
+        assert_eq!(decode_info(Capability::DigitalIn, &[0]), Err(DecodeError::TrailingBytes));
+        assert_eq!(decode_info(Capability::PwmOut, &[]), Ok(None));
+        assert_eq!(
+            decode_command(Capability::Servo, &[3, 0, 0, 0, 0]),
+            Err(DecodeError::BadValue { field: "kind" })
+        );
+        assert_eq!(
+            decode_info(Capability::Servo, &[0, 0, 0, 0, 0, 0, 0, 0, 2]),
+            Err(DecodeError::BadValue { field: "safeState" })
+        );
+        assert_eq!(
+            decode_command(Capability::DigitalOut, &[1, 1]),
+            Err(DecodeError::BadValue { field: "kind" })
+        );
+        assert_eq!(
+            decode_command(Capability::DigitalOut, &[0, 2]),
+            Err(DecodeError::BadValue { field: "level" })
+        );
+        let nan = f32::NAN.to_le_bytes();
+        assert_eq!(decode_reading(Capability::PwmOut, 0, &nan), Err(DecodeError::BadValue { field: "duty" }));
+        assert_eq!(
+            decode_info(Capability::Obstacle, &[3, 0, 0, 0, 0]),
+            Err(DecodeError::BadValue { field: "kind" })
+        );
         let mut battery = vec![0u8; 19];
         battery[17] = 3;
         assert_eq!(
@@ -586,11 +928,11 @@ pub(crate) mod tests {
         fn infos_round_trip(i in info()) {
             let mut out = vec![];
             encode_info(&i, &mut out).unwrap();
-            prop_assert_eq!(decode_info(i.capability(), &out).unwrap(), i);
+            prop_assert_eq!(decode_info(i.capability(), &out).unwrap(), Some(i));
         }
 
         #[test]
-        fn garbage_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..64), c in 0..8u8) {
+        fn garbage_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..64), c in 0..32u8) {
             if let Some(cap) = from_code(c) {
                 let _ = decode_reading(cap, 0, &bytes);
                 let _ = decode_command(cap, &bytes);

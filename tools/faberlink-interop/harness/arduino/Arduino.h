@@ -14,6 +14,9 @@
 #define LOW 0x0
 #define INPUT 0x0
 #define OUTPUT 0x1
+#define INPUT_PULLUP 0x2
+#define CHANGE 1
+#define NOT_AN_INTERRUPT -1
 
 #define PIN_A0 (14)
 #define PIN_A1 (15)
@@ -35,7 +38,13 @@ void analogWrite(uint8_t pin, int value);
 int analogRead(uint8_t pin);
 unsigned long millis();
 void delayMicroseconds(unsigned int us);
+void delay(unsigned long ms);
 unsigned long pulseIn(uint8_t pin, uint8_t state, unsigned long timeoutUs = 1000000UL);
+// As on an Uno: D2 is interrupt 0, D3 interrupt 1 (variants/standard/pins_arduino.h).
+inline int digitalPinToInterrupt(uint8_t pin) { return pin == 2 ? 0 : pin == 3 ? 1 : NOT_AN_INTERRUPT; }
+void attachInterrupt(uint8_t interrupt, void (*isr)(void), int mode);
+void noInterrupts();
+void interrupts();
 
 class Stream {
  public:

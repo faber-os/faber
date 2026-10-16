@@ -65,6 +65,8 @@ pub struct HelloAck {
 #[derive(Clone, Debug, PartialEq)]
 pub enum PartInfo {
     Known(Info),
+    /// A capability this core knows that has no info (`digital-in@1`): its info layout is empty.
+    Empty,
     Unknown(Vec<u8>),
 }
 
@@ -113,6 +115,18 @@ pub enum PinRole {
     Signal,
     /// A battery's voltage, through a divider.
     Sense,
+    /// An output the board switches: an LED, a relay module, a MOSFET.
+    Out,
+    /// A quadrature encoder's channel A.
+    A,
+    /// A quadrature encoder's channel B.
+    B,
+    /// The I²C bus's data line, for a part on the bus.
+    Sda,
+    /// The I²C bus's clock line.
+    Scl,
+    /// A time-of-flight sensor's shutdown input (VL53L0X XSHUT).
+    Xshut,
     /// A role a later library added.
     Other(u8),
 }
@@ -128,6 +142,12 @@ const PIN_ROLES: &[PinRole] = &[
     PinRole::Echo,
     PinRole::Signal,
     PinRole::Sense,
+    PinRole::Out,
+    PinRole::A,
+    PinRole::B,
+    PinRole::Sda,
+    PinRole::Scl,
+    PinRole::Xshut,
 ];
 
 impl PinRole {
@@ -405,6 +425,7 @@ impl Message {
                 w.str8(&p.name, "name")?;
                 match &p.info {
                     PartInfo::Known(i) => layout::encode_info(i, w.out)?,
+                    PartInfo::Empty => {}
                     PartInfo::Unknown(bytes) => w.out.extend_from_slice(bytes),
                 }
             }
@@ -503,7 +524,10 @@ impl Message {
                 let name = r.str8("name")?;
                 let rest = r.rest();
                 let info = match Capability::from_id(&capability) {
-                    Some(c) if layout::code(c).is_some() => PartInfo::Known(layout::decode_info(c, rest)?),
+                    Some(c) if layout::code(c).is_some() => match layout::decode_info(c, rest)? {
+                        Some(i) => PartInfo::Known(i),
+                        None => PartInfo::Empty,
+                    },
                     _ => PartInfo::Unknown(rest.to_vec()),
                 };
                 Message::Part(PartDescription { id, count, lease_ms, capability, name, info })
@@ -634,7 +658,7 @@ mod tests {
                     id,
                     count: 9,
                     lease_ms,
-                    capability: "imu@1".into(),
+                    capability: "thermal-camera@1".into(),
                     name,
                     info: PartInfo::Unknown(raw),
                 })
@@ -698,7 +722,7 @@ mod tests {
     #[test]
     fn every_pin_role_has_its_own_code_and_unknown_codes_are_kept() {
         let codes: Vec<u8> = PIN_ROLES.iter().map(|r| r.code()).collect();
-        assert_eq!(codes, (1..=10).collect::<Vec<u8>>(), "the table in docs/faberlink.md §3");
+        assert_eq!(codes, (1..=16).collect::<Vec<u8>>(), "the table in docs/faberlink.md §3");
         for r in PIN_ROLES {
             assert_eq!(PinRole::from_code(r.code()), *r);
         }

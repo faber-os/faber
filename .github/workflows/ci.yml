@@ -115,6 +115,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: arduino/setup-arduino-cli@v2
       - run: arduino-cli core update-index && arduino-cli core install arduino:avr
+      # FaberServo.h needs the Servo library, which comes with the Arduino IDE but not with the
+      # core. (FaberToF.h needs Pololu's VL53L0X and has no example yet: Faber can't install it.)
+      - run: arduino-cli lib install Servo
       - name: Every example compiles, and fits an Uno
         run: |
           for board in arduino:avr:uno arduino:avr:mega; do
@@ -122,17 +125,18 @@ jobs:
               arduino-cli compile --fqbn "$board" --library firmware/faberlink --warnings all "$example"
             done
           done
-      # Guided mode's generated sketches (docs/wiring.md §5): one per board, with every part
-      # template, written by the core's golden-file test. Any warning in them fails the build.
+      # Guided mode's generated sketches (docs/wiring.md §5): every part template on every board,
+      # spread over as many sketches as a board needs (uno, uno_2, ...), written by the core's
+      # golden-file test. Any warning in them fails the build.
       - name: Every generated guided-board sketch compiles without warnings
         run: |
           for sketch in fixtures/wiring/*/; do
             id="$(basename "$sketch")"
             case "$id" in
-              uno) fqbn=arduino:avr:uno ;;
-              nano) fqbn=arduino:avr:nano:cpu=atmega328 ;;
-              nano-old) fqbn=arduino:avr:nano:cpu=atmega328old ;;
-              mega2560) fqbn=arduino:avr:mega:cpu=atmega2560 ;;
+              uno|uno_*) fqbn=arduino:avr:uno ;;
+              nano|nano_*) fqbn=arduino:avr:nano:cpu=atmega328 ;;
+              nano-old|nano-old_*) fqbn=arduino:avr:nano:cpu=atmega328old ;;
+              mega2560|mega2560_*) fqbn=arduino:avr:mega:cpu=atmega2560 ;;
               *) echo "no FQBN for $id" && exit 1 ;;
             esac
             out="$(arduino-cli compile --fqbn "$fqbn" --library firmware/faberlink --warnings all "$sketch" 2>&1)" || { echo "$out"; exit 1; }

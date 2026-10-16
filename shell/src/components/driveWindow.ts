@@ -26,6 +26,10 @@ const VIEWERS: Partial<
   'digital-out@1': { kind: 'level', title: (name) => t('parts.title.level', { name }) },
   'analog-in@1': { kind: 'fraction', title: (name) => t('parts.title.fraction', { name }) },
   'pwm-out@1': { kind: 'fraction', title: (name) => t('parts.title.fraction', { name }) },
+  'obstacle@1': { kind: 'level', title: (name) => t('parts.title.obstacle', { name }) },
+  'servo@1': { kind: 'servo', title: (name) => t('parts.title.servo', { name }) },
+  'encoder@1': { kind: 'encoder', title: (name) => t('parts.title.encoder', { name }) },
+  'imu@1': { kind: 'imu', title: (name) => t('parts.title.imu', { name }) },
 };
 
 /** The signals of a part that Faber can draw. */

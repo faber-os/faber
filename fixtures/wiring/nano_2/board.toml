@@ -1,0 +1,35 @@
+# The plan for the board "nano_2": which parts are on its pins. Faber writes nano_2.ino from it.
+# Edit it in Faber, or here (Faber checks it when it is read). Your own code goes in my_code.h.
+
+faber-board = 1
+board = "nano"
+name = "nano_2"
+
+[parts.arm]
+template = "servo"
+shape = "signal"
+pins = { signal = 4 }
+settings = { min-deg = 0, max-deg = 180, safe-state = "hold", min-pulse-us = 544, max-pulse-us = 2400 }
+
+[parts.fan]
+template = "mosfet"
+shape = "sig"
+pins = { out = 5 }
+
+[parts.imu]
+template = "imu-mpu6050"
+shape = "i2c"
+pins = {}
+settings = { address = "0x68", rate-hz = 20 }
+
+[parts.knob]
+template = "potentiometer"
+shape = "wiper"
+pins = { signal = "A0" }
+settings = { rate-hz = 10 }
+
+[parts.wheel]
+template = "encoder"
+shape = "quadrature"
+pins = { a = 2, b = 7 }
+settings = { pulses-per-rev = 0, gear-ratio = 1 }

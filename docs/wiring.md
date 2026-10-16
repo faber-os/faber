@@ -264,6 +264,32 @@ What exists, and where it differs in detail from the design above. The decisions
   ids are the `PINS` message's role names (`pwm`, `dir`, `en`, `in1`, `in2`, `stby`, `trig`,
   `echo`, `signal`, `sense`), so a plan and a code-mode board's report speak of pins the same way. Every setting of these four is a **build** setting: the library takes
   them in constructors and has no runtime settings yet, so nothing is `live`.
+- **The first wave of parts** (research/common-parts.md §3, 2026-10-16) adds templates as their
+  library classes land: `button` (`FaberButton`, `digital-in`: push buttons, toggles, end stops,
+  TTP223), `bumper` (`FaberObstacle`, `obstacle`: a micro switch behind a bumper, or a limit
+  switch) and `ir-obstacle` (`FaberObstacle` of kind infrared: FC-51, E18-D80NK). Buttons and
+  bumpers are separate on purpose (capabilities.md, `obstacle`). `led` (`FaberOutput`: on/off,
+  or dimmable on a PWM pin), `relay` (on/off, active low by default, with the coil-current,
+  flyback-diode and mains warnings) and `mosfet` (PWM, own supply, the IRF520 warning). `servo`
+  (`FaberServo`, `include = "FaberServo.h"`, `uses = ["servo"]` so the allocator's timer rules
+  apply: no PWM on D9/D10 of an Uno once a servo is in the plan). `encoder` (`FaberEncoder`: A
+  needs an interrupt pin, B any digital pin; the allocator keeps interrupt pins for roles that need
+  them, so B lands on a plain pin and counts 2 a pulse unless the plan puts it on one).
+  `potentiometer` (`FaberAnalogIn`: knobs, sliders, a joystick axis, an LDR in a divider; a thumb
+  joystick is two of these and a button until `rc-input` exists). `imu-mpu6050` (`FaberImu`:
+  `bus = "i2c"`, addresses 0x68/0x69 with the AD0 hint, so the allocator catches a clash with a
+  clock module at 0x68). The golden plans now also split when a part would make the plan wrong
+  (an I²C part where the bus's pins are already used as GPIO). `tof-vl53l0x` (`FaberToF`, an
+  optional XSHUT role and an address 0x29-0x37) is read and checked but **not offered**: its one
+  shape is `todo` until Faber can install Pololu's VL53L0X library, and the API leaves out a
+  template with no usable shape.
+- **Libraries a part needs.** A part whose class needs another library has its own header
+  (`FaberServo.h` needs the Arduino Servo library). The Servo library comes with the Arduino IDE,
+  but an `arduino-cli` run on its own (Faber's own copy, or the IDE's run by Faber) doesn't look
+  in the IDE's library folder, so **a guided board with a servo doesn't compile in Faber yet**.
+  Open: install it on demand (`arduino-cli lib install Servo`, which downloads), or point Faber's
+  compile at the IDE's library folder when there is one. The golden-sketch compile test points
+  `arduino-cli` at the IDE's folder (`%LOCALAPPDATA%\Arduino15\libraries`) when it has Servo.
 - **Pin providers**: a template's `provides` adds pins named `<part>.<pin>` (`servos.ch3`) while
   that part is in the plan; only a role marked `provided` may take one. No provider template
   exists yet (tested with a test PCA9685).
@@ -282,7 +308,7 @@ What exists, and where it differs in detail from the design above. The decisions
   `FaberLink link(Serial);`, each part's declaration (and helper, like the Sharp curve), then
   `#include "my_code.h"` (so your code can use the parts), `setup()` with
   `link.begin(115200, "<name>", "guided")` and `userSetup()`, and `loop()` with `link.poll()` and
-  `userLoop()`. Golden files for every template on every board are in `fixtures/wiring/`; the
+  `userLoop()`. Golden files for every template on every board are in `fixtures/wiring/`, spread over as many sketches as a board needs once its pins run out (`uno`, `uno_2`, …); the
   real `arduino-cli` compiles them with `--warnings all` in a test when the computer has one (it
   did, with no warnings, on 2026-10-16) and in CI's Arduino job.
 - **Not built yet** (core): the `PINS` message (§6), Verify's warning for `delay()` in `userLoop()` (§5), the live check

@@ -5,7 +5,7 @@ use crate::bindings::faber::capabilities as cap;
 use crate::bindings::faber::connector::types as wit;
 use faber_capabilities::{
     Command, Quaternion, Reading, Twist2d, Vec3, battery, digital_out, distance, estop, motor, planar_base,
-    position, pwm_out,
+    position, pwm_out, servo,
 };
 use faber_connector::{CommandError, Health, Problem, Settings, SettingsError};
 
@@ -127,6 +127,28 @@ pub fn reading_to_wit(r: Reading) -> wit::Reading {
             volts: r.volts,
         }),
         Reading::PwmOut(r) => wit::Reading::PwmOut(cap::pwm_out::Reading { t_us: r.t_us, duty: r.duty }),
+        Reading::Obstacle(r) => {
+            wit::Reading::Obstacle(cap::obstacle::Reading { t_us: r.t_us, detected: r.detected })
+        }
+        Reading::Servo(r) => {
+            wit::Reading::Servo(cap::servo::Reading { t_us: r.t_us, angle_rad: r.angle_rad })
+        }
+        Reading::Encoder(r) => wit::Reading::Encoder(cap::encoder::Reading {
+            t_us: r.t_us,
+            count: r.count,
+            delta: r.delta,
+            counts_per_s: r.counts_per_s,
+            velocity_rad_s: r.velocity_rad_s,
+        }),
+        Reading::Imu(r) => wit::Reading::Imu(cap::imu::Reading {
+            t_us: r.t_us,
+            orientation: r.orientation.map(quaternion),
+            angular_velocity: vec3(r.angular_velocity),
+            linear_acceleration: vec3(r.linear_acceleration),
+            orientation_variance: r.orientation_variance.map(vec3),
+            angular_velocity_variance: r.angular_velocity_variance.map(vec3),
+            linear_acceleration_variance: r.linear_acceleration_variance.map(vec3),
+        }),
     }
 }
 
@@ -159,6 +181,11 @@ pub fn command_from_wit(c: wit::Command) -> Command {
         wit::Command::PwmOut(cap::pwm_out::Command::SetDuty(duty)) => {
             Command::PwmOut(pwm_out::Command::SetDuty { duty })
         }
+        wit::Command::Servo(s) => Command::Servo(match s {
+            cap::servo::Command::SetAngle(a) => servo::Command::SetAngle { angle_rad: a },
+            cap::servo::Command::Release => servo::Command::Release,
+            cap::servo::Command::Safe => servo::Command::Safe,
+        }),
     }
 }
 
@@ -180,6 +207,11 @@ pub fn command_to_wit(c: Command) -> wit::Command {
         Command::PwmOut(pwm_out::Command::SetDuty { duty }) => {
             wit::Command::PwmOut(cap::pwm_out::Command::SetDuty(duty))
         }
+        Command::Servo(s) => wit::Command::Servo(match s {
+            servo::Command::SetAngle { angle_rad } => cap::servo::Command::SetAngle(angle_rad),
+            servo::Command::Release => cap::servo::Command::Release,
+            servo::Command::Safe => cap::servo::Command::Safe,
+        }),
     }
 }
 
@@ -220,7 +252,7 @@ fn setting_value(v: wit::SettingValue) -> toml::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use faber_capabilities::{analog_in, digital_in, laser_scan, pose, temperature};
+    use faber_capabilities::{analog_in, digital_in, encoder, imu, laser_scan, obstacle, pose, temperature};
 
     #[test]
     fn settings_come_back_as_parts_toml_held_them() {
@@ -256,6 +288,9 @@ mod tests {
             Command::PlanarBase(planar_base::Command::SetVelocity(Twist2d::new(0.1, 0.2, 0.3))),
             Command::DigitalOut(digital_out::Command::Set { level: true }),
             Command::PwmOut(pwm_out::Command::SetDuty { duty: 0.25 }),
+            Command::Servo(servo::Command::SetAngle { angle_rad: 1.25 }),
+            Command::Servo(servo::Command::Release),
+            Command::Servo(servo::Command::Safe),
         ] {
             assert_eq!(command_from_wit(command_to_wit(c)), c);
         }
@@ -296,6 +331,19 @@ mod tests {
             Reading::DigitalOut(digital_out::Reading { t_us: 11, level: true }),
             Reading::AnalogIn(analog_in::Reading { t_us: 12, fraction: 0.5, volts: None }),
             Reading::PwmOut(pwm_out::Reading { t_us: 13, duty: 0.75 }),
+            Reading::Obstacle(obstacle::Reading { t_us: 14, detected: true }),
+            Reading::Servo(servo::Reading { t_us: 15, angle_rad: Some(0.5) }),
+            Reading::Encoder(encoder::Reading {
+                t_us: 16,
+                count: -3,
+                delta: -1,
+                counts_per_s: -10.0,
+                velocity_rad_s: None,
+            }),
+            Reading::Imu(imu::Reading {
+                orientation: Some(Quaternion::from_yaw(0.3)),
+                ..imu::Reading::raw(17, Vec3 { x: 1.0, y: 2.0, z: 3.0 }, Vec3::default())
+            }),
         ];
         let t: Vec<u64> = readings
             .into_iter()
@@ -336,8 +384,27 @@ mod tests {
                     assert_eq!(r.duty, 0.75);
                     r.t_us
                 }
+                wit::Reading::Obstacle(r) => {
+                    assert!(r.detected);
+                    r.t_us
+                }
+                wit::Reading::Servo(r) => {
+                    assert_eq!(r.angle_rad, Some(0.5));
+                    r.t_us
+                }
+                wit::Reading::Encoder(r) => {
+                    assert_eq!((r.count, r.delta, r.counts_per_s, r.velocity_rad_s), (-3, -1, -10.0, None));
+                    r.t_us
+                }
+                wit::Reading::Imu(r) => {
+                    assert_eq!(
+                        (r.angular_velocity.z, r.orientation.map(|q| q.z)),
+                        (3.0, Some((0.15f32).sin()))
+                    );
+                    r.t_us
+                }
             })
             .collect();
-        assert_eq!(t, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        assert_eq!(t, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
     }
 }

@@ -155,8 +155,14 @@ pins one part uses, so Faber can show them for a board whose sketch was written 
 | 6 | `stby` | STBY | `FaberMotor`: a standby or enable pin held high (TB6612 STBY, DRV8833 nSLEEP) |
 | 7 | `trig` | Trig | `FaberUltrasonic` |
 | 8 | `echo` | Echo | `FaberUltrasonic` |
-| 9 | `signal` | Signal | `FaberDistance`: the sensor's output |
+| 9 | `signal` | Signal | `FaberDistance`: the sensor's output; `FaberButton`, `FaberObstacle`: the switch's or module's pin |
 | 10 | `sense` | Sense | `FaberBattery`: the divider's middle |
+| 11 | `out` | Out | `FaberOutput`: the pin it switches (added 2026-10-16) |
+| 12 | `a` | A | `FaberEncoder`: channel A |
+| 13 | `b` | B | `FaberEncoder`: channel B |
+| 14 | `sda` | SDA | a part on the I²C bus (`FaberImu`): the bus's data line |
+| 15 | `scl` | SCL | a part on the I²C bus: the clock line |
+| 16 | `xshut` | XSHUT | `FaberToF`: the sensor's shutdown input |
 
 - **Compatibility, both ways.** An older library never sends `PINS`; Faber then shows no pins
   (not "none"). An older core skips `PINS` as a message type it doesn't know (§2) and carries on:
@@ -206,9 +212,18 @@ layout maps 1:1 onto the types in `sdk/rust/capabilities` (and `wit/capabilities
 | 3 | `planar-base@1` |
 | 4 | `estop@1` |
 | 5 | `battery@1` |
+| 6 | `digital-in@1` (added 2026-10-16) |
+| 7 | `obstacle@1` (added 2026-10-16) |
+| 8 | `digital-out@1` (added 2026-10-16) |
+| 9 | `pwm-out@1` (added 2026-10-16) |
+| 10 | `servo@1` (added 2026-10-16) |
+| 11 | `encoder@1` (added 2026-10-16) |
+| 12 | `analog-in@1` (added 2026-10-16) |
+| 13 | `imu@1` (added 2026-10-16) |
 
 Other capabilities have no FaberLink layout yet; one is added (with a new code) when a board needs
-it. A `twist` below is `vx f32 · vy f32 · omega f32`.
+it. A capability without info (`digital-in@1`) has an empty info layout, and the core's
+`PartInfo::Empty` stands for it. A `twist` below is `vx f32 · vy f32 · omega f32`.
 
 | Capability | Reading | Command | Info |
 |---|---|---|---|
@@ -217,6 +232,14 @@ it. A `twist` below is `vx f32 · vy f32 · omega f32`.
 | `planar-base@1` | `flags u8 · commanded twist · measured twist` (25 B). `flags` bit 0: `measured` is known; bit 1: bumped. | `kind u8 (0 = set-velocity) · twist` (13 B) | `holonomic u8 · max_velocity twist · max_acceleration twist · n u8 · n × str8` (the parts it is built from, by their names on the board) |
 | `estop@1` | `engaged u8 · source u8 · reason str8` | — | `hardware_latching u8` (1 B) |
 | `battery@1` | `present u8 · volts f32 · amps f32 · charge f32 · celsius f32 · level u8 · n u8 · n × cell_volts f32` (19 B + 4n). `present` bits 0/1/2/3: amps, charge, celsius, cell volts; the others are sent as 0, and `n` is 0 without bit 3. `level`: 0 ok, 1 low, 2 critical. `volts` is always finite. | — | `chemistry u8 · cells_in_series u8 · capacity_ah f32` (6 B). `chemistry`: 0 li-ion, 1 lipo, 2 lifepo4, 3 nimh, 4 lead-acid. `cells_in_series` is at least 1. A NaN capacity means "unknown". |
+| `digital-in@1` | `level u8` (1 B): the logical level, 1 = active (an active-low input reads 1 while its pin is low). | — | — (0 B) |
+| `digital-out@1` | `level u8` (1 B): the logical level, 1 = on. | `kind u8 (0 = set) · level u8` (2 B). The safe state is set 0 (off). | — (0 B) |
+| `pwm-out@1` | `duty f32` (4 B), 0..1; always finite. | `kind u8 (0 = set-duty) · duty f32` (5 B). The safe state is duty 0. | — (0 B) |
+| `servo@1` | `holding u8 · angle_rad f32` (5 B): the angle it holds, 0 while released (holding 0). | `kind u8 · angle_rad f32` (5 B). `kind`: 0 set-angle, 1 release, 2 safe (the angle is 0 for 1 and 2). The safe state is `safe`: the board answers with set-angle to the angle it holds (hold) or release. | `min_angle_rad f32 · max_angle_rad f32 · safe_state u8` (9 B). `safe_state`: 0 hold, 1 release. |
+| `encoder@1` | `present u8 · count i64 · delta i32 · counts_per_s f32 · velocity_rad_s f32` (21 B). `present` bit 0: the rad/s are known (else sent as 0). `delta` is the counts since the previous reading. | — | `counts_per_rev f32` (4 B), NaN when not known. |
+| `analog-in@1` | `present u8 · fraction f32 · volts f32` (9 B). `present` bit 0: the volts are known (else sent as 0). `fraction` is 0..1, always finite. | — | — (0 B) |
+| `imu@1` | `present u8 · angular_velocity vec3 · linear_acceleration vec3`, then the present ones of `orientation` (x, y, z, w f32), `orientation_variance`, `angular_velocity_variance`, `linear_acceleration_variance` (vec3 each) in that order (25 B without them). `present` bits 0/1/2/3. A `vec3` is `x f32 · y f32 · z f32`; every value is finite. | — | — (0 B) |
+| `obstacle@1` | `detected u8` (1 B) | — | `kind u8 · trigger_distance_m f32` (5 B). `kind`: 0 bumper, 1 infrared, 2 limit. A NaN trigger distance means "unknown". |
 
 ## 5. Rules a board follows (the library enforces them, not the sketch)
 
@@ -279,7 +302,9 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   motor's full-duty speed is given) and `FaberDistance` (analog; linear, or a curve function). A
   custom part derives from `faberlink::Part` (or `Motor`/`Distance`) and is added with
   `link.add(part)`; it reports its pins by overriding `writePins()`. Globally declared parts
-  register themselves.
+  register themselves. A part that derives from `Part` directly also names its capability:
+  `const char* capabilityId() const override { return "planar-base@1"; }` (since 2026-10-16;
+  `Motor`, `Distance`, `Battery` and the other capability classes do it themselves).
 - **Every built-in part says its pins** (`PINS`, §3), and on an AVR board the library says where
   the analog pins start, so Faber shows "Trig D7 · Echo D6" under the part in Parts.
 - **`FaberMotor` and motor drivers.** Hobby drivers take speed and direction in three shapes
@@ -323,13 +348,82 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   `FaberUltrasonic front("front", 7, 6);` (trigger, echo; 2 cm to 4 m by default, the HC-SR04
   datasheet's range). One measurement per 60 ms, as the datasheet asks; each waits at most about
   24 ms for the echo (for 4 m), and the speed of sound is taken at about 20 °C (343 m/s).
+- `FaberButton` (`digital-in@1`) and `FaberObstacle` (`obstacle@1`, 2026-10-16) read a switch or
+  a digital module on one pin, debounced in the library (`faberlink::Debouncer`: a new level counts
+  once it has held for 20 ms, 10 ms for an obstacle). `faberlink::ACTIVE_LOW` (the default) turns
+  the pin's pull-up on and reads LOW as pressed, so a switch between the pin and GND needs nothing
+  else; `faberlink::ACTIVE_HIGH` is for a part that drives its pin high (a TTP223), with no
+  pull-up. A change goes to Faber within 5 ms, an unchanged level once a second (a Faber that
+  connects later learns it). `pressed()` / `detected()` work in the sketch's own code too, with or
+  without Faber: parts now have an `update(nowMs)` hook that `poll()` calls whether Faber is
+  connected or not. Plain buttons, switches and end stops are `FaberButton`; a bumper, whisker or
+  infrared obstacle module is `FaberObstacle` (`faberlink::OBSTACLE_BUMPER`, `_INFRARED`,
+  `_LIMIT`, and the trigger distance set on the module), so an app looking for a button is never
+  offered a bumper. Neither stops the motors on the board by itself yet: Faber does that from the
+  computer.
+- `FaberOutput` (2026-10-16) switches one pin: on/off as `digital-out@1`
+  (`faberlink::OUTPUT_ON_OFF`, the default) or a duty with `analogWrite()` as `pwm-out@1`
+  (`faberlink::OUTPUT_PWM`, on a PWM pin). `faberlink::ACTIVE_LOW` makes LOW "on" (most relay
+  modules; PWM is inverted too). It is leased like a motor, for 1 s on the board as in the core:
+  no command for 1 s, the e-stop, `SAFE` or a lost heartbeat, and it goes off. Off is written
+  before the pin becomes an output, so an active-low relay doesn't click on at start. It reports
+  its value 10 times a second.
+- **Optional headers** (2026-10-16): a part class that needs another library lives in its own
+  header, header-only, so `#include <FaberLink.h>` alone still builds with nothing else installed
+  and a sketch that doesn't include it doesn't build it. It registers itself through
+  `faberlink::autoAdd()`. The first is `FaberServo.h`.
+- `FaberServo` (`servo@1`, `#include <FaberServo.h>`, on the Arduino Servo library that comes
+  with the IDE): `FaberServo arm("arm", 9);` is a 0-180° servo on 544-2400 µs (the Servo
+  library's defaults); further arguments: the angles in degrees, the safe state, and the pulse
+  widths. Faber speaks radians. It starts released (no pulses until the first angle, so it
+  doesn't jump at power-up), is leased for 1 s like an output, and when the lease ends, on the
+  e-stop or when the heartbeat stops it holds its angle (`faberlink::SERVO_HOLD`, D29's default)
+  or goes limp (`faberlink::SERVO_RELEASE`). A sketch with a servo loses PWM on D9/D10 of an Uno
+  (D44-D46 of a Mega): the Servo library takes their timer.
+- `FaberEncoder` (`encoder@1`, `#include <FaberEncoder.h>`, 2026-10-16) counts a quadrature
+  encoder with interrupts: `FaberEncoder wheel("wheel", 2, 3, 11, 34.02f);` (A, B, the pulses per
+  motor turn, the gear ratio). A must be on an external-interrupt pin; with B on one too it counts
+  every edge of both channels (4 counts a pulse, a state table that ignores a skipped state), else
+  A's edges (2 a pulse, A differing from B is forward). Up to 4 encoders, each with its own
+  interrupt routine. It is an optional header although it needs no other library: referring to
+  `attachInterrupt()` links the core's two interrupt routines into every sketch (about 160 B of
+  flash and 4 B of RAM), so only a sketch that includes it pays for them.
+  `left.useEncoder(wheel)` makes a `FaberMotor` report the speed and position the encoder measures
+  (its `motor@1` readings, 20 times a second); set-velocity stays open loop. That costs a sketch
+  with motors 34 B of flash and 2 B of RAM per motor; the code is in the encoder's class.
+- `FaberAnalogIn` (`analog-in@1`, 2026-10-16) reads an analog pin as a share of full scale and
+  volts: `FaberAnalogIn knob("knob", A0);` (further arguments: readings a second, 10 by default,
+  and the analog reference, 5 V). Each reading averages 4 `analogRead()`s. A thumb joystick is two
+  of these and a `FaberButton`; a joystick as one `rc-input@1` part needs that capability first.
+- `FaberImu` (`imu@1`, `#include <FaberImu.h>`, 2026-10-16) reads an MPU6050 (a GY-521 board) on
+  I²C through the core's Wire library, with no third-party library: the registers and scales are
+  in the header, cited to InvenSense's register map (RM-MPU-6000A-00 rev. 4.2): awake on the X
+  gyro's clock, the 44/42 Hz filter, ±2 g and ±250 °/s. Rates in rad/s and accelerations in m/s²
+  (gravity included), 20 times a second; no orientation (the DMP isn't used).
+  `faberlink::IMU_ADDRESS_69` for AD0 high. Every transfer has a 3 ms time-out
+  (`Wire.setWireTimeout`, AVR core 1.8.3 and later), so a missing or stuck IMU never hangs `loop()`
+  and the board's safety checks; it is woken again when it answers. `whoAmI()` says which chip
+  answered, since boards sold as MPU6050 sometimes carry another.
+- `FaberToF` (`distance@1`, kind laser-tof, `#include <FaberToF.h>`, 2026-10-16): a VL53L0X on
+  I²C through **Pololu's VL53L0X library** (MIT), which isn't on the computer this was built on, so
+  it is **written to the library's documented API and not compiled against it**: it is tested on
+  the PC against a stand-in with that API, its template's one shape is `todo` (refused as
+  `shape-not-ready`, and the template isn't offered), and it has no example (CI compiles every
+  example). `FaberToF left("left", faberlink::TOF_ADDRESS_30, 4);` gives a sensor an address and
+  an XSHUT pin; at every start the first `begin()` holds every XSHUT low, then releases them one
+  at a time (as an input: XSHUT is never driven HIGH, since some carriers take 3.3 V at most),
+  starts each sensor and gives it its address. It measures continuously; a read waits at most
+  40 ms. 0.03-2 m and a 25° cone (2 m from ST's datasheet, the rest general figures to verify).
 - Examples: `examples/MotorAndDistance`, `examples/MotorL298N` (two motors on an L298N),
-  `examples/Ultrasonic` and `examples/BatteryMonitor`. CI compiles every example for an Uno and a
+  `examples/Ultrasonic`, `examples/BatteryMonitor`, `examples/ButtonAndBumper`,
+  `examples/LedAndRelay`, `examples/ServoArm`, `examples/WheelEncoder`,
+  `examples/KnobAndJoystick` and `examples/Mpu6050`. CI compiles every example for an Uno and a
   Mega.
 - **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
   does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
   sends it at the end of every `HELLO_ACK` (§3). Faber then shows which sketch the board runs.
-- Not built yet: `FaberServo`, digital in/out, VL53L0X, encoders, a planar-base part with
+- Not built yet: the VL53L0X compiled against Pololu's library, the VL53L1X, a closed speed loop
+  with an encoder, a planar-base part with
   on-board ramp-down (the interop harness has a plain test one, for SENNEP's fake Mega:
   `FakeBoard::sennep`), and negotiating 1 Mbaud.
 - **Where it lives:** inside the Faber repo for now. Moving it to its own repo
@@ -388,6 +482,41 @@ three, plus its pin report. Each `FaberMotor` is 3 B larger (four pins and its d
 two pins). The stack doesn't grow: `PINS` is built in a 16-byte buffer, beside (not under) the
 32-byte one `PART` already uses.
 
+**Capability ids per class** (2026-10-16): the `"motor@1"`-style id `PART` sends used to come
+from one table in the library with every capability's id, so every sketch carried all of them (on
+an AVR every string literal takes RAM). Each capability class now gives its own
+(`Part::capabilityId()`), so a sketch carries only the ids of the capabilities it uses, and adding
+capabilities to the library costs a sketch that doesn't use them nothing. Measured the same way:
+
+| Example | Uno flash | Uno globals | Mega flash | Mega globals |
+|---|---|---|---|---|
+| `MotorAndDistance` | 10 026 B (−38) | 632 B (−38) | 11 156 B (−30) | 1 004 B (−38) |
+| `MotorL298N` | 8 426 B (−56) | 588 B (−50) | 9 504 B (−52) | 960 B (−50) |
+| `BatteryMonitor` | 7 026 B (−56) | 552 B (−50) | 7 434 B (−52) | 924 B (−50) |
+| `Ultrasonic` | 6 980 B (−54) | 553 B (−48) | 7 768 B (−50) | 925 B (−48) |
+
+**Buttons and obstacles** (2026-10-16). The `update()` hook costs every sketch about 46 B of
+flash and 2 B of RAM (a virtual table entry per part class, and the loop in `poll()`). A
+`FaberButton` or `FaberObstacle` is 38 B of RAM, plus its name:
+
+| Example | Uno flash | Uno globals | Mega flash | Mega globals |
+|---|---|---|---|---|
+| `MotorAndDistance` | 10 074 B | 636 B | 11 208 B | 1 008 B |
+| `MotorL298N` | 8 472 B | 590 B | 9 554 B | 962 B |
+| `BatteryMonitor` | 7 072 B | 554 B | 7 484 B | 926 B |
+| `Ultrasonic` | 7 026 B | 555 B | 7 818 B | 927 B |
+| `ButtonAndBumper` (new) | 6 556 B | 635 B | 7 370 B | 1 007 B |
+| `LedAndRelay` (new, outputs) | 7 592 B | 588 B | 8 680 B | 960 B |
+| `ServoArm` (new, with the Servo library 1.3.0) | 8 576 B | 588 B | 9 808 B | 1 071 B |
+| `WheelEncoder` (new: a motor using an encoder) | 10 716 B | 673 B | 12 618 B | 1 057 B |
+| `KnobAndJoystick` (new: three analog inputs and a button) | 7 726 B | 677 B | 8 560 B | 1 049 B |
+| `Mpu6050` (new, with the core's Wire library) | 9 124 B | 736 B | 9 930 B | 1 108 B |
+| `MotorAndDistance` (with `useEncoder` in `Motor`) | 10 108 B (+34) | 638 B (+2) | 11 242 B (+34) | 1 010 B (+2) |
+| `MotorL298N` | 8 514 B (+42) | 594 B (+4) | 9 596 B (+42) | 966 B (+4) |
+
+A servo doesn't change any other sketch: the figures above are the same with `FaberServo.h` in
+the library.
+
 ## 8. Interop tests (`tools/faberlink-interop`)
 
 The C++ core is compiled for the PC with the `cc` crate (MSVC on Windows, g++/clang elsewhere,
@@ -422,6 +551,16 @@ each `FaberMotor` driver shape writes the right pins for a duty (EN 128, IN1 hig
 +0.5), never drives both inputs high while turning around, ends with its pins low for every way a
 motor is stopped, holds STBY high, and refuses commands with a pin missing; every part class
 reports its pins with the analog base.
+
+The first wave of part classes (2026-10-16) is checked the same way, the stand-in core growing as
+they need it (`INPUT_PULLUP`, external interrupts on D2/D3, `delay()`, and stand-ins for the Servo,
+Wire and Pololu VL53L0X libraries with their documented APIs): a button's pull-up and a bouncing
+press counted once after the debounce time, an obstacle's info; an output's levels, an active-low
+relay's first write HIGH before `pinMode(OUTPUT)`, PWM duty and clamp, and off on every way a lease
+ends; a servo's pulse for an angle, holding or releasing when its lease ends; an encoder counting
+both ways on one or two interrupt pins and feeding its motor; an analog input's rate and volts; an
+MPU6050 woken, scaled to SI, at 0x69, and coming back after it was unplugged; several VL53L0X
+started one at a time with their own addresses and XSHUT never driven HIGH.
 
 ## 9. In the core: the `faber-bridge` connector
 

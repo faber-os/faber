@@ -5,75 +5,125 @@
 //! deliberate change; review the diff before committing it. CI's Arduino job compiles them too.
 
 use super::*;
-use crate::arduino::wiring::allocator::{Candidate, suggest};
+use crate::arduino::wiring::allocator::{Candidate, Severity, check, suggest};
 use crate::arduino::wiring::parts::{BuiltIn, templates};
 use crate::arduino::wiring::pins;
 use crate::arduino::wiring::plan;
 use std::path::{Path, PathBuf};
 
-/// A plan for `board` with one part of every template (every shape that can be used), each on the
-/// pins the allocator suggests: what the golden files and the compile test cover.
-fn everything(board: &str) -> Plan {
+/// Plans for `board` with one part of every template (every shape that can be used) between them,
+/// each on the pins the allocator suggests: what the golden files and the compile test cover. The
+/// first plan is called after the board (`uno`); when a part no longer fits (an Uno has six PWM
+/// pins), the next plan starts (`uno_2`, …).
+fn everything(board: &str) -> Vec<Plan> {
     let map = pins::arduino(board).unwrap();
-    let mut p = Plan::new(board, board);
+    let mut plans = vec![Plan::new(board, board)];
     for t in templates() {
         for shape in &t.shapes {
             let c = Candidate { template: t.id.clone(), shape: Some(shape.id.clone()), ..Default::default() };
-            let s = suggest(&map, &p, &BuiltIn, &[], &c).unwrap();
-            let unplaced: Vec<_> = s.roles.iter().filter(|r| !r.optional && r.suggested.is_none()).collect();
-            assert!(unplaced.is_empty(), "{board}: no room for {} {}: {unplaced:#?}", t.id, shape.id);
-            p.parts.insert(s.name, s.part);
+            // It fits when every role has a pin and the plan with it has no errors (an I²C part
+            // can't join a plan that uses the bus's pins for something else).
+            let fits = |p: &Plan| {
+                let s = suggest(&map, p, &BuiltIn, &[], &c).unwrap();
+                if !s.roles.iter().all(|r| r.optional || r.suggested.is_some()) {
+                    return None;
+                }
+                let mut with = p.clone();
+                with.parts.insert(s.name.clone(), s.part.clone());
+                let errors =
+                    check(&map, &with, &BuiltIn, &[]).into_iter().any(|e| e.severity == Severity::Error);
+                (!errors).then_some(s)
+            };
+            let s = match fits(plans.last().unwrap()) {
+                Some(s) => s,
+                None => {
+                    plans.push(Plan::new(board, &format!("{board}_{}", plans.len() + 1)));
+                    fits(plans.last().unwrap())
+                        .unwrap_or_else(|| panic!("{board}: no room for {} {} even alone", t.id, shape.id))
+                }
+            };
+            plans.last_mut().unwrap().parts.insert(s.name, s.part);
         }
     }
-    p
+    plans
 }
 
 fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/wiring")
 }
 
-/// The files of a guided board's folder, as Faber writes them.
-fn folder(board: &str) -> Vec<(String, String)> {
+/// The files of each guided board's folder, as Faber writes them, by the folder's name.
+fn folders(board: &str) -> Vec<(String, Vec<(String, String)>)> {
     let map = pins::arduino(board).unwrap();
-    let p = everything(board);
-    vec![
-        (plan::FILE.to_string(), plan::write(None, &p, &map, &BuiltIn)),
-        (format!("{board}.ino"), sketch(&p, &map, &BuiltIn).unwrap()),
-        (MY_CODE.to_string(), my_code(&p)),
-    ]
+    everything(board)
+        .into_iter()
+        .map(|p| {
+            let files = vec![
+                (plan::FILE.to_string(), plan::write(None, &p, &map, &BuiltIn)),
+                (format!("{}.ino", p.name), sketch(&p, &map, &BuiltIn).unwrap()),
+                (MY_CODE.to_string(), my_code(&p)),
+            ];
+            (p.name.clone(), files)
+        })
+        .collect()
+}
+
+/// The first folder of `board`: the one called after it.
+fn folder(board: &str) -> Vec<(String, String)> {
+    folders(board).remove(0).1
 }
 
 #[test]
 fn golden_sketches_for_every_template_on_every_board() {
     let refresh = std::env::var_os("FABER_REFRESH_GOLDEN").is_some();
+    let mut expected = Vec::new();
     for board in pins::arduino_boards() {
-        let dir = golden_dir().join(board);
-        for (name, text) in folder(board) {
-            let path = dir.join(&name);
-            if refresh {
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(&path, &text).unwrap();
-                continue;
-            }
-            let golden = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-                panic!(
-                    "{} is missing: run FABER_REFRESH_GOLDEN=1 cargo test -p faber-core golden",
-                    path.display()
-                )
-            });
-            // Git may check text out with CRLF on Windows.
-            assert_eq!(
-                text,
-                golden.replace("\r\n", "\n"),
-                "{} changed: if that is deliberate, run FABER_REFRESH_GOLDEN=1 cargo test -p faber-core golden and review the diff",
-                path.display()
-            );
-        }
-        // The plan read back from its file gives the same sketch.
         let map = pins::arduino(board).unwrap();
-        let files = folder(board);
-        let read = plan::parse(&files[0].1).unwrap().normalized(&map, &BuiltIn);
-        assert_eq!(sketch(&read, &map, &BuiltIn).unwrap(), files[1].1, "{board}");
+        for (folder_name, files) in folders(board) {
+            expected.push(folder_name.clone());
+            let dir = golden_dir().join(&folder_name);
+            for (name, text) in &files {
+                let path = dir.join(name);
+                if refresh {
+                    std::fs::create_dir_all(&dir).unwrap();
+                    std::fs::write(&path, text).unwrap();
+                    continue;
+                }
+                let golden = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+                    panic!(
+                        "{} is missing: run FABER_REFRESH_GOLDEN=1 cargo test -p faber-core golden",
+                        path.display()
+                    )
+                });
+                // Git may check text out with CRLF on Windows.
+                assert_eq!(
+                    *text,
+                    golden.replace("\r\n", "\n"),
+                    "{} changed: if that is deliberate, run FABER_REFRESH_GOLDEN=1 cargo test -p faber-core golden and review the diff",
+                    path.display()
+                );
+            }
+            // The plan read back from its file gives the same sketch.
+            let read = plan::parse(&files[0].1).unwrap().normalized(&map, &BuiltIn);
+            assert_eq!(sketch(&read, &map, &BuiltIn).unwrap(), files[1].1, "{folder_name}");
+        }
+    }
+    // No folder is left over from a board that now needs fewer.
+    let mut found: Vec<String> = std::fs::read_dir(golden_dir())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    found.sort();
+    expected.sort();
+    if refresh {
+        for stale in found.iter().filter(|f| !expected.contains(f)) {
+            std::fs::remove_dir_all(golden_dir().join(stale)).unwrap();
+        }
+    } else {
+        assert_eq!(
+            found, expected,
+            "golden folders: run FABER_REFRESH_GOLDEN=1 cargo test -p faber-core golden"
+        );
     }
 }
 
@@ -178,7 +228,7 @@ fn taking_over_keeps_the_code_and_drops_the_mark() {
 #[test]
 fn wiring_lines_fill_in_pins_and_settings() {
     let map = pins::arduino("uno").unwrap();
-    let p = everything("uno");
+    let p = everything("uno").remove(0);
     let w = wiring(&p, &map, &BuiltIn);
     let front = w.iter().find(|w| w.template == "ultrasonic").unwrap();
     assert_eq!(front.lines, ["VCC → 5V", "GND → GND", "Trig → D4", "Echo → D7"]);
@@ -201,65 +251,75 @@ fn every_generated_sketch_compiles_with_the_real_arduino_cli() {
         return;
     }
     let library = crate::arduino::library::install(tmp.path()).unwrap();
+    // The libraries that ship with the Arduino IDE (Servo), where it keeps them. An arduino-cli
+    // run on its own doesn't look there, so FaberServo.h wouldn't find Servo.h. (Faber's own
+    // compile doesn't either yet: docs/wiring.md §13, "Libraries a part needs".)
+    let builtin = std::env::var_os("LOCALAPPDATA")
+        .map(|d| PathBuf::from(d).join("Arduino15/libraries"))
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".arduino15/libraries")))
+        .filter(|d| d.join("Servo").is_dir());
     for board in pins::arduino_boards() {
         let fqbn = crate::arduino::fqbn(board).unwrap();
-        let dir = tmp.path().join("sketches").join(board);
-        std::fs::create_dir_all(&dir).unwrap();
-        for (name, text) in folder(board) {
-            std::fs::write(dir.join(name), text).unwrap();
+        for (folder_name, files) in folders(board) {
+            let dir = tmp.path().join("sketches").join(&folder_name);
+            std::fs::create_dir_all(&dir).unwrap();
+            for (name, text) in files {
+                std::fs::write(dir.join(name), text).unwrap();
+            }
+            // Kept between runs, so only the first run compiles the Arduino core.
+            let build = std::env::temp_dir().join("faber-wiring-compile").join(board);
+            let out = std::process::Command::new(&exe)
+                .args(["compile", "--fqbn", fqbn, "--warnings", "all", "--format", "json", "--build-path"])
+                .arg(&build)
+                .arg("--library")
+                .arg(&library)
+                .args(builtin.iter().flat_map(|b| [std::ffi::OsStr::new("--libraries"), b.as_os_str()]))
+                .arg(&dir)
+                .stdin(std::process::Stdio::null())
+                .output()
+                .unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+                panic!(
+                    "{board}: arduino-cli answered something unreadable ({e}): {}",
+                    String::from_utf8_lossy(&out.stderr)
+                )
+            });
+            if json
+                .get("error")
+                .and_then(|e| e.as_str())
+                .is_some_and(|e| e.contains("not found") || e.contains("not installed"))
+            {
+                eprintln!("skipped: {}", json["error"]);
+                return;
+            }
+            let compiler = format!(
+                "{}{}",
+                json["compiler_out"].as_str().unwrap_or(""),
+                json["compiler_err"].as_str().unwrap_or("")
+            );
+            assert_eq!(json["success"], true, "{board} doesn't compile:\n{compiler}\n{}", json["error"]);
+            let sketch_dir = dir.to_string_lossy().replace('\\', "/");
+            let warnings: Vec<&str> = compiler
+                .lines()
+                .filter(|l| {
+                    let l = l.replace('\\', "/");
+                    l.contains("warning:")
+                        && (l.contains(&sketch_dir)
+                            || l.contains("FaberLink")
+                            || l.contains(".ino:")
+                            || l.contains(MY_CODE))
+                })
+                .collect();
+            assert!(
+                warnings.is_empty(),
+                "{board}: warnings in the generated sketch or the library:\n{}",
+                warnings.join("\n")
+            );
+            eprintln!(
+                "{board}: compiled ({})",
+                compiler.lines().find(|l| l.starts_with("Sketch uses")).unwrap_or("size unknown")
+            );
         }
-        // Kept between runs, so only the first run compiles the Arduino core.
-        let build = std::env::temp_dir().join("faber-wiring-compile").join(board);
-        let out = std::process::Command::new(&exe)
-            .args(["compile", "--fqbn", fqbn, "--warnings", "all", "--format", "json", "--build-path"])
-            .arg(&build)
-            .arg("--library")
-            .arg(&library)
-            .arg(&dir)
-            .stdin(std::process::Stdio::null())
-            .output()
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
-            panic!(
-                "{board}: arduino-cli answered something unreadable ({e}): {}",
-                String::from_utf8_lossy(&out.stderr)
-            )
-        });
-        if json
-            .get("error")
-            .and_then(|e| e.as_str())
-            .is_some_and(|e| e.contains("not found") || e.contains("not installed"))
-        {
-            eprintln!("skipped: {}", json["error"]);
-            return;
-        }
-        let compiler = format!(
-            "{}{}",
-            json["compiler_out"].as_str().unwrap_or(""),
-            json["compiler_err"].as_str().unwrap_or("")
-        );
-        assert_eq!(json["success"], true, "{board} doesn't compile:\n{compiler}\n{}", json["error"]);
-        let sketch_dir = dir.to_string_lossy().replace('\\', "/");
-        let warnings: Vec<&str> = compiler
-            .lines()
-            .filter(|l| {
-                let l = l.replace('\\', "/");
-                l.contains("warning:")
-                    && (l.contains(&sketch_dir)
-                        || l.contains("FaberLink")
-                        || l.contains(".ino:")
-                        || l.contains(MY_CODE))
-            })
-            .collect();
-        assert!(
-            warnings.is_empty(),
-            "{board}: warnings in the generated sketch or the library:\n{}",
-            warnings.join("\n")
-        );
-        eprintln!(
-            "{board}: compiled ({})",
-            compiler.lines().find(|l| l.starts_with("Sketch uses")).unwrap_or("size unknown")
-        );
     }
 }
 

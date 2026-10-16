@@ -43,6 +43,8 @@ const uint16_t DEFAULT_HEARTBEAT_TIMEOUT_MS = 250;
 const uint16_t MIN_HEARTBEAT_TIMEOUT_MS = 100;
 const uint16_t MAX_HEARTBEAT_TIMEOUT_MS = 1000;
 const uint16_t DEFAULT_LEASE_MS = 250;
+// digital-out@1, pwm-out@1 and servo@1 are leased for 1 s (docs/capabilities.md).
+const uint16_t OUTPUT_LEASE_MS = 1000;
 const uint16_t STATUS_PERIOD_MS = 100;
 const size_t MAX_RAW = FABERLINK_MAX_PAYLOAD + 4;  // type, seq, payload, CRC
 
@@ -64,7 +66,21 @@ const uint8_t LOG = 0x40;
 }  // namespace kind
 
 // Capability codes in READING, COMMAND and APPLIED.
-enum Capability : uint8_t { DISTANCE = 1, MOTOR = 2, PLANAR_BASE = 3, ESTOP_CAP = 4, BATTERY = 5 };
+enum Capability : uint8_t {
+  DISTANCE = 1,
+  MOTOR = 2,
+  PLANAR_BASE = 3,
+  ESTOP_CAP = 4,
+  BATTERY = 5,
+  DIGITAL_IN = 6,
+  OBSTACLE = 7,
+  DIGITAL_OUT = 8,
+  PWM_OUT = 9,
+  SERVO = 10,
+  ENCODER = 11,
+  ANALOG_IN = 12,
+  IMU = 13,
+};
 
 // Why an actuator's output changed (APPLIED.cause).
 enum Cause : uint8_t {
@@ -99,8 +115,14 @@ enum PinRole : uint8_t {
   ROLE_STBY = 6,    // a motor driver's standby input
   ROLE_TRIG = 7,    // a range finder's trigger
   ROLE_ECHO = 8,    // a range finder's echo
-  ROLE_SIGNAL = 9,  // a sensor's output, read by the board
+  ROLE_SIGNAL = 9,  // a sensor's output read by the board (also a button's or a module's pin)
   ROLE_SENSE = 10,  // a battery's voltage, through a divider
+  ROLE_OUT = 11,    // an output the board switches: an LED, a relay module, a MOSFET
+  ROLE_A = 12,      // a quadrature encoder's channel A
+  ROLE_B = 13,      // a quadrature encoder's channel B
+  ROLE_SDA = 14,    // the I2C bus's data line, for a part on the bus
+  ROLE_SCL = 15,    // the I2C bus's clock line
+  ROLE_XSHUT = 16,  // a time-of-flight sensor's shutdown input (VL53L0X XSHUT)
 };
 
 // "No pin": an optional pin that isn't wired, or (as the analog base) "not known".
@@ -168,6 +190,13 @@ class Part {
 
   // Called once when the board starts (set pins up here, not in the constructor).
   virtual void begin() {}
+  // Called on every poll(), connected to Faber or not: for parts that must watch their pins all
+  // the time (a button's debounce), so the sketch can use them without Faber too.
+  virtual void update(uint32_t nowMs) { (void)nowMs; }
+  // The versioned capability id PART sends ("motor@1"). Each capability's class gives its own,
+  // so a sketch carries only the ids of the capabilities it uses (on an AVR every string literal
+  // takes RAM). A part that derives from Part directly returns its own ("planar-base@1").
+  virtual const char* capabilityId() const = 0;
   // The capability's info layout. Returns its length.
   virtual uint8_t writeInfo(uint8_t* out) const = 0;
   // The capability's reading layout, or 0 for "nothing to report".
@@ -202,6 +231,8 @@ class Part {
   bool added_;
 };
 
+class Encoder;
+
 enum MotorKind : uint8_t { MOTOR_DC = 0, MOTOR_STEPPER = 1, MOTOR_BLDC = 2, MOTOR_CONTINUOUS_SERVO = 3 };
 
 // motor@1, open loop: set-duty always, set-velocity when a maximum velocity is given (it then
@@ -216,7 +247,12 @@ class Motor : public Part {
   // Its speed at full duty (rad/s): with it the motor takes set-velocity too. 0 = unknown.
   // Set it before Faber asks for the parts (in setup() is fine).
   void setMaxVelocity(float radS) { maxVelocity_ = radS > 0 && isFinite(radS) ? radS : 0; }
+  // Measures the motor with an encoder on its shaft (or its wheel): its readings then carry the
+  // measured speed and position, 20 times a second, once the encoder knows its counts per turn.
+  // set-velocity stays open loop (duty = velocity / max). Call it in setup().
+  void useEncoder(Encoder& encoder);
 
+  const char* capabilityId() const override { return "motor@1"; }
   uint8_t writeInfo(uint8_t* out) const override;
   uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
   uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped) override;
@@ -229,6 +265,7 @@ class Motor : public Part {
   float maxVelocity_;
 
  private:
+  Encoder* encoder_;
   float duty_;
   MotorKind kind_;
 };
@@ -241,6 +278,7 @@ class Distance : public Part {
   Distance(const char* name, DistanceKind kind, float minM, float maxM, float fieldOfViewRad,
            uint16_t readingPeriodMs = 50);
 
+  const char* capabilityId() const override { return "distance@1"; }
   uint8_t writeInfo(uint8_t* out) const override;
   uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
 
@@ -274,6 +312,7 @@ class Battery : public Part {
   Battery(const char* name, BatteryChemistry chemistry, uint8_t cellsInSeries, float capacityAh = 0,
           uint16_t readingPeriodMs = 500);
 
+  const char* capabilityId() const override { return "battery@1"; }
   uint8_t writeInfo(uint8_t* out) const override;
   uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
   // The level at `volts`, coming from `previous` (the level reported last).
@@ -292,6 +331,203 @@ class Battery : public Part {
   BatteryChemistry chemistry_;
   uint8_t cells_;
   uint8_t level_;
+};
+
+// A digital input's level, debounced: a new level counts once the pin has held it for
+// debounceMs (a mechanical switch bounces for a few ms when it closes or opens). The first sample
+// counts at once.
+class Debouncer {
+ public:
+  explicit Debouncer(uint16_t debounceMs) : sinceMs_(0), ms_(debounceMs), raw_(false), level_(false), started_(false) {}
+  // Feeds the raw level at nowMs. True when the debounced level changed (or was first known).
+  bool update(bool raw, uint32_t nowMs);
+  bool level() const { return level_; }
+  bool known() const { return started_; }
+
+ private:
+  uint32_t sinceMs_;
+  uint16_t ms_;
+  bool raw_, level_, started_;
+};
+
+// A debounced digital input sent as a one-byte level on every change, and again every second so
+// a Faber that connects later learns it. Subclasses give the capability (digital-in@1, obstacle@1).
+class DebouncedInput : public Part {
+ public:
+  // The debounced logical level: true while active (pressed, detected).
+  bool level() const { return debouncer_.level(); }
+  void update(uint32_t nowMs) override;
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+
+ protected:
+  DebouncedInput(const char* name, Capability capability, uint16_t debounceMs);
+  ~DebouncedInput() {}
+  // The logical level now, undebounced: true is active (an active-low input inverts its pin).
+  virtual bool readLevel() = 0;
+
+ private:
+  Debouncer debouncer_;
+  uint32_t lastSentMs_;
+  bool changed_;
+};
+
+// digital-in@1: a button, a switch, an end stop. No info.
+class DigitalIn : public DebouncedInput {
+ public:
+  explicit DigitalIn(const char* name, uint16_t debounceMs = 20) : DebouncedInput(name, DIGITAL_IN, debounceMs) {}
+  const char* capabilityId() const override { return "digital-in@1"; }
+  uint8_t writeInfo(uint8_t*) const override { return 0; }
+
+ protected:
+  ~DigitalIn() {}
+};
+
+enum ObstacleKind : uint8_t { OBSTACLE_BUMPER = 0, OBSTACLE_INFRARED = 1, OBSTACLE_LIMIT = 2 };
+
+// obstacle@1: something is in the way (a bumper, a whisker, an infrared obstacle module).
+// triggerDistanceM: how close something must come, 0 or less when not known.
+class Obstacle : public DebouncedInput {
+ public:
+  Obstacle(const char* name, ObstacleKind kind, float triggerDistanceM = 0, uint16_t debounceMs = 10)
+      : DebouncedInput(name, OBSTACLE, debounceMs), trigger_(triggerDistanceM), kind_(kind) {}
+  const char* capabilityId() const override { return "obstacle@1"; }
+  uint8_t writeInfo(uint8_t* out) const override;
+
+ protected:
+  ~Obstacle() {}
+
+ private:
+  float trigger_;
+  ObstacleKind kind_;
+};
+
+// digital-out@1 (on or off) or pwm-out@1 (a duty 0..1): an LED, a relay, a MOSFET. Leased like a
+// motor: no command for its lease time (1 s) and it goes off, as it does on the e-stop and when
+// the heartbeat stops. It reports its value 10 times a second. No info.
+class PinOutput : public Part {
+ public:
+  PinOutput(const char* name, bool pwm, uint16_t leaseMs = OUTPUT_LEASE_MS);
+  const char* capabilityId() const override { return pwm_ ? "pwm-out@1" : "digital-out@1"; }
+  uint8_t writeInfo(uint8_t*) const override { return 0; }
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+  uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped) override;
+  uint8_t enterSafeState(uint8_t* out) override;
+  // The output now: 0 or 1 on/off, the duty 0..1 for PWM (1 = on, whatever the wiring).
+  float value() const { return value_; }
+  bool isPwm() const { return pwm_; }
+
+ protected:
+  ~PinOutput() {}
+  // Drives the hardware: 0 (off) or 1 (on), or a duty 0..1.
+  virtual void drive(float value) = 0;
+
+ private:
+  uint8_t writeCommand(uint8_t* out) const;
+  float value_;
+  bool pwm_;
+};
+
+// What a servo does when its lease ends, on the e-stop and when Faber goes quiet (D29).
+enum ServoSafeState : uint8_t {
+  // Keep the angle it was last told (the default): an arm holding something doesn't drop it.
+  SERVO_HOLD = 0,
+  // Stop the pulses, so it goes limp.
+  SERVO_RELEASE = 1,
+};
+
+// servo@1: a hobby servo turned to an angle (rad), within minRad..maxRad. It starts released (no
+// pulses, so it doesn't jump at power-up) and holds an angle once told one. Commands: set-angle
+// (clamped to the range), release, and safe (its safe state: hold or release). It reports the
+// angle it holds 10 times a second; a servo gives no feedback, so it is the angle it was told.
+class ServoPart : public Part {
+ public:
+  ServoPart(const char* name, float minRad, float maxRad, ServoSafeState safeState = SERVO_HOLD,
+            uint16_t leaseMs = OUTPUT_LEASE_MS);
+  const char* capabilityId() const override { return "servo@1"; }
+  uint8_t writeInfo(uint8_t* out) const override;
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+  uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped) override;
+  uint8_t enterSafeState(uint8_t* out) override;
+  // True while it holds an angle (it gets pulses); false while released.
+  bool holding() const { return holding_; }
+  // The angle it holds (rad), when it holds one.
+  float angle() const { return angle_; }
+
+ protected:
+  ~ServoPart() {}
+  // Turns the servo to `rad` (within the range), starting its pulses if they are off.
+  virtual void moveTo(float rad) = 0;
+  // Stops its pulses.
+  virtual void letGo() = 0;
+  float minRad_, maxRad_;
+
+ private:
+  uint8_t release(uint8_t* out);
+  float angle_;
+  ServoSafeState safeState_;
+  bool holding_;
+};
+
+// encoder@1: a quadrature encoder's count. countsPerRev (counts for one turn of the shaft it
+// measures, gearbox included) gives the speed in rad/s too; 0 when not known. It reports the count,
+// the counts since its last reading and the speed 20 times a second.
+class Encoder : public Part {
+ public:
+  explicit Encoder(const char* name, float countsPerRev = 0, uint16_t readingPeriodMs = 50);
+  const char* capabilityId() const override { return "encoder@1"; }
+  uint8_t writeInfo(uint8_t* out) const override;
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+  // Counts since it started; positive is forward.
+  virtual int32_t count() = 0;
+  // 0 when not known.
+  float countsPerRev() const { return countsPerRev_; }
+  // The reading of a motor this encoder measures (motor@1's layout: its speed and position), or
+  // 0 while the counts per turn aren't known. Here, not in Motor, so a sketch without an encoder
+  // doesn't carry it.
+  virtual uint8_t writeMotorReading(uint8_t* out, uint32_t nowMs);
+
+ protected:
+  ~Encoder() {}
+  void setCountsPerRev(float c) { countsPerRev_ = c > 0 && isFinite(c) ? c : 0; }
+
+ private:
+  float countsPerRev_;
+  int32_t last_, motorLast_;
+  uint32_t lastMs_, motorLastMs_;
+  bool started_;
+};
+
+// analog-in@1: an analog input as a share of full scale (0..1), and its volts when the reference
+// is known (referenceVolts > 0). No info.
+class AnalogIn : public Part {
+ public:
+  AnalogIn(const char* name, float referenceVolts = 0, uint16_t readingPeriodMs = 100);
+  const char* capabilityId() const override { return "analog-in@1"; }
+  uint8_t writeInfo(uint8_t*) const override { return 0; }
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+
+ protected:
+  ~AnalogIn() {}
+  // The input now as a share of full scale, 0..1; a negative or non-finite value sends nothing.
+  virtual float measureFraction() = 0;
+
+ private:
+  float referenceVolts_;
+};
+
+// imu@1 without fusion: rates (rad/s) and accelerations (m/s^2, gravity included) about and along
+// its own x, y and z. No info. It reports 20 times a second by default.
+class Imu : public Part {
+ public:
+  explicit Imu(const char* name, uint16_t readingPeriodMs = 50);
+  const char* capabilityId() const override { return "imu@1"; }
+  uint8_t writeInfo(uint8_t*) const override { return 0; }
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+
+ protected:
+  ~Imu() {}
+  // Fills the rates and accelerations; false when it can't measure now (nothing is sent).
+  virtual bool measure(float angularVelocity[3], float linearAcceleration[3]) = 0;
 };
 
 // The board's side of the protocol.

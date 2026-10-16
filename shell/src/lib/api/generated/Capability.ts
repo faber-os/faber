@@ -3,4 +3,4 @@
 /**
  * Every capability the core knows, with its versioned id.
  */
-export type Capability = "laser-scan@1" | "distance@1" | "motor@1" | "planar-base@1" | "estop@1" | "pose@1" | "position@1" | "battery@1" | "temperature@1" | "digital-in@1" | "digital-out@1" | "analog-in@1" | "pwm-out@1";
+export type Capability = "laser-scan@1" | "distance@1" | "motor@1" | "planar-base@1" | "estop@1" | "pose@1" | "position@1" | "battery@1" | "temperature@1" | "digital-in@1" | "digital-out@1" | "analog-in@1" | "pwm-out@1" | "obstacle@1" | "servo@1" | "encoder@1" | "imu@1";

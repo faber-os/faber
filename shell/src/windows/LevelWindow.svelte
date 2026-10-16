@@ -1,5 +1,6 @@
 <script lang="ts">
-  // The viewer of a digital-in@1 or digital-out@1 signal: on or off now, and the latest changes.
+  // The viewer of a digital-in@1, digital-out@1 or obstacle@1 signal: on or off (detected or
+  // clear) now, and the latest changes.
   import { t } from '../lib/i18n';
   import { useCore } from '../lib/state/context';
   import type { ErrorBody } from '../lib/state/types';
@@ -20,18 +21,34 @@
 
   let level = $state<boolean | null>(null);
   let output = $state(false);
+  let obstacle = $state(false);
   let changes = $state<{ tUs: number; level: boolean }[]>([]);
   let count = $state(0);
   let error = $state<ErrorBody | null>(null);
 
+  const words = (on: boolean) =>
+    obstacle
+      ? on
+        ? t('obstacle.detected')
+        : t('obstacle.clear')
+      : on
+        ? t('level.on')
+        : t('level.off');
+
   $effect(() =>
     core.watchSignal(address, 50, {
       onReading: (r) => {
-        if (r.capability !== 'digital-in@1' && r.capability !== 'digital-out@1') return;
+        let now: boolean;
+        if (r.capability === 'digital-in@1' || r.capability === 'digital-out@1') {
+          now = r.reading.level;
+        } else if (r.capability === 'obstacle@1') {
+          now = r.reading.detected;
+        } else return;
         output = r.capability === 'digital-out@1';
-        if (level !== null && r.reading.level !== level) count++;
-        level = r.reading.level;
-        changes = [{ tUs: r.reading.tUs, level: r.reading.level }, ...changes].slice(0, KEEP);
+        obstacle = r.capability === 'obstacle@1';
+        if (level !== null && now !== level) count++;
+        level = now;
+        changes = [{ tUs: r.reading.tUs, level: now }, ...changes].slice(0, KEEP);
         error = null;
       },
       onError: (e) => (error = e),
@@ -47,14 +64,14 @@
   {:else}
     <div class="now">
       <span class="lamp" class:on={level} aria-hidden="true"></span>
-      <p class="value" data-testid="level-value">{level ? t('level.on') : t('level.off')}</p>
+      <p class="value" data-testid="level-value">{words(level)}</p>
       <p class="sub">{output ? t('level.output') : t('level.changes', { count })}</p>
     </div>
     <h4>{t('level.latest')}</h4>
     <ol class="changes">
       {#each changes as c, i (i)}
         <li>
-          <span>{c.level ? t('level.on') : t('level.off')}</span>
+          <span>{words(c.level)}</span>
           <span class="time">{formatCoreTime(c.tUs)}</span>
         </li>
       {/each}

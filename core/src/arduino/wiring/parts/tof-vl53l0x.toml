@@ -1,0 +1,59 @@
+# A VL53L0X laser time-of-flight distance sensor on I2C: FaberToF
+# (firmware/faberlink/src/FaberToF.h, on Pololu's VL53L0X library), distance@1 (laser-tof).
+# Part facts: docs/research/common-parts.md §2.1 (every VL53L0X starts at 0x29 and forgets
+# another address at power-up, so several need an XSHUT pin each and are re-addressed on every
+# boot; most breakouts take 2.6-5 V; XSHUT on some carriers, Pololu's, is not level-shifted) and
+# §5 (0x29 is also the TCS34725's address).
+# Pending: the Pololu library isn't on this computer, and Faber can't install a library yet, so
+# the class is written to the library's documented API and tested against a stand-in only.
+
+faber-part = 1
+id = "tof-vl53l0x"
+name = "Laser distance sensor (VL53L0X)"
+description = "Measures the distance to what is in front of it with an infrared laser, 3 cm to 2 m: several on one bus."
+covers = ["VL53L0X", "GY-VL53L0XV2"]
+capability = "distance"
+class = "FaberToF"
+include = "FaberToF.h"
+default-name = "front"
+bus = "i2c"
+i2c-addresses = [0x29, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37]
+address-setting = "address"
+address-hint = "Every VL53L0X starts at 0x29: give each one its own address and connect its XSHUT to a pin, so the board can set the addresses at every start."
+warnings = [
+  "Several sensors need an XSHUT pin each; at most one may go without and keep 0x29.",
+  "Some carriers (Pololu's) take at most 3.3 V on XSHUT: the board never drives it HIGH, it only lets go and the carrier's pull-up raises it.",
+]
+
+[power]
+supply = "5V"
+current-ma = 20
+
+[[settings]]
+id = "address"
+name = "I²C address"
+type = "choice"
+default = "0x29"
+apply = "build"
+help = "0x29 for a single sensor without XSHUT; with several, a different one each (set at every start through XSHUT)."
+options = [
+  { id = "0x29", name = "0x29 (its own, one sensor)", code = "faberlink::TOF_ADDRESS_29" },
+  { id = "0x30", name = "0x30", code = "faberlink::TOF_ADDRESS_30" },
+  { id = "0x31", name = "0x31", code = "faberlink::TOF_ADDRESS_31" },
+  { id = "0x32", name = "0x32", code = "faberlink::TOF_ADDRESS_32" },
+  { id = "0x33", name = "0x33", code = "faberlink::TOF_ADDRESS_33" },
+  { id = "0x34", name = "0x34", code = "faberlink::TOF_ADDRESS_34" },
+  { id = "0x35", name = "0x35", code = "faberlink::TOF_ADDRESS_35" },
+  { id = "0x36", name = "0x36", code = "faberlink::TOF_ADDRESS_36" },
+  { id = "0x37", name = "0x37", code = "faberlink::TOF_ADDRESS_37" },
+]
+
+[[shapes]]
+id = "i2c"
+name = "I²C, with XSHUT"
+todo = "needs Pololu's VL53L0X library, which Faber can't install yet"
+args = ["name", "setting:address", "pin:xshut"]
+wiring = ["VIN → 5V", "GND → GND", "SDA → the board's SDA", "SCL → the board's SCL", "XSHUT → {pin:xshut}"]
+roles = [
+  { id = "xshut", name = "XSHUT", needs = "digital-out", optional = true, help = "Lets the board start it on its own and give it its address. Needed when there are several." },
+]

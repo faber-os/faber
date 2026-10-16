@@ -1,0 +1,40 @@
+# An analog input: FaberAnalogIn (firmware/faberlink/src/FaberLink.h), analog-in@1.
+# Part facts: docs/research/common-parts.md §2.4 (a potentiometer's wiper on an analog input, its
+# ends to 5V and GND; a thumb joystick's VRx and VRy are two of these, its SW a button) and §2.3
+# (a light-dependent resistor in a divider with about 10 kOhm).
+
+faber-part = 1
+id = "potentiometer"
+name = "Potentiometer or analog sensor"
+description = "Reads a knob, a slider, one axis of a thumb joystick or a light sensor in a divider, as 0-100 % and volts."
+covers = ["potentiometer", "slide potentiometer", "KY-023 joystick axis", "LDR with a 10 kΩ resistor", "TEMT6000"]
+capability = "analog-in"
+class = "FaberAnalogIn"
+include = "FaberLink.h"
+default-name = "knob"
+warnings = [
+  "A thumb joystick is three parts: two of these (VRx and VRy) and a button (SW).",
+]
+
+[power]
+supply = "5V"
+
+[[settings]]
+id = "rate-hz"
+name = "Readings a second"
+unit = "Hz"
+type = "number"
+default = 10
+min = 0.1
+max = 100
+apply = "build"
+help = "How often Faber gets its value. A joystick axis wants 20 or more."
+
+[[shapes]]
+id = "wiper"
+name = "Analog pin"
+args = ["name", "pin:signal", "setting:rate-hz", "board:analog-reference"]
+wiring = ["One end → 5V", "The other end → GND", "Middle (wiper, VRx, VRy, or the divider's middle) → {pin:signal}"]
+roles = [
+  { id = "signal", name = "Signal", needs = "analog-in", help = "A voltage between GND and the board's reference." },
+]

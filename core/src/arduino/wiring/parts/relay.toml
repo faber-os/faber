@@ -1,0 +1,47 @@
+# A relay module (1 channel of a 1/2/4/8-channel board): FaberOutput
+# (firmware/faberlink/src/FaberLink.h), digital-out@1.
+# Part facts: docs/research/common-parts.md §2.5 (SRD-05VDC modules: a 5 V coil of about 70 mA a
+# channel, many switch on with IN LOW, optocoupled boards have a JD-VCC jumper for a separate coil
+# supply; 5 V coil modules often don't switch reliably from 3.3 V logic). A module carries the
+# coil's transistor and flyback diode; a bare relay needs both.
+
+faber-part = 1
+id = "relay"
+name = "Relay module"
+description = "Switches a separate circuit (a lamp, a pump, a valve) on and off from Faber, through a relay board."
+covers = ["SRD-05VDC relay module", "1/2/4/8-channel relay boards"]
+capability = "digital-out"
+class = "FaberOutput"
+include = "FaberLink.h"
+default-name = "relay"
+warnings = [
+  "Use a relay module, never a bare relay on a pin: its coil draws about 70 mA (a pin gives 20 mA) and needs a flyback diode, which a module has.",
+  "Each coil takes about 70 mA from 5V: four channels at once are more than a USB port should give. Use the JD-VCC jumper and a separate 5 V supply on boards that have one.",
+  "Mains voltage can kill: switch only low voltages unless you know what you are doing.",
+  "Faber leases an output like a motor: the relay lets go when nobody has commanded it for a second.",
+]
+
+[power]
+supply = "5V"
+current-ma = 70
+
+[[settings]]
+id = "active"
+name = "Switches on with"
+type = "choice"
+default = "low"
+apply = "build"
+help = "Most relay modules switch on when IN is LOW. If yours clicks on when it should be off, it switches on with HIGH."
+options = [
+  { id = "low", name = "IN LOW (most modules)", code = "faberlink::ACTIVE_LOW" },
+  { id = "high", name = "IN HIGH", code = "faberlink::ACTIVE_HIGH" },
+]
+
+[[shapes]]
+id = "in"
+name = "IN pin"
+args = ["name", "pin:out", "code:faberlink::OUTPUT_ON_OFF", "setting:active"]
+wiring = ["Module VCC → 5V", "Module GND → GND", "Module IN → {pin:out}"]
+roles = [
+  { id = "out", name = "IN", needs = "digital-out", help = "Switches the relay." },
+]

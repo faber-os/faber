@@ -10,7 +10,7 @@
     type PatternKind,
   } from '../lib/state/simulation';
   import type { ErrorBody, PartInfo, Pattern } from '../lib/state/types';
-  import { formatLength, formatVolts } from '../lib/viewers/units';
+  import { formatCountRate, formatLength, formatTurnRate, formatVolts } from '../lib/viewers/units';
   import ErrorNotice from '../components/ErrorNotice.svelte';
 
   /** A manual simulated sensor's value: a slider and a pattern menu (docs/simulation.md, 9). */
@@ -23,8 +23,22 @@
   const range = $derived(sensorRange(part));
   const kinds = $derived(patternKinds(part));
   const unit = $derived(core.settings?.units.length ?? 'metric');
-  const show = (v: number) =>
-    range.quantity === 'voltage' ? formatVolts(v) : formatLength(v, unit);
+  const show = (v: number) => {
+    switch (range.quantity) {
+      case 'voltage':
+        return formatVolts(v);
+      case 'detected':
+        return v >= 0.5 ? t('obstacle.detected') : t('obstacle.clear');
+      case 'counts':
+        return formatCountRate(v);
+      case 'turn-rate':
+        return formatTurnRate(v);
+      case 'length':
+        return formatLength(v, unit);
+    }
+  };
+  // An obstacle's slider has two stops: clear and detected.
+  const step = $derived(range.quantity === 'detected' ? 1 : (range.max - range.min) / 200);
 
   let value = $state<number | null>(null);
   let kind = $state<PatternKind>('steady');
@@ -81,7 +95,7 @@
     type="range"
     min={range.min}
     max={range.max}
-    step={(range.max - range.min) / 200}
+    {step}
     value={value ?? range.min}
     disabled={value === null || lock !== null}
     title={lock ?? undefined}

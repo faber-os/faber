@@ -22,6 +22,17 @@ const FILES: &[(&str, &str)] = &[
     ("ir-distance", include_str!("parts/ir-distance.toml")),
     ("battery", include_str!("parts/battery.toml")),
     ("motor", include_str!("parts/motor.toml")),
+    ("button", include_str!("parts/button.toml")),
+    ("bumper", include_str!("parts/bumper.toml")),
+    ("ir-obstacle", include_str!("parts/ir-obstacle.toml")),
+    ("led", include_str!("parts/led.toml")),
+    ("relay", include_str!("parts/relay.toml")),
+    ("mosfet", include_str!("parts/mosfet.toml")),
+    ("servo", include_str!("parts/servo.toml")),
+    ("encoder", include_str!("parts/encoder.toml")),
+    ("potentiometer", include_str!("parts/potentiometer.toml")),
+    ("imu-mpu6050", include_str!("parts/imu-mpu6050.toml")),
+    ("tof-vl53l0x", include_str!("parts/tof-vl53l0x.toml")),
 ];
 
 /// What a pin must be able to do for a role.
@@ -748,7 +759,8 @@ pub fn check(t: &Template) -> Result<(), String> {
     }
     crate::names::PartName::parse(&t.default_name)
         .map_err(|e| format!("default-name \"{}\": {}", t.default_name, e.message))?;
-    if t.shapes.is_empty() {
+    // A template whose every shape waits for the library (todo) is kept, and not offered.
+    if t.shapes.is_empty() && t.pending_shapes.is_empty() {
         return Err("no shape can be used now".into());
     }
     let mut ids = std::collections::BTreeSet::new();
@@ -942,13 +954,19 @@ pub(crate) mod tests {
         pub has_default: bool,
     }
 
-    /// The `Faber*` classes in FaberLink.h and their constructors.
-    pub(crate) fn library_classes() -> BTreeMap<String, Vec<Vec<Param>>> {
-        let header = crate::arduino::library::FILES
+    /// The library's headers with part classes: FaberLink.h and the optional ones (FaberServo.h).
+    fn part_headers() -> String {
+        crate::arduino::library::FILES
             .iter()
-            .find(|(p, _)| *p == "src/FaberLink.h")
+            .filter(|(p, _)| p.starts_with("src/Faber") && p.ends_with(".h") && *p != "src/FaberLinkCore.h")
             .map(|(_, t)| *t)
-            .expect("FaberLink.h is built in");
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The `Faber*` classes in the library's headers and their constructors.
+    pub(crate) fn library_classes() -> BTreeMap<String, Vec<Vec<Param>>> {
+        let header = part_headers();
         let code: String =
             header.lines().map(|l| l.split("//").next().unwrap_or("")).collect::<Vec<_>>().join("\n");
         let mut out = BTreeMap::new();
@@ -1037,12 +1055,12 @@ pub(crate) mod tests {
         })
     }
 
-    /// Both library headers: constants such as `DISTANCE_*` live in FaberLinkCore.h, the motor's
+    /// Every library header: constants such as `DISTANCE_*` live in FaberLinkCore.h, the motor's
     /// `DRIVER_*` in FaberLink.h.
     fn core_header() -> String {
         crate::arduino::library::FILES
             .iter()
-            .filter(|(p, _)| *p == "src/FaberLinkCore.h" || *p == "src/FaberLink.h")
+            .filter(|(p, _)| p.starts_with("src/") && p.ends_with(".h"))
             .map(|(_, t)| *t)
             .collect()
     }
@@ -1093,7 +1111,7 @@ pub(crate) mod tests {
     fn drift_pending_shapes_match_the_library_too() {
         check_against_library(|t| t.all_shapes().collect());
         // The methods `setup` lines call (`{var}.setMaxVelocity(...)`) exist too.
-        let header = crate::arduino::library::FILES.iter().find(|(p, _)| *p == "src/FaberLink.h").unwrap().1;
+        let header = part_headers();
         for t in templates() {
             for line in t.all_shapes().flat_map(|s| &s.setup) {
                 let method = line.split('.').nth(1).and_then(|m| m.split('(').next()).unwrap_or(line);
@@ -1104,7 +1122,10 @@ pub(crate) mod tests {
                 );
             }
         }
-        assert!(templates().iter().all(|t| t.pending_shapes.is_empty()), "no shape is still marked todo");
+        // Shapes still marked todo, and why: each waits for a library Faber can't install yet.
+        let pending: Vec<&str> =
+            templates().iter().filter(|t| !t.pending_shapes.is_empty()).map(|t| t.id.as_str()).collect();
+        assert_eq!(pending, ["tof-vl53l0x"], "only the VL53L0X waits (Pololu's library)");
     }
 
     #[test]

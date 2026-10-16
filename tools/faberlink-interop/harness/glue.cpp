@@ -11,6 +11,10 @@
 
 #include "Arduino.h"
 #include "FaberLink.h"
+#include "FaberServo.h"
+#include "FaberEncoder.h"
+#include "FaberImu.h"
+#include "FaberToF.h"
 
 namespace {
 
@@ -35,10 +39,41 @@ struct Pins {
       state[i].kind = 0;
       state[i].value = 0;
       analogIn[i] = 0;
+      digitalIn[i] = -1;
+      servoUs[i] = -1;
+      servoMin[i] = servoMax[i] = 0;
     }
   }
   PinState state[256];
   int analogIn[256];
+  // What drives an input pin from outside: 0 LOW, 1 HIGH, -1 nothing (it floats, or its pull-up
+  // holds it HIGH).
+  int digitalIn[256];
+  // The pulse each pin's servo gets (us), or -1 for none; and the range it was attached with.
+  int servoUs[256];
+  int servoMin[256], servoMax[256];
+  // The routine attached to each external interrupt (D2, D3).
+  void (*isr[2])(void) = {0, 0};
+  // The I2C bus: a register file for each address that answers (present), the register pointer
+  // a transfer set, what a read will hand out, and whether begin() and a time-out were set.
+  bool i2cPresent[128] = {};
+  uint8_t i2cRegs[128][256] = {};
+  uint8_t i2cPointer[128] = {};
+  std::vector<uint8_t> i2cOut, i2cIn;
+  int i2cAddress = -1;
+  bool wireBegun = false;
+  uint32_t wireTimeoutUs = 0;
+  // Simulated VL53L0X sensors: the XSHUT pin each is wired to (NO_PIN: none), its address now,
+  // whether it is measuring, the range it sees (mm), and every init() in order (by sensor, -1 for
+  // one that found no sensor).
+  struct Tof {
+    uint8_t xshut;
+    uint8_t address;
+    bool started;
+    uint16_t mm;
+  };
+  std::vector<Tof> tofs;
+  std::vector<int> tofInits;
   std::vector<PinWrite> log;
   unsigned long nowMs;
   unsigned long echoUs;
@@ -65,7 +100,14 @@ class FakeSerial : public HardwareSerial {
 
 // One part of a sketch, as the Rust side describes it. type: 0 FaberMotor(name, pwm, dir, max),
 // 1 FaberMotor(name, driver, pins[0..4]), 2 FaberDistance(name, pin), 3 FaberUltrasonic(name,
-// trig, echo), 4 FaberBattery(name, pin, 3.0, 3).
+// trig, echo), 4 FaberBattery(name, pin, 3.0, 3), 5 FaberButton(name, pin, driver as the active
+// level), 6 FaberObstacle(name, pin, pins[1] as the kind, driver as the active level,
+// maxVelocity as the trigger distance), 7 FaberOutput(name, pin, driver as the mode, pins[1] as
+// the active level), 8 FaberServo(name, pin, 0, 180, driver as the safe state), 9 FaberEncoder(name,
+// pins[0], pins[1], maxVelocity as the pulses per rev), 10 FaberMotor(name, pins[0], pins[1]) using
+// the encoder declared just before it, 11 FaberAnalogIn(name, pins[0], 10, 5.0), 12 FaberImu(name,
+// pins[0] as its address), 13 FaberToF(name, pins[0] as XSHUT, pins[1] as its address), with a
+// simulated VL53L0X wired to that XSHUT pin.
 struct PartSpec {
   uint8_t type;
   const char* name;
@@ -84,6 +126,14 @@ struct Sketch {
   std::vector<std::unique_ptr<FaberDistance>> distances;
   std::vector<std::unique_ptr<FaberUltrasonic>> ultrasonics;
   std::vector<std::unique_ptr<FaberBattery>> batteries;
+  std::vector<std::unique_ptr<FaberButton>> buttons;
+  std::vector<std::unique_ptr<FaberObstacle>> obstacles;
+  std::vector<std::unique_ptr<FaberOutput>> outputs;
+  std::vector<std::unique_ptr<FaberServo>> servos;
+  std::vector<std::unique_ptr<FaberEncoder>> encoders;
+  std::vector<std::unique_ptr<FaberAnalogIn>> analogs;
+  std::vector<std::unique_ptr<FaberImu>> imus;
+  std::vector<std::unique_ptr<FaberToF>> tofs;
 };
 
 // Parts register themselves in a global table until the next FaberLink::begin(), as globals in a
@@ -112,7 +162,14 @@ void pinMode(uint8_t pin, uint8_t mode) {
 
 void digitalWrite(uint8_t pin, uint8_t value) { record(pin, 1, value ? 1 : 0); }
 
-int digitalRead(uint8_t pin) { return current && current->state[pin].kind == 1 ? current->state[pin].value : 0; }
+// An output reads what was written to it; an input what drives it, or HIGH from its pull-up.
+int digitalRead(uint8_t pin) {
+  if (!current) return 0;
+  const PinState& s = current->state[pin];
+  if (s.mode == OUTPUT) return s.kind == 1 ? s.value : 0;
+  if (current->digitalIn[pin] >= 0) return current->digitalIn[pin];
+  return s.mode == INPUT_PULLUP ? 1 : 0;
+}
 
 // As on an AVR: 0 and 255 are plain digital levels there too, but the value is what the sketch
 // asked for, which is what the tests check.
@@ -124,9 +181,151 @@ unsigned long millis() { return current ? current->nowMs : 0; }
 
 void delayMicroseconds(unsigned int) {}
 
+void delay(unsigned long) {}
+
 unsigned long pulseIn(uint8_t, uint8_t, unsigned long timeoutUs) {
   if (!current || current->echoUs > timeoutUs) return 0;
   return current->echoUs;
+}
+
+void attachInterrupt(uint8_t interrupt, void (*isr)(void), int) {
+  if (current && interrupt < 2) current->isr[interrupt] = isr;
+}
+
+void noInterrupts() {}
+
+void interrupts() {}
+
+// The stand-in Wire library: a write sets a device's register pointer, then writes registers from
+// it on; a read hands out registers from the pointer on. Absent devices don't acknowledge.
+TwoWire Wire;
+
+void TwoWire::begin() {
+  if (current) current->wireBegun = true;
+}
+
+void TwoWire::setWireTimeout(uint32_t timeout, bool) {
+  if (current) current->wireTimeoutUs = timeout;
+}
+
+void TwoWire::beginTransmission(uint8_t address) {
+  if (!current) return;
+  current->i2cAddress = address & 0x7F;
+  current->i2cOut.clear();
+}
+
+size_t TwoWire::write(uint8_t data) {
+  if (!current) return 0;
+  current->i2cOut.push_back(data);
+  return 1;
+}
+
+uint8_t TwoWire::endTransmission(bool) {
+  if (!current || current->i2cAddress < 0) return 4;
+  const int a = current->i2cAddress;
+  if (!current->i2cPresent[a]) return 2;  // address not acknowledged
+  if (!current->i2cOut.empty()) {
+    uint8_t reg = current->i2cOut[0];
+    current->i2cPointer[a] = reg;
+    for (size_t i = 1; i < current->i2cOut.size(); i++) current->i2cRegs[a][reg++] = current->i2cOut[i];
+  }
+  return 0;
+}
+
+uint8_t TwoWire::requestFrom(uint8_t address, uint8_t quantity) {
+  if (!current) return 0;
+  const int a = address & 0x7F;
+  current->i2cIn.clear();
+  if (!current->i2cPresent[a]) return 0;
+  uint8_t reg = current->i2cPointer[a];
+  for (uint8_t i = 0; i < quantity; i++) current->i2cIn.push_back(current->i2cRegs[a][reg++]);
+  return quantity;
+}
+
+int TwoWire::available() { return current ? static_cast<int>(current->i2cIn.size()) : 0; }
+
+int TwoWire::read() {
+  if (!current || current->i2cIn.empty()) return -1;
+  const int v = current->i2cIn.front();
+  current->i2cIn.erase(current->i2cIn.begin());
+  return v;
+}
+
+// The stand-in VL53L0X library. A sensor is on while its XSHUT isn't an output driven LOW; one
+// that is off forgets its address, as a real one does at power-up.
+namespace {
+bool tofOn(const Pins& p, const Pins::Tof& t) {
+  if (t.xshut == faberlink::NO_PIN) return true;
+  const PinState& s = p.state[t.xshut];
+  return !(s.mode == OUTPUT && s.kind == 1 && s.value == 0);
+}
+}  // namespace
+
+bool VL53L0X::init(bool) {
+  sensor_ = -1;
+  if (!current) return false;
+  int found = -1, answering = 0;
+  for (size_t i = 0; i < current->tofs.size(); i++) {
+    Pins::Tof& t = current->tofs[i];
+    if (!tofOn(*current, t)) {
+      t.address = 0x29;
+      t.started = false;
+      continue;
+    }
+    if (t.address == 0x29) {
+      answering++;
+      found = static_cast<int>(i);
+    }
+  }
+  // Two sensors at 0x29 answer on top of each other: the transfer fails.
+  if (answering != 1) found = -1;
+  current->tofInits.push_back(found);
+  sensor_ = found;
+  return found >= 0;
+}
+
+void VL53L0X::setAddress(uint8_t a) {
+  if (current && sensor_ >= 0) current->tofs[sensor_].address = a;
+}
+
+void VL53L0X::startContinuous(uint32_t) {
+  if (current && sensor_ >= 0) current->tofs[sensor_].started = true;
+}
+
+uint16_t VL53L0X::readRangeContinuousMillimeters() {
+  if (!current || sensor_ < 0 || !current->tofs[sensor_].started || timeout_ == 0) {
+    timedOut_ = true;  // without a time-out the real one could wait for ever: the test says so
+    return 65535;
+  }
+  return current->tofs[sensor_].mm;
+}
+
+// The stand-in Servo library: the pulse goes to the pin while attached.
+uint8_t Servo::attach(int pin) { return attach(pin, 544, 2400); }
+
+uint8_t Servo::attach(int pin, int min, int max) {
+  pin_ = pin;
+  attached_ = true;
+  if (current) {
+    current->state[pin].mode = OUTPUT;
+    current->servoMin[pin] = min;
+    current->servoMax[pin] = max;
+    current->servoUs[pin] = 1500;  // the library's DEFAULT_PULSE_WIDTH until written
+  }
+  return 0;
+}
+
+void Servo::detach() {
+  attached_ = false;
+  if (current && pin_ >= 0) current->servoUs[pin_] = -1;
+}
+
+void Servo::write(int value) { writeMicroseconds(value); }
+
+void Servo::writeMicroseconds(int value) {
+  if (!current || pin_ < 0 || !attached_) return;
+  const int lo = current->servoMin[pin_], hi = current->servoMax[pin_];
+  current->servoUs[pin_] = value < lo ? lo : value > hi ? hi : value;
 }
 
 extern "C" {
@@ -166,6 +365,59 @@ void* fla_new(const PartSpec* parts, size_t n) {
       case 3:
         s->ultrasonics.emplace_back(new FaberUltrasonic(name, p.pins[0], p.pins[1]));
         break;
+      case 5:
+        if (p.driver == faberlink::ACTIVE_LOW) {
+          s->buttons.emplace_back(new FaberButton(name, p.pins[0]));  // the shortest call
+        } else {
+          s->buttons.emplace_back(new FaberButton(name, p.pins[0], static_cast<faberlink::ActiveLevel>(p.driver)));
+        }
+        break;
+      case 6:
+        s->obstacles.emplace_back(new FaberObstacle(name, p.pins[0], static_cast<faberlink::ObstacleKind>(p.pins[1]),
+                                                    static_cast<faberlink::ActiveLevel>(p.driver), p.maxVelocity));
+        break;
+      case 7:
+        if (p.driver == faberlink::OUTPUT_ON_OFF && p.pins[1] == faberlink::ACTIVE_HIGH) {
+          s->outputs.emplace_back(new FaberOutput(name, p.pins[0]));  // the shortest call
+        } else {
+          s->outputs.emplace_back(new FaberOutput(name, p.pins[0], static_cast<faberlink::OutputMode>(p.driver),
+                                                  static_cast<faberlink::ActiveLevel>(p.pins[1])));
+        }
+        break;
+      case 8:
+        if (p.driver == faberlink::SERVO_HOLD) {
+          s->servos.emplace_back(new FaberServo(name, p.pins[0]));  // the shortest call
+        } else {
+          s->servos.emplace_back(new FaberServo(name, p.pins[0], 0, 180, static_cast<faberlink::ServoSafeState>(p.driver)));
+        }
+        break;
+      case 9:
+        s->encoders.emplace_back(new FaberEncoder(name, p.pins[0], p.pins[1], p.maxVelocity));
+        break;
+      case 10:
+        s->motors.emplace_back(new FaberMotor(name, p.pins[0], p.pins[1]));
+        s->motors.back()->useEncoder(*s->encoders.back());
+        break;
+      case 11:
+        s->analogs.emplace_back(new FaberAnalogIn(name, p.pins[0]));
+        break;
+      case 12:
+        if (p.pins[0] == faberlink::IMU_ADDRESS_68) {
+          s->imus.emplace_back(new FaberImu(name));  // the shortest call
+        } else {
+          s->imus.emplace_back(new FaberImu(name, static_cast<faberlink::ImuAddress>(p.pins[0])));
+        }
+        break;
+      case 13: {
+        Pins::Tof t = {p.pins[0], 0x29, false, 1000};
+        s->pins.tofs.push_back(t);
+        if (p.pins[0] == faberlink::NO_PIN) {
+          s->tofs.emplace_back(new FaberToF(name));  // the shortest call
+        } else {
+          s->tofs.emplace_back(new FaberToF(name, static_cast<faberlink::ToFAddress>(p.pins[1]), p.pins[0]));
+        }
+        break;
+      }
       default:
         s->batteries.emplace_back(new FaberBattery(name, p.pins[0], 3.0f, 3));
         break;
@@ -226,4 +478,37 @@ void fla_clear_log(void* h) { use(h)->pins.log.clear(); }
 void fla_set_analog(void* h, uint8_t pin, int32_t value) { use(h)->pins.analogIn[pin] = value; }
 
 void fla_set_echo_us(void* h, uint32_t us) { use(h)->pins.echoUs = us; }
+
+// A changed level on an interrupt pin runs its routine, as CHANGE does.
+void fla_set_digital(void* h, uint8_t pin, int32_t level) {
+  Sketch* s = use(h);
+  const int before = digitalRead(pin);
+  s->pins.digitalIn[pin] = level;
+  const int irq = digitalPinToInterrupt(pin);
+  if (irq != NOT_AN_INTERRUPT && s->pins.isr[irq] && digitalRead(pin) != before) s->pins.isr[irq]();
+}
+
+int32_t fla_servo_us(void* h, uint8_t pin) { return use(h)->pins.servoUs[pin]; }
+
+// A device at `address` on the I2C bus (present), or none.
+void fla_i2c_device(void* h, uint8_t address, int32_t present) { use(h)->pins.i2cPresent[address & 0x7F] = present != 0; }
+
+void fla_i2c_set(void* h, uint8_t address, uint8_t reg, uint8_t value) { use(h)->pins.i2cRegs[address & 0x7F][reg] = value; }
+
+uint8_t fla_i2c_get(void* h, uint8_t address, uint8_t reg) { return use(h)->pins.i2cRegs[address & 0x7F][reg]; }
+
+// The simulated VL53L0X sensors: their number; sensor i's address now; set the range it sees;
+// the i-th init() (the sensor it found, -1 for none, -2 past the end).
+size_t fla_tof_count(void* h) { return use(h)->pins.tofs.size(); }
+
+uint8_t fla_tof_address(void* h, size_t i) { return use(h)->pins.tofs[i].address; }
+
+void fla_tof_set_mm(void* h, size_t i, uint16_t mm) { use(h)->pins.tofs[i].mm = mm; }
+
+int32_t fla_tof_init_at(void* h, size_t i) {
+  const std::vector<int>& inits = use(h)->pins.tofInits;
+  return i < inits.size() ? inits[i] : -2;
+}
+
+uint32_t fla_wire_timeout(void* h) { return use(h)->pins.wireBegun ? use(h)->pins.wireTimeoutUs : 0xFFFFFFFFu; }
 }

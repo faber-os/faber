@@ -5,11 +5,28 @@ faber-board = 1
 board = "mega2560"
 name = "mega2560"
 
+[parts.arm]
+template = "servo"
+shape = "signal"
+pins = { signal = 29 }
+settings = { min-deg = 0, max-deg = 180, safe-state = "hold", min-pulse-us = 544, max-pulse-us = 2400 }
+
 [parts.battery]
 template = "battery"
 shape = "divider"
 pins = { sense = "A1" }
 settings = { r1-ohm = 20000, r2-ohm = 10000, cells = 3, chemistry = "li-ion", capacity-ah = 0 }
+
+[parts.bumper]
+template = "bumper"
+shape = "pin"
+pins = { signal = 25 }
+settings = { kind = "bumper" }
+
+[parts.fan]
+template = "mosfet"
+shape = "sig"
+pins = { out = 10 }
 
 [parts.front]
 template = "ultrasonic"
@@ -22,6 +39,34 @@ template = "ir-distance"
 shape = "analog"
 pins = { signal = "A0" }
 settings = { min-m = 0.1, max-m = 0.8 }
+
+[parts.front_3]
+template = "ir-obstacle"
+shape = "out"
+pins = { signal = 26 }
+settings = { trigger-distance-m = 0 }
+
+[parts.imu]
+template = "imu-mpu6050"
+shape = "i2c"
+pins = {}
+settings = { address = "0x68", rate-hz = 20 }
+
+[parts.knob]
+template = "potentiometer"
+shape = "wiper"
+pins = { signal = "A2" }
+settings = { rate-hz = 10 }
+
+[parts.led]
+template = "led"
+shape = "on-off"
+pins = { out = 27 }
+
+[parts.led_2]
+template = "led"
+shape = "dimmable"
+pins = { out = 9 }
 
 [parts.left]
 template = "motor"
@@ -40,3 +85,21 @@ template = "motor"
 shape = "two-pwm"
 pins = { in1 = 11, in2 = 12 }
 settings = { max-velocity-rad-s = 0 }
+
+[parts.relay]
+template = "relay"
+shape = "in"
+pins = { out = 28 }
+settings = { active = "low" }
+
+[parts.start]
+template = "button"
+shape = "pin"
+pins = { signal = 24 }
+settings = { wiring = "to-gnd", debounce-ms = 20 }
+
+[parts.wheel]
+template = "encoder"
+shape = "quadrature"
+pins = { a = 2, b = 14 }
+settings = { pulses-per-rev = 0, gear-ratio = 1 }

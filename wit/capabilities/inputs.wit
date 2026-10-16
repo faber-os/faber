@@ -10,9 +10,17 @@ interface button {
 
 interface encoder {
   use types.{timestamp, command-error};
-  record info { counts-per-rev: option<u32> }
-  /// velocity: counts/s, or rad/s when counts-per-rev is known.
-  record reading { t-us: timestamp, count: s64, delta: s32, velocity: f32 }
+  /// Counts for one turn of the shaft, gearbox included (not always whole: 34.02:1).
+  record info { counts-per-rev: option<f32> }
+  /// delta: counts since the previous reading. velocity-rad-s: when counts-per-rev is known.
+  record reading {
+    t-us: timestamp,
+    count: s64,
+    delta: s32,
+    counts-per-s: f32,
+    velocity-rad-s: option<f32>,
+  }
+  /// Shared (no lease). Not built yet: the core has no shared commands.
   reset-count: func() -> result<_, command-error>;
 }
 

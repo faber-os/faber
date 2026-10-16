@@ -81,7 +81,8 @@ mod tests {
     #[test]
     fn the_generic_parts_are_built_in() {
         let ids: Vec<_> = super::built_in().into_iter().map(|d| d.manifest.id).collect();
-        for id in [super::generic::PLANAR_BASE, super::generic::MOTOR, super::generic::DISTANCE] {
+        use super::generic::{DISTANCE, ENCODER, IMU, MOTOR, OBSTACLE, PLANAR_BASE, SERVO};
+        for id in [PLANAR_BASE, MOTOR, DISTANCE, OBSTACLE, SERVO, ENCODER, IMU] {
             assert!(ids.iter().any(|i| i == id), "{id}");
         }
     }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatLength, niceLengthStep } from './units';
+import {
+  formatAngle,
+  formatCountRate,
+  formatLength,
+  formatMetresPerS2,
+  niceLengthStep,
+} from './units';
 
 describe('lengths', () => {
   it('uses cm below one metre and m above', () => {
@@ -28,5 +34,17 @@ describe('lengths', () => {
     expect(niceLengthStep(1, 'imperial')).toBeCloseTo(1.524, 6); // 5 ft
     expect(niceLengthStep(20, 'imperial')).toBeCloseTo(30.48, 6); // 100 ft
     expect(formatLength(niceLengthStep(1, 'imperial'), 'imperial')).toBe('5 ft');
+  });
+});
+
+describe('angles, counts and accelerations', () => {
+  it('shows an angle in radians and in degrees', () => {
+    expect(formatAngle(Math.PI / 2)).toBe('1.57 rad (90°)');
+    expect(formatAngle(-0.5)).toBe('-0.5 rad (-28.6°)');
+  });
+
+  it('shows counts per second and m/s²', () => {
+    expect(formatCountRate(1234.5)).toBe('1235 counts/s');
+    expect(formatMetresPerS2(9.80665)).toBe('9.81 m/s²');
   });
 });

@@ -114,22 +114,6 @@ FrameDecoder::Result FrameDecoder::push(uint8_t byte) {
 // ---------------------------------------------------------------------------------------------
 // Parts
 
-static const char* capabilityId(Capability c) {
-  switch (c) {
-    case DISTANCE:
-      return "distance@1";
-    case MOTOR:
-      return "motor@1";
-    case PLANAR_BASE:
-      return "planar-base@1";
-    case ESTOP_CAP:
-      return "estop@1";
-    case BATTERY:
-      return "battery@1";
-  }
-  return "";
-}
-
 Part::Part(const char* name, Capability capability, uint16_t leaseMs, uint16_t readingPeriodMs)
     : name_(name),
       next_(0),
@@ -152,8 +136,14 @@ uint8_t Part::writePins(uint8_t*) const { return 0; }
 Motor::Motor(const char* name, float maxVelocityRadS, MotorKind kind, uint16_t leaseMs)
     : Part(name, MOTOR, leaseMs == 0 ? DEFAULT_LEASE_MS : leaseMs, 0),
       maxVelocity_(maxVelocityRadS > 0 && isFinite(maxVelocityRadS) ? maxVelocityRadS : 0),
+      encoder_(0),
       duty_(0),
       kind_(kind) {}
+
+void Motor::useEncoder(Encoder& encoder) {
+  encoder_ = &encoder;
+  setReadingPeriod(50);
+}
 
 uint8_t Motor::writeInfo(uint8_t* out) const {
   out[0] = kind_;
@@ -166,7 +156,12 @@ uint8_t Motor::writeInfo(uint8_t* out) const {
   return 6;
 }
 
-uint8_t Motor::writeReading(uint8_t*, uint32_t) { return 0; }
+static const float FULL_TURN_RAD = 6.28318531f;
+
+// Without an encoder a motor measures nothing; with one, the encoder writes its reading.
+uint8_t Motor::writeReading(uint8_t* out, uint32_t nowMs) {
+  return encoder_ ? encoder_->writeMotorReading(out, nowMs) : 0;
+}
 
 uint8_t Motor::apply(const uint8_t* c, uint8_t len, uint8_t* out, bool* clamped) {
   if (len != 5) return 0;
@@ -227,6 +222,266 @@ uint8_t Distance::writeReading(uint8_t* out, uint32_t) {
   putF32(out, m);
   out[4] = status;
   return 5;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Digital inputs
+
+bool Debouncer::update(bool raw, uint32_t nowMs) {
+  if (!started_) {
+    started_ = true;
+    raw_ = level_ = raw;
+    sinceMs_ = nowMs;
+    return true;
+  }
+  if (raw != raw_) {
+    raw_ = raw;
+    sinceMs_ = nowMs;
+  }
+  if (raw_ != level_ && static_cast<uint32_t>(nowMs - sinceMs_) >= ms_) {
+    level_ = raw_;
+    return true;
+  }
+  return false;
+}
+
+// A change goes out within 5 ms (the reading period); an unchanged level once a second.
+static const uint16_t INPUT_POLL_MS = 5;
+static const uint16_t INPUT_REPEAT_MS = 1000;
+
+DebouncedInput::DebouncedInput(const char* name, Capability capability, uint16_t debounceMs)
+    : Part(name, capability, 0, INPUT_POLL_MS), debouncer_(debounceMs), lastSentMs_(0), changed_(false) {}
+
+void DebouncedInput::update(uint32_t nowMs) {
+  if (debouncer_.update(readLevel(), nowMs)) changed_ = true;
+}
+
+// digital-in@1 and obstacle@1 reading layout: the level u8.
+uint8_t DebouncedInput::writeReading(uint8_t* out, uint32_t nowMs) {
+  if (!debouncer_.known()) return 0;
+  if (!changed_ && static_cast<uint32_t>(nowMs - lastSentMs_) < INPUT_REPEAT_MS) return 0;
+  changed_ = false;
+  lastSentMs_ = nowMs;
+  out[0] = debouncer_.level() ? 1 : 0;
+  return 1;
+}
+
+// obstacle@1 info layout: kind u8, trigger distance f32 (NaN = unknown).
+uint8_t Obstacle::writeInfo(uint8_t* out) const {
+  out[0] = kind_;
+  if (trigger_ > 0 && isFinite(trigger_)) {
+    putF32(out + 1, trigger_);
+  } else {
+    putU32(out + 1, 0x7FC00000UL);
+  }
+  return 5;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Outputs
+
+PinOutput::PinOutput(const char* name, bool pwm, uint16_t leaseMs)
+    : Part(name, pwm ? PWM_OUT : DIGITAL_OUT, leaseMs == 0 ? OUTPUT_LEASE_MS : leaseMs, 100), value_(0), pwm_(pwm) {}
+
+// digital-out@1 reading: level u8. pwm-out@1 reading: duty f32.
+uint8_t PinOutput::writeReading(uint8_t* out, uint32_t) {
+  if (pwm_) {
+    putF32(out, value_);
+    return 4;
+  }
+  out[0] = value_ > 0 ? 1 : 0;
+  return 1;
+}
+
+// The command layout for the value now: kind 0 (set / set-duty), then the level u8 or duty f32.
+uint8_t PinOutput::writeCommand(uint8_t* out) const {
+  out[0] = 0;
+  if (pwm_) {
+    putF32(out + 1, value_);
+    return 5;
+  }
+  out[1] = value_ > 0 ? 1 : 0;
+  return 2;
+}
+
+uint8_t PinOutput::apply(const uint8_t* c, uint8_t len, uint8_t* out, bool* clamped) {
+  if (len < 1 || c[0] != 0) return 0;
+  float v;
+  if (pwm_) {
+    if (len != 5) return 0;
+    v = getF32(c + 1);
+    if (!isFinite(v)) return 0;
+    v = clampf(v, 0, 1, clamped);
+  } else {
+    if (len != 2 || c[1] > 1) return 0;
+    v = c[1];
+  }
+  value_ = v;
+  drive(v);
+  return writeCommand(out);
+}
+
+uint8_t PinOutput::enterSafeState(uint8_t* out) {
+  value_ = 0;
+  drive(0);
+  return writeCommand(out);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Servos
+
+ServoPart::ServoPart(const char* name, float minRad, float maxRad, ServoSafeState safeState, uint16_t leaseMs)
+    : Part(name, SERVO, leaseMs == 0 ? OUTPUT_LEASE_MS : leaseMs, 100),
+      minRad_(minRad < maxRad ? minRad : maxRad),
+      maxRad_(minRad < maxRad ? maxRad : minRad),
+      angle_(0),
+      safeState_(safeState),
+      holding_(false) {}
+
+// servo@1 info layout: min f32, max f32, safe state u8 (0 hold, 1 release).
+uint8_t ServoPart::writeInfo(uint8_t* out) const {
+  putF32(out, minRad_);
+  putF32(out + 4, maxRad_);
+  out[8] = safeState_;
+  return 9;
+}
+
+// servo@1 reading layout: holding u8, angle f32 (0 while released).
+uint8_t ServoPart::writeReading(uint8_t* out, uint32_t) {
+  out[0] = holding_ ? 1 : 0;
+  putF32(out + 1, holding_ ? angle_ : 0);
+  return 5;
+}
+
+// The command layout: kind u8 (0 set-angle, 1 release, 2 safe), angle f32.
+uint8_t ServoPart::release(uint8_t* out) {
+  if (holding_) letGo();
+  holding_ = false;
+  out[0] = 1;
+  putF32(out + 1, 0);
+  return 5;
+}
+
+uint8_t ServoPart::apply(const uint8_t* c, uint8_t len, uint8_t* out, bool* clamped) {
+  if (len != 5) return 0;
+  if (c[0] == 1) return release(out);
+  if (c[0] == 2) return enterSafeState(out);
+  if (c[0] != 0) return 0;
+  float a = getF32(c + 1);
+  if (!isFinite(a)) return 0;
+  a = clampf(a, minRad_, maxRad_, clamped);
+  angle_ = a;
+  holding_ = true;
+  moveTo(a);
+  out[0] = 0;
+  putF32(out + 1, a);
+  return 5;
+}
+
+// Hold: the angle it was told stays (said as set-angle to it); release: it lets go. A servo that
+// was never told an angle stays released either way.
+uint8_t ServoPart::enterSafeState(uint8_t* out) {
+  if (safeState_ == SERVO_RELEASE || !holding_) return release(out);
+  out[0] = 0;
+  putF32(out + 1, angle_);
+  return 5;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Encoders
+
+Encoder::Encoder(const char* name, float countsPerRev, uint16_t readingPeriodMs)
+    : Part(name, ENCODER, 0, readingPeriodMs),
+      countsPerRev_(0),
+      last_(0),
+      motorLast_(0),
+      lastMs_(0),
+      motorLastMs_(0),
+      started_(false) {
+  setCountsPerRev(countsPerRev);
+}
+
+// motor@1 reading layout: present u8 (bit 0 velocity, bit 1 position), velocity, position and
+// current f32: the measured speed (from the counts since the motor's last reading) and position.
+uint8_t Encoder::writeMotorReading(uint8_t* out, uint32_t nowMs) {
+  if (countsPerRev_ <= 0) return 0;
+  const int32_t c = count();
+  const float radPerCount = FULL_TURN_RAD / countsPerRev_;
+  const uint32_t dt = nowMs - motorLastMs_;
+  const float velocity = motorLastMs_ != 0 && dt > 0 ? (c - motorLast_) * radPerCount * 1000.0f / dt : 0;
+  motorLast_ = c;
+  motorLastMs_ = nowMs;
+  out[0] = 3;
+  putF32(out + 1, velocity);
+  putF32(out + 5, c * radPerCount);
+  putF32(out + 9, 0);
+  return 13;
+}
+
+// encoder@1 info layout: counts per rev f32 (NaN = unknown).
+uint8_t Encoder::writeInfo(uint8_t* out) const {
+  if (countsPerRev_ > 0) {
+    putF32(out, countsPerRev_);
+  } else {
+    putU32(out, 0x7FC00000UL);
+  }
+  return 4;
+}
+
+// encoder@1 reading layout: present u8 (bit 0: rad/s), count i64, delta i32, counts/s f32,
+// rad/s f32.
+uint8_t Encoder::writeReading(uint8_t* out, uint32_t nowMs) {
+  const int32_t c = count();
+  const int32_t delta = started_ ? static_cast<int32_t>(static_cast<uint32_t>(c) - static_cast<uint32_t>(last_)) : 0;
+  const uint32_t dt = nowMs - lastMs_;
+  const float perS = started_ && dt > 0 ? delta * 1000.0f / dt : 0;
+  started_ = true;
+  last_ = c;
+  lastMs_ = nowMs;
+  out[0] = countsPerRev_ > 0 ? 1 : 0;
+  putU32(out + 1, static_cast<uint32_t>(c));
+  putU32(out + 5, c < 0 ? 0xFFFFFFFFUL : 0);  // the count's sign, to 64 bits
+  putU32(out + 9, static_cast<uint32_t>(delta));
+  putF32(out + 13, perS);
+  putF32(out + 17, countsPerRev_ > 0 ? perS / countsPerRev_ * FULL_TURN_RAD : 0);
+  return 21;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Analog inputs
+
+AnalogIn::AnalogIn(const char* name, float referenceVolts, uint16_t readingPeriodMs)
+    : Part(name, ANALOG_IN, 0, readingPeriodMs == 0 ? 100 : readingPeriodMs),
+      referenceVolts_(referenceVolts > 0 && isFinite(referenceVolts) ? referenceVolts : 0) {}
+
+// analog-in@1 reading layout: present u8 (bit 0: volts), fraction f32, volts f32.
+uint8_t AnalogIn::writeReading(uint8_t* out, uint32_t) {
+  float f = measureFraction();
+  if (!isFinite(f) || f < 0) return 0;
+  if (f > 1) f = 1;
+  out[0] = referenceVolts_ > 0 ? 1 : 0;
+  putF32(out + 1, f);
+  putF32(out + 5, f * referenceVolts_);
+  return 9;
+}
+
+// ---------------------------------------------------------------------------------------------
+// IMUs
+
+Imu::Imu(const char* name, uint16_t readingPeriodMs) : Part(name, IMU, 0, readingPeriodMs == 0 ? 50 : readingPeriodMs) {}
+
+// imu@1 reading layout: present u8 (0: no orientation, no variances), angular velocity x, y, z,
+// linear acceleration x, y, z (f32).
+uint8_t Imu::writeReading(uint8_t* out, uint32_t) {
+  float w[3], a[3];
+  if (!measure(w, a)) return 0;
+  out[0] = 0;
+  for (uint8_t i = 0; i < 3; i++) {
+    if (!isFinite(w[i]) || !isFinite(a[i])) return 0;
+    putF32(out + 1 + 4 * i, w[i]);
+    putF32(out + 13 + 4 * i, a[i]);
+  }
+  return 25;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -588,7 +843,7 @@ void Board::sendPart(Part& part) {
   o[1] = count_;
   putU16(o + 2, part.leaseMs_);
   size_t n = 4;
-  n += putStr(o + n, capabilityId(part.capability_), 255);
+  n += putStr(o + n, part.capabilityId(), 255);
   uint8_t info[32];
   uint8_t infoLen = part.writeInfo(info);
   size_t room = maxPayload() - n - infoLen;  // the name is cut, never the info
@@ -633,6 +888,7 @@ void Board::sendEstop(bool engaged) {
 
 void Board::tick(uint32_t nowMs) {
   checkSafety(nowMs);
+  for (Part* part = first_; part; part = part->next_) part->update(nowMs);
   if (!connected()) return;
   if (static_cast<uint32_t>(nowMs - lastStatusMs_) >= STATUS_PERIOD_MS) {
     lastStatusMs_ = nowMs;

@@ -662,6 +662,16 @@ pub enum PinRole {
     Signal,
     /// A battery's voltage, through a divider.
     Sense,
+    /// An output the board switches.
+    Out,
+    /// A quadrature encoder's channels.
+    A,
+    B,
+    /// The I²C bus's lines.
+    Sda,
+    Scl,
+    /// A time-of-flight sensor's shutdown input.
+    Xshut,
     /// A role a newer FaberLink library added.
     Other,
 }

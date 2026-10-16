@@ -6,7 +6,8 @@ use crate::bindings::faber::capabilities as cap;
 use crate::bindings::faber::connector::types as wit;
 use faber_capabilities::{
     Command, Mount, Quaternion, Reading, Twist2d, Vec3, analog_in, battery, digital_in, digital_out,
-    distance, estop, laser_scan, motor, planar_base, pose, position, pwm_out, temperature,
+    distance, encoder, estop, imu, laser_scan, motor, obstacle, planar_base, pose, position, pwm_out, servo,
+    temperature,
 };
 
 pub(crate) fn mount_from_wit(m: cap::types::Mount) -> Mount {
@@ -31,6 +32,10 @@ fn quaternion(q: Quaternion) -> cap::types::Quaternion {
 
 fn vec3_from(v: cap::types::Vec3) -> Vec3 {
     Vec3 { x: v.x, y: v.y, z: v.z }
+}
+
+fn quaternion_from(q: cap::types::Quaternion) -> Quaternion {
+    Quaternion { x: q.x, y: q.y, z: q.z, w: q.w }
 }
 
 pub fn reading_to_wit(r: Reading) -> wit::Reading {
@@ -135,6 +140,28 @@ pub fn reading_to_wit(r: Reading) -> wit::Reading {
             volts: r.volts,
         }),
         Reading::PwmOut(r) => wit::Reading::PwmOut(cap::pwm_out::Reading { t_us: r.t_us, duty: r.duty }),
+        Reading::Obstacle(r) => {
+            wit::Reading::Obstacle(cap::obstacle::Reading { t_us: r.t_us, detected: r.detected })
+        }
+        Reading::Servo(r) => {
+            wit::Reading::Servo(cap::servo::Reading { t_us: r.t_us, angle_rad: r.angle_rad })
+        }
+        Reading::Encoder(r) => wit::Reading::Encoder(cap::encoder::Reading {
+            t_us: r.t_us,
+            count: r.count,
+            delta: r.delta,
+            counts_per_s: r.counts_per_s,
+            velocity_rad_s: r.velocity_rad_s,
+        }),
+        Reading::Imu(r) => wit::Reading::Imu(cap::imu::Reading {
+            t_us: r.t_us,
+            orientation: r.orientation.map(quaternion),
+            angular_velocity: vec3(r.angular_velocity),
+            linear_acceleration: vec3(r.linear_acceleration),
+            orientation_variance: r.orientation_variance.map(vec3),
+            angular_velocity_variance: r.angular_velocity_variance.map(vec3),
+            linear_acceleration_variance: r.linear_acceleration_variance.map(vec3),
+        }),
     }
 }
 
@@ -243,6 +270,26 @@ pub fn reading_from_wit(r: wit::Reading) -> Reading {
             Reading::AnalogIn(analog_in::Reading { t_us: r.t_us, fraction: r.fraction, volts: r.volts })
         }
         wit::Reading::PwmOut(r) => Reading::PwmOut(pwm_out::Reading { t_us: r.t_us, duty: r.duty }),
+        wit::Reading::Obstacle(r) => {
+            Reading::Obstacle(obstacle::Reading { t_us: r.t_us, detected: r.detected })
+        }
+        wit::Reading::Servo(r) => Reading::Servo(servo::Reading { t_us: r.t_us, angle_rad: r.angle_rad }),
+        wit::Reading::Encoder(r) => Reading::Encoder(encoder::Reading {
+            t_us: r.t_us,
+            count: r.count,
+            delta: r.delta,
+            counts_per_s: r.counts_per_s,
+            velocity_rad_s: r.velocity_rad_s,
+        }),
+        wit::Reading::Imu(r) => Reading::Imu(imu::Reading {
+            t_us: r.t_us,
+            orientation: r.orientation.map(quaternion_from),
+            angular_velocity: vec3_from(r.angular_velocity),
+            linear_acceleration: vec3_from(r.linear_acceleration),
+            orientation_variance: r.orientation_variance.map(vec3_from),
+            angular_velocity_variance: r.angular_velocity_variance.map(vec3_from),
+            linear_acceleration_variance: r.linear_acceleration_variance.map(vec3_from),
+        }),
     }
 }
 
@@ -262,6 +309,11 @@ pub fn command_from_wit(c: wit::Command) -> Command {
         wit::Command::PwmOut(cap::pwm_out::Command::SetDuty(duty)) => {
             Command::PwmOut(pwm_out::Command::SetDuty { duty })
         }
+        wit::Command::Servo(s) => Command::Servo(match s {
+            cap::servo::Command::SetAngle(a) => servo::Command::SetAngle { angle_rad: a },
+            cap::servo::Command::Release => servo::Command::Release,
+            cap::servo::Command::Safe => servo::Command::Safe,
+        }),
     }
 }
 
@@ -283,6 +335,11 @@ pub fn command_to_wit(c: Command) -> wit::Command {
         Command::PwmOut(pwm_out::Command::SetDuty { duty }) => {
             wit::Command::PwmOut(cap::pwm_out::Command::SetDuty(duty))
         }
+        Command::Servo(s) => wit::Command::Servo(match s {
+            servo::Command::SetAngle { angle_rad } => cap::servo::Command::SetAngle(angle_rad),
+            servo::Command::Release => cap::servo::Command::Release,
+            servo::Command::Safe => cap::servo::Command::Safe,
+        }),
     }
 }
 
@@ -311,6 +368,21 @@ mod tests {
             Reading::DigitalOut(digital_out::Reading { t_us: 7, level: false }),
             Reading::AnalogIn(analog_in::Reading { t_us: 8, fraction: 0.2, volts: Some(0.66) }),
             Reading::PwmOut(pwm_out::Reading { t_us: 9, duty: 1.0 }),
+            Reading::Obstacle(obstacle::Reading { t_us: 11, detected: true }),
+            Reading::Servo(servo::Reading { t_us: 12, angle_rad: Some(0.5) }),
+            Reading::Servo(servo::Reading { t_us: 13, angle_rad: None }),
+            Reading::Encoder(encoder::Reading {
+                t_us: 14,
+                count: -5_000_000_000,
+                delta: -7,
+                counts_per_s: -70.0,
+                velocity_rad_s: Some(-0.4),
+            }),
+            Reading::Imu(imu::Reading {
+                orientation: Some(Quaternion::from_yaw(0.3)),
+                angular_velocity_variance: Some(Vec3 { x: 0.1, y: 0.2, z: 0.3 }),
+                ..imu::Reading::raw(15, Vec3 { x: 1.0, y: 2.0, z: 3.0 }, Vec3 { x: 0.0, y: 0.0, z: 9.8 })
+            }),
         ];
         for r in readings {
             assert_eq!(reading_from_wit(reading_to_wit(r.clone())), r);
@@ -320,6 +392,9 @@ mod tests {
             Command::PlanarBase(planar_base::Command::SetVelocity(Twist2d::new(0.3, 0.0, -0.1))),
             Command::DigitalOut(digital_out::Command::Set { level: true }),
             Command::PwmOut(pwm_out::Command::SetDuty { duty: 0.4 }),
+            Command::Servo(servo::Command::SetAngle { angle_rad: 1.25 }),
+            Command::Servo(servo::Command::Release),
+            Command::Servo(servo::Command::Safe),
         ] {
             assert_eq!(command_from_wit(command_to_wit(c)), c);
         }

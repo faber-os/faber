@@ -24,7 +24,18 @@ uint8_t putPin(uint8_t* out, uint8_t role, uint8_t pin) {
 void output(uint8_t pin) {
   if (pin != faberlink::NO_PIN) pinMode(pin, OUTPUT);
 }
+
+// An input with its pull-up on for an active-low part (a switch to GND, an open-collector output).
+void input(uint8_t pin, faberlink::ActiveLevel active) {
+  pinMode(pin, active == faberlink::ACTIVE_LOW ? INPUT_PULLUP : INPUT);
+}
+
+bool isActive(uint8_t pin, faberlink::ActiveLevel level) {
+  return (digitalRead(pin) == HIGH) == (level == faberlink::ACTIVE_HIGH);
+}
 }  // namespace
+
+void faberlink::autoAdd(Part& part) { enqueue(&part); }
 
 FaberMotor::FaberMotor(const char* name, uint8_t pwmPin, uint8_t directionPin, float maxVelocityRadS)
     : faberlink::Motor(name, maxVelocityRadS),
@@ -150,6 +161,73 @@ float FaberUltrasonic::measure() {
   unsigned long echoUs = pulseIn(echoPin_, HIGH, timeoutUs_);
   if (echoUs == 0) return -1;  // no echo in time: nothing in range
   return echoUs * METERS_PER_ECHO_US;
+}
+
+FaberButton::FaberButton(const char* name, uint8_t pin, faberlink::ActiveLevel active, uint16_t debounceMs)
+    : faberlink::DigitalIn(name, debounceMs), pin_(pin), active_(active) {
+  enqueue(this);
+}
+
+void FaberButton::begin() { input(pin_, active_); }
+
+uint8_t FaberButton::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_SIGNAL, pin_); }
+
+bool FaberButton::readLevel() { return isActive(pin_, active_); }
+
+FaberObstacle::FaberObstacle(const char* name, uint8_t pin, faberlink::ObstacleKind kind,
+                             faberlink::ActiveLevel active, float triggerDistanceM)
+    : faberlink::Obstacle(name, kind, triggerDistanceM), pin_(pin), active_(active) {
+  enqueue(this);
+}
+
+void FaberObstacle::begin() { input(pin_, active_); }
+
+uint8_t FaberObstacle::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_SIGNAL, pin_); }
+
+bool FaberObstacle::readLevel() { return isActive(pin_, active_); }
+
+FaberOutput::FaberOutput(const char* name, uint8_t pin, faberlink::OutputMode mode, faberlink::ActiveLevel active)
+    : faberlink::PinOutput(name, mode == faberlink::OUTPUT_PWM), pin_(pin), active_(active) {
+  enqueue(this);
+}
+
+// Off before the pin becomes an output, so an active-low relay never clicks on at start.
+void FaberOutput::begin() {
+  digitalWrite(pin_, active_ == faberlink::ACTIVE_LOW ? HIGH : LOW);
+  pinMode(pin_, OUTPUT);
+}
+
+uint8_t FaberOutput::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_OUT, pin_); }
+
+void FaberOutput::drive(float value) {
+  const bool low = active_ == faberlink::ACTIVE_LOW;
+  if (isPwm()) {
+    int duty = static_cast<int>(value * 255.0f + 0.5f);
+    analogWrite(pin_, low ? 255 - duty : duty);
+  } else {
+    digitalWrite(pin_, (value > 0) != low ? HIGH : LOW);
+  }
+}
+
+// The period for a rate, 1 ms to 60 s.
+static uint16_t periodMs(float rateHz) {
+  if (!(rateHz > 0)) return 100;
+  const float ms = 1000.0f / rateHz;
+  return ms < 1 ? 1 : ms > 60000 ? 60000 : static_cast<uint16_t>(ms + 0.5f);
+}
+
+FaberAnalogIn::FaberAnalogIn(const char* name, uint8_t analogPin, float rateHz, float referenceVolts)
+    : faberlink::AnalogIn(name, referenceVolts, periodMs(rateHz)), pin_(analogPin) {
+  enqueue(this);
+}
+
+uint8_t FaberAnalogIn::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_SIGNAL, pin_); }
+
+// analogRead() gives 0..1023 on every AVR board (10 bits).
+float FaberAnalogIn::measureFraction() {
+  long sum = 0;
+  for (uint8_t i = 0; i < 4; i++) sum += analogRead(pin_);
+  return sum / (4 * 1023.0f);
 }
 
 FaberBattery::FaberBattery(const char* name, uint8_t analogPin, float dividerRatio, uint8_t cellsInSeries,

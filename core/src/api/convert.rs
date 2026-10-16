@@ -88,6 +88,12 @@ fn board_pin(p: &BoardPin) -> dto::BoardPinInfo {
         PinRole::Echo => R::Echo,
         PinRole::Signal => R::Signal,
         PinRole::Sense => R::Sense,
+        PinRole::Out => R::Out,
+        PinRole::A => R::A,
+        PinRole::B => R::B,
+        PinRole::Sda => R::Sda,
+        PinRole::Scl => R::Scl,
+        PinRole::Xshut => R::Xshut,
         PinRole::Other(_) => R::Other,
     };
     dto::BoardPinInfo { role, pin: p.pin, label: p.label.clone() }

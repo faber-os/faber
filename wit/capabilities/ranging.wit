@@ -24,6 +24,18 @@ interface imu {
   }
 }
 
+interface obstacle {
+  use types.{timestamp, mount};
+  /// bumper: something presses a switch (a bumper, a whisker). infrared: a digital module with a
+  /// threshold (FC-51, E18-D80NK). limit: a switch at the edge of where the machine may go.
+  enum kind { bumper, infrared, limit }
+  /// trigger-distance-m: how close something must come to be detected, when it is known.
+  record info { kind: kind, trigger-distance-m: option<f32> }
+  record settings { mount: mount }
+  /// Every-message: `detected` is true while something is in the way.
+  record reading { t-us: timestamp, detected: bool }
+}
+
 interface laser-scan {
   use types.{timestamp, mount};
   record info { range-min-m: f32, range-max-m: f32 }

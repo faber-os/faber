@@ -72,6 +72,10 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
       ...inherited([
         ...PART_MEMBERS,
         f(
+          'void useEncoder(faberlink::Encoder& encoder)',
+          'Reports the speed and position a FaberEncoder on its shaft or wheel measures. Call it in setup().',
+        ),
+        f(
           'void setMaxVelocity(float radS)',
           'Its speed at full power, in rad/s: Faber can then drive it by speed as well as by power. Call it in setup().',
         ),
@@ -110,6 +114,150 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
     ],
     members: [
       f('void begin()', 'Sets up its pins; FaberLink calls it from begin().'),
+      ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
+    name: 'FaberButton',
+    doc: 'A button, switch or end stop on a digital pin, debounced. Wired between the pin and GND it needs nothing else (the pin’s pull-up holds it HIGH, pressed is LOW); pass faberlink::ACTIVE_HIGH for a part that drives the pin HIGH, such as a TTP223 touch pad. Faber sees it as an on/off input (digital-in).',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberButton(const char* name, uint8_t pin, faberlink::ActiveLevel active = faberlink::ACTIVE_LOW, uint16_t debounceMs = 20)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pin; FaberLink calls it from begin().'),
+      f('bool pressed() const', 'True while it is pressed (debounced), Faber or not.'),
+      ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
+    name: 'FaberObstacle',
+    doc: 'A bumper, whisker, limit switch or digital infrared obstacle module (FC-51, E18-D80NK) on a digital pin, debounced: it says whether something is in the way. Faber sees it as an obstacle sensor, so apps looking for a button never pick it.',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberObstacle(const char* name, uint8_t pin, faberlink::ObstacleKind kind = faberlink::OBSTACLE_BUMPER, faberlink::ActiveLevel active = faberlink::ACTIVE_LOW, float triggerDistanceM = 0)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pin; FaberLink calls it from begin().'),
+      f('bool detected() const', 'True while something is in the way (debounced), Faber or not.'),
+      ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
+    name: 'FaberOutput',
+    doc: 'An output on one pin that Faber switches: on or off (an LED, a relay module, an active buzzer), or with faberlink::OUTPUT_PWM a duty from 0 to 1 on a PWM pin (a dimmed LED, a MOSFET). faberlink::ACTIVE_LOW makes LOW mean on (most relay modules). Leased like a motor: it goes off when nobody has commanded it for 1 s, on the e-stop and when Faber goes quiet.',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberOutput(const char* name, uint8_t pin, faberlink::OutputMode mode = faberlink::OUTPUT_ON_OFF, faberlink::ActiveLevel active = faberlink::ACTIVE_HIGH)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pin, off; FaberLink calls it from begin().'),
+      ...inherited([
+        ...PART_MEMBERS,
+        f(
+          'float value() const',
+          'The output now: 0 or 1 when on/off, the duty from 0 to 1 for PWM.',
+        ),
+        f(
+          'bool active() const',
+          'True while it runs on a command from Faber, false while it is off (its safe state).',
+        ),
+      ]),
+    ],
+  },
+  {
+    name: 'FaberServo',
+    doc: 'A hobby servo (SG90, MG996R) that Faber turns to an angle, on any digital pin. Needs #include <FaberServo.h> after FaberLink.h (it uses the Servo library). Angles are degrees: minDeg and maxDeg are what minPulseUs and maxPulseUs (544 and 2400 µs by default) turn it to. It starts limp, and holds its angle when nobody drives it (faberlink::SERVO_RELEASE: goes limp). On an Uno, a servo stops analogWrite() on pins 9 and 10. Give it its own 5–6 V supply.',
+    library: 'faberlink',
+    include: 'FaberServo.h',
+    constructors: [
+      parseSignature(
+        'FaberServo(const char* name, uint8_t pin, float minDeg = 0, float maxDeg = 180, faberlink::ServoSafeState safeState = faberlink::SERVO_HOLD, uint16_t minPulseUs = 544, uint16_t maxPulseUs = 2400)',
+      ).overload,
+    ],
+    members: inherited([
+      ...PART_MEMBERS,
+      f('bool holding() const', 'True while it holds an angle (it gets pulses), false while limp.'),
+      f('float angle() const', 'The angle it holds, in radians, as Faber last told it.'),
+    ]),
+  },
+  {
+    name: 'FaberEncoder',
+    doc: 'A quadrature encoder counted with interrupts: a wheel encoder on a gear motor, a rotary knob. Needs #include <FaberEncoder.h>. Channel A must be on an interrupt pin (2 or 3 on an Uno); with B on one too it counts 4 times a pulse, else twice. With the pulses per motor turn and the gear ratio, Faber gets the speed in rad/s, and a FaberMotor can report it: left.useEncoder(wheel).',
+    library: 'faberlink',
+    include: 'FaberEncoder.h',
+    constructors: [
+      parseSignature(
+        'FaberEncoder(const char* name, uint8_t pinA, uint8_t pinB, float pulsesPerRev = 0, float gearRatio = 1)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pins and interrupts; FaberLink calls it from begin().'),
+      f('int32_t count()', 'Counts since it started; up is forward (A changing before B).'),
+      f(
+        'uint8_t countsPerPulse() const',
+        '4 with both pins on interrupt pins, 2 with only A, 0 when A is no interrupt pin (it can’t count).',
+      ),
+      f('void onEdge()', 'Its interrupt routine: the library attaches it, don’t call it.'),
+      ...inherited([
+        ...PART_MEMBERS,
+        f('float countsPerRev() const', 'Counts for one turn of the shaft, or 0 when not known.'),
+      ]),
+    ],
+  },
+  {
+    name: 'FaberAnalogIn',
+    doc: 'An analog input: a potentiometer, a slide pot, one axis of a thumb joystick, a light sensor in a divider. Faber gets it as a share of full scale (0 to 1) and, with the board’s reference voltage (5.0 on an Uno or Mega), in volts. rateHz is how many readings a second (10 by default).',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberAnalogIn(const char* name, uint8_t analogPin, float rateHz = 10, float referenceVolts = 5.0f)',
+      ).overload,
+    ],
+    members: inherited(PART_MEMBERS),
+  },
+  {
+    name: 'FaberImu',
+    doc: 'An MPU6050 IMU (a GY-521 board) on I²C: its rates (rad/s) and accelerations (m/s², gravity included) along its own axes, 20 times a second. Needs #include <FaberImu.h>. At 0x68 by default; faberlink::IMU_ADDRESS_69 when its AD0 is at VCC. No orientation: the chip’s motion processor isn’t used.',
+    library: 'faberlink',
+    include: 'FaberImu.h',
+    constructors: [
+      parseSignature(
+        'FaberImu(const char* name, faberlink::ImuAddress address = faberlink::IMU_ADDRESS_68, float rateHz = 20)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Starts the I²C bus and wakes the IMU; FaberLink calls it from begin().'),
+      f(
+        'uint8_t whoAmI() const',
+        'What the chip says it is (0x68 for an MPU6050), 0 while it doesn’t answer.',
+      ),
+      ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
+    name: 'FaberToF',
+    doc: 'A VL53L0X laser distance sensor on I²C, 3 cm to 2 m. Needs #include <FaberToF.h> and Pololu’s VL53L0X library. One sensor needs nothing more; several need an address each (faberlink::TOF_ADDRESS_30 …) and an XSHUT pin each: at every start the board holds them all off, then starts them one at a time and gives each its address.',
+    library: 'faberlink',
+    include: 'FaberToF.h',
+    constructors: [
+      parseSignature(
+        'FaberToF(const char* name, faberlink::ToFAddress address = faberlink::TOF_ADDRESS_29, uint8_t xshutPin = faberlink::NO_PIN, float minM = 0.03f, float maxM = 2.0f)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Starts every FaberToF of the sketch, one at a time; FaberLink calls it.'),
+      f('bool ready() const', 'True when it answered as it started.'),
       ...inherited(PART_MEMBERS),
     ],
   },
@@ -164,6 +312,38 @@ export const FABERLINK_CONSTANTS: ApiConstant[] = [
     'FaberMotor: a driver with two PWM inputs, one per direction, such as an L9110, DRV8833 or BTS7960. Pins: IN1, IN2, then an enable pin if it has one.',
   ),
   k('NO_PIN', 'A pin that isn’t connected, for an optional pin you leave out.'),
+  k(
+    'ACTIVE_LOW',
+    'FaberButton, FaberObstacle: LOW means pressed or detected, and the pin’s pull-up is on (a switch to GND); their default. FaberOutput: LOW means on (most relay modules).',
+  ),
+  k(
+    'ACTIVE_HIGH',
+    'FaberButton, FaberObstacle: HIGH means pressed or detected, no pull-up (a TTP223 touch pad). FaberOutput: HIGH means on; its default.',
+  ),
+  k('IMU_ADDRESS_68', 'FaberImu: the MPU6050 at 0x68, its AD0 open or low (the default).'),
+  k('IMU_ADDRESS_69', 'FaberImu: the MPU6050 at 0x69, its AD0 at VCC.'),
+  k(
+    'TOF_ADDRESS_29',
+    'FaberToF: the address it gets at every start: its own, for one sensor without XSHUT (the default).',
+  ),
+  k('TOF_ADDRESS_30', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_31', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_32', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_33', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_34', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_35', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_36', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_37', 'FaberToF: the address it gets at every start.'),
+  k('SERVO_HOLD', 'FaberServo: holds its angle when nobody drives it (the default).'),
+  k('SERVO_RELEASE', 'FaberServo: goes limp (no pulses) when nobody drives it.'),
+  k('OUTPUT_ON_OFF', 'FaberOutput: on or off, Faber sees a digital output (the default).'),
+  k(
+    'OUTPUT_PWM',
+    'FaberOutput: a duty from 0 to 1 with analogWrite(), on a PWM pin; Faber sees a PWM output.',
+  ),
+  k('OBSTACLE_BUMPER', 'FaberObstacle: a bumper or whisker that something presses (the default).'),
+  k('OBSTACLE_INFRARED', 'FaberObstacle: a digital infrared obstacle module (FC-51, E18-D80NK).'),
+  k('OBSTACLE_LIMIT', 'FaberObstacle: a limit switch at the edge of where the machine may go.'),
   k('BATTERY_OK', 'FaberBattery level: charged enough.'),
   k('BATTERY_LOW', 'FaberBattery level: low, charge it soon.'),
   k('BATTERY_CRITICAL', 'FaberBattery level: very low; stop and charge it.'),

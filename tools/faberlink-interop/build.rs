@@ -28,8 +28,30 @@ fn main() {
     let lib = root.join("../../firmware/faberlink/src");
     let harness = root.join("harness");
     let arduino = harness.join("arduino");
-    watch(&lib, &["FaberLinkCore.cpp", "FaberLinkCore.h", "FaberLink.cpp", "FaberLink.h"]);
-    watch(&harness, &["harness.cpp", "glue.cpp", "arduino/Arduino.h"]);
+    watch(
+        &lib,
+        &[
+            "FaberLinkCore.cpp",
+            "FaberLinkCore.h",
+            "FaberLink.cpp",
+            "FaberLink.h",
+            "FaberServo.h",
+            "FaberEncoder.h",
+            "FaberImu.h",
+            "FaberToF.h",
+        ],
+    );
+    watch(
+        &harness,
+        &[
+            "harness.cpp",
+            "glue.cpp",
+            "arduino/Arduino.h",
+            "arduino/Servo.h",
+            "arduino/Wire.h",
+            "arduino/VL53L0X.h",
+        ],
+    );
 
     let mut build = cc::Build::new();
     strict(&mut build);

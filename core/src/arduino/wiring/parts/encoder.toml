@@ -1,0 +1,54 @@
+# A quadrature encoder: FaberEncoder (firmware/faberlink/src/FaberEncoder.h), encoder@1, counted
+# with interrupts.
+# Part facts: docs/research/common-parts.md §2.2 (A on an external-interrupt pin, B on one too
+# for 4x resolution or any digital pin for 2x; hall encoders often have open-collector outputs that
+# need pull-ups, which the pins' own give; an Uno has two interrupt pins, a Mega six of which
+# 18/19 are also Serial1 and 20/21 also I2C).
+
+faber-part = 1
+id = "encoder"
+name = "Quadrature encoder"
+description = "Counts how far a wheel or a knob has turned, both ways: wheel encoders on gear motors, rotary knobs."
+covers = ["hall encoder on a gear motor (JGB37-520, JGA25)", "optical wheel encoder", "KY-040 rotary knob", "EC11"]
+capability = "encoder"
+class = "FaberEncoder"
+include = "FaberEncoder.h"
+default-name = "wheel"
+warnings = [
+  "Channel A must be on an interrupt pin, and B counts twice as finely on one too: an Uno has only two (D2 and D3), enough for one encoder at full resolution or two at half.",
+  "A KY-040's push button is a separate part: add it as a button.",
+]
+
+[power]
+supply = "5V"
+current-ma = 10
+
+[[settings]]
+id = "pulses-per-rev"
+name = "Pulses per motor turn"
+type = "number"
+default = 0
+min = 0
+max = 100000
+apply = "build"
+help = "From the motor's or encoder's data (11 for many hall encoders, 20 for a KY-040). 0 if you don't know it: Faber then counts without turns or rad/s."
+
+[[settings]]
+id = "gear-ratio"
+name = "Gear ratio"
+type = "number"
+default = 1
+min = 0.001
+max = 10000
+apply = "build"
+help = "How many motor turns make one turn of the shaft you care about (34.02 for a 1:34 gearbox). 1 for an encoder straight on the shaft, or a knob."
+
+[[shapes]]
+id = "quadrature"
+name = "Channels A and B"
+args = ["name", "pin:a", "pin:b", "setting:pulses-per-rev", "setting:gear-ratio"]
+wiring = ["Encoder VCC → 5V", "Encoder GND → GND", "Encoder A (C1, CLK) → {pin:a}", "Encoder B (C2, DT) → {pin:b}"]
+roles = [
+  { id = "a", name = "A", needs = "interrupt", help = "Each of its edges is counted: it needs an interrupt pin." },
+  { id = "b", name = "B", needs = "digital-in", help = "Says the direction. On an interrupt pin too, it counts twice as finely." },
+]

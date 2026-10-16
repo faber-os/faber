@@ -24,6 +24,9 @@ import WiringWindow from './WiringWindow.svelte';
 import TemperatureWindow from './TemperatureWindow.svelte';
 import LevelWindow from './LevelWindow.svelte';
 import FractionWindow from './FractionWindow.svelte';
+import ServoWindow from './ServoWindow.svelte';
+import EncoderWindow from './EncoderWindow.svelte';
+import ImuWindow from './ImuWindow.svelte';
 import I2cScannerWindow from './I2cScannerWindow.svelte';
 import GpioPanelWindow from './GpioPanelWindow.svelte';
 import PortsWindow from './PortsWindow.svelte';
@@ -300,6 +303,54 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 440, h: 380 },
     minSize: { w: 300, h: 260 },
     component: FractionWindow,
+  },
+  {
+    kind: 'servo',
+    get title() {
+      return t('programs.servo.title');
+    },
+    get description() {
+      return t('programs.servo.description');
+    },
+    icon: 'gauge',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 380, h: 360 },
+    minSize: { w: 280, h: 260 },
+    component: ServoWindow,
+  },
+  {
+    kind: 'encoder',
+    get title() {
+      return t('programs.encoder.title');
+    },
+    get description() {
+      return t('programs.encoder.description');
+    },
+    icon: 'plot',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 440, h: 360 },
+    minSize: { w: 300, h: 260 },
+    component: EncoderWindow,
+  },
+  {
+    kind: 'imu',
+    get title() {
+      return t('programs.imu.title');
+    },
+    get description() {
+      return t('programs.imu.description');
+    },
+    icon: 'plot',
+    menu: null,
+    colour: 'viewer',
+    multiple: true,
+    defaultSize: { w: 460, h: 380 },
+    minSize: { w: 320, h: 280 },
+    component: ImuWindow,
   },
   {
     // An i2cdetect-style scan of one I²C bus, with suggestions (docs/api.md, "I²C scan").

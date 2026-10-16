@@ -106,6 +106,8 @@ class SimPlanarBase : public faberlink::Part {
  public:
   SimPlanarBase(const char* name, uint16_t leaseMs)
       : faberlink::Part(name, faberlink::PLANAR_BASE, leaseMs, 50), vx(0), vy(0), omega(0) {}
+  // A part that derives from Part directly names its capability itself.
+  const char* capabilityId() const override { return "planar-base@1"; }
   uint8_t writeInfo(uint8_t* out) const override {
     out[0] = 1;  // holonomic
     putTwist(out + 1, kMaxV, kMaxV, kMaxOmega);

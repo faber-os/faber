@@ -282,7 +282,7 @@ async fn pin_map(State(s): State<AppState>, Path(board): Path<String>) -> Result
 }
 
 async fn part_templates(State(s): State<AppState>) -> Json<Vec<Template>> {
-    Json(s.machine.part_templates().to_vec())
+    Json(s.machine.part_templates())
 }
 
 async fn plans(State(s): State<AppState>) -> Result<Json<Vec<dto::GuidedBoardSummary>>, Failure> {

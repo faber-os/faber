@@ -4,16 +4,20 @@ import type { BatteryReading } from "./BatteryReading";
 import type { DigitalInReading } from "./DigitalInReading";
 import type { DigitalOutReading } from "./DigitalOutReading";
 import type { DistanceReading } from "./DistanceReading";
+import type { EncoderReading } from "./EncoderReading";
 import type { EstopReading } from "./EstopReading";
+import type { ImuReading } from "./ImuReading";
 import type { LaserScanReading } from "./LaserScanReading";
 import type { MotorReading } from "./MotorReading";
+import type { ObstacleReading } from "./ObstacleReading";
 import type { PlanarBaseReading } from "./PlanarBaseReading";
 import type { PoseReading } from "./PoseReading";
 import type { PositionReading } from "./PositionReading";
 import type { PwmOutReading } from "./PwmOutReading";
+import type { ServoReading } from "./ServoReading";
 import type { TemperatureReading } from "./TemperatureReading";
 
 /**
  * One reading of any capability, tagged with the capability it belongs to.
  */
-export type Reading = { "capability": "laser-scan@1", "reading": LaserScanReading } | { "capability": "distance@1", "reading": DistanceReading } | { "capability": "motor@1", "reading": MotorReading } | { "capability": "planar-base@1", "reading": PlanarBaseReading } | { "capability": "estop@1", "reading": EstopReading } | { "capability": "pose@1", "reading": PoseReading } | { "capability": "position@1", "reading": PositionReading } | { "capability": "battery@1", "reading": BatteryReading } | { "capability": "temperature@1", "reading": TemperatureReading } | { "capability": "digital-in@1", "reading": DigitalInReading } | { "capability": "digital-out@1", "reading": DigitalOutReading } | { "capability": "analog-in@1", "reading": AnalogInReading } | { "capability": "pwm-out@1", "reading": PwmOutReading };
+export type Reading = { "capability": "laser-scan@1", "reading": LaserScanReading } | { "capability": "distance@1", "reading": DistanceReading } | { "capability": "motor@1", "reading": MotorReading } | { "capability": "planar-base@1", "reading": PlanarBaseReading } | { "capability": "estop@1", "reading": EstopReading } | { "capability": "pose@1", "reading": PoseReading } | { "capability": "position@1", "reading": PositionReading } | { "capability": "battery@1", "reading": BatteryReading } | { "capability": "temperature@1", "reading": TemperatureReading } | { "capability": "digital-in@1", "reading": DigitalInReading } | { "capability": "digital-out@1", "reading": DigitalOutReading } | { "capability": "analog-in@1", "reading": AnalogInReading } | { "capability": "pwm-out@1", "reading": PwmOutReading } | { "capability": "obstacle@1", "reading": ObstacleReading } | { "capability": "servo@1", "reading": ServoReading } | { "capability": "encoder@1", "reading": EncoderReading } | { "capability": "imu@1", "reading": ImuReading };
