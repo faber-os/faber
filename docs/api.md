@@ -420,7 +420,7 @@ The core of guided mode ([wiring.md](wiring.md), D57): each board's pins, the pa
 allocator that suggests pins and checks a plan, and plans that Faber turns into a sketch. A guided
 board is a sketch folder, `home:/Arduino/<name>/`, with the plan `board.toml`, the generated
 `<name>.ino` and your own `my_code.h`; compiling and uploading it is the editor's
-[compile and upload](#the-arduino-editor), as for any sketch. The shell's wizard is not built yet.
+[compile and upload](#the-arduino-editor), as for any sketch. The shell's wizard is Parts → Add part → On a board's pins ([wiring.md](wiring.md) §14).
 
 Who may: anyone signed in reads, and asks for a suggestion (it writes nothing); an **operator**
 starts, saves and takes over a plan; uploading stays an **admin**'s.

@@ -47,6 +47,12 @@ ever two of these.
 | **Sub-part** | A part on a bridge's board (a motor or sensor wired to it), named after the bridge and the board's own name for it: `mega.left`. It has its own signals, viewer and lease; the board decides which exist, parts.toml only where they sit (`[parts.mega.parts.left]`). |
 | **Paused** | A part stopped on purpose (`paused = true` in parts.toml, Pause in Parts) so its port is free for another program, such as the Arduino IDE uploading a sketch. It stays paused until it is resumed; a bridge's sub-parts pause with it. |
 | **FaberLink** | The small, versioned serial protocol and Arduino/C++ library that a bridge runs. |
+| **Guided board** | A bridge whose sketch Faber writes from its **plan**: you pick the parts and their pins in Parts (Add part → On a board's pins), and Faber writes, compiles and uploads the sketch ([wiring.md](wiring.md)). Your own code goes in its `my_code.h`, which Faber never overwrites. |
+| **Code mode** | A bridge whose sketch you write yourself. A guided board becomes one when you **take over the code**, which is one way. |
+| **Plan** | A guided board's `board.toml`: its board type, its parts, their pins and their settings. |
+| **Pin map** | What each pin of a board can do, which pins are reserved and why, and the order of its headers (for drawing it). Data in the core, one per board type. |
+| **Part template** | What Faber knows about one kind of part on a board's pins: its pin roles, settings, power, wiring and the code it adds to the sketch. One per FaberLink part class. |
+| **Wiring checklist** | The wires a guided board's plan needs, with its pins, to tick off while wiring. |
 | **Package** | The unit the store distributes. There are exactly two package types: **connector** and **app**. |
 | **Manifest** | The `faber.toml` file at the root of every package. It declares identity, version, capabilities, permissions and settings. |
 | **Permission** | Something a package must declare before it gets it: port claims, network access, which capabilities it may command. It is shown to the user at install. |
