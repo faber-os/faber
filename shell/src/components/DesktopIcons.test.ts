@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { DEFAULT_SETTINGS, fakeShell, listing } from '../test/fakeShell';
@@ -25,12 +25,16 @@ describe('Desktop icons', () => {
   });
 
   it('selects on the first click and opens on the second', async () => {
+    // Two clicks count as an open only within 450 ms; a loaded test machine can be slower
+    // than that between userEvent clicks, so time stands still here.
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
     const shell = setup();
     await userEvent.click(icon('Settings'));
     expect(icon('Settings')).toHaveAttribute('aria-selected', 'true');
     expect(shell.desktop.state.windows).toHaveLength(0);
     await userEvent.click(icon('Settings'));
     expect(shell.desktop.state.windows.map((w) => w.kind)).toEqual(['settings']);
+    now.mockRestore();
   });
 
   it('opens a text file on the desktop in Notes with Enter', async () => {
