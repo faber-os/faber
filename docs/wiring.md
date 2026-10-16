@@ -176,3 +176,40 @@ is an **admin** (D53, as for the editor).
 5. **Pi GPIO** (Phase 6b) could later use the same wizard, pin drawing and allocator, with the Pi's
    40-pin header as one more pin map. Should the design aim for that now? Recommended: yes, in the
    data format only.
+
+## 11. After setup: configuring parts
+
+Every part keeps its settings editable after it is set up: the part's page in Parts has a
+**Settings** tab with a form built from the part template (a sonar's min and max range, a motor's
+max speed and direction, a battery's divider resistors and chemistry, a button's debounce).
+
+Two kinds of setting, and the form says which:
+- **Live settings** change without an upload: they are sent to the board as a FaberLink command,
+  or applied by the core (smoothing, a display unit). Most range limits and smoothing are live.
+- **Build settings** are compiled into the sketch (pins, a sensor's hardware mode). Changing one
+  shows the new wiring if it moved, and offers an upload.
+
+For a code-mode board, only settings the board itself accepts at runtime are shown, because Faber
+can't edit your sketch.
+
+## 12. Next: automations (a separate design)
+
+Mikkel wants a no-code way to make parts react, like Home Assistant's automations: **when** something
+happens (a trigger: a distance drops below 30 cm, a button is pressed, the battery goes low, a
+time, an app's signal), **if** conditions hold (the e-stop is released, it is daytime), **then**
+do actions (stop the base, set an LED colour, notify, start an app, wait).
+
+This is big enough for its own design (`docs/automations.md`, to come). Points that design must
+settle:
+- **Where it runs.** In the core, over capabilities, so it works with any part, real or simulated,
+  and with apps. Actions that move things take a lease like any program and respect the e-stop and
+  D46. A later option: compile simple, safety-relevant rules ("bumper pressed → stop motors") into
+  a guided board's sketch as **board reflexes**, so they still act within milliseconds when the Pi
+  or the link is down.
+- **How it relates to apps.** An automation is a small, declarative program with no code. It should
+  probably run as an app (its own leases, logs and on/off switch), so there is one way to run
+  things.
+- **The editor.** A visual trigger/condition/action builder with the same pickers as the rest of
+  Faber (parts, signals, values with units), and a YAML/TOML view for those who want text.
+- **Safety.** Automations that move things are off until turned on and confirmed, and they show
+  in the Stop bar while they drive.
