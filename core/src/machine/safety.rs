@@ -166,11 +166,11 @@ impl Machine {
 
     /// Every live lease, by part.
     pub fn leases(&self) -> Vec<Lease> {
-        self.state.lock().expect("machine lock").leases.active()
+        self.state.lock().leases.active()
     }
 
     pub fn estop(&self) -> EstopView {
-        let st = self.state.lock().expect("machine lock");
+        let st = self.state.lock();
         EstopView { engaged: st.estop.engaged().cloned(), history: st.estop.history().cloned().collect() }
     }
 
@@ -210,7 +210,7 @@ impl Machine {
     /// Grants `holder` the lease on `part`, or says who holds it. `take_over` ends the lease in
     /// the way (an operator taking over; its holder hears `taken-over`).
     pub fn request_lease(&self, part: &str, holder: &str, take_over: bool) -> Result<Lease, MachineError> {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         if let Some(e) = paused(&st, part) {
             return Err(e);
         }
@@ -272,7 +272,7 @@ impl Machine {
 
     /// Keeps a lease alive without sending a command.
     pub fn renew_lease(&self, part: &str, lease: &str) -> Result<Lease, MachineError> {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let name = Self::known_part(&st, part)?;
         let now = self.clock.now_us();
         st.leases.renew(&name, lease, now).map_err(|e| lease_error(&st, &name, e))
@@ -280,7 +280,7 @@ impl Machine {
 
     /// The holder is done: the part gets its safe state.
     pub fn release_lease(&self, part: &str, lease: &str) -> Result<(), MachineError> {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let name = Self::known_part(&st, part)?;
         let ended = st.leases.release(&name, lease).map_err(|e| lease_error(&st, &name, e))?;
         self.finish(&mut st, vec![ended]);
@@ -290,7 +290,7 @@ impl Machine {
     /// Checks the e-stop and the lease, clamps the command to the part's info, applies it and
     /// renews the lease.
     pub fn command(&self, part: &str, lease: &str, command: Command) -> Result<CommandReply, MachineError> {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let name = Self::known_part(&st, part)?;
         if st.estop.is_engaged() {
             return Err(estop_engaged(&st));
@@ -336,7 +336,7 @@ impl Machine {
     /// Engages the e-stop: always allowed, for anyone. Every lease ends, every actuator gets its
     /// safe state, and new leases and commands are refused until it is released.
     pub fn engage_estop(&self, source: estop::Source, reason: &str) -> EstopView {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let now = self.clock.now_us();
         let reason = if reason.trim().is_empty() { "No reason given" } else { reason.trim() };
         if let Some(change) = st.estop.engage(source, reason, now) {
@@ -362,7 +362,7 @@ impl Machine {
     /// Releases the e-stop, unless a board's own stop button is still latched: that is reset on
     /// the board first (docs/faberlink.md §5, rule 3). Releasing never restarts anything.
     pub fn release_estop(&self, source: estop::Source) -> Result<EstopView, MachineError> {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let latched = st.running.iter().find_map(|(name, r)| match &r.runner {
             Some(Runner::Bridge(h)) if h.hardware_estop_latched() => Some(name.clone()),
             _ => None,
@@ -389,7 +389,7 @@ impl Machine {
 
     /// Sets the value pattern of a manual simulated sensor.
     pub fn set_pattern(&self, part: &str, pattern: Pattern) -> Result<Pattern, MachineError> {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let name = Self::known_part(&st, part)?;
         let runner = st.running.get_mut(&name).and_then(|r| r.runner.as_mut());
         let result = match runner {
@@ -401,7 +401,7 @@ impl Machine {
 
     /// The pattern a manual simulated sensor follows now.
     pub fn pattern(&self, part: &str) -> Result<Pattern, MachineError> {
-        let st = self.state.lock().expect("machine lock");
+        let st = self.state.lock();
         let name = Self::known_part(&st, part)?;
         match st.running.get(&name).and_then(|r| r.runner.as_ref()) {
             Some(Runner::Simulated(s)) => {
@@ -441,7 +441,7 @@ impl Machine {
                 }
                 BridgeEvent::PartsChanged { bridge, removed, changed } => {
                     tracing::info!(target: "core::bridge", part = %bridge, "the board has other parts now");
-                    let mut st = self.state.lock().expect("machine lock");
+                    let mut st = self.state.lock();
                     for p in &removed {
                         self.revoke_part(&mut st, p, EndReason::PartRemoved);
                     }
@@ -464,7 +464,7 @@ impl Machine {
     /// Ends expired leases, and leases on parts that stopped working.
     pub(super) fn sweep(&self) {
         self.handle_bridge_events();
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let mut ended = st.leases.sweep(self.clock.now_us());
         let failed: Vec<PartName> = st
             .leases
@@ -605,7 +605,7 @@ pub(super) fn sweep_leases(machine: Weak<Machine>, stop: Arc<AtomicBool>) {
                 m.sweep();
                 m.sweep_app_windows();
                 if apps_checked.elapsed() >= APPS_EVERY {
-                    m.reconcile_apps();
+                    m.reconcile_apps_if_free();
                     m.flush_app_states();
                     apps_checked = std::time::Instant::now();
                 }

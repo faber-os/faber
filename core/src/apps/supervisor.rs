@@ -116,16 +116,84 @@ pub struct RunDeps {
     pub timing: Timing,
 }
 
+/// What an app's thread is doing, so a run that won't stop can say where it is stuck.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Step {
+    Making,
+    Starting,
+    Ticking,
+    Waiting,
+    StoppingLogic,
+    EndingLeases,
+    SavingState,
+    BackingOff,
+    Ended,
+}
+
+impl Step {
+    const ALL: [Step; 9] = [
+        Step::Making,
+        Step::Starting,
+        Step::Ticking,
+        Step::Waiting,
+        Step::StoppingLogic,
+        Step::EndingLeases,
+        Step::SavingState,
+        Step::BackingOff,
+        Step::Ended,
+    ];
+
+    /// In words, for the log.
+    pub fn describe(self) -> &'static str {
+        match self {
+            Step::Making => "making a new run",
+            Step::Starting => "in its start()",
+            Step::Ticking => "in its tick() (a call it made to Faber hasn't returned)",
+            Step::Waiting => "waiting for its next tick",
+            Step::StoppingLogic => "in its stop()",
+            Step::EndingLeases => "ending its leases",
+            Step::SavingState => "saving its state",
+            Step::BackingOff => "waiting to restart after a crash",
+            Step::Ended => "ended",
+        }
+    }
+}
+
+/// The step an app's thread is at, shared with its handle.
+#[derive(Clone, Default)]
+struct StepCell(Arc<std::sync::atomic::AtomicU8>);
+
+impl StepCell {
+    fn set(&self, step: Step) {
+        self.0.store(step as u8, Ordering::Relaxed);
+    }
+    fn get(&self) -> Step {
+        Step::ALL[self.0.load(Ordering::Relaxed) as usize]
+    }
+}
+
+/// How long stopping an app waits for its thread. A run that takes longer is stuck in a call it
+/// made; Faber logs where and carries on rather than freezing with it (its leases still end by
+/// their deadlines).
+pub const STOP_GRACE: Duration = Duration::from_secs(2);
+
+/// A run that didn't end within [`STOP_GRACE`] after it was asked to stop.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Stuck(pub Step);
+
 /// A running app. Stopping it (or dropping it) calls its `stop`, ends its leases, saves its
 /// state, removes its derived signals and ends its thread.
 pub struct AppHandle {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    step: StepCell,
 }
 
 impl AppHandle {
-    pub fn stop(mut self) {
-        self.shutdown();
+    /// Asks the app to stop and waits for its thread, at most [`STOP_GRACE`].
+    pub fn stop(mut self) -> Result<(), Stuck> {
+        self.shutdown(STOP_GRACE)
     }
 
     /// Asks the app to stop without waiting for it.
@@ -133,21 +201,29 @@ impl AppHandle {
         self.stop.store(true, Ordering::Relaxed);
     }
 
-    fn shutdown(&mut self) {
+    fn shutdown(&mut self, grace: Duration) -> Result<(), Stuck> {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(t) = self.thread.take() {
-            // Dropped on the app's own thread (it held the machine's last reference): it sees the
-            // stop flag and ends by itself once this returns; waiting for it here never would.
-            if t.thread().id() != std::thread::current().id() {
-                let _ = t.join();
-            }
+        let Some(t) = self.thread.take() else { return Ok(()) };
+        // Dropped on the app's own thread (it held the machine's last reference): it sees the
+        // stop flag and ends by itself once this returns; waiting for it here never would.
+        if t.thread().id() == std::thread::current().id() {
+            return Ok(());
         }
+        let until = Instant::now() + grace;
+        while !t.is_finished() {
+            if Instant::now() >= until {
+                return Err(Stuck(self.step.get())); // the thread is left to end by itself
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let _ = t.join();
+        Ok(())
     }
 }
 
 impl Drop for AppHandle {
     fn drop(&mut self) {
-        self.shutdown();
+        let _ = self.shutdown(STOP_GRACE);
     }
 }
 
@@ -157,11 +233,13 @@ pub fn start(spec: RunSpec, deps: RunDeps) -> AppHandle {
     deps.status.set(&spec.id, AppStatus::Starting);
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
+    let step = StepCell::default();
+    let thread_step = step.clone();
     let thread = std::thread::Builder::new()
         .name(format!("app:{}", spec.id))
-        .spawn(move || supervise(spec, deps, thread_stop))
+        .spawn(move || supervise(spec, deps, thread_stop, thread_step))
         .expect("spawn app thread");
-    AppHandle { stop, thread: Some(thread) }
+    AppHandle { stop, thread: Some(thread), step }
 }
 
 /// Waits for `d`, waking early when stopped. Returns false if stopped.
@@ -181,7 +259,7 @@ enum End {
     Crashed(Problem),
 }
 
-fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>) {
+fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>, step: StepCell) {
     let addresses: Vec<SignalAddress> =
         spec.publishes.iter().map(|p| SignalAddress::derived(&spec.id, p.name.clone())).collect();
     for (addr, p) in addresses.iter().zip(&spec.publishes) {
@@ -191,9 +269,10 @@ fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>) {
     while !stop.load(Ordering::Relaxed) {
         deps.status.set(&spec.id, AppStatus::Starting);
         let started = Instant::now();
+        step.set(Step::Making);
         let end = match (spec.make)() {
             Err(p) => End::Crashed(p),
-            Ok(mut logic) => run_once(logic.as_mut(), &spec, &deps, &stop),
+            Ok(mut logic) => run_once(logic.as_mut(), &spec, &deps, &stop, &step),
         };
         if started.elapsed() >= deps.timing.healthy_after {
             crashes = 0;
@@ -217,6 +296,7 @@ fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>) {
                     break;
                 }
                 deps.status.set(&spec.id, AppStatus::Failed(p));
+                step.set(Step::BackingOff);
                 if !wait(deps.timing.backoff_start * 2u32.pow(crashes - 1), &stop) {
                     break;
                 }
@@ -226,13 +306,21 @@ fn supervise(spec: RunSpec, deps: RunDeps, stop: Arc<AtomicBool>) {
     for addr in &addresses {
         deps.router.remove(addr);
     }
+    step.set(Step::Ended);
 }
 
 /// One run: start, tick until stopped or crashed, then stop. Its leases end and its state is
 /// saved however the run ends.
-fn run_once(logic: &mut dyn Logic, spec: &RunSpec, deps: &RunDeps, stop: &AtomicBool) -> End {
+fn run_once(
+    logic: &mut dyn Logic,
+    spec: &RunSpec,
+    deps: &RunDeps,
+    stop: &AtomicBool,
+    step: &StepCell,
+) -> End {
     let period = Duration::from_secs(1) / spec.tick_hz.max(1);
     let mut ran = || -> Result<(), Problem> {
+        step.set(Step::Starting);
         logic.start(deps.clock.now_us())?;
         deps.status.set(&spec.id, AppStatus::Running);
         let mut next = Instant::now();
@@ -241,8 +329,10 @@ fn run_once(logic: &mut dyn Logic, spec: &RunSpec, deps: &RunDeps, stop: &Atomic
             if stop.load(Ordering::Relaxed) {
                 return Ok(());
             }
+            step.set(Step::Ticking);
             logic.tick(deps.clock.now_us())?;
             if saved.elapsed() >= Duration::from_secs(1) {
+                step.set(Step::SavingState);
                 save(logic, &spec.id);
                 saved = Instant::now();
             }
@@ -251,6 +341,7 @@ fn run_once(logic: &mut dyn Logic, spec: &RunSpec, deps: &RunDeps, stop: &Atomic
             if next < now {
                 next = now; // fell behind: carry on, don't catch up in a burst
             }
+            step.set(Step::Waiting);
             if !wait(next - now, stop) {
                 return Ok(());
             }
@@ -258,6 +349,7 @@ fn run_once(logic: &mut dyn Logic, spec: &RunSpec, deps: &RunDeps, stop: &Atomic
     };
     let end = match ran() {
         Ok(()) => {
+            step.set(Step::StoppingLogic);
             if let Err(p) = logic.stop() {
                 tracing::warn!(target: "core::apps", app = spec.id.as_str(), "stopping it failed: {}", p.message);
             }
@@ -265,7 +357,9 @@ fn run_once(logic: &mut dyn Logic, spec: &RunSpec, deps: &RunDeps, stop: &Atomic
         }
         Err(p) => End::Crashed(p),
     };
+    step.set(Step::EndingLeases);
     logic.session().release_all();
+    step.set(Step::SavingState);
     save(logic, &spec.id);
     end
 }
@@ -382,7 +476,7 @@ mod tests {
         wait_until("ten ticks", || ticks.lock().unwrap().iter().filter(|t| *t == "tick").count() >= 10);
         assert_eq!(status.get("wf"), Some(AppStatus::Running));
         assert!(matches!(router.latest(&addr), Some(Some(_))), "its derived signal is published");
-        h.stop();
+        assert_eq!(h.stop(), Ok(()));
         let t = ticks.lock().unwrap().clone();
         assert_eq!(
             (t.first().map(String::as_str), t.last().map(String::as_str)),
@@ -391,6 +485,62 @@ mod tests {
         assert_eq!(router.latest(&addr), None, "its signals go with it");
         let log = driver.log.lock().unwrap().clone();
         assert_eq!(log, ["acquire base as app:wf", "release base lease-base"]);
+    }
+
+    /// Ticks until the gate is closed, then waits for it inside tick(): a call to Faber that
+    /// doesn't return.
+    struct Gated {
+        session: Session,
+        gate: Arc<Mutex<()>>,
+    }
+
+    impl Logic for Gated {
+        fn start(&mut self, _: u64) -> Result<(), Problem> {
+            Ok(())
+        }
+        fn tick(&mut self, _: u64) -> Result<(), Problem> {
+            drop(self.gate.lock().unwrap());
+            Ok(())
+        }
+        fn stop(&mut self) -> Result<(), Problem> {
+            Ok(())
+        }
+        fn session(&mut self) -> &mut Session {
+            &mut self.session
+        }
+    }
+
+    /// Stopping an app stuck in a call never freezes whoever stops it: it gives up after the grace
+    /// time and says where the app is.
+    #[test]
+    fn a_stuck_app_is_left_behind_with_where_it_is_stuck() {
+        let router = Arc::new(Router::new());
+        let gate = Arc::new(Mutex::new(()));
+        let (r, g) = (Arc::clone(&router), Arc::clone(&gate));
+        let make: MakeLogic = Box::new(move || {
+            let driver: Arc<dyn Driver> = Arc::new(FakeDriver::default());
+            let session = Session::new(
+                "stuck",
+                Vec::new(),
+                Vec::new(),
+                Arc::clone(&r),
+                driver,
+                Arc::new(SharedState::in_memory("t")),
+                Arc::new(crate::apps::Channel::new()),
+            );
+            Ok(Box::new(Gated { session, gate: Arc::clone(&g) }) as Box<dyn Logic>)
+        });
+        let deps = deps(&router);
+        let status = Arc::clone(&deps.status);
+        let mut h = start(RunSpec { id: "stuck".into(), tick_hz: 100, publishes: Vec::new(), make }, deps);
+        wait_until("it runs", || status.get("stuck") == Some(AppStatus::Running));
+        let closed = gate.lock().unwrap();
+        std::thread::sleep(Duration::from_millis(50)); // it is inside tick() now
+        let started = Instant::now();
+        assert_eq!(h.shutdown(Duration::from_millis(100)), Err(Stuck(Step::Ticking)));
+        assert!(started.elapsed() < Duration::from_secs(1), "it didn't wait for the thread");
+        drop(closed); // the call returns; the thread sees the stop flag and ends by itself
+        wait_until("the left-behind thread to end", || h.step.get() == Step::Ended);
     }
 
     /// An app's thread can end up dropping its own handle: a driver call holds the machine
@@ -405,7 +555,12 @@ mod tests {
             drop(rx.recv().unwrap());
             d.store(true, Ordering::Relaxed);
         });
-        tx.send(AppHandle { stop: Arc::new(AtomicBool::new(false)), thread: Some(thread) }).unwrap();
+        let handle = AppHandle {
+            stop: Arc::new(AtomicBool::new(false)),
+            thread: Some(thread),
+            step: StepCell::default(),
+        };
+        tx.send(handle).unwrap();
         wait_until("the thread to let go of its own handle", || done.load(Ordering::Relaxed));
     }
 
@@ -416,13 +571,23 @@ mod tests {
     fn a_new_run_reports_starting_before_start_returns() {
         let router = Arc::new(Router::new());
         let driver = Arc::new(FakeDriver::default());
-        let (spec, _) = spec(&router, &driver, None);
+        let (mut spec, _) = spec(&router, &driver, None);
+        // The new run can't get going until the gate opens, so only start() can have changed
+        // the status by then (the thread itself would say Starting, and soon Running).
+        let gate = Arc::new(Mutex::new(()));
+        let closed = gate.lock().unwrap();
+        let (g, make) = (Arc::clone(&gate), spec.make);
+        spec.make = Box::new(move || {
+            drop(g.lock().unwrap());
+            make()
+        });
         let deps = deps(&router);
         let status = Arc::clone(&deps.status);
         status.set("wf", AppStatus::Running); // the run before this one
         let h = start(spec, deps);
-        assert_ne!(status.get("wf"), Some(AppStatus::Running), "still the old run's state");
-        h.stop();
+        assert_eq!(status.get("wf"), Some(AppStatus::Starting), "not the old run's Running");
+        drop(closed);
+        assert_eq!(h.stop(), Ok(()));
     }
 
     #[test]
@@ -441,6 +606,6 @@ mod tests {
         assert!(!ticks.lock().unwrap().contains(&"stop".to_string()), "a crashed run isn't asked to stop");
         let log = driver.log.lock().unwrap().clone();
         assert_eq!(log.iter().filter(|l| l.starts_with("release")).count(), 3, "{log:?}");
-        h.stop();
+        assert_eq!(h.stop(), Ok(()));
     }
 }

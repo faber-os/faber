@@ -4,6 +4,7 @@
 // Layer 1: small pure building blocks.
 pub mod clock;
 pub mod names;
+pub mod watched;
 
 // Layer 2: one job each; none of them knows about HTTP.
 pub mod arduino;

@@ -165,7 +165,7 @@ impl Machine {
     /// as the board needs: seconds for an Uno, up to a minute for a full Mega.
     pub fn flash_port(&self, req: FlashRequest) -> Result<Flashed, MachineError> {
         let entry = {
-            let st = self.state.lock().expect("machine lock");
+            let st = self.state.lock();
             PortId::parse(&req.port).and_then(|id| st.ports.iter().find(|p| p.id == id).cloned()).ok_or_else(
                 || {
                     bad_request(
@@ -223,7 +223,7 @@ impl Machine {
             )),
         };
         {
-            let mut st = self.state.lock().expect("machine lock");
+            let mut st = self.state.lock();
             st.claims.release(&entry.id, &me);
             self.ports_changed.send_modify(|n| *n += 1);
             self.reconcile(&mut st); // the bridge stopped for this starts again, on the new firmware
@@ -250,7 +250,7 @@ impl Machine {
         stop_part: bool,
         why: Use,
     ) -> Result<Option<PartName>, MachineError> {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let mut stopped = None;
         match st.claims.holder(&entry.id).cloned() {
             None => {}

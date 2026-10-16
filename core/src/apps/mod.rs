@@ -23,7 +23,9 @@ pub use installed::{AppDefinition, load_folder, load_installed};
 pub use logic::{Compiled, Logic, WasmLogic, compile};
 pub use session::{BoundPart, BoundRole, DriveError, Driver, RoleView, Session, holder};
 pub use state::{MAX_BYTES as STATE_MAX_BYTES, SharedState, StateChange, StateStore};
-pub use supervisor::{AppHandle, AppStatus, MakeLogic, RunDeps, RunSpec, StatusBoard, Timing, start};
+pub use supervisor::{
+    AppHandle, AppStatus, MakeLogic, RunDeps, RunSpec, STOP_GRACE, StatusBoard, Step, Stuck, Timing, start,
+};
 
 use crate::router::Router;
 use std::sync::Arc;

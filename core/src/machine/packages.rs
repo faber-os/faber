@@ -219,7 +219,7 @@ impl Machine {
     /// Every installed package (`GET /api/v0/packages`).
     pub fn packages(&self) -> Result<Vec<PackageView>, MachineError> {
         let list = self.package_store().list()?;
-        let st = self.state.lock().expect("machine lock");
+        let st = self.state.lock();
         Ok(list.into_iter().map(|p| self.package_view(&st, p)).collect())
     }
 
@@ -304,7 +304,7 @@ impl Machine {
             return self.install_app(prepared, preview_of, source);
         }
 
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let swapped = prepared.swap_in()?;
         let problems = self.reload_connectors();
         let failed = problems.into_iter().find(|p| p.folder == id).map(|p| p.problem).or_else(|| {
@@ -372,7 +372,7 @@ impl Machine {
         }
         self.announce_packages();
         self.app_status.touch();
-        let st = self.state.lock().expect("machine lock");
+        let st = self.state.lock();
         let view = self.package_view(&st, installed);
         Ok((preview_of, Some(view)))
     }
@@ -402,7 +402,7 @@ impl Machine {
             self.announce_packages();
             return Ok(());
         }
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let users = parts_using(&st, id);
         if !users.is_empty() {
             return Err(MachineError::new(
@@ -507,7 +507,7 @@ impl Machine {
             return Ok(());
         }
         let store = self.package_store();
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let undo = |swapped: Vec<(String, Swapped, String)>| {
             for (id, s, _) in swapped.into_iter().rev() {
                 if let Err(e) = s.roll_back() {

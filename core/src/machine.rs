@@ -54,6 +54,7 @@ use crate::simparts::{self, WorldEngine};
 use crate::simulation::{self, Outlet, PartSpec};
 use crate::suggest::{Suggestion, suggestions};
 use crate::translations::Translations;
+use crate::watched::Watched;
 use faber_capabilities::{Capability, Info, Mount, Reading, estop};
 use faber_connector::{
     ConnectorKind, Definition, Health, Manifest, PortRequirement, Problem, Provide, Settings,
@@ -325,7 +326,7 @@ pub struct Machine {
     files: Files,
     settings: SettingsStore,
     translations: Translations,
-    state: Mutex<State>,
+    state: Watched<State>,
     ports_changed: watch::Sender<u64>,
     packages_changed: watch::Sender<u64>,
     files_changed: broadcast::Sender<Vec<String>>,
@@ -345,7 +346,7 @@ pub struct Machine {
     stop_sweeping: Arc<AtomicBool>,
     sweeper: Mutex<Option<JoinHandle<()>>>,
     /// The installed apps and the running ones (docs/apps.md). Locked before `state`, never after.
-    apps: Mutex<apps::Apps>,
+    apps: Watched<apps::Apps>,
     app_status: Arc<crate::apps::StatusBoard>,
     /// Each installed app's state, shared by its logic and its windows. A leaf lock: nothing
     /// else is taken while it is held.
@@ -418,21 +419,24 @@ impl Machine {
             files,
             settings,
             translations,
-            state: Mutex::new(State {
-                text,
-                config,
-                config_problem,
-                ports: Vec::new(),
-                port_problems: Vec::new(),
-                disks: Vec::new(),
-                claims: Claims::default(),
-                running: BTreeMap::new(),
-                leases: Leases::new(lease_seed()),
-                estop: Estop::default(),
-                world: world::Loaded::default(),
-                board_checks: BTreeMap::new(),
-                paused_boards: BTreeMap::new(),
-            }),
+            state: Watched::new(
+                "machine",
+                State {
+                    text,
+                    config,
+                    config_problem,
+                    ports: Vec::new(),
+                    port_problems: Vec::new(),
+                    disks: Vec::new(),
+                    claims: Claims::default(),
+                    running: BTreeMap::new(),
+                    leases: Leases::new(lease_seed()),
+                    estop: Estop::default(),
+                    world: world::Loaded::default(),
+                    board_checks: BTreeMap::new(),
+                    paused_boards: BTreeMap::new(),
+                },
+            ),
             ports_changed: watch::channel(0).0,
             packages_changed: watch::channel(0).0,
             files_changed: broadcast::channel(64).0,
@@ -448,7 +452,7 @@ impl Machine {
             bridge_inbox: Mutex::new(bridge_inbox),
             stop_sweeping: Arc::new(AtomicBool::new(false)),
             sweeper: Mutex::new(None),
-            apps: Mutex::new(apps::Apps::default()),
+            apps: Watched::new("apps", apps::Apps::default()),
             app_status: Arc::new(crate::apps::StatusBoard::default()),
             app_states: Mutex::new(BTreeMap::new()),
             app_channels: Mutex::new(BTreeMap::new()),
@@ -468,6 +472,12 @@ impl Machine {
             .spawn(move || safety::sweep_leases(weak, stop))
             .expect("spawn lease sweeper");
         *machine.sweeper.lock().expect("sweeper lock") = Some(sweeper);
+        let weak = Arc::downgrade(&machine);
+        let stop = Arc::clone(&machine.stop_sweeping);
+        std::thread::Builder::new()
+            .name("lock-watchdog".into())
+            .spawn(move || watch_locks(weak, stop))
+            .expect("spawn lock watchdog");
         if let Some(every) = opts.port_scan {
             let weak = Arc::downgrade(&machine);
             let stop = Arc::clone(&machine.stop_scanning);
@@ -493,7 +503,7 @@ impl Machine {
         // The sweeper is gone, so nothing starts them again; their leases end as they stop.
         self.stop_apps();
         self.save_app_states();
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         self.revoke_all(&mut st, EndReason::Shutdown);
         let names: Vec<_> = st.running.keys().cloned().collect();
         for name in names {
@@ -521,7 +531,7 @@ impl Machine {
     }
 
     pub fn config_problem(&self) -> Option<ConfigError> {
-        self.state.lock().expect("machine lock").config_problem.clone()
+        self.state.lock().config_problem.clone()
     }
 
     pub fn connectors(&self) -> Vec<Manifest> {
@@ -550,7 +560,7 @@ impl Machine {
 
     /// Every part in parts.toml, each bridge followed by its sub-parts.
     pub fn parts(&self) -> Vec<PartView> {
-        let st = self.state.lock().expect("machine lock");
+        let st = self.state.lock();
         let mut out = Vec::new();
         for (name, cfg) in &st.config.parts {
             // What it provides with its own settings, resolved when it was (re)started.
@@ -668,7 +678,7 @@ impl Machine {
     }
 
     pub fn ports(&self) -> Vec<PortView> {
-        let st = self.state.lock().expect("machine lock");
+        let st = self.state.lock();
         let manifests = self.connectors();
         st.ports
             .iter()
@@ -699,7 +709,7 @@ impl Machine {
 
     /// Things plugged in over USB that the computer can't talk to, so they never became a port.
     pub fn port_problems(&self) -> Vec<PortProblem> {
-        self.state.lock().expect("machine lock").port_problems.clone()
+        self.state.lock().port_problems.clone()
     }
 
     /// Looks for new or removed ports (and USB problems and disks), and starts parts whose port
@@ -711,7 +721,7 @@ impl Machine {
         let mut failed = self.usb_problems.list();
         failed.sort(); // the OS's order isn't stable; only a real change may send `ports`
         let problems: Vec<PortProblem> = failed.iter().filter_map(port_problem).collect();
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         st.board_checks.retain(|id, _| found.iter().any(|p| &p.id == id));
         if st.ports != found || st.port_problems != problems {
             st.ports = found;
@@ -726,7 +736,7 @@ impl Machine {
     fn refresh_disks(&self) {
         let found = self.disks.list();
         let changed: Vec<VPath> = {
-            let mut st = self.state.lock().expect("machine lock");
+            let mut st = self.state.lock();
             if st.disks == found {
                 return;
             }
@@ -755,7 +765,7 @@ impl Machine {
                 "Pick another name, e.g. world_lidar.",
             ));
         }
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         refuse_if_config_broken(&st)?;
         if st.config.parts.contains_key(&name) {
             return Err(MachineError::new(
@@ -895,7 +905,7 @@ impl Machine {
             )
         };
         let name = PartName::parse_any(name).map_err(|_| unknown())?;
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         refuse_if_config_broken(&st)?;
         if let Some(bridge) = name.bridge() {
             return self.remove_sub_part(&mut st, &bridge, &name).map_err(|e| e.unwrap_or_else(unknown));
@@ -932,7 +942,7 @@ impl Machine {
             )
         };
         let part = PartName::parse_any(name).map_err(|_| unknown())?;
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         refuse_if_config_broken(&st)?;
         if let Some(bridge) = part.bridge() {
             Self::known_part(&st, name).map_err(|_| unknown())?;
@@ -1272,7 +1282,7 @@ impl Machine {
     pub fn check_for_board(&self, port: &str) -> Result<BoardCheck, MachineError> {
         let me = Claimant::Tool(BOARD_CHECK);
         let entry = {
-            let mut st = self.state.lock().expect("machine lock");
+            let mut st = self.state.lock();
             let entry = PortId::parse(port)
                 .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
                 .ok_or_else(|| {
@@ -1304,7 +1314,7 @@ impl Machine {
             }
             Err(e) => Err(e.to_string()),
         };
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         st.claims.release(&entry.id, &me);
         self.ports_changed.send_modify(|n| *n += 1);
         let check = match outcome {
@@ -1363,7 +1373,7 @@ impl Machine {
     /// Opens and claims a port for the serial monitor. Nothing is read until
     /// [`SerialSession::start`], so the caller can announce the session before data flows.
     pub fn open_serial(self: &Arc<Self>, port: &str, baud: u32) -> Result<SerialSession, MachineError> {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         let entry = PortId::parse(port)
             .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
             .ok_or_else(|| {
@@ -1404,7 +1414,7 @@ impl Machine {
     }
 
     fn close_serial(&self, port: &PortId) {
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         st.claims.release(port, &Claimant::Tool(SERIAL_MONITOR));
         self.ports_changed.send_modify(|n| *n += 1);
         self.reconcile(&mut st); // a part waiting for this port can start now
@@ -1475,7 +1485,7 @@ impl Machine {
     /// someone asks: Faber never scans by itself.
     pub fn scan_i2c(&self, port: &str) -> Result<I2cScan, MachineError> {
         let (bus, used) = {
-            let st = self.state.lock().expect("machine lock");
+            let st = self.state.lock();
             let entry = PortId::parse(port)
                 .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
                 .ok_or_else(|| {
@@ -1796,7 +1806,7 @@ impl Machine {
     /// The places Files shows: home, then connected disks, then (developer setting) the machine.
     pub fn file_roots(&self) -> Vec<(VPath, String, Option<&'static str>)> {
         let mut roots = vec![(VPath::home(&[]), "Home".to_string(), None)];
-        let disks = self.state.lock().expect("machine lock").disks.clone();
+        let disks = self.state.lock().disks.clone();
         roots.extend(
             disks
                 .into_iter()
@@ -1862,7 +1872,7 @@ impl Machine {
             )
         })?;
         world::read_config(&text).map_err(|e| config_invalid(&e))?;
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         self.save(&mut st, text)?;
         st.config_problem = None;
         self.reconcile(&mut st);
@@ -2042,6 +2052,36 @@ impl Recorder {
         Ok(self.bytes)
     }
 }
+
+/// Logs, once per episode, any of the machine's locks held longer than [`LOCK_TOO_LONG`], with the
+/// code holding it and the code waiting for it. Every request needs the machine lock, so this is
+/// what a core that stops answering says about why. It never takes those locks itself.
+fn watch_locks(machine: Weak<Machine>, stop: Arc<AtomicBool>) {
+    let mut told: [Option<String>; 2] = [None, None];
+    while !stop.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(500));
+        let Some(m) = machine.upgrade() else { return };
+        let reports = [m.state.held_too_long(LOCK_TOO_LONG), m.apps.held_too_long(LOCK_TOO_LONG)];
+        drop(m);
+        for (report, last) in reports.into_iter().zip(told.iter_mut()) {
+            // One line per lock and holder: the same holder still holding it isn't news.
+            let holder = report.as_ref().map(|r| r.split("; waiting").next().unwrap_or(r).to_string());
+            let same = holder
+                .as_ref()
+                .zip(last.as_ref())
+                .is_some_and(|(h, l)| h.split(" (").next() == l.split(" (").next());
+            if let Some(r) = &report
+                && !same
+            {
+                tracing::error!(target: "core", "{r}");
+            }
+            *last = holder;
+        }
+    }
+}
+
+/// How long a machine lock may be held before the watchdog says so.
+const LOCK_TOO_LONG: Duration = Duration::from_secs(2);
 
 impl Drop for Machine {
     fn drop(&mut self) {

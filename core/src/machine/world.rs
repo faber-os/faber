@@ -74,7 +74,7 @@ impl Machine {
 
     /// The world simulated parts are in now.
     pub fn world(&self) -> WorldView {
-        let wanted = self.state.lock().expect("machine lock").config.world.clone();
+        let wanted = self.state.lock().config.world.clone();
         let (world, start) =
             resolve(wanted.as_ref()).or_else(|| resolve(None)).expect("the default world is built in");
         WorldView { world, start, footprint: self.world.state().footprint }
@@ -109,7 +109,7 @@ impl Machine {
                 ));
             }
         }
-        let mut st = self.state.lock().expect("machine lock");
+        let mut st = self.state.lock();
         refuse_if_config_broken(&st)?;
         let wanted = WorldConfig {
             name: name.to_string(),

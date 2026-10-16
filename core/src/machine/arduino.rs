@@ -497,7 +497,7 @@ impl Machine {
     }
 
     fn port_entry(&self, port: &str) -> Result<PortEntry, MachineError> {
-        let st = self.state.lock().expect("machine lock");
+        let st = self.state.lock();
         PortId::parse(port).and_then(|id| st.ports.iter().find(|p| p.id == id).cloned()).ok_or_else(|| {
             bad(
                 "unknown-port",
@@ -553,7 +553,7 @@ impl Machine {
     /// The build id a FaberLink board that is connected on this port says, if one is: `None`
     /// when no bridge on the port has an answer from its board.
     fn live_build_id(&self, port: &PortId) -> Option<Option<u64>> {
-        let st = self.state.lock().expect("machine lock");
+        let st = self.state.lock();
         st.config.parts.iter().find_map(|(name, cfg)| {
             if cfg.connector != BRIDGE_CONNECTOR
                 || cfg.source.port().and_then(PortId::parse).as_ref() != Some(port)
@@ -640,7 +640,7 @@ impl Machine {
             )),
         };
         {
-            let mut st = self.state.lock().expect("machine lock");
+            let mut st = self.state.lock();
             st.claims.release(&entry.id, &me);
             self.ports_changed.send_modify(|n| *n += 1);
             self.reconcile(&mut st); // a bridge stopped for this starts again

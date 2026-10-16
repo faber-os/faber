@@ -60,7 +60,9 @@ fn main() -> ExitCode {
     let logs = LogBook::new(clock.clone());
     tracing_subscriber::registry()
         .with(
+            // stderr, as logs go: test runners (Playwright, CI) show it, and stdout stays free.
             tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
                 .with_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())),
         )
         .with(logs.layer().with_filter(EnvFilter::new("info")))

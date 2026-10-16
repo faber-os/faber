@@ -56,10 +56,19 @@ struct Running {
 }
 
 impl Running {
-    /// Stops the app's logic and waits for it: its leases have ended when this returns.
-    fn stop(self) {
-        if let Some(h) = self.handle {
-            h.stop();
+    /// Stops the app's logic and waits for it: its leases have ended when this returns, unless
+    /// the run is stuck in a call it made. Then the log says where, the core goes on without
+    /// waiting, and its leases end by their deadlines (the sweeper never waits for apps).
+    fn stop(self, id: &str) {
+        let Some(h) = self.handle else { return };
+        if let Err(apps::Stuck(step)) = h.stop() {
+            tracing::error!(
+                target: "core::apps",
+                app = id,
+                "didn't stop within {} s: it is {}. Faber goes on without waiting for it.",
+                apps::STOP_GRACE.as_secs(),
+                step.describe()
+            );
         }
     }
 }
@@ -187,12 +196,12 @@ impl Machine {
 
     /// Installed apps that couldn't be loaded, and why.
     pub fn app_problems(&self) -> Vec<LoadProblem> {
-        self.apps.lock().expect("apps lock").problems.clone()
+        self.apps.lock().problems.clone()
     }
 
     /// Every installed app, by id.
     pub fn apps(&self) -> Vec<AppView> {
-        let apps = self.apps.lock().expect("apps lock");
+        let apps = self.apps.lock();
         let config = self.read_apps_config().1.unwrap_or_default();
         apps.definitions.iter().map(|d| self.app_view(d, &config)).collect()
     }
@@ -213,7 +222,7 @@ impl Machine {
     }
 
     fn known_app(&self, id: &str) -> Result<AppDefinition, MachineError> {
-        let apps = self.apps.lock().expect("apps lock");
+        let apps = self.apps.lock();
         apps.definitions.iter().find(|d| d.manifest.id == id).cloned().ok_or_else(|| unknown_app(id))
     }
 
@@ -248,7 +257,7 @@ impl Machine {
         };
         let mut roles: BTreeMap<String, Vec<PartName>> = BTreeMap::new();
         {
-            let st = self.state.lock().expect("machine lock");
+            let st = self.state.lock();
             for (role, parts) in &wanted {
                 let Some(spec) = m.role(role) else {
                     let names: Vec<&str> = m.requires.iter().map(|r| r.role.as_str()).collect();
@@ -324,7 +333,7 @@ impl Machine {
     pub(super) fn reload_apps(&self) -> Vec<LoadProblem> {
         let (defs, problems) = apps::load_installed(&self.apps_dir(), crate::sandbox::Limits::default());
         {
-            let mut a = self.apps.lock().expect("apps lock");
+            let mut a = self.apps.lock();
             a.definitions = defs;
             a.problems = problems.clone();
             a.generation += 1;
@@ -339,10 +348,10 @@ impl Machine {
     /// run must have ended before the restored state is written.
     pub(super) fn with_apps_stopped<T>(&self, ids: &[String], change: impl FnOnce() -> T) -> T {
         let out = {
-            let mut a = self.apps.lock().expect("apps lock");
+            let mut a = self.apps.lock();
             for id in ids {
                 if let Some(r) = a.running.remove(id) {
-                    r.stop();
+                    r.stop(id);
                 }
                 if let Some(s) = self.app_states.lock().expect("app states lock").get(id) {
                     s.suspend_saving();
@@ -502,10 +511,23 @@ impl Machine {
     /// have every role filled, stops the others with the reason, and restarts an app whose
     /// parts or package changed.
     pub(super) fn reconcile_apps(&self) {
-        let mut apps = self.apps.lock().expect("apps lock");
+        let apps = self.apps.lock();
+        self.reconcile_locked(apps);
+    }
+
+    /// [`Machine::reconcile_apps`] if no one else is changing the apps right now; the sweeper's
+    /// regular check. It never waits for the apps lock: whoever holds it may be waiting for an
+    /// app to stop, and the sweeper must go on ending expired leases meanwhile.
+    pub(super) fn reconcile_apps_if_free(&self) {
+        if let Some(apps) = self.apps.try_lock() {
+            self.reconcile_locked(apps);
+        } // else: the next check, 200 ms later
+    }
+
+    fn reconcile_locked(&self, mut apps: crate::watched::WatchedGuard<'_, Apps>) {
         let parsed = self.read_apps_config().1;
         let desired: Vec<(AppDefinition, Desired)> = {
-            let st = self.state.lock().expect("machine lock");
+            let st = self.state.lock();
             apps.definitions.iter().map(|d| (d.clone(), desired(&st, d, &parsed))).collect()
         };
         let generation = apps.generation;
@@ -513,7 +535,7 @@ impl Machine {
         let gone: Vec<String> = apps.running.keys().filter(|id| !installed.contains(id)).cloned().collect();
         for id in gone {
             if let Some(r) = apps.running.remove(&id) {
-                r.stop();
+                r.stop(&id);
             }
             self.app_status.remove(&id);
         }
@@ -526,7 +548,7 @@ impl Machine {
                         continue;
                     }
                     if let Some(old) = apps.running.remove(&id) {
-                        old.stop(); // the old run ends before the new one starts
+                        old.stop(&id); // the old run ends before the new one starts
                     }
                     let driver: Arc<dyn Driver> =
                         Arc::new(MachineDriver(self.me.get().cloned().unwrap_or_default()));
@@ -543,7 +565,7 @@ impl Machine {
                 }
                 Desired::Not(status) => {
                     if let Some(r) = apps.running.remove(&id) {
-                        r.stop();
+                        r.stop(&id);
                         tracing::info!(target: "core::apps", app = id.as_str(), "stopped");
                     }
                     self.app_status.set(&id, status);
@@ -567,9 +589,9 @@ impl Machine {
 
     /// Stops every app (the core is stopping). Their leases end.
     pub(super) fn stop_apps(&self) {
-        let running = std::mem::take(&mut self.apps.lock().expect("apps lock").running);
-        for r in running.into_values() {
-            r.stop();
+        let running = std::mem::take(&mut self.apps.lock().running);
+        for (id, r) in running {
+            r.stop(&id);
         }
     }
 
