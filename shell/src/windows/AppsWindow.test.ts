@@ -135,6 +135,16 @@ describe('Apps window', () => {
     expect(screen.getByText(/Wall follower will be able to drive "base"/)).toBeInTheDocument();
   });
 
+  it('says when a role is driven only from the app’s window', async () => {
+    const app = structuredClone(APP);
+    app.roles[1]!.drive = 'window';
+    setup([app], []);
+    const note = await screen.findByText(/Only while you drive it from the app’s window/);
+    expect(note.closest('[role="note"]')).toHaveTextContent(
+      'Wall follower will be able to drive "base". Only while you drive it from the app’s window, after Faber asks you.',
+    );
+  });
+
   it('opens the app’s window and its derived signal’s viewer', async () => {
     const shell = setup([APP]);
     await userEvent.click(await screen.findByRole('button', { name: 'Open Wall follower' }));

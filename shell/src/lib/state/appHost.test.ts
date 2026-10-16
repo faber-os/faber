@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { part, simBase, simDistance } from '../../test/fakeShell';
+import type { AppWindowHandlers } from '../api/socket';
 import {
   AppHost,
+  MAX_APP_MESSAGE_BYTES,
+  MAX_APP_MESSAGES_PER_S,
   MAX_STATE_BYTES,
   MAX_SUBSCRIPTIONS,
   appHolder,
@@ -64,7 +67,7 @@ const GO = {
 };
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const flush = async () => {
-  for (let i = 0; i < 5; i++) await Promise.resolve();
+  for (let i = 0; i < 20; i++) await Promise.resolve();
 };
 
 function setup(options: { confirm?: boolean } = {}) {
@@ -137,6 +140,16 @@ function setup(options: { confirm?: boolean } = {}) {
       return ok({});
     },
   };
+  /** The window's link to the logic, as the core plays it: what the host asked, and its handlers. */
+  const link: {
+    handlers: AppWindowHandlers | null;
+    opens: number;
+    /** What the core answers `app-window-drive` with. */
+    driveAnswer: ErrorBody | null;
+    /** The core opens the link (else it refuses it, as without a connection). */
+    connected: boolean;
+  } = { handlers: null, opens: 0, driveAnswer: null, connected: true };
+  const driving: string[][] = [];
   const deps: AppHostDeps = {
     appId: 'wall-follower',
     app: () => app,
@@ -162,6 +175,30 @@ function setup(options: { confirm?: boolean } = {}) {
     confirmDriving: confirm,
     theme: () => ({ scheme: 'dark', tokens: { '--surface': 'black' } }),
     appState,
+    openChannel: (handlers) => {
+      link.opens++;
+      core.push('link open');
+      link.handlers = handlers;
+      if (link.connected) queueMicrotask(() => handlers.onOpened(link.opens));
+      else {
+        handlers.onError({ code: 'not-connected', message: 'Offline.', hint: 'Wait.' });
+        handlers.onClosed();
+      }
+      return {
+        send: (kind, data) =>
+          void core.push(`link send ${kind} ${typeof data === 'string' ? data : `[${data}]`}`),
+        heartbeat: () => void core.push('link heartbeat'),
+        drive: (role, index) => {
+          core.push(`link drive ${role} ${index}`);
+          const answer = link.driveAnswer;
+          queueMicrotask(() => handlers.onDrive(role, index, answer));
+        },
+        release: (role, index) => void core.push(`link release ${role} ${index}`),
+        stop: () => void core.push('link stop'),
+        close: () => void core.push('link close'),
+      };
+    },
+    onDriving: (parts) => void driving.push(parts),
   };
   const host = new AppHost(deps);
   let nextId = 1;
@@ -209,6 +246,15 @@ function setup(options: { confirm?: boolean } = {}) {
     },
     stateError: (e: ErrorBody) => stateHandlers?.onError(e),
     events: (name: string) => posted.filter((m) => m.event === name),
+    link,
+    driving,
+    /** The app with its wheels declared drive = "window". */
+    windowDriven: () => {
+      const a = structuredClone(APP);
+      a.roles[1]!.drive = 'window';
+      app = a;
+      host.appChanged();
+    },
   };
 }
 
@@ -507,6 +553,194 @@ describe('the app window host: what an app may do', () => {
     const s = setup();
     s.setApp(null);
     expect((await s.ask({ type: 'roles' })).error?.code).toBe('app-gone');
+  });
+});
+
+describe('the app window host: messages and driving through the logic', () => {
+  it('refuses bad messages before the core hears of them', async () => {
+    const s = setup();
+    const cases: [Record<string, unknown>, string][] = [
+      [{ kind: '', data: 'x' }, 'bad-kind'],
+      [{ kind: 'Drive', data: 'x' }, 'bad-kind'],
+      [{ kind: 'drive now', data: 'x' }, 'bad-kind'],
+      [{ kind: 'k'.repeat(65), data: 'x' }, 'bad-kind'],
+      [{ kind: 'drive-ended', data: 'base 0 stopped' }, 'bad-kind'],
+      [{ kind: 'drive-started', data: 'base 0' }, 'bad-kind'],
+      [{ kind: 7, data: 'x' }, 'bad-kind'],
+      [{ kind: 'drive', data: 1 }, 'bad-request'],
+      [{ kind: 'drive', data: { evil: true } }, 'bad-request'],
+      [{ kind: 'drive', data: [1, 2] }, 'bad-request'],
+      [{ kind: 'drive' }, 'bad-request'],
+      [{ kind: 'big', data: 'é'.repeat(MAX_APP_MESSAGE_BYTES / 2) }, 'message-too-large'],
+      [{ kind: 'big', data: new Uint8Array(MAX_APP_MESSAGE_BYTES - 2) }, 'message-too-large'],
+    ];
+    for (const [fields, code] of cases) {
+      const r = await s.ask({ type: 'message-send', ...fields });
+      expect(r.error?.code, JSON.stringify(fields).slice(0, 60)).toBe(code);
+    }
+    expect(s.core.some((c) => c.startsWith('link send'))).toBe(false);
+    const fits = await s.ask({ type: 'message-send', kind: 'big', data: 'x'.repeat(4093) });
+    expect(fits.ok).toBe(true);
+  });
+
+  it('slows down a page that floods its logic: 50 messages a second', async () => {
+    let now = 0;
+    const s = setup();
+    (s.host as unknown as { now: () => number }).now = () => now;
+    const ids = Array.from({ length: MAX_APP_MESSAGES_PER_S + 1 }, (_, i) =>
+      s.send({ type: 'message-send', kind: 'drive', data: String(i) }),
+    );
+    await flush();
+    const last = s.posted.find((m) => m.re === ids.at(-1)) as { error?: ErrorBody };
+    expect(last.error?.code).toBe('too-many-messages');
+    expect(s.core.filter((c) => c.startsWith('link send'))).toHaveLength(MAX_APP_MESSAGES_PER_S);
+    expect(s.core.filter((c) => c === 'link open')).toHaveLength(1);
+    now = 1000;
+    expect((await s.ask({ type: 'message-send', kind: 'drive', data: 'again' })).ok).toBe(true);
+  });
+
+  it('sends the logic text and bytes, and passes its messages on once asked', async () => {
+    const s = setup();
+    expect((await s.ask({ type: 'message-send', kind: 'drive', data: '1 0 0' })).ok).toBe(true);
+    const bytes = new Uint8Array([1, 2]);
+    await s.ask({ type: 'message-send', kind: 'blob', data: bytes });
+    expect(s.core).toEqual(['link open', 'link send drive 1 0 0', 'link send blob [1,2]']);
+    s.link.handlers!.onMessage('limits', '{}');
+    expect(s.events('message'), 'not asked for yet').toEqual([]);
+    expect((await s.ask({ type: 'message-watch' })).ok).toBe(true);
+    s.link.handlers!.onMessage('limits', '{"driving":true}');
+    s.link.handlers!.onMessage('blob', new Uint8Array([9]));
+    expect(s.events('message')).toEqual([
+      { faber: 1, event: 'message', kind: 'limits', data: '{"driving":true}' },
+      { faber: 1, event: 'message', kind: 'blob', data: new Uint8Array([9]) },
+    ]);
+    // A new page asks again; the old page's link is closed.
+    s.host.reset();
+    expect(s.core.at(-1)).toBe('link close');
+    s.link.handlers!.onMessage('limits', 'old link');
+    expect(s.events('message')).toHaveLength(2);
+  });
+
+  it('refuses messages while the app is off, and says so when the core can’t be reached', async () => {
+    const s = setup();
+    s.setApp({ ...APP, enabled: false });
+    expect((await s.ask({ type: 'message-send', kind: 'drive', data: 'x' })).error?.code).toBe(
+      'app-off',
+    );
+    s.setApp(APP);
+    s.link.connected = false;
+    expect((await s.ask({ type: 'message-send', kind: 'drive', data: 'x' })).error?.code).toBe(
+      'not-connected',
+    );
+    s.link.connected = true;
+    expect((await s.ask({ type: 'message-send', kind: 'drive', data: 'x' })).ok).toBe(true);
+    expect(s.core.filter((c) => c === 'link open')).toHaveLength(2);
+  });
+
+  it('drives through the logic only a drive = "window" role, after the go-ahead (D46)', async () => {
+    const s = setup({ confirm: false });
+    expect((await s.ask({ type: 'drive-via', role: 'wheels' })).error?.code).toBe(
+      'not-window-driven',
+    );
+    s.windowDriven();
+    expect((await s.ask({ type: 'drive-via', role: 'scanner' })).error?.code).toBe(
+      'not-commandable',
+    );
+    expect((await s.ask({ type: 'drive-via', role: 'nope' })).error?.code).toBe('unknown-role');
+    expect((await s.ask({ type: 'drive-via', role: 'wheels', index: -1 })).error?.code).toBe(
+      'bad-request',
+    );
+    expect((await s.ask({ type: 'drive-via', role: 'wheels', index: 1 })).error?.code).toBe(
+      'no-part',
+    );
+    expect((await s.ask({ type: 'drive-via', role: 'wheels' })).error?.code).toBe('not-confirmed');
+    expect(s.confirm).toHaveBeenCalledWith('base1');
+    expect(s.core).toEqual([]);
+  });
+
+  it('drives through the logic with the Stop bar, beats, and lets go', async () => {
+    const s = setup();
+    s.windowDriven();
+    expect((await s.ask({ type: 'drive-via', role: 'wheels' })).ok).toBe(true);
+    expect(s.core).toEqual(['link open', 'link drive wheels 0']);
+    expect(s.driving.at(-1)).toEqual(['base1']);
+    expect(s.host.drivingVia).toBe(1);
+    // Asking again changes nothing; the heartbeat goes to the core.
+    expect((await s.ask({ type: 'drive-via', role: 'wheels' })).ok).toBe(true);
+    await s.ask({ type: 'heartbeat' });
+    expect(s.core.slice(2)).toEqual(['link heartbeat']);
+    expect(s.confirm).toHaveBeenCalledTimes(1);
+    await s.ask({ type: 'drive-via-release', role: 'wheels' });
+    expect(s.core.at(-1)).toBe('link release wheels 0');
+    expect(s.driving.at(-1)).toEqual([]);
+  });
+
+  it('passes the core’s refusal on', async () => {
+    const s = setup();
+    s.windowDriven();
+    s.link.driveAnswer = { code: 'app-not-running', message: 'Not running.', hint: 'Turn it on.' };
+    const r = await s.ask({ type: 'drive-via', role: 'wheels' });
+    expect(r.error).toEqual(s.link.driveAnswer);
+    expect(s.host.drivingVia).toBe(0);
+  });
+
+  it('the Stop bar ends it at once, and the page hears why', async () => {
+    const s = setup();
+    s.windowDriven();
+    await s.ask({ type: 'drive-via', role: 'wheels' });
+    await s.host.stopDriving();
+    expect(s.core.at(-1)).toBe('link stop');
+    expect(s.driving.at(-1)).toEqual([]);
+    expect(s.events('drive-ended')).toEqual([
+      expect.objectContaining({
+        role: 'wheels',
+        index: 0,
+        reason: 'stopped',
+        error: expect.objectContaining({ code: 'drive-ended' }),
+      }),
+    ]);
+    // The core's own word on it afterwards changes nothing.
+    s.link.handlers!.onDriveEnded('wheels', 0, 'stopped');
+    expect(s.events('drive-ended')).toHaveLength(1);
+  });
+
+  it('tells the page when the core ends it (the page stopped beating)', async () => {
+    const s = setup();
+    s.windowDriven();
+    await s.ask({ type: 'drive-via', role: 'wheels' });
+    s.link.handlers!.onDriveEnded('wheels', 0, 'heartbeat-lost');
+    const [e] = s.events('drive-ended') as { reason: string; error: ErrorBody }[];
+    expect(e?.reason).toBe('heartbeat-lost');
+    expect(e?.error.message).toContain('stopped answering');
+    expect(s.host.drivingVia).toBe(0);
+  });
+
+  it('ends it when the app is turned off, the connection goes, or a new page loads', async () => {
+    const s = setup();
+    s.windowDriven();
+    await s.ask({ type: 'drive-via', role: 'wheels' });
+    const off = structuredClone(APP);
+    off.roles[1]!.drive = 'window';
+    off.enabled = false;
+    s.setApp(off);
+    expect(s.core.at(-1)).toBe('link release wheels 0');
+    expect(s.events('drive-ended').at(-1)).toMatchObject({ error: { code: 'app-off' } });
+
+    s.windowDriven();
+    await s.ask({ type: 'drive-via', role: 'wheels' });
+    s.link.handlers!.onClosed('lost');
+    expect(s.events('drive-ended').at(-1)).toMatchObject({ reason: 'connection-lost' });
+    expect(s.host.drivingVia).toBe(0);
+
+    await s.ask({ type: 'drive-via', role: 'wheels' });
+    expect(s.core.filter((c) => c === 'link open')).toHaveLength(2);
+    s.host.reset();
+    expect(s.core.at(-1)).toBe('link close');
+    expect(s.host.drivingVia).toBe(0);
+    expect(s.driving.at(-1)).toEqual([]);
+    await s.ask({ type: 'drive-via', role: 'wheels' });
+    await s.host.dispose();
+    expect(s.core.at(-1)).toBe('link close');
   });
 });
 

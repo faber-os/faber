@@ -106,6 +106,41 @@ describe('App window', () => {
     expect(replies().some((m) => m.event === 'lease-ended')).toBe(true);
   });
 
+  it('drives through the app’s logic only after D46, with the same Stop bar outside the frame', async () => {
+    const app = structuredClone(APP);
+    app.roles[1]!.drive = 'window';
+    const { shell, fromApp, replies } = setup(app);
+    const sentOf = (type: string) => shell.sent().filter((m) => m.type === type);
+    fromApp({ faber: 1, id: 1, type: 'drive-via', role: 'base' });
+    const sheet = await screen.findByRole('alertdialog', { name: 'Start driving faber?' });
+    expect(sheet).toHaveTextContent('Wall follower wants to drive “base”.');
+    expect(sentOf('app-window-open')).toHaveLength(0);
+    await userEvent.click(within(sheet).getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(sentOf('app-window-open')).toHaveLength(1));
+    const id = sentOf('app-window-open')[0]!.id;
+    expect(sentOf('app-window-open')[0]).toMatchObject({ app: 'wall-follower' });
+    shell.receive({ type: 'app-window-opened', id, window: 1 });
+    await waitFor(() =>
+      expect(sentOf('app-window-drive')).toEqual([
+        { type: 'app-window-drive', id, role: 'base', index: 0 },
+      ]),
+    );
+    expect(screen.queryByRole('status')).toBeNull();
+    shell.receive({ type: 'app-window-driving', id, role: 'base', index: 0 });
+    await waitFor(() =>
+      expect(replies()).toContainEqual({ faber: 1, re: 1, ok: true, value: null }),
+    );
+    expect(shell.fetch.calls.some((c) => c.path.endsWith('/lease'))).toBe(false);
+    const bar = await screen.findByRole('status');
+    expect(bar).toHaveTextContent('Wall follower is driving base.');
+    await userEvent.click(within(bar).getByRole('button', { name: 'Stop' }));
+    await waitFor(() =>
+      expect(sentOf('app-window-stop')).toEqual([{ type: 'app-window-stop', id }]),
+    );
+    expect(replies().some((m) => m.event === 'drive-ended' && m.reason === 'stopped')).toBe(true);
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+  });
+
   it('a "no" drives nothing', async () => {
     const { shell, fromApp, replies } = setup();
     fromApp({ faber: 1, id: 1, type: 'drive', role: 'base' });

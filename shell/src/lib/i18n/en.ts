@@ -640,6 +640,10 @@ export const en = {
   'roles.willDrive':
     '<b>{app} will be able to drive {parts}.</b> It moves it whenever the app is on.',
   'roles.willDrivePicked': '<b>{app} will be able to drive the part you pick here.</b>',
+  'roles.willDriveFromWindow':
+    '<b>{app} will be able to drive {parts}.</b> Only while you drive it from the app’s window, after Faber asks you.',
+  'roles.willDriveFromWindowPicked':
+    '<b>{app} will be able to drive the part you pick here.</b> Only while you drive it from the app’s window.',
 
   // An app window's page asking the shell (docs/apps.md §9): the errors it gets back
   'appHost.badRequest.message': 'The app sent a message Faber can’t read.',
@@ -678,6 +682,23 @@ export const en = {
   'appHost.leaseEnded.hint': 'Start driving it again when you are ready.',
   'appHost.stopped.message': 'You stopped the app driving “{role}”.',
   'appHost.stopped.hint': 'Start driving it again when you are ready.',
+  'appHost.notWindowDriven.message': 'The app can’t drive “{role}” through its logic.',
+  'appHost.notWindowDriven.hint':
+    'Only roles with drive = "window" in its faber.toml are driven through the logic. Use faber.drive() for the others.',
+  'appHost.badKind.message': 'That message kind isn’t allowed.',
+  'appHost.badKind.hint':
+    'Use 1 to 64 characters of a-z, 0-9 and -, like "drive". drive-started and drive-ended are Faber’s own.',
+  'appHost.messageTooLarge.message': 'The message is larger than 4 KB.',
+  'appHost.messageTooLarge.hint': 'Send less at once, or split it into several messages.',
+  'appHost.tooManyMessages.message': 'The app sent its logic more than 50 messages in a second.',
+  'appHost.tooManyMessages.hint':
+    'Send at most one every 20 ms; every 100 ms is plenty for driving.',
+  'appHost.notConnected.message': 'The app’s window isn’t connected to Faber’s core.',
+  'appHost.notConnected.hint': 'Wait until the taskbar says Connected, then try again.',
+  'appHost.heartbeatLost.message': 'Faber stopped “{role}”: the app’s page stopped answering.',
+  'appHost.heartbeatLost.hint': 'Close the app’s window and open it again.',
+  'appHost.connectionLost.message': 'Faber stopped “{role}”: the connection to the core was lost.',
+  'appHost.connectionLost.hint': 'Drive again once the taskbar says Connected.',
 
   // An app's window
   'appWindow.loading': 'Opening the app…',
