@@ -1,10 +1,12 @@
 # Phase 5 design: apps
 
 Status: **design v1; Phase 5a (apps in the core), 5b (apps in the shell), 5c (shared state,
-the start menu, the template's window, Share setup) and 5d (the SENNEP app v0) built** (2026-10-16).
-Builds on D03, D04, D24, D29 and architecture.md §7. §8 says what 5a built and how it differs, §9
-what 5b built: app windows, the message protocol, `@faber-os/shell`, the role picker and Apps; §10
-what 5c built; §11 the SENNEP app and what it added to apps. The open questions in
+the start menu, the template's window, Share setup), 5d (the SENNEP app v0) and 5e (live messages
+and driving through the logic) built** (2026-10-16). Builds on D03, D04, D24, D29, D46, D49 and
+architecture.md §7. §8 says what 5a built and how it differs, §9 what 5b built: app windows, the
+message protocol, `@faber-os/shell`, the role picker and Apps; §10 what 5c built; §11 the SENNEP
+app and what it added to apps; §12 the live channel between a window and its logic, and the rule
+for driving through it. The open questions in
 §7 were answered with their recommendations while Mikkel was away: both wasm logic and UI-only
 apps; SENNEP's app in the SENNEP V2 repo, with a small example app here.
 
@@ -342,7 +344,8 @@ logic takes the lease, limits the request and sends it. A request that stops cha
 "is driving" bar and no D46 confirm for this window, which belong to `faber.drive()`; turning the
 app on is the go-ahead, as for any app with logic, and the window has its own Stop. The state is
 saved at most once a second, so driving writes `state.toml` about once a second; the logic removes
-`drive` when it stops. The window's text is plain English: apps aren't translated by Faber's
+`drive` when it stops. **Replaced in 5e (§12):** state is for settings, and the window now drives
+through the logic over live messages, with the confirm and the bar. The window's text is plain English: apps aren't translated by Faber's
 catalogue.
 
 **What apps gained.**
@@ -369,3 +372,88 @@ and the layout test opens its window on the 7" screen.
 **Needs the real robot:** the LD19 and the corner sensors on SENNEP with their mounts measured,
 the Mega's FaberLink firmware with a planar base, and the stop distance, the slow-down rate and the
 pose's drift checked on the floor.
+
+## 12. As built (Phase 5e: live messages, and driving through the logic)
+
+5d drove SENNEP by writing the driver's request into the app's state ten times a second. That was
+wrong twice: the state is for saved settings (it ended up in `state.toml` about once a second), and
+it went around the D46 confirm and the shell's "… is driving …" bar, so a user driving through an
+app window never got either. 5e gives a window and its own logic a live channel, and makes driving
+through the logic a declared intent the core enforces.
+
+**Messages.** Each installed app has one channel in the core (`apps::Channel`), shared by every run
+of its logic and every open window. A window sends its logic small typed messages: a `kind` (1–64
+characters of `a-z`, `0-9`, `-`) and a payload that is text or bytes, at most 4 KB together and 50
+a second per window. The logic reads everything since its last tick with `messages.poll()` (each
+message with the id of the window it came from) and answers one window or all of them with
+`messages.send(window?, kind, payload)`, under the same limits per window. **Nothing is ever
+saved**: messages that arrive while the logic isn't running are dropped, and what the logic hasn't
+read when its run ends is gone. Settings stay in the state (§10).
+
+| Where | What |
+|---|---|
+| WIT (`faber:app/messages`) | `poll() -> list<message>` (`window: u64`, `kind`, `payload: text(string) \| bytes(list<u8>)`), `send(window: option<u64>, kind, payload) -> result<_, string>` |
+| Rust SDK | `Host::poll_messages()`, `Host::send_message(window, kind, payload)`, `Message::drive_event()`; `TestHost::window_says/window_drives/window_stops` |
+| JS SDK | `faber.send(kind, data)`, `faber.onMessage((kind, data) => …)` |
+| Window protocol | `message-send` (`kind`, `data`), `message-watch`; the `message` event |
+| WebSocket | `app-window-open/send/…` and `app-window-opened/message/…` (api.md, "App windows") |
+
+The shell's app host opens the window's link to the core the first time its page needs it, and
+closes it with the page. The link lives on the shell's WebSocket, so a closed browser tab closes
+it too.
+
+**Driving through the logic.** A command role may be declared **`drive = "window"`** in the
+manifest (the default is `drive = "logic"`). The logic may then hold that role's lease **only
+while one of the app's windows has a drive intent for it**:
+
+1. The page calls `faber.driveVia(role)`. The shell's host checks the role (it must be
+   `drive = "window"`) and that the app is on, asks the **D46 confirm** outside the frame (once per
+   session, naming the app and the part, the same sheet as `faber.drive()`), then tells the core
+   (`app-window-drive`) and shows **"<app> is driving <part>." with its Stop** above the frame.
+2. The core records the intent and gives the logic a `drive-started` message. From now on the
+   logic's `acquire` on the role succeeds (as `app:<id>`, as always).
+3. The page's SDK sends a `heartbeat` every 100 ms while it drives through the logic, and the
+   window sends what the driver wants as messages (SENNEP: `drive` every 100 ms).
+4. The intent ends when the page lets go (`drive-via-release`), the user presses the shell's Stop,
+   the window closes or reloads, the WebSocket goes, the logic stops, or **no heartbeat comes for
+   300 ms** (the core's sweeper checks every 10 ms). Then:
+   - the logic gets a `drive-ended` message (`"<role> <index> <reason>"`);
+   - **the core ends the logic's lease on the role itself**, at once, unless another window still
+     drives it, and **refuses a new one** (`part-not-ready`, "no window is driving …"); the
+     logic's next command answers `lease-ended` (`drive-ended`);
+   - the window hears `drive-ended` and the bar goes away.
+
+**The guarantee and how it is enforced.** For a `drive = "window"` role, the part moves under the
+app's lease only while a window the user confirmed is driving it and alive, and the shell's Stop
+ends it, whatever the app's code does. It doesn't depend on the app: the logic's `acquire`,
+`renew` and `send` on such a role pass through the channel's gate in the core (`Session`), which
+answers from the core's own record of intents; the lease ids the logic got for the role are kept
+by the channel, which releases them when the last intent ends; and the heartbeat, Stop and close
+come from the shell, not from the app's page or logic. An app that ignores `drive-ended` (the test
+guest in `core/tests/apps.rs` takes the lease again on every tick and never reads its messages)
+still loses the lease and can't get it back. The lease's own dead man's switch (250 ms) and the
+e-stop work exactly as before underneath.
+
+**What it doesn't cover.** A role left at `drive = "logic"` is background control (the wall
+follower): its logic drives without any window, and turning the app on is the go-ahead, as in 5a.
+Such an app could still steer by messages from its window without the confirm or the bar; the
+install window says which kind each role is ("SENNEP will be able to drive "base". Only while you
+drive it from the app's window, after Faber asks you."). After the user presses Stop, a page that
+calls `driveVia` again gets the drive back without a second confirm (D46 is once per session), as
+with `faber.drive()`.
+
+**The SENNEP app** (§11) moved onto it: its `base` is `drive = "window"`; its window calls
+`faber.driveVia("base")` on the first control and sends `drive` (`"<x> <y> <turn>"`), `hello` and
+`reset-pose` as messages; the logic sends `limits` back as a message whenever they change. Nothing
+about driving is in its state any more. Its safety layer and every rule of it are unchanged.
+
+**Tests.** `core/src/apps/channel.rs` (the channel, limits, non-persistence, every way an intent
+ends), `session.rs` (the gate), `core/tests/apps.rs` (a guest that ignores `drive-ended`: Stop,
+a missed heartbeat and closing each end its lease, directly and over the WebSocket),
+`sdk/js/shell/src/faber-shell.test.ts`, `shell/src/lib/state/appHost.test.ts` (hostile messages:
+kinds, reserved kinds, sizes, types, floods, roles that aren't `drive = "window"`),
+`socket.test.ts`, `AppWindow.test.ts` (the confirm and the bar for `drive-via`),
+`examples/apps/sennep` (its logic against `TestHost`), `core/tests/sennep.rs` and `bridge.rs` (the
+apartment and the fake Mega, driven over the WebSocket: Stop, a hung page, a closed window), and
+`shell/e2e/sennep.spec.ts` (the confirm the first time, the bar while driving, its Stop stopping
+the base).
