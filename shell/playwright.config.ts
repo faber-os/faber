@@ -50,7 +50,10 @@ export default defineConfig({
       `--data target/e2e-data --listen 127.0.0.1:${port} --fake-arduino-cli --fake-hardware`,
     cwd: '..',
     url: `http://127.0.0.1:${port}/api/v0/system`,
-    reuseExistingServer: !process.env.CI,
+    // Never test against a core that happens to answer on the port: it may be another checkout's,
+    // with other data and users, and stopped or rebuilt mid-run (it looked like the core hanging).
+    // A busy port fails at once; pick another with FABER_E2E_PORT.
+    reuseExistingServer: false,
     timeout: 600_000,
   },
 });
