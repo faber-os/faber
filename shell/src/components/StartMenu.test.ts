@@ -42,6 +42,7 @@ describe('Start menu', () => {
       'World',
       'Serial monitor',
       'Arduino flasher',
+      'Arduino',
       'Logs',
       'Files',
       'Notes',

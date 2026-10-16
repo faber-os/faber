@@ -169,6 +169,27 @@ describe('A FaberLink board in Parts', () => {
     ).toBeInTheDocument();
   });
 
+  it('says which code the board runs, from its build id', async () => {
+    const shell = setup();
+    const record = {
+      id: 'usb-2341-0042-S1',
+      board: 'mega2560',
+      boardName: 'Arduino Mega 2560',
+      sketch: 'home:/Arduino/Rover/Rover.ino',
+      sketchName: 'Rover',
+      buildId: '0123456789abcdef',
+      sha256: 'ab'.repeat(32),
+      bytes: 9000,
+      flashedAt: '2026-10-16T10:00:00Z',
+      identity: { serial: 'S1', port: MEGA_PORT.id, unique: true },
+      checkMs: 1500,
+    };
+    shell.pushParts([bridgePart('mega', { code: { buildId: record.buildId, record } })]);
+    expect(await screen.findByText('Code from Faber: Rover')).toBeInTheDocument();
+    shell.pushParts([bridgePart('mega', { code: {} })]);
+    expect(await screen.findByText('Code not flashed from Faber (unknown)')).toBeInTheDocument();
+  });
+
   it('says when the board is out of reach', async () => {
     const shell = setup();
     shell.pushParts([

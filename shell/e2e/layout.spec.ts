@@ -46,6 +46,7 @@ test.afterEach(async ({ request }) => {
   await removeSimParts(request);
   await request.delete('/api/v0/packages/wall-follower');
   await request.delete('/api/v0/packages/sennep');
+  await request.post('/api/v0/files/delete', { data: { paths: ['home:/Arduino'] } });
 });
 
 /** Whether SENNEP's own page (in its sandboxed frame) is wider than its window. */
@@ -103,6 +104,24 @@ async function openSimViewers(page: Page) {
   await expect(page.locator('[data-window-kind="battery"]')).toBeVisible();
 }
 
+/**
+ * The Arduino editor with a sketch open and compiled (the core runs a stand-in arduino-cli,
+ * `--fake-arduino-cli`): toolbar, tabs, editor and the output with its size report.
+ */
+async function openASketch(page: Page) {
+  const editor = page.locator('[data-window-kind="arduino"]');
+  await page
+    .getByRole('navigation', { name: 'Taskbar' })
+    .getByRole('button', { name: 'Arduino', exact: true })
+    .click();
+  await editor.getByRole('button', { name: 'New sketch' }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'New sketch' });
+  await dialog.getByLabel('Name').fill(`Layout${Date.now()}`);
+  await dialog.getByRole('button', { name: 'Create' }).click();
+  await editor.getByRole('button', { name: 'Verify' }).click();
+  await expect(editor.getByText(/^Program: /)).toBeVisible();
+}
+
 test('no window cuts its content off, also after the browser shrinks', async ({ page }) => {
   await page.goto('/');
   await expect(
@@ -111,6 +130,8 @@ test('no window cuts its content off, also after the browser shrinks', async ({ 
   const kinds = await openEveryProgram(page);
   expect(kinds).toContain('drive');
   expect(kinds).toContain('arduino-flasher');
+  expect(kinds).toContain('arduino');
+  await openASketch(page);
   await openSimViewers(page);
   await page
     .getByRole('navigation', { name: 'Taskbar' })

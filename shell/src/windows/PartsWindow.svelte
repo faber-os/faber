@@ -6,6 +6,7 @@
   import type { ErrorBody, PartInfo, SignalInfo, Simulate } from '../lib/state/types';
   import { canMove } from '../lib/state/driving';
   import { isBridge, isSubPart, linkText, localName, removable } from '../lib/state/bridges';
+  import { partCodeText } from '../lib/state/arduino';
   import { isManualSensor } from '../lib/state/simulation';
   import { item, separator } from '../lib/desktop/contextMenu';
   import { menuTrigger, useMenu } from '../components/menuController.svelte';
@@ -314,6 +315,10 @@
                   {#if b.protocol !== undefined}
                     <span class="sep" aria-hidden="true">·</span>
                     <span>{t('parts.board.protocol', { version: b.protocol })}</span>
+                  {/if}
+                  {#if partCodeText(b)}
+                    <span class="sep" aria-hidden="true">·</span>
+                    <span class="code">{partCodeText(b)}</span>
                   {/if}
                 </p>
                 {#if b.hardwareEstop}

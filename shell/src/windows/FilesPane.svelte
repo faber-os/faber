@@ -27,6 +27,7 @@
   import { fileTypeLabel } from '../lib/desktop/fileTypes';
   import { isPackageFile } from '../lib/desktop/packages';
   import { openDroppedPackage } from '../components/installWindow';
+  import { openInArduino } from '../components/arduinoWindow';
   import { afterConflict, uploadSummary, type ConflictAnswer } from '../lib/desktop/uploads';
   import Dialog from '../components/Dialog.svelte';
   import { useDesktop } from '../components/desktopController.svelte';
@@ -330,6 +331,8 @@
         return onopentab(e.path);
       case 'notes':
         return openInNotes(desktop, e.path);
+      case 'arduino':
+        return openInArduino(desktop, e.path);
       case 'rename':
         return startRename(e.path, e.name);
       case 'trash':

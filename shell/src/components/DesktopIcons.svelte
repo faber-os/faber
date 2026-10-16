@@ -27,6 +27,7 @@
   import FileIcon from './FileIcon.svelte';
   import { isPackageFile } from '../lib/desktop/packages';
   import { openDroppedPackage } from './installWindow';
+  import { openInArduino } from './arduinoWindow';
   import { fileLook } from './fileLook';
   import { menuTrigger, useMenu } from './menuController.svelte';
   import { pinItem, runPinItem } from './programs';
@@ -320,6 +321,7 @@
         onSelect: (id: string) => {
           if (id === 'open') open(i);
           else if (id === 'notes') openInNotes(desktop, e.path);
+          else if (id === 'arduino') openInArduino(desktop, e.path);
           else if (id === 'rename') void startRename(e);
           else if (id === 'trash') void trash(e);
           else if (id === 'download') download(core, e.path);

@@ -27,6 +27,15 @@ import type { Command } from './generated/Command';
 import type { CommandResult } from './generated/CommandResult';
 import type { EstopStatus } from './generated/EstopStatus';
 import type { FlashBoard } from './generated/FlashBoard';
+import type { ArduinoInfo } from './generated/ArduinoInfo';
+import type { ArduinoTools } from './generated/ArduinoTools';
+import type { BoardCodeInfo } from './generated/BoardCodeInfo';
+import type { CompileRequest } from './generated/CompileRequest';
+import type { CompileResult } from './generated/CompileResult';
+import type { NewSketchRequest } from './generated/NewSketchRequest';
+import type { SketchRef } from './generated/SketchRef';
+import type { UploadRequest } from './generated/UploadRequest';
+import type { UploadResult } from './generated/UploadResult';
 import type { FlashRequest } from './generated/FlashRequest';
 import type { FlashResult } from './generated/FlashResult';
 import type { LeaseGrant } from './generated/LeaseGrant';
@@ -93,6 +102,19 @@ export interface CoreHttp {
    * the `flash` topic follows it. Replaces the program on the board: only on a user's confirm.
    */
   flash(port: string, req: FlashRequest): Promise<FlashResult>;
+  /** The Arduino editor (docs/api.md, "The Arduino editor"). */
+  getArduino(): Promise<ArduinoInfo>;
+  /** Downloads and installs arduino-cli and the AVR core. Only on a user's confirm. */
+  installArduinoTools(): Promise<ArduinoTools>;
+  newSketch(req: NewSketchRequest): Promise<SketchRef>;
+  compileSketch(req: CompileRequest): Promise<CompileResult>;
+  /** Compiles and flashes. Replaces the program on the board: only on a user's confirm. */
+  uploadSketch(req: UploadRequest): Promise<UploadResult>;
+  /** What is on the board, as far as can be told without touching it. */
+  getBoardCode(port: string): Promise<BoardCodeInfo>;
+  /** Reads the program back and compares; resets the board. Only on a user's request. */
+  checkBoardCode(port: string, stopPart: boolean): Promise<BoardCodeInfo>;
+  openFlashed(id: string, copy: boolean): Promise<SketchRef>;
   getParts(): Promise<PartInfo[]>;
   addPart(part: NewPart): Promise<PartInfo>;
   removePart(name: string): Promise<void>;
@@ -275,6 +297,20 @@ export function createHttp(
     checkBoard: (port) => request('POST', '/ports/check-board', { port }),
     getFlasherBoards: () => request('GET', '/flasher/boards'),
     flash: (port, req) => request('POST', `/ports/${encodeURIComponent(port)}/flash`, req),
+    getArduino: () => request('GET', '/arduino'),
+    installArduinoTools: () => request('POST', '/arduino/tools/install'),
+    newSketch: (req) => request('POST', '/arduino/sketches', req),
+    compileSketch: (req) => request('POST', '/arduino/compile', req),
+    uploadSketch: (req) => request('POST', '/arduino/upload', req),
+    getBoardCode: (port) => request('GET', `/arduino/boards/${encodeURIComponent(port)}/code`),
+    checkBoardCode: (port, stopPart) =>
+      request(
+        'POST',
+        `/arduino/boards/${encodeURIComponent(port)}/check`,
+        stopPart ? { stopPart } : {},
+      ),
+    openFlashed: (id, copy) =>
+      request('POST', `/arduino/flashed/${encodeURIComponent(id)}/open`, copy ? { copy } : {}),
     getParts: () => request('GET', '/parts'),
     addPart: (part) => request('POST', '/parts', part),
     removePart: (name) => request('DELETE', `/parts/${encodeURIComponent(name)}`),

@@ -45,6 +45,7 @@ const SERVER_TYPE_LIST: Record<ServerMessage['type'], true> = {
   world: true,
   'world-changed': true,
   flash: true,
+  'arduino-tools': true,
   notice: true,
   'app-state': true,
   'app-state-changed': true,
