@@ -23,6 +23,7 @@
   import {
     SKETCHBOOK,
     diagnosticPlace,
+    diagnosticsByTab,
     isSketchFile,
     sizeLines,
     sketchNameProblem,
@@ -121,6 +122,12 @@
   const ready = $derived(info?.tools.state === 'ready');
   const dirty = $derived(tabs.filter((tab) => tab.text !== tab.saved));
   const errors = $derived(result?.diagnostics.filter((d) => d.severity === 'error') ?? []);
+  // The compiler's messages per tab, for the editors to underline. Made again only when the
+  // result or the tabs' names change (a string, so typing doesn't), so an underline an edit took
+  // away stays away until the next Verify.
+  const tabNames = $derived(tabs.map((tab) => tab.name).join('/'));
+  const tabDiagnostics = $derived(diagnosticsByTab(result?.diagnostics ?? [], tabNames.split('/')));
+  const NO_DIAGNOSTICS: SketchDiagnostic[] = [];
 
   async function loadInfo() {
     const r = await core.arduino();
@@ -610,6 +617,12 @@
           bind:this={editors[tab.name]}
           value={tab.saved}
           label={t('arduino.editor.label', { name: tab.name })}
+          file={tab.name}
+          others={() =>
+            tabs
+              .filter((other) => other.name !== tab.name)
+              .map((other) => ({ name: other.name, text: other.text }))}
+          diagnostics={tabDiagnostics.get(tab.name) ?? NO_DIAGNOSTICS}
           visible={visible && tab.name === active}
           onchange={(text) => edit(tab.name, text)}
         />

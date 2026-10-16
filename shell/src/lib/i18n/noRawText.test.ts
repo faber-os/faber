@@ -31,6 +31,7 @@ const ALLOWED = new Set([
   'µs',
   'OK', // the same in the languages Faber is likely to get, and used as a status word
   'Aa', // the type sample on a style swatch (aria-hidden): shows the font, not a word
+  'No diagnostics', // a CodeMirror phrase's name, which codemirror.ts translates with t()
 ]);
 
 /** Props and attributes whose value people read. */
@@ -71,9 +72,12 @@ const SOURCES = {
 /**
  * Files that never hold shell text: tests and their fakes, generated types, the catalogue. And
  * lib/state/diagnostics.ts: "Copy diagnostics" is a report for a bug tracker, kept in English on
- * purpose so maintainers can read every report (docs/translations.md).
+ * purpose so maintainers can read every report (docs/translations.md). And the Arduino editor's
+ * API catalogue (components/editor/arduinoApi.ts, faberlinkApi.ts): documentation of code, in
+ * English like the code it describes (docs/arduino-editor.md).
  */
-const SKIPPED = /^\/src\/(test\/|lib\/api\/generated\/|lib\/i18n\/|lib\/state\/diagnostics\.ts$)/;
+const SKIPPED =
+  /^\/src\/(test\/|lib\/api\/generated\/|lib\/i18n\/|lib\/state\/diagnostics\.ts$|components\/editor\/(arduinoApi|faberlinkApi)\.ts$)/;
 
 /** A catalogue key such as `settings.nav.units`, passed around to be translated later. */
 const KEY = /^[a-z][\w-]*(\.[\w-]+)+$/;

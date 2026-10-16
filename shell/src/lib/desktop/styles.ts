@@ -183,6 +183,26 @@ const STATUS: Record<
   },
 };
 
+/**
+ * The code editor's syntax colours (codemirror.ts): the same hues in every style, like the status
+ * colours, so code reads the same everywhere. Each is text, checked at 4.5:1 on the editor's
+ * background and its active line (styles.test.ts). Comments, operators and plain names use
+ * `--text-muted` and `--text`; FaberLink's classes are the type colour in bold.
+ */
+export const CODE_COLOURS: Record<string, Record<ThemeName, Oklch>> = {
+  keyword: { light: { l: 0.47, c: 0.17, h: 305 }, dark: { l: 0.79, c: 0.12, h: 305 } },
+  type: { light: { l: 0.47, c: 0.085, h: 190 }, dark: { l: 0.81, c: 0.1, h: 190 } },
+  function: { light: { l: 0.47, c: 0.15, h: 260 }, dark: { l: 0.8, c: 0.1, h: 258 } },
+  api: { light: { l: 0.5, c: 0.14, h: 48 }, dark: { l: 0.8, c: 0.12, h: 55 } },
+  constant: { light: { l: 0.49, c: 0.17, h: 350 }, dark: { l: 0.8, c: 0.12, h: 350 } },
+  string: { light: { l: 0.47, c: 0.12, h: 145 }, dark: { l: 0.81, c: 0.13, h: 145 } },
+  macro: { light: { l: 0.49, c: 0.15, h: 18 }, dark: { l: 0.79, c: 0.11, h: 18 } },
+  property: { light: { l: 0.44, c: 0.07, h: 230 }, dark: { l: 0.83, c: 0.05, h: 230 } },
+  'bracket-1': { light: { l: 0.5, c: 0.1, h: 80 }, dark: { l: 0.86, c: 0.13, h: 88 } },
+  'bracket-2': { light: { l: 0.49, c: 0.18, h: 330 }, dark: { l: 0.78, c: 0.14, h: 330 } },
+  'bracket-3': { light: { l: 0.48, c: 0.13, h: 245 }, dark: { l: 0.8, c: 0.1, h: 245 } },
+};
+
 /** `more`: Settings → Accessibility → Higher contrast. */
 export type ContrastLevel = 'normal' | 'more';
 
@@ -311,6 +331,13 @@ export function styleTokens(
             '--focus-ring': ink(0.1),
           },
     );
+  }
+
+  // Higher contrast moves code colours further from the background, like status text.
+  const codeDl = level === 'more' ? (theme === 'light' ? -0.1 : 0.07) : 0;
+  for (const [name, colours] of Object.entries(CODE_COLOURS)) {
+    const c = colours[theme];
+    tokens[`--code-${name}`] = ok({ ...c, l: Math.min(0.96, c.l + codeDl) });
   }
 
   tokens['--plate'] = PLATE[theme];

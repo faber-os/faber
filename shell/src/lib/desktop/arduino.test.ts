@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   diagnosticPlace,
+  diagnosticsByTab,
   groupDigits,
   isMainFile,
   isSketchFile,
@@ -64,6 +65,28 @@ describe('sizes and messages', () => {
     expect(diagnosticPlace({ file: 'Blink.ino', line: 5 })).toBe('Blink.ino:5');
     expect(diagnosticPlace({ file: 'FaberLink.h' })).toBe('FaberLink.h');
     expect(diagnosticPlace({})).toBe('');
+  });
+
+  it('sorts the compiler’s messages by the tab they point into', () => {
+    const d = (file: string | undefined, inSketch: boolean, line?: number) => ({
+      file,
+      inSketch,
+      line,
+      message: `${file}:${line}`,
+    });
+    const list = [
+      d('Rover.ino', true, 3),
+      d('motor.h', true, 1),
+      d('Rover.ino', true, 9),
+      d('FaberLink.h', false, 9),
+      d('Rover.ino', true),
+      d('src/extra.cpp', true, 2),
+      d(undefined, false),
+    ];
+    const byTab = diagnosticsByTab(list, ['Rover.ino', 'motor.h']);
+    expect([...byTab.keys()]).toEqual(['Rover.ino', 'motor.h']);
+    expect(byTab.get('Rover.ino')!.map((x) => x.line)).toEqual([3, 9]);
+    expect(byTab.get('motor.h')!.map((x) => x.line)).toEqual([1]);
   });
 
   it('finds a line and column in the text', () => {

@@ -35,9 +35,11 @@ once by hand (below). Steps marked *(needs hardware)* have not run on a real boa
    It is saved in Files as `Arduino/<name>/<name>.ino`, exactly as the Arduino IDE keeps
    sketches. *(tested)*
 4. **Write the code.** More files of the sketch (`.h`, `.cpp`) are tabs; **+** adds one. Ctrl+F
-   searches, Ctrl+Z undoes. Ctrl+S saves every changed tab. *(tested)*
+   searches, Ctrl+Z undoes. Ctrl+S saves every changed tab. The editor helps while you type
+   (below). *(tested)*
 5. **Verify** (Ctrl+R) saves and compiles. Errors are listed with their file and line, e.g.
-   `motor.h:3:2`; click one to jump there. When it compiles, the size shows like the IDE's:
+   `motor.h:3:2`; click one to jump there. They are also underlined in the code (red for an
+   error, amber for a warning) with a mark in the margin; hover the underline to read it. When it compiles, the size shows like the IDE's:
    "Program: 6 896 bytes of 32 256 (21 %)". The first compile takes a minute (the Arduino core is
    compiled once); later ones are quicker. *(tested)*
 6. **Pick the board and the port.** An official Uno or Mega is recognised by its USB ids, and the
@@ -52,6 +54,39 @@ FaberLink is always there for a sketch: `#include <FaberLink.h>` works without i
 library, and it is the copy built into this Faber, so the board always speaks the core's protocol
 version (a FaberLink folder in the Arduino IDE's own libraries is not used). Other libraries can't
 be installed from the editor yet.
+
+## Help while you type
+
+All of it works offline, from what Faber knows about the Arduino language and from the sketch
+itself. *(tested: unit tests for each piece, the window against a fake core, and typing in a
+browser in `shell/e2e/arduino.spec.ts`)*
+
+- **Colours.** Keywords, types, your functions, the Arduino API (`pinMode`, `millis`,
+  `Serial` …), constants (`HIGH`, `A0`, and ALL_CAPS names, the C++ habit for constants),
+  FaberLink's classes (in bold), strings, comments, `#include` and `#define`, and brackets by how
+  deeply they nest (three colours in turn). The colours belong to the style you picked in
+  Settings, light and dark, and are checked to read well on the editor in every style.
+- **Completion.** After two letters of a name the editor offers what fits: the sketch's own
+  functions, variables, `#define`s, classes and the local variables in scope (from every tab of
+  the sketch), the Arduino API, FaberLink, C++ keywords and snippets (`setup`, `for`, `if`,
+  `ifelse`, `switch`, `while`, `every` for a `millis()` timer without `delay()`). After `.` it
+  offers what that object has: `Serial.`, `Wire.`, a FaberLink part you declared
+  (`FaberUltrasonic front(…); front.`), or your own struct. After `#` the directives, after
+  `#include <` the libraries. Ctrl+Space opens the list anywhere; arrows pick, Enter or Tab
+  takes it, Escape closes it. Taking a function writes its call with its parameters to type
+  over: Tab goes to the next one.
+- **Signature help.** Inside a call, the function's parameters show above it, with the one you
+  are typing in bold. Escape hides it.
+- **Hover docs.** Rest the pointer on a name to see what it is: an Arduino or FaberLink function
+  with its signature and what it does (and the `#include` it needs), or your own function,
+  variable or class with its declaration and where it is (`motor.h:12`).
+- **Errors in the code**, after Verify (above). Editing an underlined line takes its underline
+  away, since the message may not be true any more; the next Verify shows the new ones. F8 goes
+  to the next one, Ctrl+Shift+M lists them below the code.
+
+The editor reads the sketch the way the C++ grammar sees it, not the way the compiler does: it
+can't know the types a library you include defines, or what a macro expands to. A language server
+(`clangd`) would know all of it; see "Not built yet".
 
 ## What you should see
 
@@ -145,6 +180,18 @@ FaberLink library) has the same build id, because it is the same code to edit.
 | Reading a program back | `faber_flash::read_back` (`sdk/rust/flash`) |
 | The build id on the wire | `FABER_BUILD_ID` in `firmware/faberlink`, `HelloAck::build_id` in `sdk/rust/faberlink` |
 | The window | `shell/src/windows/ArduinoWindow.svelte`, the editor in `shell/src/components/CodeEditor.svelte` and `codemirror.ts` |
+| Help while you type | `shell/src/components/editor/`: the catalogue (`arduinoApi.ts`, `faberlinkApi.ts`), the sketch's names from the syntax tree (`symbols.ts`, `sketchIndex.ts`), `completion.ts`, `signature.ts`, `hover.ts`, the extra colours and bracket depth (`semantic.ts`), the compiler's messages in the code (`diagnostics.ts`). All of it is in the editor's chunk, loaded only when an editor opens |
+| The colours | `CODE_COLOURS` in `shell/src/lib/desktop/styles.ts` (`--code-*` tokens, the same hues in every style), checked at 4.5:1 on the editor and its active line (7:1 with higher contrast) in `styles.test.ts` |
+
+**Adding an API entry.** The catalogue is plain data in `shell/src/components/editor/`. A
+function is one line: `fn('void pinMode(uint8_t pin, uint8_t mode)', 'What it does.')`, with a
+list of signatures for overloads; a class has its constructors and members the same way; a
+constant, object or type is a name and a description. Write the description in your own words,
+short, in English: it documents code, like the code itself, so it is data and not a text of the
+interface (it isn't translated; `noRawText.test.ts` skips these two files). `catalogue.test.ts`
+checks that every entry has a signature and a description and that no name is there twice.
+FaberLink's entries mirror `firmware/faberlink/src/FaberLink.h`: `faberlinkApi.test.ts` reads the
+header and fails when a public class or method is added or removed there and not here.
 
 `arduino-cli` is found in this order: Faber's own copy in `<data>/tools/arduino-cli/` (installed
 for Faber, with its own data folder under `<data>/tools/`), then one on the `PATH`, then the one the
@@ -165,3 +212,7 @@ without a build id, for an Uno and a Mega, with no warnings from the library. No
 - Installing other libraries (`arduino-cli lib install`, behind a confirm).
 - Boards other than the Uno, Nano and Mega 2560 (the flasher's).
 - A serial monitor inside the editor (Tools → Serial monitor works on the port).
+- **A language server (`clangd`)**, planned as an option on top of the built-in help: it would
+  give completion and errors as you type from the real compiler's view (library types, macros,
+  templates), at the cost of a large program on the machine and a compile database per sketch.
+  The built-in help stays, so the editor works without it.
