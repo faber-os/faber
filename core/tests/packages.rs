@@ -432,6 +432,63 @@ mod backups {
         reading_where(&c.app, "front/distance", |r| r["reading"]["meters"] == 1.5).await;
     }
 
+    /// Share setup (docs/apps.md §7, Q3): a backup without the user's files, to set up another
+    /// machine the same way. It holds the parts, the settings (but not the machine's name or its
+    /// developer settings), the apps and the installed packages; restored through the usual
+    /// checks, the receiving machine keeps its own name and files.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_shared_setup_sets_up_another_machine_but_keeps_its_name_and_files() {
+        let a = core();
+        call(
+            &a.app,
+            "POST",
+            "/api/v0/packages?name=my-sensor-0.1.0.faberpkg",
+            Some(Body::from(package(SENSOR))),
+        )
+        .await;
+        let part = json!({"name": "front", "connector": "my-sensor", "port": "replay:bench"});
+        assert_eq!(json_call(&a.app, "POST", "/api/v0/parts", part).await.0, StatusCode::CREATED);
+        let (_, mut settings) = call(&a.app, "GET", "/api/v0/settings", None).await;
+        settings["machine"]["name"] = json!("bench");
+        settings["appearance"]["theme"] = json!("dark");
+        assert_eq!(json_call(&a.app, "PUT", "/api/v0/settings", settings).await.0, StatusCode::OK);
+        std::fs::write(a.dir.path().join("files/Documents/secret.txt"), "mine").unwrap();
+        let (s, info) = call(&a.app, "POST", "/api/v0/backups/setup", None).await;
+        assert_eq!(s, StatusCode::CREATED, "{info}");
+        let path = info["path"].as_str().unwrap();
+        assert!(path.starts_with("home:/Backups/bench-setup-") && path.ends_with(".zip"), "{path}");
+        let zip = on_disk(&a, path);
+        let names: Vec<String> = {
+            let z = zip::ZipArchive::new(std::fs::File::open(&zip).unwrap()).unwrap();
+            z.file_names().map(|n| n.unwrap().into_owned()).collect()
+        };
+        assert!(
+            names.iter().all(|n| !n.starts_with("files/")),
+            "no Desktop, Documents or Recordings: {names:?}"
+        );
+        assert!(names.contains(&"connectors/my-sensor/faber.toml".to_string()), "{names:?}");
+
+        let b = core();
+        let (_, mut theirs) = call(&b.app, "GET", "/api/v0/settings", None).await;
+        theirs["machine"]["name"] = json!("other");
+        assert_eq!(json_call(&b.app, "PUT", "/api/v0/settings", theirs).await.0, StatusCode::OK);
+        std::fs::write(b.dir.path().join("files/Documents/theirs.txt"), "keep").unwrap();
+        let dest = b.dir.path().join("files/Backups");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::copy(&zip, dest.join(zip.file_name().unwrap())).unwrap();
+        let (s, e) = restore(&b, path).await;
+        assert_eq!(s, StatusCode::NO_CONTENT, "{e}");
+        let (_, after) = call(&b.app, "GET", "/api/v0/settings", None).await;
+        assert_eq!(
+            (after["machine"]["name"].as_str(), after["appearance"]["theme"].as_str()),
+            (Some("other"), Some("dark"))
+        );
+        assert_eq!(package_ids(&b).await, [("my-sensor".to_string(), "0.1.0".to_string())]);
+        reading_where(&b.app, "front/distance", |r| r["reading"]["meters"] == 1.5).await;
+        assert_eq!(std::fs::read_to_string(b.dir.path().join("files/Documents/theirs.txt")).unwrap(), "keep");
+        assert!(!b.dir.path().join("files/Documents/secret.txt").exists(), "nothing of the other's files");
+    }
+
     /// Connector code in a backup is never copied in blind: it goes through the package checks
     /// and the staging load first, and a connector that fails fails the whole restore.
     #[tokio::test(flavor = "multi_thread")]

@@ -1278,6 +1278,17 @@ impl Machine {
 
     /// Saves a backup in `home:/Backups` (D41). Returns its path and size.
     pub fn create_backup(&self, include_recordings: bool) -> Result<(String, u64), MachineError> {
+        self.write_backup(include_recordings, false)
+    }
+
+    /// Saves this machine's setup in `home:/Backups` (Settings → Storage → Share setup): a backup
+    /// without the user's files, the machine's name or its developer settings, to set up another
+    /// machine the same way. It restores like a backup. Returns its path and size.
+    pub fn share_setup(&self) -> Result<(String, u64), MachineError> {
+        self.write_backup(false, true)
+    }
+
+    fn write_backup(&self, include_recordings: bool, setup: bool) -> Result<(String, u64), MachineError> {
         let home = self.files.home_dir().to_path_buf();
         let settings_path = self.config_path.with_file_name(settings_file::FILE_NAME);
         // No install or uninstall half-way through while the connectors are copied.
@@ -1286,6 +1297,7 @@ impl Machine {
         self.save_app_states();
         let (packages_path, connectors, connector_ids) = self.packages_to_back_up()?;
         let (apps_toml, apps, app_ids) = self.apps_to_back_up()?;
+        let settings_text = setup.then(|| crate::settings::setup_text(&self.settings.get()));
         let src = backup::Sources {
             parts_toml: &self.config_path,
             settings_toml: &settings_path,
@@ -1297,20 +1309,23 @@ impl Machine {
             app_ids: &app_ids,
             home: &home,
             include_recordings,
+            setup: settings_text.as_deref(),
         };
         self.check_room(
             backup::source_bytes(&src),
-            "The backup",
+            if setup { "The setup" } else { "The backup" },
             "Delete old backups or recordings and empty the Trash, or leave the recordings out.",
         )?;
         let folder = home.join(Special::Backups.name());
+        let named = if setup { backup::setup_file_name } else { backup::file_name };
         let name = files::unique_name(
             &folder,
-            &backup::file_name(jiff::Timestamp::now(), &self.display_zone(), &self.settings().machine.name),
+            &named(jiff::Timestamp::now(), &self.display_zone(), &self.settings().machine.name),
         );
         let bytes = backup::create(&src, &folder.join(&name))?;
         let p = VPath::home(&["Backups", &name]);
-        tracing::info!(target: "core::backup", "saved the backup {p} ({bytes} bytes)");
+        let what = if setup { "setup" } else { "backup" };
+        tracing::info!(target: "core::backup", "saved the {what} {p} ({bytes} bytes)");
         self.notify_files(std::slice::from_ref(&p));
         Ok((p.to_string(), bytes))
     }
@@ -1386,7 +1401,8 @@ impl Machine {
             self.restore_apps_config(text)?;
         }
         if let Some(s) = restored_settings {
-            self.settings.restore(s)?;
+            // A setup has no name of its own: this machine keeps its own.
+            self.settings.restore(s, archive.is_setup())?;
         }
         let result = items.iter().try_for_each(|(vp, item)| self.restore_item(&mut archive, vp, item));
         self.notify_folders(&[VPath::home(&[])]);

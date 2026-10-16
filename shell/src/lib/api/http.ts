@@ -128,6 +128,8 @@ export interface CoreHttp {
   getStorage(): Promise<StorageInfo>;
   /** Saves a backup in `home:/Backups`. `507 disk-full` if it won't fit. */
   createBackup(includeRecordings: boolean): Promise<BackupInfo>;
+  /** Saves this machine's setup: a backup without the user's files or the machine's name. */
+  shareSetup(): Promise<BackupInfo>;
   /** Restores a backup from the home folder; checked first (`422 config-invalid` …). */
   restoreBackup(path: string): Promise<void>;
 
@@ -305,6 +307,7 @@ export function createHttp(
 
     getStorage: () => request('GET', '/storage'),
     createBackup: (includeRecordings) => request('POST', '/backups', { includeRecordings }),
+    shareSetup: () => request('POST', '/backups/setup'),
     restoreBackup: (path) => request('POST', '/backups/restore', { path }),
 
     getTranslations: () => request('GET', '/translations'),

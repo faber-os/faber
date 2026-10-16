@@ -386,6 +386,7 @@ File error codes: `bad-path`, `not-found`, `already-exists`, `protected`, `not-a
 |---|---|
 | `GET /api/v0/storage` | `StorageInfo`: bytes used by `home:/Recordings`, `Documents`, `Desktop` and `Backups` (`recordingsBytes` …), and `freeBytes` / `totalBytes` of the disk that holds the data folder. |
 | `POST /api/v0/backups` | `BackupRequest` `{includeRecordings}` → `201 BackupInfo` `{path, bytes}`. Errors: `507 disk-full` (checked before anything is written), `500 io-error`. |
+| `POST /api/v0/backups/setup` | No body → `201 BackupInfo`: **Share setup**, a backup without the user's files (below). Errors as for a backup. |
 | `POST /api/v0/backups/restore` | `PathRequest` with a `.zip` in the home folder → `204`. Errors: `400 bad-path` (not in home), `404 not-found`, `422 backup-invalid`, `422 config-invalid` (with the line), `507 disk-full`. |
 
 A backup (D41) is `home:/Backups/faber-backup-YYYY-MM-DD-HHMM.zip`, named after the minute it was
@@ -441,6 +442,15 @@ alone. Then:
   aren't in the backup stay.
 - `settings` and `files-changed` (`home:/`) are announced, and restored recordings become replay
   ports.
+
+**Share setup** (Settings → Storage; apps.md §7, Q3) makes `home:/Backups/<machine>-setup-YYYY-MM-DD-HHMM.zip`:
+a backup without the user's files, to set up another machine the same way. It holds
+`config/parts.toml`, `config/settings.toml` **without** `machine` (the name) and `developer`,
+`config/packages.toml`, `config/apps.toml` and the installed connectors and apps (with their saved
+state), and `config/setup.toml` (`kind = "setup"`) to say what it is, but nothing from `files/`
+(no Desktop, Documents or Recordings). It is restored with `POST /api/v0/backups/restore` like a
+backup, through every check above; the receiving machine **keeps its own name**, its files and its
+developer settings. A setup that holds files is refused (`422 backup-invalid`).
 
 Backups of any size can be downloaded with `GET /api/v0/files/content?path=…&download=1`, which
 streams from disk.

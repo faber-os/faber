@@ -506,6 +506,11 @@ export class CoreState {
     return this.call(() => this.http.createBackup(includeRecordings));
   }
 
+  /** Settings → Storage → Share setup: this machine's parts, apps and settings, without its files. */
+  shareSetup(): Promise<Result<BackupInfo>> {
+    return this.call(() => this.http.shareSetup());
+  }
+
   restoreBackup(path: string): Promise<Result<void>> {
     return this.call(() => this.http.restoreBackup(path));
   }

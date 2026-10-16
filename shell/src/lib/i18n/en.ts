@@ -1264,6 +1264,17 @@ export const en = {
   'settings.storage.backup.now': 'Back up now',
   'settings.storage.backup.busy': 'Backing up…',
   'settings.storage.backup.saved': 'Saved {name} ({size}).',
+  'settings.storage.setup.name': "Share this machine's setup",
+  'settings.storage.setup.desc':
+    "Saves parts, settings, installed connectors and apps as one .zip in Backups, without your files, this machine's name or its developer settings. Restore it on another machine to set it up the same way.",
+  'settings.storage.setup.now': 'Share setup…',
+  'settings.storage.setup.busy': 'Saving…',
+  'settings.storage.setup.saved':
+    'Saved {name} ({size}). Download it, put it in the other machine’s Backups folder and restore it there.',
+  'settings.storage.setup.restoreTitle': 'Set up this machine from this setup?',
+  'settings.storage.setup.restoreBody':
+    'Parts, apps, installed connectors and settings become the ones in the setup. This machine keeps its name, its files and its developer settings.',
+  'settings.storage.setup.restored': 'Set up from {name}. This machine kept its name and files.',
   'settings.storage.backups.name': 'Backups',
   'settings.storage.backups.open': 'Open in Files',
   'settings.storage.backups.loading': 'Loading…',
