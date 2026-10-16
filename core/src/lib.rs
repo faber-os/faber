@@ -21,6 +21,7 @@ pub mod ports;
 pub mod roles;
 pub mod router;
 pub mod sandbox;
+pub mod sessions;
 
 pub mod runtime;
 pub mod settings;
@@ -28,6 +29,7 @@ pub mod sim;
 pub mod simulation;
 pub mod suggest;
 pub mod translations;
+pub mod users;
 
 // Layer 3: runs parts (`runtime` and `suggest` too; see docs/development.md).
 pub mod apps;
