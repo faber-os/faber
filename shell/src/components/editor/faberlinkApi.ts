@@ -246,6 +246,22 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
     ],
   },
   {
+    name: 'FaberToF',
+    doc: 'A VL53L0X laser distance sensor on I²C, 3 cm to 2 m. Needs #include <FaberToF.h> and Pololu’s VL53L0X library. One sensor needs nothing more; several need an address each (faberlink::TOF_ADDRESS_30 …) and an XSHUT pin each: at every start the board holds them all off, then starts them one at a time and gives each its address.',
+    library: 'faberlink',
+    include: 'FaberToF.h',
+    constructors: [
+      parseSignature(
+        'FaberToF(const char* name, faberlink::ToFAddress address = faberlink::TOF_ADDRESS_29, uint8_t xshutPin = faberlink::NO_PIN, float minM = 0.03f, float maxM = 2.0f)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Starts every FaberToF of the sketch, one at a time; FaberLink calls it.'),
+      f('bool ready() const', 'True when it answered as it started.'),
+      ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
     name: 'FaberBattery',
     doc: 'A battery measured through a voltage divider (battery + to R1 to the pin to R2 to GND). dividerRatio is (R1 + R2) / R2; keep the pin below referenceVolts when the battery is full.',
     library: 'faberlink',
@@ -306,6 +322,18 @@ export const FABERLINK_CONSTANTS: ApiConstant[] = [
   ),
   k('IMU_ADDRESS_68', 'FaberImu: the MPU6050 at 0x68, its AD0 open or low (the default).'),
   k('IMU_ADDRESS_69', 'FaberImu: the MPU6050 at 0x69, its AD0 at VCC.'),
+  k(
+    'TOF_ADDRESS_29',
+    'FaberToF: the address it gets at every start: its own, for one sensor without XSHUT (the default).',
+  ),
+  k('TOF_ADDRESS_30', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_31', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_32', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_33', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_34', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_35', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_36', 'FaberToF: the address it gets at every start.'),
+  k('TOF_ADDRESS_37', 'FaberToF: the address it gets at every start.'),
   k('SERVO_HOLD', 'FaberServo: holds its angle when nobody drives it (the default).'),
   k('SERVO_RELEASE', 'FaberServo: goes limp (no pulses) when nobody drives it.'),
   k('OUTPUT_ON_OFF', 'FaberOutput: on or off, Faber sees a digital output (the default).'),

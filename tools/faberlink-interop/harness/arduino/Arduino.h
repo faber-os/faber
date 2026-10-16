@@ -38,6 +38,7 @@ void analogWrite(uint8_t pin, int value);
 int analogRead(uint8_t pin);
 unsigned long millis();
 void delayMicroseconds(unsigned int us);
+void delay(unsigned long ms);
 unsigned long pulseIn(uint8_t pin, uint8_t state, unsigned long timeoutUs = 1000000UL);
 // As on an Uno: D2 is interrupt 0, D3 interrupt 1 (variants/standard/pins_arduino.h).
 inline int digitalPinToInterrupt(uint8_t pin) { return pin == 2 ? 0 : pin == 3 ? 1 : NOT_AN_INTERRUPT; }

@@ -67,6 +67,10 @@ mod ffi {
         pub fn fla_i2c_set(h: *mut c_void, address: u8, reg: u8, value: u8);
         pub fn fla_i2c_get(h: *mut c_void, address: u8, reg: u8) -> u8;
         pub fn fla_wire_timeout(h: *mut c_void) -> u32;
+        pub fn fla_tof_count(h: *mut c_void) -> usize;
+        pub fn fla_tof_address(h: *mut c_void, i: usize) -> u8;
+        pub fn fla_tof_set_mm(h: *mut c_void, i: usize, mm: u16);
+        pub fn fla_tof_init_at(h: *mut c_void, i: usize) -> i32;
     }
 
     /// `PartSpec` in glue.cpp.
@@ -166,6 +170,26 @@ mod ffi {
         pub fn i2c_get(&mut self, address: u8, reg: u8) -> u8 {
             // SAFETY: self.0 is a live sketch.
             unsafe { fla_i2c_get(self.0, address, reg) }
+        }
+
+        pub fn tof_count(&mut self) -> usize {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_tof_count(self.0) }
+        }
+
+        pub fn tof_address(&mut self, i: usize) -> u8 {
+            // SAFETY: self.0 is a live sketch; i is checked by the caller against tof_count.
+            unsafe { fla_tof_address(self.0, i) }
+        }
+
+        pub fn tof_set_mm(&mut self, i: usize, mm: u16) {
+            // SAFETY: as above.
+            unsafe { fla_tof_set_mm(self.0, i, mm) }
+        }
+
+        pub fn tof_init_at(&mut self, i: usize) -> i32 {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_tof_init_at(self.0, i) }
         }
 
         pub fn wire_timeout(&mut self) -> u32 {
@@ -524,6 +548,9 @@ pub enum SketchPart {
     AnalogIn { name: &'static str, pin: u8 },
     /// `FaberImu name(name, address)`: an MPU6050 on I2C.
     Imu { name: &'static str, address: u8 },
+    /// `FaberToF name(name, xshut, address)` (or `name(name)` without XSHUT), with a simulated
+    /// VL53L0X wired to that XSHUT pin.
+    ToF { name: &'static str, xshut: u8, address: u8 },
 }
 
 impl SketchPart {
@@ -541,7 +568,8 @@ impl SketchPart {
             | SketchPart::Encoder { name, .. }
             | SketchPart::MotorWithEncoder { name, .. }
             | SketchPart::AnalogIn { name, .. }
-            | SketchPart::Imu { name, .. } => name,
+            | SketchPart::Imu { name, .. }
+            | SketchPart::ToF { name, .. } => name,
         }
     }
 }
@@ -635,6 +663,7 @@ impl Sketch {
                     SketchPart::MotorWithEncoder { pwm, dir, .. } => (10, 0, [pwm, dir, NO_PIN, NO_PIN], 0.0),
                     SketchPart::AnalogIn { pin, .. } => (11, 0, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0),
                     SketchPart::Imu { address, .. } => (12, 0, [address, NO_PIN, NO_PIN, NO_PIN], 0.0),
+                    SketchPart::ToF { xshut, address, .. } => (13, 0, [xshut, address, NO_PIN, NO_PIN], 0.0),
                 };
                 ffi::PartSpec { kind, name: name.as_ptr(), driver, pins, max_velocity }
             })
@@ -695,6 +724,28 @@ impl Sketch {
     /// `None` nothing (its pull-up, if on, holds it HIGH).
     pub fn set_input(&mut self, pin: u8, level: Option<bool>) {
         self.handle.set_digital(pin, level.map_or(-1, i32::from));
+    }
+
+    /// The address of simulated VL53L0X `i` now (in declaration order).
+    pub fn tof_address(&mut self, i: usize) -> u8 {
+        assert!(i < self.handle.tof_count(), "no VL53L0X {i}");
+        self.handle.tof_address(i)
+    }
+
+    /// The range simulated VL53L0X `i` sees from now on (mm; 8190 and up is out of range).
+    pub fn tof_set_mm(&mut self, i: usize, mm: u16) {
+        assert!(i < self.handle.tof_count(), "no VL53L0X {i}");
+        self.handle.tof_set_mm(i, mm);
+    }
+
+    /// Every `init()` the sketch made, in order: the simulated sensor it found, or `None` when it
+    /// found none (off, or two answering at 0x29).
+    pub fn tof_inits(&mut self) -> Vec<Option<usize>> {
+        (0..)
+            .map(|i| self.handle.tof_init_at(i))
+            .take_while(|&s| s != -2)
+            .map(|s| usize::try_from(s).ok())
+            .collect()
     }
 
     /// Puts a device on the I²C bus at `address` (it acknowledges), or takes it off.

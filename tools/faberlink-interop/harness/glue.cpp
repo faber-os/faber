@@ -14,6 +14,7 @@
 #include "FaberServo.h"
 #include "FaberEncoder.h"
 #include "FaberImu.h"
+#include "FaberToF.h"
 
 namespace {
 
@@ -62,6 +63,17 @@ struct Pins {
   int i2cAddress = -1;
   bool wireBegun = false;
   uint32_t wireTimeoutUs = 0;
+  // Simulated VL53L0X sensors: the XSHUT pin each is wired to (NO_PIN: none), its address now,
+  // whether it is measuring, the range it sees (mm), and every init() in order (by sensor, -1 for
+  // one that found no sensor).
+  struct Tof {
+    uint8_t xshut;
+    uint8_t address;
+    bool started;
+    uint16_t mm;
+  };
+  std::vector<Tof> tofs;
+  std::vector<int> tofInits;
   std::vector<PinWrite> log;
   unsigned long nowMs;
   unsigned long echoUs;
@@ -94,7 +106,8 @@ class FakeSerial : public HardwareSerial {
 // the active level), 8 FaberServo(name, pin, 0, 180, driver as the safe state), 9 FaberEncoder(name,
 // pins[0], pins[1], maxVelocity as the pulses per rev), 10 FaberMotor(name, pins[0], pins[1]) using
 // the encoder declared just before it, 11 FaberAnalogIn(name, pins[0], 10, 5.0), 12 FaberImu(name,
-// pins[0] as its address).
+// pins[0] as its address), 13 FaberToF(name, pins[0] as XSHUT, pins[1] as its address), with a
+// simulated VL53L0X wired to that XSHUT pin.
 struct PartSpec {
   uint8_t type;
   const char* name;
@@ -120,6 +133,7 @@ struct Sketch {
   std::vector<std::unique_ptr<FaberEncoder>> encoders;
   std::vector<std::unique_ptr<FaberAnalogIn>> analogs;
   std::vector<std::unique_ptr<FaberImu>> imus;
+  std::vector<std::unique_ptr<FaberToF>> tofs;
 };
 
 // Parts register themselves in a global table until the next FaberLink::begin(), as globals in a
@@ -166,6 +180,8 @@ int analogRead(uint8_t pin) { return current ? current->analogIn[pin] : 0; }
 unsigned long millis() { return current ? current->nowMs : 0; }
 
 void delayMicroseconds(unsigned int) {}
+
+void delay(unsigned long) {}
 
 unsigned long pulseIn(uint8_t, uint8_t, unsigned long timeoutUs) {
   if (!current || current->echoUs > timeoutUs) return 0;
@@ -233,6 +249,55 @@ int TwoWire::read() {
   const int v = current->i2cIn.front();
   current->i2cIn.erase(current->i2cIn.begin());
   return v;
+}
+
+// The stand-in VL53L0X library. A sensor is on while its XSHUT isn't an output driven LOW; one
+// that is off forgets its address, as a real one does at power-up.
+namespace {
+bool tofOn(const Pins& p, const Pins::Tof& t) {
+  if (t.xshut == faberlink::NO_PIN) return true;
+  const PinState& s = p.state[t.xshut];
+  return !(s.mode == OUTPUT && s.kind == 1 && s.value == 0);
+}
+}  // namespace
+
+bool VL53L0X::init(bool) {
+  sensor_ = -1;
+  if (!current) return false;
+  int found = -1, answering = 0;
+  for (size_t i = 0; i < current->tofs.size(); i++) {
+    Pins::Tof& t = current->tofs[i];
+    if (!tofOn(*current, t)) {
+      t.address = 0x29;
+      t.started = false;
+      continue;
+    }
+    if (t.address == 0x29) {
+      answering++;
+      found = static_cast<int>(i);
+    }
+  }
+  // Two sensors at 0x29 answer on top of each other: the transfer fails.
+  if (answering != 1) found = -1;
+  current->tofInits.push_back(found);
+  sensor_ = found;
+  return found >= 0;
+}
+
+void VL53L0X::setAddress(uint8_t a) {
+  if (current && sensor_ >= 0) current->tofs[sensor_].address = a;
+}
+
+void VL53L0X::startContinuous(uint32_t) {
+  if (current && sensor_ >= 0) current->tofs[sensor_].started = true;
+}
+
+uint16_t VL53L0X::readRangeContinuousMillimeters() {
+  if (!current || sensor_ < 0 || !current->tofs[sensor_].started || timeout_ == 0) {
+    timedOut_ = true;  // without a time-out the real one could wait for ever: the test says so
+    return 65535;
+  }
+  return current->tofs[sensor_].mm;
 }
 
 // The stand-in Servo library: the pulse goes to the pin while attached.
@@ -343,6 +408,16 @@ void* fla_new(const PartSpec* parts, size_t n) {
           s->imus.emplace_back(new FaberImu(name, static_cast<faberlink::ImuAddress>(p.pins[0])));
         }
         break;
+      case 13: {
+        Pins::Tof t = {p.pins[0], 0x29, false, 1000};
+        s->pins.tofs.push_back(t);
+        if (p.pins[0] == faberlink::NO_PIN) {
+          s->tofs.emplace_back(new FaberToF(name));  // the shortest call
+        } else {
+          s->tofs.emplace_back(new FaberToF(name, static_cast<faberlink::ToFAddress>(p.pins[1]), p.pins[0]));
+        }
+        break;
+      }
       default:
         s->batteries.emplace_back(new FaberBattery(name, p.pins[0], 3.0f, 3));
         break;
@@ -421,6 +496,19 @@ void fla_i2c_device(void* h, uint8_t address, int32_t present) { use(h)->pins.i2
 void fla_i2c_set(void* h, uint8_t address, uint8_t reg, uint8_t value) { use(h)->pins.i2cRegs[address & 0x7F][reg] = value; }
 
 uint8_t fla_i2c_get(void* h, uint8_t address, uint8_t reg) { return use(h)->pins.i2cRegs[address & 0x7F][reg]; }
+
+// The simulated VL53L0X sensors: their number; sensor i's address now; set the range it sees;
+// the i-th init() (the sensor it found, -1 for none, -2 past the end).
+size_t fla_tof_count(void* h) { return use(h)->pins.tofs.size(); }
+
+uint8_t fla_tof_address(void* h, size_t i) { return use(h)->pins.tofs[i].address; }
+
+void fla_tof_set_mm(void* h, size_t i, uint16_t mm) { use(h)->pins.tofs[i].mm = mm; }
+
+int32_t fla_tof_init_at(void* h, size_t i) {
+  const std::vector<int>& inits = use(h)->pins.tofInits;
+  return i < inits.size() ? inits[i] : -2;
+}
 
 uint32_t fla_wire_timeout(void* h) { return use(h)->pins.wireBegun ? use(h)->pins.wireTimeoutUs : 0xFFFFFFFFu; }
 }

@@ -115,6 +115,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: arduino/setup-arduino-cli@v2
       - run: arduino-cli core update-index && arduino-cli core install arduino:avr
+      # FaberServo.h needs the Servo library, which comes with the Arduino IDE but not with the
+      # core. (FaberToF.h needs Pololu's VL53L0X and has no example yet: Faber can't install it.)
+      - run: arduino-cli lib install Servo
       - name: Every example compiles, and fits an Uno
         run: |
           for board in arduino:avr:uno arduino:avr:mega; do

@@ -279,7 +279,10 @@ What exists, and where it differs in detail from the design above. The decisions
   joystick is two of these and a button until `rc-input` exists). `imu-mpu6050` (`FaberImu`:
   `bus = "i2c"`, addresses 0x68/0x69 with the AD0 hint, so the allocator catches a clash with a
   clock module at 0x68). The golden plans now also split when a part would make the plan wrong
-  (an I²C part where the bus's pins are already used as GPIO).
+  (an I²C part where the bus's pins are already used as GPIO). `tof-vl53l0x` (`FaberToF`, an
+  optional XSHUT role and an address 0x29-0x37) is read and checked but **not offered**: its one
+  shape is `todo` until Faber can install Pololu's VL53L0X library, and the API leaves out a
+  template with no usable shape.
 - **Libraries a part needs.** A part whose class needs another library has its own header
   (`FaberServo.h` needs the Arduino Servo library). The Servo library comes with the Arduino IDE,
   but an `arduino-cli` run on its own (Faber's own copy, or the IDE's run by Faber) doesn't look

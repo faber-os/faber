@@ -404,6 +404,16 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   (`Wire.setWireTimeout`, AVR core 1.8.3 and later), so a missing or stuck IMU never hangs `loop()`
   and the board's safety checks; it is woken again when it answers. `whoAmI()` says which chip
   answered, since boards sold as MPU6050 sometimes carry another.
+- `FaberToF` (`distance@1`, kind laser-tof, `#include <FaberToF.h>`, 2026-10-16): a VL53L0X on
+  I²C through **Pololu's VL53L0X library** (MIT), which isn't on the computer this was built on, so
+  it is **written to the library's documented API and not compiled against it**: it is tested on
+  the PC against a stand-in with that API, its template's one shape is `todo` (refused as
+  `shape-not-ready`, and the template isn't offered), and it has no example (CI compiles every
+  example). `FaberToF left("left", faberlink::TOF_ADDRESS_30, 4);` gives a sensor an address and
+  an XSHUT pin; at every start the first `begin()` holds every XSHUT low, then releases them one
+  at a time (as an input: XSHUT is never driven HIGH, since some carriers take 3.3 V at most),
+  starts each sensor and gives it its address. It measures continuously; a read waits at most
+  40 ms. 0.03-2 m and a 25° cone (2 m from ST's datasheet, the rest general figures to verify).
 - Examples: `examples/MotorAndDistance`, `examples/MotorL298N` (two motors on an L298N),
   `examples/Ultrasonic`, `examples/BatteryMonitor`, `examples/ButtonAndBumper`,
   `examples/LedAndRelay`, `examples/ServoArm`, `examples/WheelEncoder`,
@@ -412,7 +422,8 @@ void loop()  { link.poll(); }            // everything else is done by the libra
 - **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
   does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
   sends it at the end of every `HELLO_ACK` (§3). Faber then shows which sketch the board runs.
-- Not built yet: VL53L0X, a closed speed loop with an encoder, a planar-base part with
+- Not built yet: the VL53L0X compiled against Pololu's library, the VL53L1X, a closed speed loop
+  with an encoder, a planar-base part with
   on-board ramp-down (the interop harness has a plain test one, for SENNEP's fake Mega:
   `FakeBoard::sennep`), and negotiating 1 Mbaud.
 - **Where it lives:** inside the Faber repo for now. Moving it to its own repo

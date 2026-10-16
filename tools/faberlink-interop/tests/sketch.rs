@@ -745,3 +745,56 @@ fn an_imu_with_ad0_high_is_at_0x69_and_one_that_goes_away_stops_reporting() {
     l.run(200);
     assert!(last_imu(&l).is_some(), "plugged back in: it wakes it again");
 }
+
+#[test]
+fn several_vl53l0x_get_their_own_addresses_one_at_a_time_on_every_boot() {
+    let parts = [
+        SketchPart::ToF { name: "left", xshut: 4, address: 0x30 },
+        SketchPart::ToF { name: "middle", xshut: 5, address: 0x31 },
+        SketchPart::ToF { name: "right", xshut: 6, address: 0x32 },
+    ];
+    let mut l = Link::ready(&parts);
+    // Each init() found exactly one sensor at 0x29: the others were held off by their XSHUT.
+    assert_eq!(l.sketch.tof_inits().len(), 3);
+    assert!(l.sketch.tof_inits().iter().all(Option::is_some), "{:?}", l.sketch.tof_inits());
+    let mut addresses: Vec<u8> = (0..3).map(|i| l.sketch.tof_address(i)).collect();
+    addresses.sort();
+    assert_eq!(addresses, [0x30, 0x31, 0x32]);
+    for x in [4, 5, 6] {
+        assert_eq!(l.sketch.pin_mode(x), PinMode::Input, "XSHUT released as an input, never driven HIGH");
+        assert!(l.sketch.writes().iter().all(|&(p, out)| p != x || out == LOW));
+    }
+    l.sketch.tof_set_mm(0, 250);
+    l.run(100);
+    let left = l
+        .events
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            Event::Reading { part: 0, reading: Reading::Distance(d) } => Some(d.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!((left.meters - 0.25).abs() < 1e-6 && left.status == faber_capabilities::distance::Status::Ok);
+    assert_eq!(l.session.pins()[2], pins(2, &[(PinRole::Sda, 18), (PinRole::Scl, 19), (PinRole::Xshut, 6)]));
+}
+
+#[test]
+fn a_lone_vl53l0x_keeps_0x29_and_a_far_or_missing_one_is_no_target() {
+    let mut l = Link::ready(&[SketchPart::ToF { name: "front", xshut: NO_PIN, address: 0x29 }]);
+    assert_eq!(l.sketch.tof_address(0), 0x29);
+    let PartInfo::Known(Info::Distance(i)) = &l.session.parts()[0].info else { panic!() };
+    assert_eq!((i.kind, i.max_m), (faber_capabilities::distance::Kind::LaserTof, 2.0));
+    l.sketch.tof_set_mm(0, 8190); // the sensor's "out of range"
+    l.run(100);
+    let d = l
+        .events
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            Event::Reading { reading: Reading::Distance(d), .. } => Some(d.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(d.status, faber_capabilities::distance::Status::NoTarget);
+}

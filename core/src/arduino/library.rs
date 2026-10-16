@@ -23,6 +23,7 @@ pub const FILES: &[(&str, &str)] = library![
     "src/FaberServo.h",
     "src/FaberEncoder.h",
     "src/FaberImu.h",
+    "src/FaberToF.h",
     "examples/MotorAndDistance/MotorAndDistance.ino",
     "examples/Ultrasonic/Ultrasonic.ino",
     "examples/BatteryMonitor/BatteryMonitor.ino",

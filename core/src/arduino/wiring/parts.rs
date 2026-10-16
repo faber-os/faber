@@ -32,6 +32,7 @@ const FILES: &[(&str, &str)] = &[
     ("encoder", include_str!("parts/encoder.toml")),
     ("potentiometer", include_str!("parts/potentiometer.toml")),
     ("imu-mpu6050", include_str!("parts/imu-mpu6050.toml")),
+    ("tof-vl53l0x", include_str!("parts/tof-vl53l0x.toml")),
 ];
 
 /// What a pin must be able to do for a role.
@@ -758,7 +759,8 @@ pub fn check(t: &Template) -> Result<(), String> {
     }
     crate::names::PartName::parse(&t.default_name)
         .map_err(|e| format!("default-name \"{}\": {}", t.default_name, e.message))?;
-    if t.shapes.is_empty() {
+    // A template whose every shape waits for the library (todo) is kept, and not offered.
+    if t.shapes.is_empty() && t.pending_shapes.is_empty() {
         return Err("no shape can be used now".into());
     }
     let mut ids = std::collections::BTreeSet::new();
@@ -1120,7 +1122,10 @@ pub(crate) mod tests {
                 );
             }
         }
-        assert!(templates().iter().all(|t| t.pending_shapes.is_empty()), "no shape is still marked todo");
+        // Shapes still marked todo, and why: each waits for a library Faber can't install yet.
+        let pending: Vec<&str> =
+            templates().iter().filter(|t| !t.pending_shapes.is_empty()).map(|t| t.id.as_str()).collect();
+        assert_eq!(pending, ["tof-vl53l0x"], "only the VL53L0X waits (Pololu's library)");
     }
 
     #[test]
