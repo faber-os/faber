@@ -113,6 +113,8 @@ pub struct Sennep {
     driving: bool,
     /// Why it stopped on its own, kept until the next drive.
     stopped_because: Option<String>,
+    /// The ways the safety layer blocked last tick.
+    blocked: Blocked,
     /// The direction it last went (unit vector), for the nearest obstacle.
     heading: (f32, f32),
     /// The `limits` text last written, so it is only written when it changes.
@@ -250,7 +252,8 @@ impl App for Sennep {
         let asked = request.map_or(Twist2d::ZERO, |k| {
             Twist2d::new(k.x * s.max_speed, k.y * s.max_speed, k.turn * s.max_turn)
         });
-        let mut limited = safety::limit(asked, &points, &s, critical);
+        let mut limited = safety::limit(asked, &points, &s, critical, self.blocked);
+        self.blocked = limited.blocked;
         if request.is_some() {
             self.stopped_because = None;
             if !seeing {
@@ -436,7 +439,7 @@ mod tests {
         app.tick(&mut host, 50_000);
         assert_eq!(last_sent(&host).vx, 0.0, "it holds the lease, but doesn't move");
         let l = limits(&host);
-        assert!(l.contains("Stopped: something 0.3 m ahead.") && l.contains("\"forward\":true"), "{l}");
+        assert!(l.contains("Stopped: something 0.30 m ahead.") && l.contains("\"forward\":true"), "{l}");
         // Backing away is allowed.
         ask(&mut host, 2, -1.0, 0.0, 0.0);
         app.tick(&mut host, 100_000);
@@ -474,7 +477,7 @@ mod tests {
         app.tick(&mut host, 100_000);
         let t = last_sent(&host);
         assert_eq!((t.vx, t.vy), (0.0, 0.0), "{}", limits(&host));
-        assert!(limits(&host).contains("Stopped: something 0.1 m in the way."), "{}", limits(&host));
+        assert!(limits(&host).contains("Stopped: something 0.10 m in the way."), "{}", limits(&host));
     }
 
     #[test]
