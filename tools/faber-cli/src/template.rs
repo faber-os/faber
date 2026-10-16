@@ -48,7 +48,8 @@ const DECLARATIVE: &[(&str, &str)] =
     template!("connector-declarative": "faber.toml", "README.md", "LICENSE", ".gitignore");
 
 const APP: &[(&str, &str)] = template!("app-rust":
-    "Cargo.toml", "faber.toml", "README.md", "LICENSE", ".gitignore", "src/lib.rs", "ui/index.html",
+    "Cargo.toml", "faber.toml", "README.md", "LICENSE", ".gitignore", "src/lib.rs",
+    "ui/index.html", "ui/app.js", "ui/style.css",
 );
 /// The app template's own names.
 const APP_ID: &str = "my-app";
@@ -97,8 +98,12 @@ pub fn new_connector(name: &str, kind: Kind, parent: &Path) -> Result<PathBuf, C
 }
 
 /// Writes a new app project called `name` into `parent/name`, and returns its folder.
+/// Its window is built on `@faber-os/shell`: the SDK this `faber` was built with is copied in as
+/// `ui/faber-shell.js`, as it is (an app's page can only load its own files).
 pub fn new_app(name: &str, parent: &Path) -> Result<PathBuf, CliError> {
-    write_project(name, "app", "wall-follower", parent, APP, (APP_ID, APP_CRATE, APP_NAME))
+    let dir = write_project(name, "app", "wall-follower", parent, APP, (APP_ID, APP_CRATE, APP_NAME))?;
+    write_file(&dir, &format!("ui/{}", crate::ui::SDK_FILE), crate::ui::SDK.as_bytes())?;
+    Ok(dir)
 }
 
 fn write_file(dir: &Path, rel: &str, bytes: &[u8]) -> Result<(), CliError> {
@@ -188,7 +193,11 @@ mod tests {
         let cargo = std::fs::read_to_string(project.join("Cargo.toml")).unwrap();
         assert!(cargo.contains(&format!("path = \"{}app-wasm\"", sdk_dir())), "{cargo}");
         let ui = std::fs::read_to_string(project.join("ui/index.html")).unwrap();
-        assert!(ui.contains("app:nearest-wall/nearest"), "{ui}");
+        assert!(ui.contains("app:nearest-wall/nearest") && ui.contains("src=\"app.js\""), "{ui}");
+        let sdk = std::fs::read_to_string(project.join("ui/faber-shell.js")).unwrap();
+        assert_eq!(sdk, crate::ui::SDK, "the SDK is copied as it is");
+        let js = std::fs::read_to_string(project.join("ui/app.js")).unwrap();
+        assert!(js.contains("from \"./faber-shell.js\""), "{js}");
         assert!(!project.join(SAMPLE).exists(), "an app has no recordings");
         let e = new_app("Nearest Wall", dir.path()).unwrap_err();
         assert!(e.message.contains("an app's name") && e.hint.contains("wall-follower"), "{e:?}");

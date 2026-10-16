@@ -6,6 +6,7 @@
 pub mod check;
 pub mod pack;
 pub mod template;
+pub mod ui;
 
 use faber_connector::Problem;
 

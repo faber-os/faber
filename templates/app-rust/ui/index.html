@@ -2,10 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>My app</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- The page talks to Faber only through faber-shell.js (the @faber-os/shell SDK). -->
+    <script type="module" src="app.js"></script>
   </head>
   <body>
     <h1>My app</h1>
-    <p>It publishes the nearest distance its sensors measure as <code>app:my-app/nearest</code>.</p>
+    <p class="label">Nearest distance</p>
+    <p id="nearest" class="value">–</p>
+    <p class="hint">
+      What <code>app:my-app/nearest</code> says now: the nearest distance any of
+      its sensors measures.
+    </p>
+    <p id="problem" class="problem" hidden></p>
   </body>
 </html>
