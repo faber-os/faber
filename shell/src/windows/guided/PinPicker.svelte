@@ -278,6 +278,7 @@
 
 <style>
   .picker {
+    container-type: inline-size;
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-4);
@@ -429,6 +430,13 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
+  }
+  /* In a narrow window the board gets the whole width, its roles below it. */
+  @container (max-width: 44rem) {
+    .board-side,
+    .side {
+      flex-basis: 100%;
+    }
   }
   .swatch {
     width: 16px;
