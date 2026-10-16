@@ -117,9 +117,20 @@ drives a motor, and killing the app stops the motor.
 - [x] `battery@1` everywhere, for SENNEP's battery: types, WIT, FaberLink and `FaberBattery`, the
   declarative engine, `generic-battery`, level notices and the Battery viewer (5c)
 - [x] Apps in the start menu and pinned to the taskbar; `faber new app` with a window (5c)
-- **`sennep` app v0:** LiDAR view, manual drive (on-screen joystick), battery, proximity ring
-- Derived signals: `sennep:pose` published and shown in the shell (D24)
+- [x] **`sennep` app v0** (5d, [examples/apps/sennep](../examples/apps/sennep/README.md)): LiDAR
+  view, manual drive (joystick and keys) through a safety layer in its logic (stop distance,
+  critical-battery cap), battery, proximity ring; optional roles and part mounts for apps
+- [x] Derived signals: `app:sennep/pose` (dead reckoning) and `app:sennep/nearest-obstacle`,
+  published and shown in the shell with the app badge (D24)
 - [x] Machine-config export/import: Share setup, a backup without the user's files (5c)
+- [ ] Run on the real SENNEP: its Mega's FaberLink firmware with a planar base (Phase 4)
+
+**Status (2026-10-16):** built and proven without the robot. `core/tests/sennep.rs` drives a
+simulated SENNEP in the apartment through the app (it stops at the stop distance with no bump,
+its pose follows the world's, a critical battery caps the speed, the base stops when the window
+goes quiet or the app is turned off); `core/tests/bridge.rs` drives the base of a simulated SENNEP
+Mega (the FaberLink library's C++ behind a fake cable) through the app; `shell/e2e/sennep.spec.ts`
+installs it, drives with a key and stops from the browser. The "done when" needs the real Mega.
 
 **Done when:** SENNEP drives by hand from a browser window through Faber on the PC (Mega over USB).
 

@@ -231,7 +231,8 @@ void loop()  { link.poll(); }            // everything else is done by the libra
 - Examples: `examples/MotorAndDistance` and `examples/BatteryMonitor`. CI compiles every example
   for an Uno and a Mega.
 - Not built yet: `FaberServo`, digital in/out, HC-SR04, VL53L0X, encoders, a planar-base part with
-  on-board ramp-down, and negotiating 1 Mbaud.
+  on-board ramp-down (the interop harness has a plain test one, for SENNEP's fake Mega:
+  `FakeBoard::sennep`), and negotiating 1 Mbaud.
 - **Where it lives:** inside the Faber repo for now. Moving it to its own repo
   (`faber-os/faberlink-arduino`, so the Arduino Library Manager can list it) needs Mikkel's OK; the
   folder is already a complete Arduino library, so the move is a copy.
