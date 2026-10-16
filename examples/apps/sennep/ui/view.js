@@ -122,9 +122,9 @@ export function isStill(s) {
   return s.x === 0 && s.y === 0 && s.turn === 0;
 }
 
-/** The app's `drive` state value: a counter, then the stick (see src/lib.rs). */
-export function driveValue(seq, s) {
-  return `${seq} ${round(s.x)} ${round(s.y)} ${round(s.turn)}`;
+/** A `drive` message to the app's logic: the stick, `"<x> <y> <turn>"` (see src/lib.rs). */
+export function driveValue(s) {
+  return `${round(s.x)} ${round(s.y)} ${round(s.turn)}`;
 }
 
 function round(v) {

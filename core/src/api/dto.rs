@@ -313,6 +313,18 @@ pub struct AppRole {
     pub count: String,
     /// The parts picked for it, in order. Empty: none yet (the app can't run).
     pub parts: Vec<String>,
+    /// For a command role: `logic` (the app's logic drives it on its own while the app is on) or
+    /// `window` (only while one of its windows drives it through the logic, docs/apps.md §12).
+    pub drive: AppDrive,
+}
+
+/// Who decides when an app drives a command role (`drive` in its `[[requires]]`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum AppDrive {
+    Logic,
+    Window,
 }
 
 /// A derived signal an app publishes (`[[publishes]]`, D24): read-only, never a part's.
@@ -746,6 +758,63 @@ pub enum ClientMessage {
     SerialRecordStop {
         id: u32,
     },
+    /// Opens an app window's live link to its app's logic (docs/apps.md §12). The core answers
+    /// `app-window-opened`, or an `error` (`unknown-app`) with the same `id`. The link ends with
+    /// `app-window-close` or the WebSocket, and whatever it drove ends with it.
+    AppWindowOpen {
+        id: u32,
+        app: String,
+    },
+    /// A message from the window for the logic. Dropped while the logic isn't running; an `error`
+    /// only when it breaks a limit (`bad-kind`, `reserved-kind`, `message-too-large`,
+    /// `too-many-messages`).
+    AppWindowSend {
+        id: u32,
+        kind: String,
+        data: AppMessageData,
+    },
+    /// The window's page is alive. While it drives through the logic it must beat at least every
+    /// 300 ms (its SDK beats every 100 ms), or its drives end (`heartbeat-lost`).
+    AppWindowHeartbeat {
+        id: u32,
+    },
+    /// The window drives `role` (part `index`, default 0) through the logic. The shell sends it
+    /// only after the D46 confirm. Answered by `app-window-driving` or `app-window-drive-refused`.
+    AppWindowDrive {
+        id: u32,
+        role: String,
+        #[serde(default)]
+        #[ts(optional, as = "Option<u32>")]
+        index: u32,
+    },
+    /// The window lets go of `role`.
+    AppWindowRelease {
+        id: u32,
+        role: String,
+        #[serde(default)]
+        #[ts(optional, as = "Option<u32>")]
+        index: u32,
+    },
+    /// The user pressed the shell's Stop for this window: everything it drives ends.
+    AppWindowStop {
+        id: u32,
+    },
+    AppWindowClose {
+        id: u32,
+    },
+}
+
+/// What a message between an app's windows and its logic carries: text, or bytes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum AppMessageData {
+    Text(String),
+    Bytes(
+        #[serde(with = "serde_bytes")]
+        #[ts(type = "Uint8Array")]
+        Vec<u8>,
+    ),
 }
 
 /// Messages from the core to the shell. `id` is the subscription or serial session it belongs to.
@@ -878,6 +947,46 @@ pub enum ServerMessage {
     Notice {
         id: u32,
         notice: Notice,
+    },
+    /// The app window's link (`app-window-open`) is open; `window` is its id as the app's logic
+    /// sees it.
+    AppWindowOpened {
+        id: u32,
+        #[ts(type = "number")]
+        window: u64,
+    },
+    /// A message from the app's logic for this window.
+    AppWindowMessage {
+        id: u32,
+        kind: String,
+        data: AppMessageData,
+    },
+    /// The window now drives `role` through the logic.
+    AppWindowDriving {
+        id: u32,
+        role: String,
+        index: u32,
+    },
+    /// `app-window-drive` was refused (`app-not-running`, `unknown-role`, `not-window-driven`,
+    /// `no-part`).
+    AppWindowDriveRefused {
+        id: u32,
+        role: String,
+        index: u32,
+        error: ErrorBody,
+    },
+    /// The window no longer drives `role`: `released`, `stopped` (the shell's Stop),
+    /// `heartbeat-lost`, `app-stopped`. The logic's lease on it has ended.
+    AppWindowDriveEnded {
+        id: u32,
+        role: String,
+        index: u32,
+        reason: String,
+    },
+    /// The link ended without the client closing it (the app was uninstalled).
+    AppWindowClosed {
+        id: u32,
+        reason: String,
     },
     /// Everything an app has saved (the `app-state` topic, now and after a missed change).
     AppState {
@@ -1464,6 +1573,43 @@ mod tests {
         let json = serde_json::to_value(&m).unwrap();
         assert_eq!(json["type"], "signal");
         assert_eq!(json["reading"]["capability"], "laser-scan@1");
+    }
+
+    #[test]
+    fn app_window_messages_carry_text_or_bytes() {
+        let m: ClientMessage = serde_json::from_value(
+            json!({"type": "app-window-send", "id": 4, "kind": "drive", "data": {"text": "1 0 0"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            m,
+            ClientMessage::AppWindowSend {
+                id: 4,
+                kind: "drive".into(),
+                data: AppMessageData::Text("1 0 0".into())
+            }
+        );
+        let drive: ClientMessage =
+            serde_json::from_value(json!({"type": "app-window-drive", "id": 4, "role": "base"})).unwrap();
+        assert_eq!(drive, ClientMessage::AppWindowDrive { id: 4, role: "base".into(), index: 0 });
+        // Bytes are MessagePack's binary, and text stays text, both ways.
+        let out = ServerMessage::AppWindowMessage {
+            id: 4,
+            kind: "blob".into(),
+            data: AppMessageData::Bytes(vec![1, 2]),
+        };
+        let bytes = rmp_serde::to_vec_named(&out).unwrap();
+        assert!(bytes.windows(4).any(|w| w == [0xc4, 2, 1, 2]), "{bytes:x?}");
+        assert_eq!(rmp_serde::from_slice::<ServerMessage>(&bytes).unwrap(), out);
+        let text = ServerMessage::AppWindowMessage {
+            id: 4,
+            kind: "t".into(),
+            data: AppMessageData::Text("ab".into()),
+        };
+        assert_eq!(
+            rmp_serde::from_slice::<ServerMessage>(&rmp_serde::to_vec_named(&text).unwrap()).unwrap(),
+            text
+        );
     }
 
     #[test]

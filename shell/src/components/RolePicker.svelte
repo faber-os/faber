@@ -95,7 +95,11 @@
         <p class="drives" role="note">
           <Icon name="drive" size={16} />
           <span>
-            {#if picked.length > 0}
+            {#if role.drive === 'window' && picked.length > 0}
+              <RichText text={t('roles.willDriveFromWindow', { app, parts: partList(picked) })} />
+            {:else if role.drive === 'window'}
+              <RichText text={t('roles.willDriveFromWindowPicked', { app })} />
+            {:else if picked.length > 0}
               <RichText text={t('roles.willDrive', { app, parts: partList(picked) })} />
             {:else}
               <RichText text={t('roles.willDrivePicked', { app })} />

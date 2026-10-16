@@ -3,7 +3,8 @@
 //! feeds it, so a slow topic never holds up another.
 
 use super::{AppState, convert, dto};
-use crate::machine::{LeaseEvent, SerialSession};
+use crate::apps::{Payload, ToWindow};
+use crate::machine::{AppWindowLink, LeaseEvent, SerialSession};
 use crate::names::SignalAddress;
 use crate::ports::PortEvent;
 use axum::extract::ws::{Message, WebSocket};
@@ -85,6 +86,7 @@ async fn session(socket: WebSocket, state: AppState, format: Format) {
     });
     let mut subs: HashMap<u32, JoinHandle<()>> = HashMap::new();
     let mut serial: HashMap<u32, Arc<SerialSession>> = HashMap::new();
+    let mut windows = Windows::new();
     while let Some(Ok(msg)) = stream.next().await {
         if matches!(msg, Message::Close(_)) {
             break;
@@ -104,11 +106,31 @@ async fn session(socket: WebSocket, state: AppState, format: Format) {
                 continue;
             }
         };
+        if let dto::ClientMessage::AppWindowOpen { .. }
+        | dto::ClientMessage::AppWindowSend { .. }
+        | dto::ClientMessage::AppWindowHeartbeat { .. }
+        | dto::ClientMessage::AppWindowDrive { .. }
+        | dto::ClientMessage::AppWindowRelease { .. }
+        | dto::ClientMessage::AppWindowStop { .. }
+        | dto::ClientMessage::AppWindowClose { .. } = &msg
+        {
+            let in_use = |id: &u32| subs.contains_key(id) || serial.contains_key(id);
+            windows.handle(msg, &state, &out_tx, in_use).await;
+            continue;
+        }
+        if let dto::ClientMessage::Subscribe { id, .. } | dto::ClientMessage::SerialOpen { id, .. } = &msg
+            && windows.has(*id)
+        {
+            let _ = out_tx.send(id_in_use(*id)).await;
+            continue;
+        }
         handle(msg, &state, &out_tx, &mut subs, &mut serial).await;
     }
     for (_, task) in subs.drain() {
         task.abort();
     }
+    // The page's windows are gone with the connection: what they drove ends now.
+    windows.close_all().await;
     let sessions: Vec<_> = serial.drain().map(|(_, s)| s).collect();
     let _ = tokio::task::spawn_blocking(move || drop(sessions)).await;
     drop(out_tx);
@@ -253,6 +275,14 @@ async fn handle(
                 };
             let _ = out.send(reply).await;
         }
+        // The session loop hands these to `Windows`.
+        C::AppWindowOpen { .. }
+        | C::AppWindowSend { .. }
+        | C::AppWindowHeartbeat { .. }
+        | C::AppWindowDrive { .. }
+        | C::AppWindowRelease { .. }
+        | C::AppWindowStop { .. }
+        | C::AppWindowClose { .. } => {}
         C::SerialRecordStop { id } => {
             let Some(session) = serial.get(&id).cloned() else {
                 let _ = out.send(unknown_session(id)).await;
@@ -267,6 +297,184 @@ async fn handle(
             let _ = out.send(reply).await;
         }
     }
+}
+
+fn id_in_use(id: u32) -> dto::ServerMessage {
+    error(Some(id), "id-in-use", format!("Id {id} is already in use."), "Pick a new id for each session.")
+}
+
+fn payload_from(data: dto::AppMessageData) -> Payload {
+    match data {
+        dto::AppMessageData::Text(t) => Payload::Text(t),
+        dto::AppMessageData::Bytes(b) => Payload::Bytes(b),
+    }
+}
+
+fn data_of(payload: Payload) -> dto::AppMessageData {
+    match payload {
+        Payload::Text(t) => dto::AppMessageData::Text(t),
+        Payload::Bytes(b) => dto::AppMessageData::Bytes(b),
+    }
+}
+
+/// One connection's app window links (docs/apps.md §12), by the client's id. Each has a task
+/// that forwards what the core tells the window.
+struct Windows {
+    open: HashMap<u32, (Arc<AppWindowLink>, JoinHandle<()>)>,
+}
+
+impl Windows {
+    fn new() -> Windows {
+        Windows { open: HashMap::new() }
+    }
+
+    fn has(&self, id: u32) -> bool {
+        self.open.contains_key(&id)
+    }
+
+    async fn handle(
+        &mut self,
+        msg: dto::ClientMessage,
+        state: &AppState,
+        out: &mpsc::Sender<dto::ServerMessage>,
+        in_use: impl Fn(&u32) -> bool,
+    ) {
+        use dto::ClientMessage as C;
+        let reply = match msg {
+            C::AppWindowOpen { id, app } => {
+                if in_use(&id) || self.has(id) {
+                    Some(id_in_use(id))
+                } else {
+                    self.open(id, app, state, out).await
+                }
+            }
+            C::AppWindowSend { id, kind, data } => match self.link(id) {
+                Ok(link) => link.send(&kind, payload_from(data)).err().map(|e| err(id, &e)),
+                Err(e) => Some(*e),
+            },
+            C::AppWindowHeartbeat { id } => match self.link(id) {
+                Ok(link) => link.heartbeat().err().map(|e| err(id, &e)),
+                Err(e) => Some(*e),
+            },
+            C::AppWindowDrive { id, role, index } => match self.link(id) {
+                Ok(link) => {
+                    let r = role.clone();
+                    let answer = tokio::task::spawn_blocking(move || link.drive_via(&r, index)).await;
+                    Some(match answer {
+                        Ok(Ok(())) => dto::ServerMessage::AppWindowDriving { id, role, index },
+                        Ok(Err(e)) => dto::ServerMessage::AppWindowDriveRefused {
+                            id,
+                            role,
+                            index,
+                            error: convert::error_body(&e),
+                        },
+                        Err(_) => internal(id),
+                    })
+                }
+                Err(e) => Some(*e),
+            },
+            C::AppWindowRelease { id, role, index } => match self.link(id) {
+                Ok(link) => {
+                    let _ = tokio::task::spawn_blocking(move || link.end_drive(&role, index)).await;
+                    None
+                }
+                Err(e) => Some(*e),
+            },
+            C::AppWindowStop { id } => match self.link(id) {
+                Ok(link) => {
+                    let _ = tokio::task::spawn_blocking(move || link.stop()).await;
+                    None
+                }
+                Err(e) => Some(*e),
+            },
+            C::AppWindowClose { id } => {
+                if let Some((link, task)) = self.open.remove(&id) {
+                    task.abort();
+                    let _ = tokio::task::spawn_blocking(move || drop(link)).await;
+                }
+                None
+            }
+            _ => None,
+        };
+        if let Some(r) = reply {
+            let _ = out.send(r).await;
+        }
+    }
+
+    async fn open(
+        &mut self,
+        id: u32,
+        app: String,
+        state: &AppState,
+        out: &mpsc::Sender<dto::ServerMessage>,
+    ) -> Option<dto::ServerMessage> {
+        // The core's side never waits: what it tells the window queues here (it is rate-limited),
+        // and a task hands it to the connection's writer.
+        let (tx, mut rx) = mpsc::unbounded_channel::<ToWindow>();
+        let sink: crate::apps::channel::Sink = Arc::new(move |m| {
+            let _ = tx.send(m);
+        });
+        let machine = Arc::clone(&state.machine);
+        let link = match tokio::task::spawn_blocking(move || machine.open_app_window(&app, sink)).await {
+            Ok(Ok(link)) => Arc::new(link),
+            Ok(Err(e)) => return Some(err(id, &e)),
+            Err(_) => return Some(internal(id)),
+        };
+        let window = link.id();
+        // Opened is said before anything the core tells the window.
+        let _ = out.send(dto::ServerMessage::AppWindowOpened { id, window }).await;
+        let out = out.clone();
+        let task = tokio::spawn(async move {
+            while let Some(m) = rx.recv().await {
+                let msg = match m {
+                    ToWindow::Message { kind, payload } => {
+                        dto::ServerMessage::AppWindowMessage { id, kind, data: data_of(payload) }
+                    }
+                    ToWindow::DriveEnded { role, index, reason } => dto::ServerMessage::AppWindowDriveEnded {
+                        id,
+                        role,
+                        index,
+                        reason: reason.id().into(),
+                    },
+                    ToWindow::Closed => {
+                        dto::ServerMessage::AppWindowClosed { id, reason: "app-removed".into() }
+                    }
+                };
+                if out.send(msg).await.is_err() {
+                    return;
+                }
+            }
+        });
+        self.open.insert(id, (link, task));
+        None
+    }
+
+    fn link(&self, id: u32) -> Result<Arc<AppWindowLink>, Box<dto::ServerMessage>> {
+        self.open.get(&id).map(|(l, _)| Arc::clone(l)).ok_or_else(|| {
+            Box::new(error(
+                Some(id),
+                "unknown-window",
+                format!("No app window link {id} is open."),
+                "Open it first with app-window-open.",
+            ))
+        })
+    }
+
+    async fn close_all(&mut self) {
+        let links: Vec<_> = self
+            .open
+            .drain()
+            .map(|(_, (link, task))| {
+                task.abort();
+                link
+            })
+            .collect();
+        let _ = tokio::task::spawn_blocking(move || drop(links)).await;
+    }
+}
+
+fn err(id: u32, e: &crate::machine::MachineError) -> dto::ServerMessage {
+    dto::ServerMessage::Error { id: Some(id), error: convert::error_body(e) }
 }
 
 fn unknown_session(id: u32) -> dto::ServerMessage {

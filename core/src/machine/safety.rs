@@ -579,6 +579,7 @@ pub(super) fn sweep_leases(machine: Weak<Machine>, stop: Arc<AtomicBool>) {
         match machine.upgrade() {
             Some(m) => {
                 m.sweep();
+                m.sweep_app_windows();
                 if apps_checked.elapsed() >= APPS_EVERY {
                     m.reconcile_apps();
                     m.flush_app_states();

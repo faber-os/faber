@@ -151,8 +151,22 @@ describe('Install window for an app', () => {
     logic: true,
     tickHz: 20,
     roles: [
-      { role: 'lidar', capability: 'laser-scan@1', command: false, count: '1', parts: [] },
-      { role: 'base', capability: 'planar-base@1', command: true, count: '1', parts: [] },
+      {
+        role: 'lidar',
+        capability: 'laser-scan@1',
+        command: false,
+        count: '1',
+        parts: [],
+        drive: 'logic',
+      },
+      {
+        role: 'base',
+        capability: 'planar-base@1',
+        command: true,
+        count: '1',
+        parts: [],
+        drive: 'logic',
+      },
     ],
     publishes: [
       {
@@ -254,8 +268,22 @@ describe('Install window for an app', () => {
       ...APP,
       roles: [
         ...APP.roles,
-        { role: 'battery', capability: 'battery@1', command: false, count: '0..1', parts: [] },
-        { role: 'proximity', capability: 'distance@1', command: false, count: '0..', parts: [] },
+        {
+          role: 'battery',
+          capability: 'battery@1',
+          command: false,
+          count: '0..1',
+          parts: [],
+          drive: 'logic',
+        },
+        {
+          role: 'proximity',
+          capability: 'distance@1',
+          command: false,
+          count: '0..',
+          parts: [],
+          drive: 'logic',
+        },
       ],
     };
     const { shell } = setup([

@@ -336,6 +336,7 @@ mod tests {
                 Arc::clone(&r),
                 driver,
                 Arc::new(SharedState::in_memory("t")),
+                Arc::new(crate::apps::Channel::new()),
             );
             Ok(Box::new(Fake { session, ticks: Arc::clone(&t), crash_on }) as Box<dyn Logic>)
         });

@@ -94,6 +94,9 @@ export interface Hello {
   theme: Theme;
 }
 
+/** What a message between an app's window and its logic carries: text, or bytes. */
+export type MessageData = string | Uint8Array;
+
 export interface CommandResult {
   /** What the part got (values beyond its limits are clamped). */
   applied: Command;
@@ -123,7 +126,24 @@ export type Request =
   | { type: 'state-set'; key: string; value: string | null }
   | { type: 'state-keys' }
   /** From now on, a `state` event for every change, whoever made it (the logic, any window). */
-  | { type: 'state-watch' };
+  | { type: 'state-watch' }
+  /**
+   * A message for the app's logic (docs/apps.md §12): `kind` is 1-64 characters of `a-z`, `0-9`
+   * and `-`; kind and data at most 4 KB together, at most 50 a second. Never saved: dropped while
+   * the logic isn't running.
+   */
+  | { type: 'message-send'; kind: string; data: MessageData }
+  /** From now on, a `message` event for every message the logic sends this window. */
+  | { type: 'message-watch' }
+  /**
+   * Drive a `drive = "window"` role through the app's logic, after the user's go-ahead (D46):
+   * the logic may drive it from now until `drive-via-release`, the user's Stop, the window
+   * closing, or no `heartbeat` for 300 ms.
+   */
+  | { type: 'drive-via'; role: string; index?: number }
+  | { type: 'drive-via-release'; role: string; index?: number }
+  /** The page is alive: send one at least every 300 ms while driving through the logic. */
+  | { type: 'heartbeat' };
 
 export type RequestType = Request['type'];
 
@@ -144,6 +164,11 @@ export interface ReplyValues {
   'state-set': null;
   'state-keys': string[];
   'state-watch': null;
+  'message-send': null;
+  'message-watch': null;
+  'drive-via': null;
+  'drive-via-release': null;
+  heartbeat: null;
 }
 
 export type RequestMessage = { faber: ProtocolVersion; id: number } & Request;
@@ -161,6 +186,20 @@ export type Event =
   | { faber: ProtocolVersion; event: 'status'; status: AppStatus }
   /** A key of the app's state changed (after `state-watch`); `value` is `null` when removed. */
   | { faber: ProtocolVersion; event: 'state'; key: string; value: string | null }
+  /** A message from the app's logic (after `message-watch`). */
+  | { faber: ProtocolVersion; event: 'message'; kind: string; data: MessageData }
+  /**
+   * A `drive-via` ended without the page letting go: `reason` is `stopped` (the user pressed
+   * Stop), `heartbeat-lost`, `app-stopped`, `connection-lost`, …
+   */
+  | {
+      faber: ProtocolVersion;
+      event: 'drive-ended';
+      role: string;
+      index: number;
+      reason: string;
+      error: ErrorBody;
+    }
   /** A lease ended without the app letting go: `reason` as the core says it (`expired`, `estop`, …). */
   | {
       faber: ProtocolVersion;

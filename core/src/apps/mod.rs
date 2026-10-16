@@ -8,8 +8,9 @@
 //!   a crash ends its leases and restarts it with backoff, until it crashes too often.
 //! - Everything it can do goes through a [`Session`]: its roles by name, leases held as
 //!   `app:<id>` through a [`Driver`] (the machine), its derived signals `app:<id>/<name>`, a
-//!   small state and the log.
+//!   small state, live messages with its windows ([`channel`]) and the log.
 
+pub mod channel;
 mod installed;
 mod logic;
 pub mod manifest;
@@ -17,6 +18,7 @@ mod session;
 mod state;
 mod supervisor;
 
+pub use channel::{Channel, DrivenRole, EndReason, Payload, ToWindow};
 pub use installed::{AppDefinition, load_folder, load_installed};
 pub use logic::{Compiled, Logic, WasmLogic, compile};
 pub use session::{BoundPart, BoundRole, DriveError, Driver, RoleView, Session, holder};
@@ -36,13 +38,14 @@ impl AppDefinition {
     }
 
     /// What runs this app with these roles: a fresh instance and session for every run, all with
-    /// the app's one shared `state`. `None` for a UI-only app (it has no logic to run).
+    /// the app's one shared `state` and `channel` to its windows. `None` for a UI-only app (it has no logic to run).
     pub fn run_spec(
         &self,
         roles: Vec<BoundRole>,
         router: Arc<Router>,
         driver: Arc<dyn Driver>,
         state: Arc<SharedState>,
+        channel: Arc<Channel>,
     ) -> Option<RunSpec> {
         let compiled = Arc::clone(self.logic.as_ref()?);
         let m = &self.manifest;
@@ -55,6 +58,7 @@ impl AppDefinition {
                 Arc::clone(&router),
                 Arc::clone(&driver),
                 Arc::clone(&state),
+                Arc::clone(&channel),
             );
             Ok(Box::new(compiled.instantiate(session)?) as Box<dyn Logic>)
         });

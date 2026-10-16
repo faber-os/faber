@@ -451,11 +451,13 @@ mod support;
 
 /// The SENNEP app (examples/apps/sennep) with its roles on SENNEP's Mega: the board's planar base,
 /// its front distance sensor and its battery (and a simulated LiDAR, which the board doesn't
-/// have). A client drives it the way the app's window does, through the app's state.
+/// have). A client drives it the way the shell does for the app's window: through the app's
+/// logic, with `drive` messages and the page's heartbeat over the WebSocket.
 ///
 /// It proves that the app's commands reach the board, that the board's sensor and battery feed
-/// its safety layer, and that the base on the board stops when the window goes quiet or the app
-/// is turned off: through the core's SAFE, since the board's own lease is a whole second here.
+/// its safety layer, and that the base on the board stops when the user presses the shell's Stop,
+/// when the window goes quiet or when the app is turned off: through the core's SAFE, since the
+/// board's own lease is a whole second here.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_sennep_app_drives_the_boards_base_and_stops_it() {
     let Some(wasm) = support::component("sennep") else { return };
@@ -498,7 +500,9 @@ async fn the_sennep_app_drives_the_boards_base_and_stops_it() {
     .await;
 
     let vx = |c: &TestCore| c.cable.board(|b| b.base_velocity()[0]);
-    let window = Window::hold(&c);
+    let mut window = support::AppWindow::open(&c.app, "sennep").await;
+    window.drive_via("base").await;
+    window.hold(1.0, 0.0, 0.0);
     until("the board's base to drive at the top speed", async || (vx(&c) - 0.3).abs() < 1e-4).await;
     let leases = call(&c.app, "GET", "/api/v0/leases", None).await.1;
     assert_eq!(leases[0]["holder"], "app:sennep", "{leases}");
@@ -514,14 +518,25 @@ async fn the_sennep_app_drives_the_boards_base_and_stops_it() {
     until("the speed to be capped", async || (vx(&c) - 0.09).abs() < 1e-4).await;
     c.cable.board(|b| b.set_battery_volts(12.0));
 
-    // The window goes quiet: the app lets go, the core sends SAFE, the base stops.
-    drop(window);
+    // The user presses the shell's Stop: the core ends the drive and the app's lease, SAFE.
+    window.press_stop();
+    let stop = Instant::now();
+    until("the board's base to stop", async || vx(&c) == 0.0).await;
+    assert!(stop.elapsed() < SLACK, "it took {:?}", stop.elapsed());
+
+    // The page goes quiet (it hung): the core ends the drive, sends SAFE, the base stops.
+    window.drive_via("base").await;
+    until("it to drive again", async || vx(&c) > 0.0).await;
+    window.hang();
     let quiet = Instant::now();
     until("the board's base to stop", async || vx(&c) == 0.0).await;
     assert!(quiet.elapsed() < Duration::from_millis(500), "it took {:?}", quiet.elapsed());
+    drop(window);
 
     // Turned off while driving: at once.
-    let window = Window::hold(&c);
+    let mut window = support::AppWindow::open(&c.app, "sennep").await;
+    window.drive_via("base").await;
+    window.hold(1.0, 0.0, 0.0);
     until("it to drive again", async || vx(&c) > 0.0).await;
     let (s, _) = call(&c.app, "POST", "/api/v0/apps/sennep/disable", None).await;
     assert_eq!(s, StatusCode::OK);
@@ -529,32 +544,4 @@ async fn the_sennep_app_drives_the_boards_base_and_stops_it() {
     until("the board's base to stop", async || vx(&c) == 0.0).await;
     assert!(off.elapsed() < SLACK, "it took {:?}", off.elapsed());
     drop(window);
-}
-
-/// What the SENNEP app's window does while W is held: "full ahead" into the app's state, a new
-/// counter every 100 ms. Dropping it is the window closing: nothing more, not even a stop.
-struct Window {
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Window {
-    fn hold(c: &TestCore) -> Window {
-        let app = c.app.clone();
-        let task = tokio::spawn(async move {
-            let mut seq = 0u64;
-            loop {
-                seq += 1;
-                let body = json!({"key": "drive", "value": format!("{seq} 1 0 0")});
-                call(&app, "PUT", "/api/v0/apps/sennep/state", Some(body)).await;
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        });
-        Window { task }
-    }
-}
-
-impl Drop for Window {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
 }

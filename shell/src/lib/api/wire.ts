@@ -48,6 +48,12 @@ const SERVER_TYPE_LIST: Record<ServerMessage['type'], true> = {
   notice: true,
   'app-state': true,
   'app-state-changed': true,
+  'app-window-opened': true,
+  'app-window-message': true,
+  'app-window-driving': true,
+  'app-window-drive-refused': true,
+  'app-window-drive-ended': true,
+  'app-window-closed': true,
   error: true,
 };
 const SERVER_TYPES = new Set<string>(Object.keys(SERVER_TYPE_LIST));
@@ -97,6 +103,13 @@ function normaliseServerMessage(raw: unknown): ServerMessage {
   const msg = raw as ServerMessage;
   if (msg.type === 'serial-data' && !(msg.data instanceof Uint8Array)) {
     msg.data = Uint8Array.from(msg.data as unknown as number[]);
+  }
+  if (
+    msg.type === 'app-window-message' &&
+    'bytes' in msg.data &&
+    !(msg.data.bytes instanceof Uint8Array)
+  ) {
+    msg.data = { bytes: Uint8Array.from(msg.data.bytes as unknown as number[]) };
   }
   if (msg.type === 'signal') msg.reading = normaliseReading(msg.reading);
   return msg;

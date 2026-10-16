@@ -16,8 +16,22 @@ const APP: AppInfo = {
   logic: true,
   tickHz: 20,
   roles: [
-    { role: 'lidar', capability: 'laser-scan@1', command: false, count: '1', parts: ['lidar'] },
-    { role: 'base', capability: 'planar-base@1', command: true, count: '1', parts: ['base'] },
+    {
+      role: 'lidar',
+      capability: 'laser-scan@1',
+      command: false,
+      count: '1',
+      parts: ['lidar'],
+      drive: 'logic',
+    },
+    {
+      role: 'base',
+      capability: 'planar-base@1',
+      command: true,
+      count: '1',
+      parts: ['base'],
+      drive: 'logic',
+    },
   ],
   publishes: [
     { name: 'wall-distance', capability: 'distance@1', address: 'app:wall-follower/wall-distance' },
@@ -119,6 +133,16 @@ describe('Apps window', () => {
       }),
     );
     expect(screen.getByText(/Wall follower will be able to drive "base"/)).toBeInTheDocument();
+  });
+
+  it('says when a role is driven only from the app’s window', async () => {
+    const app = structuredClone(APP);
+    app.roles[1]!.drive = 'window';
+    setup([app], []);
+    const note = await screen.findByText(/Only while you drive it from the app’s window/);
+    expect(note.closest('[role="note"]')).toHaveTextContent(
+      'Wall follower will be able to drive "base". Only while you drive it from the app’s window, after Faber asks you.',
+    );
   });
 
   it('opens the app’s window and its derived signal’s viewer', async () => {

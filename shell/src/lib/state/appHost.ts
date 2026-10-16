@@ -8,6 +8,7 @@ import type {
   Source,
   Theme,
 } from '../../../../sdk/js/shell/src/protocol';
+import type { AppMessageData, AppWindowHandlers, AppWindowSession } from '../api/socket';
 import { LeaseKeeper, type LeaseClient, type LeaseStatus } from './driving';
 import type { Result } from './result';
 import type {
@@ -40,6 +41,13 @@ import type {
  * - State: the app's saved state (`state-get/set/keys/watch`), shared with its logic through the
  *   core. Keys are 1-256 bytes and everything together at most 64 KB, checked here before the
  *   core checks it again.
+ * - Messages with the app's logic (`message-send/watch`, docs/apps.md §12): live, never saved,
+ *   over the window's own link to the core. A kind of 1-64 characters of `a-z`, `0-9`, `-`, at
+ *   most 4 KB and 50 a second, checked here before the core checks them again.
+ * - Driving through the logic (`drive-via`): only a role declared `drive = "window"`, only while
+ *   the app is on, after the same D46 confirm, with the same Stop bar. The core lets the logic
+ *   hold the role's lease only while this window drives it, and ends it when the page lets go,
+ *   the user presses Stop, the window closes or the page's `heartbeat` stops for 300 ms.
  * - A new page in the frame, the app turned off or a role given another part end what the old
  *   page had; closing the window ends everything.
  *
@@ -61,6 +69,14 @@ export const MAX_MESSAGES_PER_S = 200;
 export const MAX_STATE_BYTES = 64 * 1024;
 /** The longest state key (bytes). */
 export const MAX_STATE_KEY_BYTES = 256;
+/** A message to the app's logic: its kind and data together, in bytes, as the core counts them. */
+export const MAX_APP_MESSAGE_BYTES = 4 * 1024;
+/** The most messages a second one window may send its logic. */
+export const MAX_APP_MESSAGES_PER_S = 50;
+/** A message's kind: lowercase words joined by `-`. */
+const KIND = /^[a-z0-9-]{1,64}$/;
+/** Kinds only the core sends the logic. */
+const RESERVED_KINDS = new Set(['drive-started', 'drive-ended']);
 
 /** The app's saved state in the core (docs/api.md, "Apps"), as the host reaches it. */
 export interface AppStateClient {
@@ -107,6 +123,11 @@ export interface AppHostDeps {
   theme(): Theme;
   /** The app's saved state, shared with its logic. */
   appState: AppStateClient;
+  /**
+   * Opens the window's live link to the app's logic (messages, driving through it). The host
+   * opens it when the page first needs it, and closes it with the page.
+   */
+  openChannel(handlers: AppWindowHandlers): AppWindowSession;
   /** Called with the parts the window drives, whenever that changes (the window shows them). */
   onDriving?: (parts: string[]) => void;
   /** Milliseconds, for the message rate. */
@@ -129,7 +150,12 @@ type ErrorCode =
   | 'too-many-subscriptions'
   | 'app-gone'
   | 'bad-key'
-  | 'state-full';
+  | 'state-full'
+  | 'not-window-driven'
+  | 'bad-kind'
+  | 'message-too-large'
+  | 'too-many-messages'
+  | 'not-connected';
 
 function fail(
   code: ErrorCode,
@@ -209,6 +235,63 @@ function fail(
       return { code, message: t('appHost.badKey.message'), hint: t('appHost.badKey.hint') };
     case 'state-full':
       return { code, message: t('appHost.stateFull.message'), hint: t('appHost.stateFull.hint') };
+    case 'not-window-driven':
+      return {
+        code,
+        message: t('appHost.notWindowDriven.message', p),
+        hint: t('appHost.notWindowDriven.hint'),
+      };
+    case 'bad-kind':
+      return { code, message: t('appHost.badKind.message'), hint: t('appHost.badKind.hint') };
+    case 'message-too-large':
+      return {
+        code,
+        message: t('appHost.messageTooLarge.message'),
+        hint: t('appHost.messageTooLarge.hint'),
+      };
+    case 'too-many-messages':
+      return {
+        code,
+        message: t('appHost.tooManyMessages.message'),
+        hint: t('appHost.tooManyMessages.hint'),
+      };
+    case 'not-connected':
+      return {
+        code,
+        message: t('appHost.notConnected.message'),
+        hint: t('appHost.notConnected.hint'),
+      };
+  }
+}
+
+/** Why a drive through the logic ended, for the page. */
+function driveEnded(role: string, reason: string): ErrorBody {
+  const code = 'drive-ended';
+  switch (reason) {
+    case 'stopped':
+      return {
+        code,
+        message: t('appHost.stopped.message', { role }),
+        hint: t('appHost.stopped.hint'),
+      };
+    case 'heartbeat-lost':
+      return {
+        code,
+        message: t('appHost.heartbeatLost.message', { role }),
+        hint: t('appHost.heartbeatLost.hint'),
+      };
+    case 'connection-lost':
+      return {
+        code,
+        message: t('appHost.connectionLost.message', { role }),
+        hint: t('appHost.connectionLost.hint'),
+      };
+    default:
+      return {
+        code,
+        message: t('appHost.leaseEnded.message', { role }),
+        hint: t('appHost.leaseEnded.hint'),
+      };
   }
 }
 
@@ -268,6 +351,23 @@ interface Driving {
   keeper: LeaseKeeper;
 }
 
+/** A role this window drives through the app's logic. */
+interface DrivingVia {
+  role: string;
+  index: number;
+  part: string;
+}
+
+/** The window's link to the app's logic, while it is open or opening. */
+interface Channel {
+  session: AppWindowSession;
+  /** Resolves true once the core opened it, false if it never did or it closed. */
+  opened: Promise<boolean>;
+  settle(opened: boolean): void;
+  /** `drive-via`s waiting for the core's answer, by role and index. */
+  pending: Map<string, (error: ErrorBody | null) => void>;
+}
+
 export class AppHost {
   /** Messages dropped without an answer (wrong source or origin, or not a protocol message). */
   ignored = 0;
@@ -289,6 +389,12 @@ export class AppHost {
   private stopStateWatch: (() => void) | null = null;
   /** The page asked for `state` events (`state-watch`). */
   private stateWatched = false;
+  private channel: Channel | null = null;
+  private readonly vias = new Map<string, DrivingVia>();
+  /** The page asked for `message` events (`message-watch`). */
+  private messagesWatched = false;
+  private messageWindowStart = 0;
+  private messageCount = 0;
 
   constructor(private readonly deps: AppHostDeps) {
     this.now = deps.now ?? Date.now;
@@ -380,6 +486,27 @@ export class AppHost {
         });
       }
     }
+    for (const [key, v] of [...this.vias]) {
+      const role = app?.roles.find((r) => r.role === v.role);
+      const part = role?.parts[v.index];
+      if (!app || !app.enabled || !role?.command || role.drive !== 'window' || part !== v.part) {
+        this.vias.delete(key);
+        this.drivingChanged();
+        this.channel?.session.release(v.role, v.index);
+        const error =
+          app && app.enabled
+            ? fail('no-part', { role: v.role })
+            : fail('app-off', { app: app?.name ?? '' });
+        this.deps.post({
+          faber: PROTOCOL,
+          event: 'drive-ended',
+          role: v.role,
+          index: v.index,
+          reason: 'released',
+          error,
+        });
+      }
+    }
   }
 
   /** The shell's look changed: the page may follow it. */
@@ -406,7 +533,21 @@ export class AppHost {
   async stopDriving(): Promise<void> {
     const drives = [...this.drives.values()];
     this.drives.clear();
+    const vias = [...this.vias.values()];
+    this.vias.clear();
     this.drivingChanged();
+    // The core ends what the window drives through the logic, and the logic's lease with it.
+    if (vias.length > 0) this.channel?.session.stop();
+    for (const v of vias) {
+      this.deps.post({
+        faber: PROTOCOL,
+        event: 'drive-ended',
+        role: v.role,
+        index: v.index,
+        reason: 'stopped',
+        error: driveEnded(v.role, 'stopped'),
+      });
+    }
     for (const d of drives) {
       this.deps.post({
         faber: PROTOCOL,
@@ -426,7 +567,13 @@ export class AppHost {
 
   private drivingChanged(): void {
     const parts = [...this.drives.values()].filter((d) => d.keeper.held).map((d) => d.keeper.part);
+    for (const v of this.vias.values()) parts.push(v.part);
     this.deps.onDriving?.([...new Set(parts)].sort());
+  }
+
+  /** How many roles the window drives through the app's logic (tests). */
+  get drivingVia(): number {
+    return this.vias.size;
   }
 
   /** How many leases the window holds (tests, and the window's own display). */
@@ -445,8 +592,86 @@ export class AppHost {
     }
     const drives = [...this.drives.values()];
     this.drives.clear();
+    this.closeChannel();
     this.drivingChanged();
     await Promise.all(drives.map((d) => d.keeper.release()));
+  }
+
+  /** Closes the window's link to the logic: the core ends what it drove through it. */
+  private closeChannel(): void {
+    const ch = this.channel;
+    this.channel = null;
+    this.vias.clear();
+    this.messagesWatched = false;
+    if (!ch) return;
+    ch.session.close();
+    ch.settle(false);
+    for (const p of ch.pending.values()) p(fail('app-gone'));
+    ch.pending.clear();
+  }
+
+  /** The window's link to the logic, opened the first time the page needs it. */
+  private async link(): Promise<AppWindowSession> {
+    let ch = this.channel;
+    if (!ch) {
+      let settle: (opened: boolean) => void = () => {};
+      const opened = new Promise<boolean>((resolve) => (settle = resolve));
+      const made: Channel = {
+        session: { send() {}, heartbeat() {}, drive() {}, release() {}, stop() {}, close() {} },
+        opened,
+        settle: (v) => settle(v),
+        pending: new Map(),
+      };
+      ch = made;
+      this.channel = made;
+      made.session = this.deps.openChannel({
+        onOpened: () => made.settle(true),
+        onMessage: (kind, data) => this.fromLogic(made, kind, data),
+        onDrive: (role, index, error) => {
+          const key = `${role}#${index}`;
+          const answer = made.pending.get(key);
+          made.pending.delete(key);
+          answer?.(error);
+        },
+        onDriveEnded: (role, index, reason) => {
+          if (this.channel === made) this.viaEnded(`${role}#${index}`, reason);
+        },
+        onClosed: () => {
+          made.settle(false);
+          for (const p of made.pending.values()) p(fail('not-connected'));
+          made.pending.clear();
+          if (this.channel !== made) return;
+          this.channel = null;
+          this.messagesWatched = false;
+          for (const key of [...this.vias.keys()]) this.viaEnded(key, 'connection-lost');
+        },
+        // Refusals the host didn't foresee: the page already has its answer.
+        onError: () => {},
+      });
+    }
+    if (!(await ch.opened)) throw new Refused(fail('not-connected'));
+    return ch.session;
+  }
+
+  private fromLogic(ch: Channel, kind: string, data: AppMessageData): void {
+    if (this.channel !== ch || !this.messagesWatched || this.disposed) return;
+    this.deps.post({ faber: PROTOCOL, event: 'message', kind, data });
+  }
+
+  /** A drive through the logic ended without the page letting go: the page hears why. */
+  private viaEnded(key: string, reason: string): void {
+    const v = this.vias.get(key);
+    if (!v) return;
+    this.vias.delete(key);
+    this.drivingChanged();
+    this.deps.post({
+      faber: PROTOCOL,
+      event: 'drive-ended',
+      role: v.role,
+      index: v.index,
+      reason,
+      error: driveEnded(v.role, reason),
+    });
   }
 
   private withinRate(): boolean {
@@ -550,6 +775,20 @@ export class AppHost {
       case 'state-watch':
         await this.state();
         this.stateWatched = true;
+        return null;
+      case 'message-send':
+        return this.sendMessage(m.kind, m.data);
+      case 'message-watch':
+        this.app();
+        await this.link();
+        this.messagesWatched = true;
+        return null;
+      case 'drive-via':
+        return this.driveVia(m.role, m.index);
+      case 'drive-via-release':
+        return this.releaseVia(m.role, m.index);
+      case 'heartbeat':
+        this.channel?.session.heartbeat();
         return null;
       default:
         throw new Refused(fail('unknown-request', { name: type }));
@@ -780,6 +1019,69 @@ export class AppHost {
     if (r === null) throw new Refused(fail('lease-required', { role: role.role }));
     if (!r.ok) throw new Refused(r.error);
     return { applied: r.value.applied, clamped: r.value.clamped };
+  }
+
+  private messageWithinRate(): boolean {
+    const now = this.now();
+    if (now - this.messageWindowStart >= 1000) {
+      this.messageWindowStart = now;
+      this.messageCount = 0;
+    }
+    this.messageCount++;
+    return this.messageCount <= MAX_APP_MESSAGES_PER_S;
+  }
+
+  private async sendMessage(kind: unknown, data: unknown): Promise<null> {
+    if (typeof kind !== 'string' || !KIND.test(kind) || RESERVED_KINDS.has(kind))
+      throw new Refused(fail('bad-kind'));
+    if (typeof data !== 'string' && !(data instanceof Uint8Array))
+      throw new Refused(fail('bad-request'));
+    const size = bytes(kind) + (typeof data === 'string' ? bytes(data) : data.byteLength);
+    if (size > MAX_APP_MESSAGE_BYTES) throw new Refused(fail('message-too-large'));
+    if (!this.messageWithinRate()) throw new Refused(fail('too-many-messages'));
+    const app = this.app();
+    if (!app.enabled) throw new Refused(fail('app-off', { app: app.name }));
+    const session = await this.link();
+    // A copy: nothing the page keeps a hold of reaches the core.
+    session.send(kind, typeof data === 'string' ? data : new Uint8Array(data));
+    return null;
+  }
+
+  private async driveVia(roleName: unknown, rawIndex: unknown): Promise<null> {
+    const { role, index } = this.drivable(roleName, rawIndex);
+    if (role.drive !== 'window') throw new Refused(fail('not-window-driven', { role: role.role }));
+    const app = this.app();
+    if (!app.enabled) throw new Refused(fail('app-off', { app: app.name }));
+    const part = this.part(role, index);
+    const key = `${role.role}#${index}`;
+    if (this.vias.has(key)) return null;
+    const generation = this.generation;
+    const gone = () => generation !== this.generation || this.disposed;
+    if (!(await this.deps.confirmDriving(part.name))) throw new Refused(fail('not-confirmed'));
+    if (gone()) throw new Refused(fail('app-gone'));
+    const session = await this.link();
+    const ch = this.channel;
+    if (gone() || !ch) throw new Refused(fail('app-gone'));
+    const error = await new Promise<ErrorBody | null>((answer) => {
+      ch.pending.get(key)?.(fail('app-gone'));
+      ch.pending.set(key, answer);
+      session.drive(role.role, index);
+    });
+    if (error) throw new Refused(error);
+    // The page went away meanwhile: closing its link ended the drive in the core already.
+    if (gone() || this.channel !== ch) throw new Refused(fail('app-gone'));
+    this.vias.set(key, { role: role.role, index, part: part.name });
+    this.drivingChanged();
+    return null;
+  }
+
+  private releaseVia(roleName: unknown, rawIndex: unknown): null {
+    const { role, index } = this.drivable(roleName, rawIndex);
+    if (this.vias.delete(`${role.role}#${index}`)) {
+      this.drivingChanged();
+      this.channel?.session.release(role.role, index);
+    }
+    return null;
   }
 
   private async release(roleName: unknown, rawIndex: unknown): Promise<null> {

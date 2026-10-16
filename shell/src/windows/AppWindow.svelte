@@ -63,6 +63,11 @@
           value,
         ),
     },
+    openChannel: (handlers) =>
+      core.openAppWindow(
+        untrack(() => appId),
+        handlers,
+      ),
     onDriving: (parts) => (driving = parts),
   });
 

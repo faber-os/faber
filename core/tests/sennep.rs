@@ -1,12 +1,14 @@
 //! The SENNEP app (examples/apps/sennep) proven in the apartment (Phase 5, docs/roadmap.md): a
 //! simulated SENNEP V2 (its base, an LD19 0.2 m ahead of the centre, a distance sensor at each
-//! corner and a 3S Li-ion battery) gets the packed app, and a client drives it the way the app's
-//! window does: by writing its request into the app's state every 100 ms (`drive`), so every
-//! command passes the app's logic and its safety layer.
+//! corner and a 3S Li-ion battery) gets the packed app, and a client drives it the way the shell
+//! does for the app's window: over the WebSocket, it drives the base through the app's logic
+//! (`app-window-drive`, as after the D46 confirm) and sends `drive` messages every 100 ms, with
+//! the page's heartbeat, so every command passes the app's logic and its safety layer.
 //!
 //! It shows that the app stops SENNEP short of a wall without a bump, that its dead-reckoned pose
-//! follows the world's true pose over a short drive, that a critical battery caps the speed, and
-//! that turning the app off, or the window going quiet, stops the base.
+//! follows the world's true pose over a short drive, that a critical battery caps the speed, that
+//! the shell's Stop, the window going quiet or closing, and turning the app off stop the base, and
+//! that driving saves nothing.
 
 mod support;
 
@@ -27,9 +29,8 @@ use faber_core::runtime::Timing;
 use serde_json::{Value, json};
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use support::{check_e2e_fixture, component, example_package};
+use support::{AppWindow, check_e2e_fixture, component, example_package};
 use tower::ServiceExt;
 
 /// The package the shell's end-to-end test installs (shell/e2e/sennep.spec.ts).
@@ -154,10 +155,15 @@ async fn app_state(c: &TestCore) -> Value {
     call(&c.app, "GET", "/api/v0/apps/sennep/state", None).await.1["values"].clone()
 }
 
-/// The app's `limits` (written by its logic for the window), parsed.
-async fn limits(c: &TestCore) -> Value {
-    let text = app_state(c).await["limits"].as_str().map(str::to_string).unwrap_or_default();
-    serde_json::from_str(&text).unwrap_or(Value::Null)
+/// Driving is live messages, never the app's saved state: nothing of it is there.
+async fn nothing_saved(c: &TestCore) {
+    let state = app_state(c).await;
+    for key in ["drive", "limits", "reset-pose"] {
+        assert!(state.get(key).is_none(), "{key} in the app's state: {state}");
+    }
+    let file = c._dir.path().join("apps/sennep/state.toml");
+    let saved = std::fs::read_to_string(&file).unwrap_or_default();
+    assert!(!saved.contains("drive") && !saved.contains("limits"), "{saved}");
 }
 
 async fn wait_running(c: &TestCore) {
@@ -172,42 +178,12 @@ async fn wait_running(c: &TestCore) {
     }
 }
 
-/// What the window does while a key is held: the request every 100 ms, a new counter each time.
-/// Dropping it is the window closing: nothing more is written, not even a "stop".
-struct Window {
-    task: tokio::task::JoinHandle<()>,
-}
-
-static SEQ: AtomicU64 = AtomicU64::new(1);
-
-impl Window {
-    fn hold(c: &TestCore, x: f32, y: f32, turn: f32) -> Window {
-        let app = c.app.clone();
-        let task = tokio::spawn(async move {
-            loop {
-                let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-                let body = json!({"key": "drive", "value": format!("{seq} {x} {y} {turn}")});
-                let (s, e) = call(&app, "PUT", "/api/v0/apps/sennep/state", Some(body)).await;
-                assert_eq!(s, StatusCode::OK, "{e}");
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        });
-        Window { task }
-    }
-
-    /// Lets go of the key: one last request for nothing.
-    async fn let_go(self, c: &TestCore) {
-        self.task.abort();
-        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-        let body = json!({"key": "drive", "value": format!("{seq} 0 0 0")});
-        call(&c.app, "PUT", "/api/v0/apps/sennep/state", Some(body)).await;
-    }
-}
-
-impl Drop for Window {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
+/// SENNEP's window, opened, driving the base through the app's logic while `x y turn` is held.
+async fn drive(c: &TestCore, x: f32, y: f32, turn: f32) -> AppWindow {
+    let mut w = AppWindow::open(&c.app, "sennep").await;
+    w.drive_via("base").await;
+    w.hold(x, y, turn);
+    w
 }
 
 /// SENNEP V2 simulated in the apartment's living room at `start`, with the app installed, its
@@ -281,7 +257,7 @@ async fn driving_at_a_wall_the_app_stops_sennep_at_the_stop_distance_without_a_b
     assert_eq!(holder(&c, "base"), None, "nobody drives until the window asks");
 
     // Full speed ahead, held, as the window does while W is down.
-    let window = Window::hold(&c, 1.0, 0.0, 0.0);
+    let mut window = drive(&c, 1.0, 0.0, 0.0).await;
     wait_for("the app to drive", 3.0, || {
         (holder(&c, "base").as_deref() == Some("app:sennep") && base(&c).commanded.vx > 0.2).then_some(())
     })
@@ -305,7 +281,7 @@ async fn driving_at_a_wall_the_app_stops_sennep_at_the_stop_distance_without_a_b
     let gap = y - 0.4;
     assert!((0.33..=0.40).contains(&gap), "the front edge stopped {gap} m from the wall");
     assert_eq!(holder(&c, "base").as_deref(), Some("app:sennep"), "it still holds the base while asked");
-    let l = limits(&c).await;
+    let l = window.limits();
     assert_eq!(l["blocked"]["forward"], true, "{l}");
     assert!(l["message"].as_str().unwrap().starts_with("Stopped: something 0.3"), "{l}");
     assert!(l["message"].as_str().unwrap().ends_with("m ahead."), "{l}");
@@ -315,14 +291,14 @@ async fn driving_at_a_wall_the_app_stops_sennep_at_the_stop_distance_without_a_b
     assert!((nearest - f64::from(gap)).abs() < 0.05, "the nearest obstacle ahead: {nearest}, the gap {gap}");
 
     // Backing away is fine.
-    drop(window);
-    let window = Window::hold(&c, -1.0, 0.0, 0.0);
+    window.hold(-1.0, 0.0, 0.0);
     wait_for("it to back away", 3.0, || (base(&c).commanded.vx < -0.2).then_some(())).await;
-    window.let_go(&c).await;
+    window.let_go("base");
     wait_for("the base to stop and be let go", 2.0, || {
         (holder(&c, "base").is_none() && base(&c).commanded == Twist2d::ZERO).then_some(())
     })
     .await;
+    nothing_saved(&c).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -342,10 +318,12 @@ async fn the_apps_pose_follows_the_worlds_over_a_short_drive() {
     assert_eq!(v["reading"]["reading"]["frame"], "odom");
 
     // Ahead, then sideways while turning, then let go.
+    let mut window = AppWindow::open(&c.app, "sennep").await;
     for (x, y, turn, ms) in [(1.0, 0.0, 0.0, 1500), (0.0, -1.0, 0.5, 1500)] {
-        let window = Window::hold(&c, x, y, turn);
+        window.drive_via("base").await;
+        window.hold(x, y, turn);
         tokio::time::sleep(Duration::from_millis(ms)).await;
-        window.let_go(&c).await;
+        window.let_go("base");
     }
     wait_for("SENNEP to stand still", 3.0, || {
         base(&c).measured.is_some_and(|m| m == Twist2d::ZERO).then_some(())
@@ -366,10 +344,7 @@ async fn the_apps_pose_follows_the_worlds_over_a_short_drive() {
     assert!((got.2 - want.2).abs() < 0.05, "its heading: {got:?}, want {want:?}");
 
     // Reset pose (the window's button): back to 0, here.
-    let (s, _) =
-        call(&c.app, "PUT", "/api/v0/apps/sennep/state", Some(json!({"key": "reset-pose", "value": "1"})))
-            .await;
-    assert_eq!(s, StatusCode::OK);
+    window.send("reset-pose", "");
     wait_for("the pose to reset", 2.0, || {
         pose_of(&c, "app:sennep/pose").filter(|p| p.0.abs() < 1e-3 && p.1.abs() < 1e-3).map(|_| ())
     })
@@ -395,43 +370,83 @@ async fn a_critical_battery_caps_the_speed_to_30_percent() {
     assert_eq!(s, StatusCode::OK, "{a}");
     wait_running(&c).await;
 
-    let window = Window::hold(&c, 1.0, 0.0, 0.0);
+    let mut window = drive(&c, 1.0, 0.0, 0.0).await;
     wait_for("it to drive, slowly", 3.0, || (base(&c).commanded.vx > 0.0).then_some(())).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     let vx = base(&c).commanded.vx;
     assert!((vx - 0.09).abs() < 1e-3, "30 % of 0.3 m/s: {vx}");
-    let l = limits(&c).await;
+    let l = window.limits();
     assert_eq!(l["cap"], 0.3, "{l}");
     assert!(l["message"].as_str().unwrap().contains("Battery critical: speed capped to 30 %."), "{l}");
-    window.let_go(&c).await;
+    window.let_go("base");
 }
 
+/// What the shell's Stop bar, a page that hangs, a window that closes and the app being turned off
+/// each do to SENNEP while a key is held.
 #[tokio::test(flavor = "multi_thread")]
-async fn turning_the_app_off_or_the_window_going_quiet_stops_the_base() {
+async fn stop_a_quiet_or_closed_window_or_turning_the_app_off_stops_the_base() {
     if component("sennep").is_none() {
         return;
     }
     let c = sennep_with_the_app((8.0, 2.0, FRAC_PI_2)).await;
+    let drives = || async {
+        wait_for("the app to drive", 3.0, || {
+            (holder(&c, "base").as_deref() == Some("app:sennep") && base(&c).commanded.vx > 0.2).then_some(())
+        })
+        .await
+    };
+    let stops = |within: Duration| {
+        let c = &c;
+        async move {
+            let from = Instant::now();
+            wait_for("the base to stop", 2.0, || {
+                (holder(c, "base").is_none() && base(c).commanded == Twist2d::ZERO).then_some(())
+            })
+            .await;
+            assert!(from.elapsed() < within, "it took {:?}", from.elapsed());
+        }
+    };
 
-    // The window closes (or hangs) while a key is held: nothing more is written.
-    let window = Window::hold(&c, 1.0, 0.0, 0.0);
-    wait_for("the app to drive", 3.0, || {
-        (holder(&c, "base").is_some() && base(&c).commanded.vx > 0.2).then_some(())
-    })
-    .await;
+    // The user presses the shell's Stop: the core ends the drive and the lease at once, though
+    // the page keeps asking (its key is still down), and the window hears why.
+    let window = drive(&c, 1.0, 0.0, 0.0).await;
+    drives().await;
+    window.press_stop();
+    stops(Duration::from_millis(100)).await;
+    let ended = window.wait_for("drive-ended", |m| m["type"] == "app-window-drive-ended").await;
+    assert_eq!(ended["reason"], "stopped", "{ended}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(holder(&c, "base"), None, "the page's messages alone drive nothing");
+    assert_eq!(base(&c).commanded, Twist2d::ZERO);
+    // This page ignored it and keeps asking, so the logic tries, and the core refuses.
+    let l = window.limits();
+    assert!(l["message"].as_str().unwrap().contains("no window is driving"), "{l}");
     drop(window);
-    let quiet = Instant::now();
-    wait_for("the base to stop", 2.0, || {
-        (holder(&c, "base").is_none() && base(&c).commanded == Twist2d::ZERO).then_some(())
-    })
-    .await;
-    assert!(quiet.elapsed() < Duration::from_millis(500), "it took {:?}", quiet.elapsed());
-    let l = limits(&c).await;
-    assert!(l["message"].as_str().unwrap().contains("the window stopped sending"), "{l}");
-    assert_eq!(app_state(&c).await.get("drive"), None, "the stale request is gone");
+
+    // The page hangs while a key is held: no messages, no heartbeat.
+    let mut window = drive(&c, 1.0, 0.0, 0.0).await;
+    drives().await;
+    window.hang();
+    stops(Duration::from_millis(500)).await;
+    let ended = window.wait_for("drive-ended", |m| m["type"] == "app-window-drive-ended").await;
+    assert_eq!(ended["reason"], "heartbeat-lost", "{ended}");
+    let said = window
+        .wait_for("the logic to say why", |m| {
+            m["kind"] == "limits"
+                && m["data"]["text"].as_str().is_some_and(|t| t.contains("Stopped: the window stopped"))
+        })
+        .await;
+    assert!(said["data"]["text"].as_str().unwrap().contains("\"driving\":false"), "{said}");
+    drop(window);
+
+    // The window closes while a key is held: at once.
+    let window = drive(&c, 1.0, 0.0, 0.0).await;
+    drives().await;
+    drop(window);
+    stops(Duration::from_millis(250)).await;
 
     // Turned off while driving: the lease ends at once.
-    let window = Window::hold(&c, 0.0, 1.0, 0.0);
+    let window = drive(&c, 0.0, 1.0, 0.0).await;
     wait_for("the app to drive", 3.0, || (base(&c).commanded.vy > 0.2).then_some(())).await;
     let (s, a) = call(&c.app, "POST", "/api/v0/apps/sennep/disable", None).await;
     assert_eq!((s, a["state"]["kind"].as_str()), (StatusCode::OK, Some("stopped")), "{a}");
@@ -441,4 +456,5 @@ async fn turning_the_app_off_or_the_window_going_quiet_stops_the_base() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(holder(&c, "base"), None);
     drop(window);
+    nothing_saved(&c).await;
 }

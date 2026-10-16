@@ -1,7 +1,10 @@
 //! A [`Host`] for testing an app's logic on the PC, without wasm or a core: set the readings its
-//! roles see, then look at what it commanded, published, stored and logged.
+//! roles see and the messages its windows send, then look at what it commanded, published,
+//! stored, sent its windows and logged.
 
-use crate::{Command, DriveError, Host, LogLevel, Mount, Reading, Role};
+use crate::{
+    Command, DRIVE_ENDED, DRIVE_STARTED, DriveError, Host, LogLevel, Message, Mount, Payload, Reading, Role,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Plays the core for an app under test.
@@ -24,6 +27,15 @@ pub struct TestHost {
     pub published: Vec<(String, Reading)>,
     pub state: BTreeMap<String, String>,
     pub logged: Vec<(LogLevel, String)>,
+    /// What the app's windows sent, for the next `poll_messages`.
+    pub inbox: Vec<Message>,
+    /// Every message the app sent its windows: to which (`None`: all), kind, payload.
+    pub outbox: Vec<(Option<u64>, String, Payload)>,
+    /// Roles declared `drive = "window"`: driven only while a window drives them, as the core
+    /// enforces it (see [`TestHost::window_drives`]).
+    pub window_driven: BTreeSet<String>,
+    /// The `(role, index)`s a window drives now.
+    pub driven: BTreeSet<(String, u32)>,
 }
 
 impl TestHost {
@@ -39,8 +51,32 @@ impl TestHost {
         self.readings.insert(key, reading);
     }
 
+    /// A window sends the app a text message.
+    pub fn window_says(&mut self, window: u64, kind: &str, text: &str) {
+        self.inbox.push(Message { window, kind: kind.into(), payload: Payload::Text(text.into()) });
+    }
+
+    /// A window starts driving `role` through the logic (`faber.driveVia`), as the core says it.
+    pub fn window_drives(&mut self, window: u64, role: &str, index: u32) {
+        self.driven.insert((role.to_string(), index));
+        self.window_says(window, DRIVE_STARTED, &format!("{role} {index}"));
+    }
+
+    /// A window's drive ends (`stopped`, `heartbeat-lost`, …): as the core does, the app's lease
+    /// on the role ends too, whatever the app does next.
+    pub fn window_stops(&mut self, window: u64, role: &str, index: u32, reason: &str) {
+        let key = (role.to_string(), index);
+        self.driven.remove(&key);
+        self.leases.remove(&key);
+        self.window_says(window, DRIVE_ENDED, &format!("{role} {index} {reason}"));
+    }
+
     fn may_drive(&self, role: &str, index: u32) -> bool {
         self.roles.iter().any(|r| r.name == role && r.command && index < r.parts)
+    }
+
+    fn window_allows(&self, role: &str, index: u32) -> bool {
+        !self.window_driven.contains(role) || self.driven.contains(&(role.to_string(), index))
     }
 }
 
@@ -70,6 +106,9 @@ impl Host for TestHost {
         }
         if let Some(e) = &self.refuse {
             return Err(e.clone());
+        }
+        if !self.window_allows(role, index) {
+            return Err(DriveError::PartNotReady(format!("no window is driving \"{role}\".")));
         }
         self.leases.insert((role.to_string(), index));
         Ok(())
@@ -119,6 +158,15 @@ impl Host for TestHost {
         self.state.keys().cloned().collect()
     }
 
+    fn poll_messages(&mut self) -> Vec<Message> {
+        std::mem::take(&mut self.inbox)
+    }
+
+    fn send_message(&mut self, window: Option<u64>, kind: &str, payload: Payload) -> Result<(), String> {
+        self.outbox.push((window, kind.to_string(), payload));
+        Ok(())
+    }
+
     fn log(&mut self, level: LogLevel, message: &str) {
         self.logged.push((level, message.to_string()));
     }
@@ -152,6 +200,22 @@ mod tests {
         assert_eq!(h.latest("front", 0), Some(r.clone()));
         h.set_reading("front", 0, r.clone());
         assert_eq!(h.poll("front", 0), Some(r));
+    }
+
+    #[test]
+    fn a_window_driven_role_needs_a_window_driving_it() {
+        let mut h = TestHost::with_roles(vec![base()]);
+        h.window_driven.insert("base".into());
+        assert!(matches!(h.acquire("base", 0), Err(DriveError::PartNotReady(_))));
+        h.window_drives(7, "base", 0);
+        h.acquire("base", 0).unwrap();
+        h.window_stops(7, "base", 0, "stopped");
+        assert!(h.leases.is_empty(), "the core ends the lease");
+        let kinds: Vec<String> = h.poll_messages().into_iter().map(|m| m.kind).collect();
+        assert_eq!(kinds, [DRIVE_STARTED, DRIVE_ENDED]);
+        assert!(h.poll_messages().is_empty());
+        h.send_message(None, "limits", Payload::Text("{}".into())).unwrap();
+        assert_eq!(h.outbox, [(None, "limits".to_string(), Payload::Text("{}".into()))]);
     }
 
     #[test]

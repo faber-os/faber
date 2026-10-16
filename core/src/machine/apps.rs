@@ -15,9 +15,11 @@
 
 use super::safety::provides_of;
 use super::{ErrorKind, Machine, MachineError, State, write_atomically};
+use crate::apps::channel::{ChannelError, Sink};
 use crate::apps::manifest::AppManifest;
 use crate::apps::{
-    self, AppDefinition, AppHandle, AppStatus, BoundPart, BoundRole, DriveError, Driver, RunDeps,
+    self, AppDefinition, AppHandle, AppStatus, BoundPart, BoundRole, Channel, DriveError, Driver, Payload,
+    RunDeps,
 };
 use crate::connectors::LoadProblem;
 use crate::names::{PartName, SignalAddress};
@@ -28,7 +30,7 @@ use faber_connector::Problem;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// An app's state is written at most this often, however often it changes.
 const SAVE_STATE_EVERY: Duration = Duration::from_secs(1);
@@ -451,6 +453,40 @@ impl Machine {
         Ok((state.values(), rx))
     }
 
+    /// An app's channel to its windows, made the first time it is wanted.
+    fn channel_of(&self, id: &str) -> Arc<Channel> {
+        let mut channels = self.app_channels.lock().expect("app channels lock");
+        Arc::clone(channels.entry(id.to_string()).or_default())
+    }
+
+    /// Opens a window's live link to an app's logic (the WebSocket's `app-window-open`): messages
+    /// both ways, and driving through the logic (docs/apps.md §12). What the core tells the window
+    /// goes to `sink`. Closing the link (dropping it) ends whatever the window drove.
+    pub fn open_app_window(&self, id: &str, sink: Sink) -> Result<AppWindowLink, MachineError> {
+        self.known_app(id)?;
+        let channel = self.channel_of(id);
+        let window = channel.open_window(sink, Instant::now());
+        Ok(AppWindowLink { app: id.to_string(), channel, window })
+    }
+
+    /// Ends the drives of app windows whose heartbeat is overdue (the sweeper, every 10 ms).
+    pub(super) fn sweep_app_windows(&self) {
+        let channels: Vec<_> =
+            self.app_channels.lock().expect("app channels lock").values().cloned().collect();
+        let now = Instant::now();
+        for c in channels {
+            c.sweep(now);
+        }
+    }
+
+    /// An uninstalled app's windows hear that it is gone.
+    pub(super) fn close_app_windows(&self, id: &str) {
+        let channel = self.app_channels.lock().expect("app channels lock").remove(id);
+        if let Some(c) = channel {
+            c.close_all();
+        }
+    }
+
     /// Forgets an uninstalled app's line in apps.toml.
     pub(super) fn forget_app(&self, id: &str) {
         let (text, _) = self.read_apps_config();
@@ -495,7 +531,8 @@ impl Machine {
                     let driver: Arc<dyn Driver> =
                         Arc::new(MachineDriver(self.me.get().cloned().unwrap_or_default()));
                     let state = self.state_of(&def);
-                    let handle = def.run_spec(roles, Arc::clone(&self.router), driver, state).map(|spec| {
+                    let channel = self.channel_of(&def.manifest.id);
+                    let handle = def.run_spec(roles, Arc::clone(&self.router), driver, state, channel).map(|spec| {
                         tracing::info!(target: "core::apps", app = id.as_str(), "starting {} {}", def.manifest.name, def.manifest.version);
                         apps::start(spec, self.app_deps())
                     });
@@ -632,4 +669,70 @@ fn mount_of(st: &State, part: &PartName) -> Mount {
         Some(b) => st.config.parts.get(&b).and_then(|c| c.parts.get(part.local())).map(|c| c.mount),
     }
     .unwrap_or_default()
+}
+
+/// One open app window's link to its app's logic (docs/apps.md §12). Dropping it closes the
+/// window: what it drove through the logic ends at once.
+pub struct AppWindowLink {
+    app: String,
+    channel: Arc<Channel>,
+    window: u64,
+}
+
+fn channel_error(e: ChannelError) -> MachineError {
+    let kind = match e {
+        ChannelError::BadKind
+        | ChannelError::Reserved(_)
+        | ChannelError::UnknownRole(_)
+        | ChannelError::NotWindowDriven(_) => ErrorKind::BadRequest,
+        ChannelError::TooLarge(_) => ErrorKind::TooLarge,
+        ChannelError::TooFast => ErrorKind::Forbidden,
+        ChannelError::NoSuchWindow => ErrorKind::NotFound,
+        ChannelError::NotRunning => ErrorKind::Conflict,
+        ChannelError::NoPart(_) => ErrorKind::Unprocessable,
+    };
+    MachineError::new(kind, e.code(), e.message(), e.hint())
+}
+
+impl AppWindowLink {
+    /// The app this window belongs to.
+    pub fn app(&self) -> &str {
+        &self.app
+    }
+
+    /// The window's id, as the app's logic sees it.
+    pub fn id(&self) -> u64 {
+        self.window
+    }
+
+    /// A message for the logic; dropped while the logic isn't running.
+    pub fn send(&self, kind: &str, payload: Payload) -> Result<(), MachineError> {
+        self.channel.from_window(self.window, kind, payload, Instant::now()).map_err(channel_error)
+    }
+
+    /// The window's page is alive (its SDK beats every 100 ms while it drives).
+    pub fn heartbeat(&self) -> Result<(), MachineError> {
+        self.channel.heartbeat(self.window, Instant::now()).map_err(channel_error)
+    }
+
+    /// The window drives `role` through the logic, after the shell's D46 confirm.
+    pub fn drive_via(&self, role: &str, index: u32) -> Result<(), MachineError> {
+        self.channel.drive_via(self.window, role, index, Instant::now()).map_err(channel_error)
+    }
+
+    /// The window lets go of `role`.
+    pub fn end_drive(&self, role: &str, index: u32) {
+        self.channel.end_drive(self.window, role, index)
+    }
+
+    /// The user pressed Stop for this window (outside its page).
+    pub fn stop(&self) {
+        self.channel.stop(self.window)
+    }
+}
+
+impl Drop for AppWindowLink {
+    fn drop(&mut self) {
+        self.channel.close_window(self.window);
+    }
 }

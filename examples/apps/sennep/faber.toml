@@ -20,11 +20,14 @@ height = 540
 role = "lidar"
 capability = "laser-scan@1"
 
-# The mecanum base. command = true: the app takes its lease while you drive.
+# The mecanum base. command = true: the app takes its lease while you drive. drive = "window":
+# only while you drive it from the app's window (Faber asks you first and shows its Stop bar);
+# the app never drives it on its own.
 [[requires]]
 role = "base"
 capability = "planar-base@1"
 command = true
+drive = "window"
 
 # Distance sensors around the body (SENNEP has one at each corner). Optional: the app runs
 # without them, and the safety layer uses those it has.

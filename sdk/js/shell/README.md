@@ -67,6 +67,33 @@ await base.release(); // the base stops
 | `applyTheme(theme)`                                                   | Sets those tokens on the page's root and its `color-scheme`, so `var(--surface)` works in your CSS.                                                                                                                                                                                                                     |
 | `connect({parent, self, timeoutMs})`                                  | A connection of your own (tests use it with a fake shell); `faber` is one made on first use.                                                                                                                                                                                                                            |
 
+**Driving through the app's logic.** When an app's logic must check every command (a safety
+layer, like SENNEP's), the window doesn't drive the part itself: its role is declared
+`drive = "window"` in `faber.toml`, and the window asks to drive it _through the logic_, then
+sends the logic what the driver wants as messages:
+
+```js
+const via = await faber.driveVia('base'); // Faber asks the user first, and shows its Stop bar
+const timer = setInterval(() => faber.send('drive', '1 0 0'), 100);
+via.onEnd((e) => console.log('stopped:', e.message)); // e.g. the user pressed Stop
+// … later
+clearInterval(timer);
+await via.release();
+
+faber.onMessage((kind, data) => show(kind, data)); // what the logic sends back
+```
+
+The logic reads the messages with `messages.poll()` on each tick and may hold the role's lease
+only while a window drives it: Faber ends the lease itself when the window lets go, the user
+presses Stop, the window closes, or the page stops beating (the SDK beats every 100 ms; 300 ms
+without one ends it). Messages are never saved: use `faber.state` for settings.
+
+| Function                        | What it does                                                                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `faber.driveVia(role, {index})` | Drives a `drive = "window"` role through the logic. Answers a `DriveVia`: `release()`, `onEnd(cb)` and `ended`.                                 |
+| `faber.send(kind, data)`        | A message for the logic: `kind` is 1-64 characters of `a-z`, `0-9`, `-`; `data` a string or a `Uint8Array`; at most 4 KB together, 50 a second. |
+| `faber.onMessage(cb)`           | Calls `cb(kind, data)` with each message the logic sends this window. Returns a function that stops it.                                         |
+
 **Driving safely.** The lease on a part lasts 250 ms unless something renews it. A `Drive` renews
 it every 100 ms from your page's own timer, so if your page hangs or its window is closed the lease
 lapses and the part stops. The e-stop, an operator taking over, the part going away or the app

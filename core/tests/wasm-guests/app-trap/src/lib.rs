@@ -2,6 +2,10 @@
 //! `core/tests/apps.rs`. The debug hook is its state: with `trap-after = "<n>"` saved, it panics
 //! on its n-th tick (counting from its start); with `hog = "yes"` it asks for 64 MB on its first
 //! tick instead.
+//!
+//! It is also the app that ignores the rules: it never reads its messages (so never hears
+//! `drive-ended`) and takes the base's lease again on every tick it lost it. With the base
+//! declared `drive = "window"`, it proves the core ends and refuses the lease on its own.
 
 use faber_app_wasm::{App, Command, Host};
 use faber_capabilities::{Twist2d, planar_base};
@@ -30,7 +34,9 @@ impl App for Trapper {
             panic!("trap requested after {} ticks", self.ticks);
         }
         let go = Command::PlanarBase(planar_base::Command::SetVelocity(Twist2d::new(0.2, 0.0, 0.0)));
-        let _ = host.send("base", 0, go);
+        if host.send("base", 0, go).is_err() && host.acquire("base", 0).is_ok() {
+            let _ = host.send("base", 0, go);
+        }
     }
 }
 

@@ -66,7 +66,7 @@ describe('the SENNEP window', () => {
       y: 0,
       turn: 1,
     });
-    expect(driveValue(7, { x: 1, y: -0.33333, turn: 0 })).toBe('7 1 -0.333 0');
+    expect(driveValue({ x: 1, y: -0.33333, turn: 0 })).toBe('1 -0.333 0');
   });
 
   it('cuts the proximity ring by where each sensor looks, without overlaps', () => {

@@ -11,7 +11,7 @@ mod packages;
 mod safety;
 mod world;
 
-pub use apps::AppView;
+pub use apps::{AppView, AppWindowLink};
 pub use flash::{FirmwareSource, FlashProgress, FlashRequest, Flashed};
 pub use packages::{PackagePreview, PackagePreviewOf, PackageView, installed_connectors};
 pub use safety::{CommandReply, EstopView, LeaseEvent};
@@ -309,6 +309,9 @@ pub struct Machine {
     /// Each installed app's state, shared by its logic and its windows. A leaf lock: nothing
     /// else is taken while it is held.
     app_states: Mutex<BTreeMap<String, Arc<crate::apps::SharedState>>>,
+    /// Each installed app's live channel between its windows and its logic (docs/apps.md §12).
+    /// Taken before `state`, never after; never while `app_states` is held.
+    app_channels: Mutex<BTreeMap<String, Arc<crate::apps::Channel>>>,
     /// This machine, for what it hands out that must not keep it alive (apps' lease driver).
     me: OnceLock<Weak<Machine>>,
 }
@@ -394,6 +397,7 @@ impl Machine {
             apps: Mutex::new(apps::Apps::default()),
             app_status: Arc::new(crate::apps::StatusBoard::default()),
             app_states: Mutex::new(BTreeMap::new()),
+            app_channels: Mutex::new(BTreeMap::new()),
             me: OnceLock::new(),
         });
         let _ = machine.me.set(Arc::downgrade(&machine));

@@ -97,6 +97,28 @@ impl Count {
     }
 }
 
+/// Who decides when an app drives a command role (`drive = "logic"` or `"window"`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DrivenBy {
+    /// The logic drives it on its own whenever the app is on (the default): background control,
+    /// like the wall follower. Turning the app on is the go-ahead.
+    #[default]
+    Logic,
+    /// The logic drives it only while one of the app's windows is driving it through the logic
+    /// (`faber.driveVia`), with the D46 confirm and the shell's Stop bar (docs/apps.md §12). The
+    /// core ends the logic's lease when the window stops, closes or goes quiet.
+    Window,
+}
+
+impl DrivenBy {
+    pub fn id(self) -> &'static str {
+        match self {
+            DrivenBy::Logic => "logic",
+            DrivenBy::Window => "window",
+        }
+    }
+}
+
 /// One `[[requires]]`: a role the user fills with parts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RoleSpec {
@@ -105,6 +127,8 @@ pub struct RoleSpec {
     /// The app may drive it (it needs a lease).
     pub command: bool,
     pub count: Count,
+    /// For a command role: whether the logic drives it on its own or only for a window.
+    pub drive: DrivenBy,
 }
 
 /// One `[[suggests]]`: a connector offered when nothing fills a role.
@@ -214,6 +238,7 @@ struct RawRequire {
     capability: Spanned<String>,
     command: Option<Spanned<bool>>,
     count: Option<Spanned<String>>,
+    drive: Option<Spanned<String>>,
 }
 
 #[derive(Deserialize)]
@@ -519,7 +544,28 @@ impl Builder<'_> {
                 }
             },
         };
-        Ok(RoleSpec { role: r.role.into_inner(), capability, command, count })
+        let drive = match &r.drive {
+            None => DrivenBy::Logic,
+            Some(d) if !command => {
+                return Err(self.err(
+                    d.span(),
+                    format!("drive = \"{}\" is only for a role the app drives.", d.get_ref()),
+                    "Add command = true to the role, or remove drive.",
+                ));
+            }
+            Some(d) => match d.get_ref().as_str() {
+                "logic" => DrivenBy::Logic,
+                "window" => DrivenBy::Window,
+                other => {
+                    return Err(self.err(
+                        d.span(),
+                        format!("drive = \"{other}\" is not a way Faber knows to drive a role."),
+                        "Write drive = \"logic\" (the logic drives it on its own, the default) or \"window\" (only while a window drives it through the logic).",
+                    ));
+                }
+            },
+        };
+        Ok(RoleSpec { role: r.role.into_inner(), capability, command, count, drive })
     }
 
     fn window(&self, w: Spanned<RawWindow>, ui: bool) -> Result<Window, ManifestError> {
@@ -639,19 +685,22 @@ capability = "pose@1"
                     role: "lidar".into(),
                     capability: Capability::LaserScan,
                     command: false,
-                    count: Count::One
+                    count: Count::One,
+                    drive: DrivenBy::Logic
                 },
                 RoleSpec {
                     role: "base".into(),
                     capability: Capability::PlanarBase,
                     command: true,
-                    count: Count::One
+                    count: Count::One,
+                    drive: DrivenBy::Logic
                 },
                 RoleSpec {
                     role: "proximity".into(),
                     capability: Capability::Distance,
                     command: false,
-                    count: Count::OneOrMore
+                    count: Count::OneOrMore,
+                    drive: DrivenBy::Logic
                 },
             ]
         );
@@ -693,6 +742,50 @@ count = \"0..1\"
         );
         assert!(Count::One.required() && Count::OneOrMore.required());
         assert!(!Count::Optional.required() && !Count::Any.required());
+    }
+
+    #[test]
+    fn a_command_role_can_be_driven_only_from_a_window() {
+        let m = parse(&SENNEP.replace(
+            "command = true
+",
+            "command = true
+drive = \"window\"
+",
+        ))
+        .unwrap();
+        assert_eq!(m.role("base").map(|r| r.drive), Some(DrivenBy::Window));
+        assert_eq!(m.role("lidar").map(|r| r.drive), Some(DrivenBy::Logic));
+        let m = parse(&SENNEP.replace(
+            "command = true
+",
+            "command = true
+drive = \"logic\"
+",
+        ))
+        .unwrap();
+        assert_eq!(m.role("base").map(|r| r.drive), Some(DrivenBy::Logic));
+        assert_eq!([DrivenBy::Logic.id(), DrivenBy::Window.id()], ["logic", "window"]);
+
+        let e = parse(&SENNEP.replace(
+            "command = true
+",
+            "command = true
+drive = \"user\"
+",
+        ))
+        .unwrap_err();
+        assert!(e.message.contains("drive = \"user\" is not a way") && e.line == Some(27), "{e:?}");
+        let e = parse(&SENNEP.replace(
+            "count = \"1..\"",
+            "count = \"1..\"
+drive = \"window\"",
+        ))
+        .unwrap_err();
+        assert!(
+            e.message.contains("only for a role the app drives") && e.hint.contains("command = true"),
+            "{e:?}"
+        );
     }
 
     #[test]

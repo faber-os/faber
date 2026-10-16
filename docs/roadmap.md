@@ -123,14 +123,18 @@ drives a motor, and killing the app stops the motor.
 - [x] Derived signals: `app:sennep/pose` (dead reckoning) and `app:sennep/nearest-obstacle`,
   published and shown in the shell with the app badge (D24)
 - [x] Machine-config export/import: Share setup, a backup without the user's files (5c)
+- [x] Live messages between an app's window and its logic, and driving through the logic with the
+  D46 confirm and the shell's Stop bar (`drive = "window"`, 5e, [apps.md §12](apps.md)); SENNEP's
+  window moved onto it
 - [ ] Run on the real SENNEP: its Mega's FaberLink firmware with a planar base (Phase 4)
 
 **Status (2026-10-16):** built and proven without the robot. `core/tests/sennep.rs` drives a
 simulated SENNEP in the apartment through the app (it stops at the stop distance with no bump,
 its pose follows the world's, a critical battery caps the speed, the base stops when the window
-goes quiet or the app is turned off); `core/tests/bridge.rs` drives the base of a simulated SENNEP
-Mega (the FaberLink library's C++ behind a fake cable) through the app; `shell/e2e/sennep.spec.ts`
-installs it, drives with a key and stops from the browser. The "done when" needs the real Mega.
+goes quiet or closes, the shell's Stop is pressed, or the app is turned off); `core/tests/bridge.rs`
+drives the base of a simulated SENNEP Mega (the FaberLink library's C++ behind a fake cable)
+through the app; `shell/e2e/sennep.spec.ts` installs it, confirms, drives with a key and stops it
+with the shell's Stop bar from the browser. The "done when" needs the real Mega.
 
 **Done when:** SENNEP drives by hand from a browser window through Faber on the PC (Mega over USB).
 

@@ -89,6 +89,38 @@ interface state {
   keys: func() -> list<string>;
 }
 
+/// Live messages between the app's windows and its logic (docs/apps.md §12): small, typed, and
+/// never saved. What a window sends while the logic isn't running is dropped.
+///
+/// The core sends two kinds itself, from the window they are about:
+/// - `drive-started`, payload `"<role> <index>"`: the window is driving a `drive = "window"` role
+///   through the logic (the user confirmed it). Only now may the logic take that role's lease.
+/// - `drive-ended`, payload `"<role> <index> <reason>"`: it stopped (`released`, `stopped` by the
+///   user, `window-closed`, `heartbeat-lost`, `app-stopped`). The core has already ended the
+///   logic's lease on the role if no other window drives it, and refuses a new one.
+interface messages {
+  /// What a message carries: text, or bytes.
+  variant payload {
+    text(string),
+    bytes(list<u8>),
+  }
+
+  record message {
+    /// The window it came from (the same id for as long as the window is open).
+    window: u64,
+    /// What it is, e.g. `drive`: 1–64 characters of `a-z`, `0-9` and `-`.
+    kind: string,
+    payload: payload,
+  }
+
+  /// Every message that came since the last call, oldest first. Call it every tick.
+  poll: func() -> list<message>;
+  /// Sends a message to one window, or to every open window with none. Kind and payload are at
+  /// most 4 KB together, and each window takes at most 50 a second; fails, saying why, otherwise
+  /// (a window over its rate just misses a message sent to every window).
+  send: func(window: option<u64>, kind: string, payload: payload) -> result<_, string>;
+}
+
 /// Lines in the core's log, as `app:<id>`.
 interface log {
   use faber:connector/types@0.1.0.{log-level};
@@ -104,6 +136,7 @@ world app {
   import drive;
   import publish;
   import state;
+  import messages;
   import log;
 
   /// Called once when the app starts (it was enabled, its roles changed, or it restarted).

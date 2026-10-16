@@ -117,3 +117,167 @@ pub fn check_e2e_fixture(file: &str, fresh: Vec<u8>) {
     }
     packages::open(&old.unwrap()).expect("the committed package opens");
 }
+
+/// An app's window as the shell runs it for its page (docs/apps.md §12): a WebSocket to the core
+/// with the window's link to its app's logic open, its heartbeat every 100 ms, and what the core
+/// tells it kept in order. Dropping it is the window closing (the connection goes).
+pub struct AppWindow {
+    out: tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
+    heard: std::sync::Arc<Mutex<Vec<serde_json::Value>>>,
+    beat: Option<tokio::task::JoinHandle<()>>,
+    hold: Option<tokio::task::JoinHandle<()>>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
+}
+
+/// The window's link id on its WebSocket.
+const LINK: u32 = 1;
+
+impl AppWindow {
+    /// Opens `app`'s window on the core behind `router`, and says hello to its logic.
+    pub async fn open(router: &axum::Router, app: &str) -> AppWindow {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = router.clone();
+        let serve = tokio::spawn(async move { axum::serve(listener, server).await.unwrap() });
+        let (ws, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/api/v0/ws?format=json")).await.unwrap();
+        let (mut sink, mut stream) = ws.split();
+        let (out, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+        let writer = tokio::spawn(async move {
+            while let Some(m) = rx.recv().await {
+                if sink.send(Message::Text(m.to_string().into())).await.is_err() {
+                    return;
+                }
+            }
+        });
+        let heard = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let h = std::sync::Arc::clone(&heard);
+        let reader = tokio::spawn(async move {
+            while let Some(Ok(m)) = stream.next().await {
+                if let Message::Text(t) = m {
+                    h.lock().unwrap().push(serde_json::from_str(&t).unwrap());
+                }
+            }
+        });
+        let mut w = AppWindow { out, heard, beat: None, hold: None, tasks: vec![serve, writer, reader] };
+        w.say(serde_json::json!({"type": "app-window-open", "id": LINK, "app": app}));
+        let opened = w.wait_for("the link to open", |m| m["type"] != "app-window-message").await;
+        assert_eq!(opened["type"], "app-window-opened", "{opened}");
+        let out = w.out.clone();
+        w.beat = Some(tokio::spawn(async move {
+            loop {
+                let _ = out.send(serde_json::json!({"type": "app-window-heartbeat", "id": LINK}));
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }));
+        w.send("hello", "");
+        w
+    }
+
+    fn say(&self, m: serde_json::Value) {
+        self.out.send(m).unwrap();
+    }
+
+    /// A message for the app's logic.
+    pub fn send(&self, kind: &str, text: &str) {
+        self.say(
+            serde_json::json!({"type": "app-window-send", "id": LINK, "kind": kind, "data": {"text": text}}),
+        );
+    }
+
+    /// Everything the core told the window so far.
+    pub fn heard(&self) -> Vec<serde_json::Value> {
+        self.heard.lock().unwrap().clone()
+    }
+
+    /// The first thing the core told the window that `want` says yes to, waiting up to 5 s.
+    pub async fn wait_for(&self, what: &str, want: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(m) = self.heard().into_iter().find(|m| want(m)) {
+                return m;
+            }
+            assert!(std::time::Instant::now() < until, "timed out waiting for {what}: {:?}", self.heard());
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Drives `role` through the logic, as the shell does once the user said yes (D46).
+    pub async fn drive_via(&self, role: &str) {
+        let before = self.heard().len();
+        self.say(serde_json::json!({"type": "app-window-drive", "id": LINK, "role": role}));
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let answer = self
+                .heard()
+                .into_iter()
+                .skip(before)
+                .find(|m| m["type"] == "app-window-driving" || m["type"] == "app-window-drive-refused");
+            if let Some(a) = answer {
+                assert_eq!(a["type"], "app-window-driving", "{a}");
+                return;
+            }
+            assert!(std::time::Instant::now() < until, "no answer to app-window-drive");
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
+
+    /// What the window's page does while a control is held: `drive` every 100 ms.
+    pub fn hold(&mut self, x: f32, y: f32, turn: f32) {
+        if let Some(t) = self.hold.take() {
+            t.abort();
+        }
+        let out = self.out.clone();
+        self.hold = Some(tokio::spawn(async move {
+            loop {
+                let m = serde_json::json!({"type": "app-window-send", "id": LINK, "kind": "drive", "data": {"text": format!("{x} {y} {turn}")}});
+                let _ = out.send(m);
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }));
+    }
+
+    /// The control is let go: one last `drive` for nothing, and the drive is released.
+    pub fn let_go(&mut self, role: &str) {
+        if let Some(t) = self.hold.take() {
+            t.abort();
+        }
+        self.send("drive", "0 0 0");
+        self.say(serde_json::json!({"type": "app-window-release", "id": LINK, "role": role}));
+    }
+
+    /// The page hangs: nothing more comes from it, not its messages, not its heartbeat.
+    pub fn hang(&mut self) {
+        for t in [self.hold.take(), self.beat.take()].into_iter().flatten() {
+            t.abort();
+        }
+    }
+
+    /// The user presses the shell's Stop bar for this window.
+    pub fn press_stop(&self) {
+        self.say(serde_json::json!({"type": "app-window-stop", "id": LINK}));
+    }
+
+    /// The limits the app's logic last told the window (its `limits` message, parsed).
+    pub fn limits(&self) -> serde_json::Value {
+        self.heard()
+            .into_iter()
+            .rev()
+            .find(|m| m["type"] == "app-window-message" && m["kind"] == "limits")
+            .and_then(|m| serde_json::from_str(m["data"]["text"].as_str()?).ok())
+            .unwrap_or(serde_json::Value::Null)
+    }
+}
+
+impl Drop for AppWindow {
+    fn drop(&mut self) {
+        for t in [self.hold.take(), self.beat.take()].into_iter().flatten() {
+            t.abort();
+        }
+        for t in &self.tasks {
+            t.abort();
+        }
+    }
+}

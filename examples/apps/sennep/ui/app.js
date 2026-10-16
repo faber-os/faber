@@ -1,10 +1,12 @@
 // SENNEP's window. It drives SENNEP by hand and shows what it sees, through the @faber-os/shell
 // SDK. Its text is plain English: an app's own words aren't translated by Faber's catalogue.
 //
-// Driving goes through the app's logic (src/lib.rs), never around it: the window saves what the
-// driver asks for in the app's state (`drive`), at least every 100 ms while a control is held, and
-// the logic drives the base through its safety layer. If this page closes or hangs, the request
-// stops changing and the logic stops the base within 300 ms.
+// Driving goes through the app's logic (src/lib.rs), never around it: the window asks Faber to
+// drive the base through the logic (`faber.driveVia`: Faber asks the user the first time and shows
+// its Stop bar outside this page), then sends what the driver asks for as live messages (`drive`),
+// every 100 ms while a control is held, and the logic drives the base through its safety layer.
+// Nothing of it is saved. If this page closes or hangs, Faber ends the drive within 300 ms and
+// the base stops, whatever the logic does.
 import { applyTheme, faber } from "./faber-shell.js";
 import {
   SENNEP,
@@ -61,7 +63,7 @@ function token(name, fallback) {
   );
 }
 
-// ---- the app's state: settings and what the logic says ---------------------------------------
+// ---- the app's state (settings) and what the logic says (live messages) ----------------------
 
 function num(text, fallback, lo, hi) {
   const v = Number(text);
@@ -86,11 +88,6 @@ const settings = {
     seen.footprint.width = num(v, SENNEP.width, 0.1, 3);
     draw();
   },
-  limits: (v) => {
-    seen.limits = readLimits(v);
-    showLimits();
-    draw();
-  },
 };
 
 const sliding = new Set();
@@ -103,6 +100,17 @@ for (const key of Object.keys(settings)) {
   faber.state.get(key).then((v) => settings[key](v), showProblem);
 }
 faber.state.onChange((key, value) => settings[key]?.(value));
+
+// What limits the driving, as the logic says it whenever it changes. A new window asks once.
+faber.onMessage((kind, data) => {
+  if (kind !== "limits") return;
+  seen.limits = readLimits(data);
+  showLimits();
+  draw();
+});
+function hello() {
+  faber.send("hello", "").catch(() => {});
+}
 
 /** A slider saves its key while it moves, at most every 100 ms, and once more where it stops. */
 function slider(id, key, text) {
@@ -164,7 +172,10 @@ function showStatus(status) {
     $(id).disabled = !seen.running;
   $("pad").setAttribute("aria-disabled", String(!seen.running));
   if (!seen.running) letGo();
-  if (seen.running && !was) faber.roles().then(follow, showProblem);
+  if (seen.running && !was) {
+    faber.roles().then(follow, showProblem);
+    hello();
+  }
   showLimits();
 }
 faber.status().then(showStatus, showProblem);
@@ -269,7 +280,7 @@ function showBattery(b) {
 }
 
 $("reset-pose").addEventListener("click", () => {
-  faber.state.set("reset-pose", String(Date.now())).catch(showProblem);
+  faber.send("reset-pose", "").catch(showProblem);
 });
 
 // ---- the top view ----------------------------------------------------------------------------
@@ -476,16 +487,44 @@ drawRing();
 const held = new Set();
 let pad = STILL;
 let turn = 0;
-let seq = Date.now();
 let timer = null;
+/** The drive through the logic while a control is held (`faber.driveVia`), and while Faber asks. */
+let via = null;
+let asking = null;
 
 function stick() {
   return combine(keysToStick(held), pad, { x: 0, y: 0, turn });
 }
 
 function send(s) {
-  seq += 1;
-  faber.state.set("drive", driveValue(seq, s)).catch(showProblem);
+  faber.send("drive", driveValue(s)).catch(showProblem);
+}
+
+/** Asks Faber to drive the base through the logic: the user says yes the first time. */
+async function startDriving() {
+  asking ??= faber.driveVia("base").then(
+    (v) => {
+      via = v;
+      // The user pressed Faber's Stop, or the app stopped: let go of every control here too.
+      v.onEnd(() => {
+        if (via === v) via = null;
+        letGo();
+      });
+    },
+    (e) => {
+      letGo();
+      showProblem(e);
+    },
+  );
+  await asking;
+  asking = null;
+}
+
+/** Lets go of the drive: the logic may no longer drive the base, and it stops. */
+function release() {
+  const v = via;
+  via = null;
+  if (v) v.release().catch(() => {});
 }
 
 /** Sends the request now, and every 100 ms while it asks for something (the logic's dead man). */
@@ -495,8 +534,13 @@ function update() {
     if (timer !== null) {
       clearInterval(timer);
       timer = null;
-      send(STILL);
     }
+    if (via) send(STILL);
+    release();
+    return;
+  }
+  if (!via) {
+    if (!asking) startDriving().then(() => via && update());
     return;
   }
   send(s);
@@ -515,7 +559,8 @@ function letGo() {
     clearInterval(timer);
     timer = null;
   }
-  if (seen.running) send(STILL);
+  if (via) send(STILL);
+  release();
 }
 
 $("stop").addEventListener("click", letGo);

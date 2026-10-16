@@ -3,7 +3,8 @@
 //! signals, keep a small state and log. The sandbox (`logic`) hands every import to this; it is
 //! plain Rust, so it is tested without wasm.
 
-use super::manifest::{PublishSpec, RoleSpec};
+use super::channel::{Channel, DrivenRole, Message, Payload};
+use super::manifest::{DrivenBy, PublishSpec, RoleSpec};
 use super::state::SharedState;
 use crate::names::{PartName, SignalAddress};
 use crate::router::{PublishError, Router};
@@ -11,6 +12,7 @@ use faber_capabilities::{Command, Mount, Reading};
 use faber_connector::Problem;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 /// Why a lease or a command was refused, as the app sees it (`faber:app/drive`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +79,10 @@ pub struct Session {
     polled: BTreeMap<(String, u32), Arc<Reading>>,
     /// The app's store, shared with its windows and every run.
     pub state: Arc<SharedState>,
+    /// Live messages to and from the app's windows, and their drive intents.
+    channel: Arc<Channel>,
+    /// This run's place in the channel.
+    token: u64,
     /// A rule the app broke during a call; it stops the app.
     bug: Option<Problem>,
 }
@@ -94,7 +100,18 @@ impl Session {
         router: Arc<Router>,
         driver: Arc<dyn Driver>,
         state: Arc<SharedState>,
+        channel: Arc<Channel>,
     ) -> Self {
+        let driven = roles
+            .iter()
+            .filter(|r| r.spec.command)
+            .map(|r| DrivenRole {
+                role: r.spec.role.clone(),
+                window: r.spec.drive == DrivenBy::Window,
+                parts: r.parts.len() as u32,
+            })
+            .collect();
+        let token = channel.attach(driven, Arc::clone(&driver));
         Session {
             app: app.to_string(),
             holder: holder(app),
@@ -105,6 +122,8 @@ impl Session {
             leases: BTreeMap::new(),
             polled: BTreeMap::new(),
             state,
+            channel,
+            token,
             bug: None,
         }
     }
@@ -168,8 +187,28 @@ impl Session {
         }
     }
 
+    /// Declared `drive = "window"`: driven only while one of the app's windows drives it.
+    fn window_driven(&self, role: &str) -> bool {
+        self.roles.iter().any(|r| r.spec.role == role && r.spec.drive == DrivenBy::Window)
+    }
+
+    /// For a window-driven role: whether a window drives it now. When none does, the lease this
+    /// run may still think it holds is let go (the core already ended it).
+    fn window_allows(&mut self, role: &str, index: u32) -> bool {
+        if !self.window_driven(role) || self.channel.may_drive(role, index, Instant::now()) {
+            return true;
+        }
+        if let Some((part, lease)) = self.leases.remove(&(role.to_string(), index)) {
+            self.driver.release(&part, &lease);
+        }
+        false
+    }
+
     pub fn acquire(&mut self, role: &str, index: u32) -> Result<(), DriveError> {
         let part = self.drivable(role, index)?;
+        if !self.window_allows(role, index) {
+            return Err(no_window(role));
+        }
         let key = (role.to_string(), index);
         if let Some((_, lease)) = self.leases.get(&key) {
             match self.driver.renew(&part, lease) {
@@ -181,12 +220,22 @@ impl Session {
             }
         }
         let lease = self.driver.acquire(&part, &self.holder)?;
+        if self.window_driven(role)
+            && !self.channel.took_lease(self.token, role, index, part.clone(), lease.clone(), Instant::now())
+        {
+            // The window let go while the lease was on its way.
+            self.driver.release(&part, &lease);
+            return Err(no_window(role));
+        }
         self.leases.insert(key, (part, lease));
         Ok(())
     }
 
     pub fn renew(&mut self, role: &str, index: u32) -> Result<(), DriveError> {
         self.drivable(role, index)?;
+        if !self.window_allows(role, index) {
+            return Err(DriveError::LeaseEnded(DRIVE_ENDED.into()));
+        }
         let key = (role.to_string(), index);
         let (part, lease) = self.leases.get(&key).cloned().ok_or(DriveError::LeaseRequired)?;
         self.driver.renew(&part, &lease).inspect_err(|_| {
@@ -196,12 +245,16 @@ impl Session {
 
     pub fn release(&mut self, role: &str, index: u32) {
         if let Some((part, lease)) = self.leases.remove(&(role.to_string(), index)) {
+            self.channel.dropped_lease(self.token, role, index);
             self.driver.release(&part, &lease);
         }
     }
 
     pub fn send(&mut self, role: &str, index: u32, command: Command) -> Result<Command, DriveError> {
         self.drivable(role, index)?;
+        if !self.window_allows(role, index) {
+            return Err(DriveError::LeaseEnded(DRIVE_ENDED.into()));
+        }
         let key = (role.to_string(), index);
         let (part, lease) = self.leases.get(&key).cloned().ok_or(DriveError::LeaseRequired)?;
         self.driver.command(&part, &lease, command).inspect_err(|e| {
@@ -211,11 +264,24 @@ impl Session {
         })
     }
 
-    /// Ends every lease this run holds (it stopped, trapped or was turned off).
+    /// Ends every lease this run holds (it stopped, trapped or was turned off), and its place in
+    /// the channel: the windows' drives end, and messages for it are dropped from now on.
     pub fn release_all(&mut self) {
         for ((_, _), (part, lease)) in std::mem::take(&mut self.leases) {
             self.driver.release(&part, &lease);
         }
+        self.channel.detach(self.token);
+    }
+
+    /// Every message from the app's windows (and the core's `drive-started`/`drive-ended`) since
+    /// the last call.
+    pub fn poll_messages(&mut self) -> Vec<Message> {
+        self.channel.poll(self.token)
+    }
+
+    /// A message to one of the app's windows, or all of them; why not, in words.
+    pub fn send_message(&mut self, window: Option<u64>, kind: &str, payload: Payload) -> Result<(), String> {
+        self.channel.to_windows(window, kind, payload, Instant::now()).map_err(|e| e.message())
     }
 
     /// Publishes a derived signal. Only `[[publishes]]` names with their capability; anything
@@ -241,6 +307,23 @@ impl Session {
     }
 }
 
+impl Drop for Session {
+    fn drop(&mut self) {
+        // A run that never got as far as `release_all` (it failed to start) leaves no trace.
+        self.channel.detach(self.token);
+    }
+}
+
+/// The `lease-ended` reason when a window-driven role's drive ended.
+const DRIVE_ENDED: &str = "drive-ended";
+
+/// Why a window-driven role can't be driven now.
+fn no_window(role: &str) -> DriveError {
+    DriveError::PartNotReady(format!(
+        "no window is driving \"{role}\". It is declared drive = \"window\", so the app drives it only while one of its windows does."
+    ))
+}
+
 fn bug(what: String) -> Problem {
     Problem::new(
         format!("The app stopped because of a bug: {what}."),
@@ -251,7 +334,8 @@ fn bug(what: String) -> Problem {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::apps::manifest::Count;
+    use crate::apps::channel::{DRIVE_ENDED as ENDED_KIND, DRIVE_STARTED, Sink, ToWindow};
+    use crate::apps::manifest::{Count, DrivenBy};
     use faber_capabilities::{Capability, Twist2d, distance, planar_base};
     use std::sync::Mutex;
 
@@ -290,7 +374,13 @@ pub(crate) mod tests {
 
     pub fn role(name: &str, capability: Capability, command: bool, parts: &[&str]) -> BoundRole {
         BoundRole {
-            spec: RoleSpec { role: name.into(), capability, command, count: Count::One },
+            spec: RoleSpec {
+                role: name.into(),
+                capability,
+                command,
+                count: Count::One,
+                drive: DrivenBy::Logic,
+            },
             parts: parts
                 .iter()
                 .map(|n| BoundPart {
@@ -317,6 +407,7 @@ pub(crate) mod tests {
             Arc::clone(&router),
             driver.clone(),
             Arc::new(SharedState::in_memory("t")),
+            Arc::new(Channel::new()),
         );
         (s, router, driver)
     }
@@ -386,6 +477,59 @@ pub(crate) mod tests {
                 "release base lease-base"
             ]
         );
+    }
+
+    /// The core's guarantee for a `drive = "window"` role: the logic gets its lease only while a
+    /// window drives it, and loses it when the window stops, even if it ignores `drive-ended`.
+    #[test]
+    fn a_window_driven_role_is_driven_only_while_a_window_drives_it() {
+        let driver = Arc::new(FakeDriver::default());
+        let channel = Arc::new(Channel::new());
+        let mut base = role("base", Capability::PlanarBase, true, &["base"]);
+        base.spec.drive = DrivenBy::Window;
+        let mut s = Session::new(
+            "sennep",
+            vec![base],
+            Vec::new(),
+            Arc::new(Router::new()),
+            driver.clone(),
+            Arc::new(SharedState::in_memory("t")),
+            Arc::clone(&channel),
+        );
+        let go = Command::PlanarBase(planar_base::Command::SetVelocity(Twist2d::new(0.3, 0.0, 0.0)));
+        let Err(DriveError::PartNotReady(why)) = s.acquire("base", 0) else {
+            panic!("no window drives it yet")
+        };
+        assert!(why.contains("no window is driving \"base\""), "{why}");
+        assert!(driver.log.lock().unwrap().is_empty(), "the machine was never asked");
+
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let t = Arc::clone(&told);
+        let sink: Sink = Arc::new(move |m| t.lock().unwrap().push(m));
+        let now = Instant::now();
+        let w = channel.open_window(sink, now);
+        channel.drive_via(w, "base", 0, now).unwrap();
+        s.acquire("base", 0).unwrap();
+        assert_eq!(s.send("base", 0, go), Ok(go));
+        let m = s.poll_messages();
+        assert_eq!((m[0].window, m[0].kind.as_str()), (w, DRIVE_STARTED));
+
+        // The user presses Stop; the app ignores `drive-ended` and drives on.
+        channel.stop(w);
+        assert_eq!(driver.log.lock().unwrap().last().map(String::as_str), Some("release base lease-base"));
+        assert_eq!(s.send("base", 0, go), Err(DriveError::LeaseEnded("drive-ended".into())));
+        assert!(matches!(s.acquire("base", 0), Err(DriveError::PartNotReady(_))));
+        assert_eq!(s.poll_messages()[0].kind, ENDED_KIND);
+
+        s.send_message(Some(w), "limits", Payload::Text("{}".into())).unwrap();
+        let e = s.send_message(Some(w), "Bad Kind", Payload::Text(String::new())).unwrap_err();
+        assert!(e.contains("kind is 1 to 64 characters"), "{e}");
+        assert_eq!(
+            told.lock().unwrap().last(),
+            Some(&ToWindow::Message { kind: "limits".into(), payload: Payload::Text("{}".into()) })
+        );
+        s.release_all();
+        assert_eq!(channel.drive_via(w, "base", 0, now), Err(crate::apps::channel::ChannelError::NotRunning));
     }
 
     #[test]
