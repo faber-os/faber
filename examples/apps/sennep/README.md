@@ -45,8 +45,11 @@ Every command the app sends goes through it, whether the window is open or not:
 - **Battery**: when the battery's level is critical (below 9.9 V for a 3S Li-ion pack, D48), it
   drives at 30 % of the top speed and says so.
 - **No LiDAR, no driving**: without a new scan in the last second it won't move.
-- **The window's dead man's switch**: the window repeats what you ask every 100 ms; if it stops
-  (closed, crashed, the browser hung), the app lets go of the base within 300 ms and the base stops.
+- **The window's dead man's switch**: the window repeats what you ask every 100 ms, and its page
+  beats every 100 ms while it drives; if either stops (closed, crashed, the browser hung), the base
+  stops within 300 ms. Faber itself ends the app's lease when the beat stops, when you press its
+  Stop bar or close the window: the base is declared `drive = "window"`, so the app may only drive
+  it while its window does.
 
 It **only limits this app's own commands.** It doesn't touch the core's e-stop, which always
 works, nor anything else driving the base (the Drive window, another app, a program). And it only
@@ -73,16 +76,18 @@ No robot needed.
    and Install.
 4. **Open its window** (Apps → SENNEP → Open, or the start menu) and drive: **W A S D** or the
    arrows (or drag the joystick) move it, **Q E** turn, **Space** or Stop stops. Click into the
-   window first, so it gets the keys.
+   window first, so it gets the keys. The first time, Faber asks whether SENNEP may drive the base;
+   while it drives, Faber shows "SENNEP is driving base." above the window, with a Stop.
 
 Drive at a wall: SENNEP slows down and stops 0.35 m short of it, the joystick's edge and the stop
 zone turn red, and the window says "Stopped: something 0.36 m ahead." To see the speed capped, add
 a manual `generic-battery`, set it below 9.9 V (its Manual pane), and pick it for the `battery`
 role in Apps.
 
-## Its state
+## Its settings and its messages
 
-The window and the logic share the app's state (`PUT /api/v0/apps/sennep/state`):
+The window and the logic share the app's **state**, its saved settings
+(`PUT /api/v0/apps/sennep/state`):
 
 | Key | Default | What |
 |---|---|---|
@@ -90,9 +95,15 @@ The window and the logic share the app's state (`PUT /api/v0/apps/sennep/state`)
 | `stop-distance` | `0.35` | Leading edge to obstacle (m, 0.1–1.5). The window's slider. |
 | `max-turn` | `0.8` | Top turn rate (rad/s). |
 | `length`, `width` | `0.8`, `0.65` | SENNEP's footprint (m), for the stop distance and the view. |
-| `drive` | | What the window asks for: `"<seq> <x> <y> <turn>"`, each −1..1. Written by the window. |
-| `reset-pose` | | Any new value resets the pose. |
-| `limits` | | Written by the logic: what limits the driving now, for the window (JSON). |
+
+What changes all the time goes as live **messages** instead (docs/apps.md §12), never saved:
+
+| Kind | From → to | What |
+|---|---|---|
+| `drive` | window → logic | What the driver asks for: `"<x> <y> <turn>"`, each −1..1, every 100 ms while a control is held. Only while the window drives the base through the logic (`faber.driveVia("base")`). |
+| `reset-pose` | window → logic | Puts the pose back to 0. |
+| `hello` | window → logic | A window opened: the logic answers with the limits. |
+| `limits` | logic → windows | What limits the driving now (JSON), whenever it changes. |
 
 ## The code, explained
 
@@ -102,9 +113,9 @@ The window and the logic share the app's state (`PUT /api/v0/apps/sennep/state`)
 - `src/safety.rs`: the safety layer, a plain function of the request, the points, the settings and
   the battery, so `cargo test` checks every rule without wasm or a core.
 - `src/odometry.rs`: dead reckoning.
-- `src/lib.rs`: the app. Each tick (20 a second) it reads the settings, integrates the pose, takes
-  the newest scan and the proximity readings, reads the window's request, limits it, and sends it
-  under the base's lease. It lets go of the lease when you stop driving, so the Drive window or
+- `src/lib.rs`: the app. Each tick (20 a second) it reads the settings and its messages, integrates
+  the pose, takes the newest scan and the proximity readings, limits the window's request, and
+  sends it under the base's lease. It lets go of the lease when you stop driving, so the Drive window or
   another program can take over.
 - `ui/`: the window, plain HTML and JavaScript. `view.js` holds its pure parts (tested by the
   SDK's tests, `sdk/js/shell/src/sennep-view.test.js`), `app.js` wires them to the
@@ -114,9 +125,9 @@ The window and the logic share the app's state (`PUT /api/v0/apps/sennep/state`)
 **Why the window drives through the logic** instead of with the SDK's `faber.drive()`: leases are
 exclusive, so if the window held the base's lease the logic couldn't limit what it sends. Keeping
 the stop in the logic means it works the same whoever asks to drive, and keeps working if the
-window's page misbehaves. The cost: the shell's "is driving" bar and its first-drive confirm
-(D46) belong to `faber.drive()`, so this window shows its own Stop and state instead. Turning the
-app on in Apps is the go-ahead, as for any app with logic.
+window's page misbehaves. `faber.driveVia("base")` keeps what `faber.drive()` gives the user: Faber
+asks before the first drive (D46) and shows its own "SENNEP is driving base." bar with a Stop the
+app can't hide, and Faber, not the app, ends the drive when the window stops.
 
 ## What needs the real robot
 

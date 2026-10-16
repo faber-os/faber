@@ -5,8 +5,9 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
  * The SENNEP app end to end (Phase 5, docs/roadmap.md): its package on the desktop is opened in
  * Files; the Install window binds its roles to a simulated SENNEP V2 in the apartment (base, LiDAR,
  * four corner distance sensors, battery); it is installed and turned on; its window shows the
- * LiDAR's view; a held key drives SENNEP (through the app's logic, which takes the base's lease)
- * and the dead-reckoned pose moves; Stop lets go of the base.
+ * LiDAR's view; the first key asks the D46 confirm, outside the app's page; a held key then drives
+ * SENNEP (through the app's logic, which takes the base's lease) while the shell shows its own
+ * "SENNEP is driving …" bar, and the dead-reckoned pose moves; that bar's Stop stops the base.
  *
  * The package is the example packed (core/tests/sennep.rs writes the fixture).
  */
@@ -111,7 +112,17 @@ test('install SENNEP, bind its roles, drive it with a key and stop it', async ({
   const pose = app.getByTestId('pose');
   await expect(pose).toHaveText(/^x 0\.00 m, y 0\.00 m/, { timeout: 10_000 });
 
-  // Hold W for a moment: the logic drives the base under its own lease, and the pose moves.
+  // The first key asks first (D46), in the shell, outside the app's page. Nothing moves yet.
+  await app.getByTestId('lidar-view').click();
+  await page.keyboard.press('KeyW');
+  const sheet = page.getByRole('alertdialog', { name: /^Start driving/ });
+  await expect(sheet).toContainText('SENNEP wants to drive');
+  expect(await (await page.request.get('/api/v0/leases')).json()).toEqual([]);
+  await sheet.getByRole('button', { name: 'Start' }).click();
+  await expect(sheet).toBeHidden();
+
+  // Hold W for a moment: the logic drives the base under its own lease, the shell says so above
+  // the page, and the pose moves.
   await app.getByTestId('lidar-view').click();
   await page.keyboard.down('KeyW');
   await expect
@@ -119,14 +130,17 @@ test('install SENNEP, bind its roles, drive it with a key and stop it', async ({
       timeout: 5_000,
     })
     .toContainEqual(expect.objectContaining({ part: BASE, holder: 'app:sennep' }));
+  const bar = win.getByRole('status');
+  await expect(bar).toContainText(`SENNEP is driving ${BASE}.`);
   await expect(app.getByTestId('velocity')).toHaveText(/m\/s ahead/);
   await page.waitForTimeout(800);
-  // Stop (the window's own button) lets go, whatever keys are down.
-  await app.getByTestId('stop').click();
-  await page.keyboard.up('KeyW');
+  // The shell's Stop, outside the page, stops the base whatever keys are down in it.
+  await bar.getByRole('button', { name: 'Stop' }).click();
   await expect
     .poll(async () => (await (await page.request.get('/api/v0/leases')).json()) as unknown[])
     .toEqual([]);
+  await expect(bar).toBeHidden();
+  await page.keyboard.up('KeyW');
   await expect(pose).not.toHaveText(/^x 0\.00 m/);
   await expect(app.getByTestId('velocity')).toHaveText('Standing still');
   const base = await (await page.request.get(`/api/v0/signals/${BASE}/planar-base`)).json();
