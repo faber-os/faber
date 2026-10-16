@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { apiFingerprint } from './apiFingerprint.ts';
 
 // The core listens on 127.0.0.1:7878 (docs/api.md). In development Vite forwards /api to it,
-// including the WebSocket, so the shell can always use relative URLs.
-const CORE = 'http://127.0.0.1:7878';
+// including the WebSocket, so the shell can always use relative URLs. FABER_CORE points it at a
+// core elsewhere (one started on another port beside your own).
+const CORE = process.env.FABER_CORE || 'http://127.0.0.1:7878';
 
 export default defineConfig({
   plugins: [svelte(), svelteTesting()],

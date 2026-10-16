@@ -3,6 +3,7 @@ import { loadGeometry, saveGeometry, type StorageLike } from '../lib/desktop/geo
 import {
   closeWindow,
   emptyDesktop,
+  ensureSize,
   focusWindow,
   isCompactScreen,
   minimiseWindow,
@@ -245,6 +246,11 @@ export class DesktopController {
     if (!w) return;
     this.geometry = { ...this.geometry, [geometryKey(this.kind(w), w.key)]: rect };
     this.scheduleSave();
+  }
+
+  /** Gives a window room for a task (the pin picker) without changing its remembered size. */
+  ensureSize(id: string, want: Size): void {
+    this.state = ensureSize(this.state, id, want, this.area);
   }
 
   setViewport(viewport: Area): void {

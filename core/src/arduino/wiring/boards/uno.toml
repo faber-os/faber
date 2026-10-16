@@ -56,3 +56,24 @@ reason = "D0 and D1 carry the USB link to Faber (Serial)."
 pins = ["D13"]
 note = "D13 also drives the on-board LED: fine for an output, weak as an input with a pull-up."
 avoid = ["digital-in"]
+
+# The headers, for drawing the board in the pin picker: only the order of the positions along
+# each header, not measured positions. From Arduino's published Uno Rev3 pinout (top view, USB
+# and power jack on the left): the digital headers along the top (the R3's SCL/SDA copies of
+# A5/A4 first, then AREF, GND, D13 … D8, and D7 … D0), the power and analog headers along the
+# bottom (NC, IOREF, RESET, 3V3, 5V, GND, GND, VIN, then A0 … A5).
+[[headers]]
+edge = "top"
+positions = ["SCL", "SDA", "AREF", "GND", "D13", "D12", "D11", "D10", "D9", "D8"]
+
+[[headers]]
+edge = "top"
+positions = ["D7", "D6", "D5", "D4", "D3", "D2", "D1", "D0"]
+
+[[headers]]
+edge = "bottom"
+positions = ["NC", "IOREF", "RESET", "3V3", "5V", "GND", "GND", "VIN"]
+
+[[headers]]
+edge = "bottom"
+positions = ["A0", "A1", "A2", "A3", "A4", "A5"]

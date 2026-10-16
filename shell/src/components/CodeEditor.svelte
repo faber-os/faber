@@ -18,6 +18,7 @@
     diagnostics = NONE,
     visible = true,
     onchange,
+    readOnly = false,
   }: {
     value: string;
     /** For screen readers: which file this is. */
@@ -30,6 +31,8 @@
     /** False while another tab is shown; the editor measures itself again when it is shown. */
     visible?: boolean;
     onchange: (text: string) => void;
+    /** Read once: shown but not editable (a guided board's generated sketch). */
+    readOnly?: boolean;
   } = $props();
 
   let host: HTMLDivElement;
@@ -56,6 +59,7 @@
         file,
         others: () => others(),
         onchange: (text) => onchange(text),
+        readOnly,
       });
       if (pending) editor.goto(...pending);
       pending = null;

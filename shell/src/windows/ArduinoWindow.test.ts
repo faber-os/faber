@@ -145,6 +145,83 @@ describe('Arduino editor', () => {
     expect(screen.getByRole('button', { name: /^New$/ })).toBeDisabled();
   });
 
+  describe('a guided board’s sketch', () => {
+    const plan = (takenOver?: string) => ({
+      name: 'Rover',
+      folder: 'home:/Arduino/Rover',
+      sketch: SKETCH,
+      plan: {
+        board: 'mega2560',
+        name: 'Rover',
+        parts: {},
+        ...(takenOver ? { takenOver } : {}),
+      },
+      problems: [],
+      wiring: [],
+      generated: !takenOver,
+      edited: false,
+    });
+    const PLAN = '/api/v0/arduino/plans/Rover';
+
+    it('opens its .ino read-only with a bar, my code normally, for the plan’s board', async () => {
+      const shell = await setup([{ path: PLAN, body: plan() }]);
+      const code = await screen.findByRole('textbox', { name: 'Code of Rover.ino' });
+      expect(code).toHaveAttribute('aria-readonly', 'true');
+      expect(screen.getByRole('note')).toHaveTextContent(
+        'Faber writes this file from the board’s plan.',
+      );
+      // The plan is for a Mega, whatever the port's USB ids guess.
+      await waitFor(() => expect(screen.getByLabelText('Board')).toHaveValue('mega2560'));
+      await userEvent.click(screen.getByRole('tab', { name: 'motor.h' }));
+      expect(screen.queryByRole('note')).toBeNull();
+      expect(await screen.findByRole('textbox', { name: 'Code of motor.h' })).not.toHaveAttribute(
+        'aria-readonly',
+      );
+      // "Edit the plan" opens it in Parts.
+      await userEvent.click(screen.getByRole('tab', { name: 'Rover.ino' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Edit the plan' }));
+      const parts = shell.desktop.state.windows.find((w) => w.kind === 'parts');
+      expect(parts?.params).toEqual({ editPlan: 'Rover' });
+    });
+
+    it('takes over the code only after a confirm that says it is one way', async () => {
+      const shell = await setup([
+        { path: PLAN, body: plan() },
+        { method: 'POST', path: `${PLAN}/take-over`, body: plan('2026-10-16T12:00:00Z') },
+      ]);
+      await screen.findByRole('textbox', { name: 'Code of Rover.ino' });
+      await userEvent.click(screen.getByRole('button', { name: 'Take over the code' }));
+      const dialog = screen.getByRole('alertdialog', { name: 'Take over the code?' });
+      expect(dialog).toHaveTextContent('This is one way');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Keep it guided' }));
+      expect(calls(shell, 'POST', `${PLAN}/take-over`)).toHaveLength(0);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Take over the code' }));
+      shell.fetch.route({ path: PLAN, body: plan('2026-10-16T12:00:00Z') });
+      await userEvent.click(
+        within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Take over the code' }),
+      );
+      await waitFor(() => expect(screen.queryByRole('note')).toBeNull());
+      expect(calls(shell, 'POST', `${PLAN}/take-over`)).toHaveLength(1);
+      expect(await screen.findByRole('textbox', { name: 'Code of Rover.ino' })).not.toHaveAttribute(
+        'aria-readonly',
+      );
+    });
+
+    it('needs an operator to edit the plan or take over the code', async () => {
+      const shell = await setup([{ path: PLAN, body: plan() }]);
+      shell.signInAs('viewer');
+      await screen.findByRole('note');
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Take over the code' })).toBeDisabled(),
+      );
+      expect(screen.getByRole('button', { name: 'Edit the plan' })).toHaveAttribute(
+        'title',
+        'Needs the operator role',
+      );
+    });
+  });
+
   it('opens a sketch with its code files as tabs, the main .ino first', async () => {
     await setup();
     const tabs = await screen.findAllByRole('tab');

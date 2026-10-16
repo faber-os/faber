@@ -274,6 +274,8 @@ export interface EditorOptions {
   /** The sketch's other tabs, read when completion or hover needs their names. */
   others: () => SketchFile[];
   onchange: (text: string) => void;
+  /** Shown but not editable: a guided board's sketch, which Faber writes (docs/wiring.md §5). */
+  readOnly?: boolean;
 }
 
 export function createEditor(parent: HTMLElement, doc: string, options: EditorOptions): Editor {
@@ -318,7 +320,11 @@ export function createEditor(parent: HTMLElement, doc: string, options: EditorOp
           close: t('arduino.assist.close'),
         }),
         theme,
-        EditorView.contentAttributes.of({ 'aria-label': options.label }),
+        EditorView.contentAttributes.of({
+          'aria-label': options.label,
+          ...(options.readOnly ? { 'aria-readonly': 'true' } : {}),
+        }),
+        EditorState.readOnly.of(options.readOnly === true),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) options.onchange(u.state.doc.toString());
         }),

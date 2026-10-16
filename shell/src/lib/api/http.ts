@@ -38,6 +38,14 @@ import type { NewSketchRequest } from './generated/NewSketchRequest';
 import type { SketchRef } from './generated/SketchRef';
 import type { UploadRequest } from './generated/UploadRequest';
 import type { UploadResult } from './generated/UploadResult';
+import type { GuidedBoard } from './generated/GuidedBoard';
+import type { GuidedBoardSummary } from './generated/GuidedBoardSummary';
+import type { NewPlanRequest } from './generated/NewPlanRequest';
+import type { PartSuggestion } from './generated/PartSuggestion';
+import type { PartTemplate } from './generated/PartTemplate';
+import type { PinMap } from './generated/PinMap';
+import type { SavePlanRequest } from './generated/SavePlanRequest';
+import type { SuggestRequest } from './generated/SuggestRequest';
 import type { FlashRequest } from './generated/FlashRequest';
 import type { FlashResult } from './generated/FlashResult';
 import type { LeaseGrant } from './generated/LeaseGrant';
@@ -129,6 +137,19 @@ export interface CoreHttp {
   /** Reads the program back and compares; resets the board. Only on a user's request. */
   checkBoardCode(port: string, stopPart: boolean): Promise<BoardCodeInfo>;
   openFlashed(id: string, copy: boolean): Promise<SketchRef>;
+  /** Guided boards (docs/api.md, "Guided boards"): a board's pins, with its headers. */
+  getPinMap(board: string): Promise<PinMap>;
+  /** The part templates, in catalogue order. */
+  getPartTemplates(): Promise<PartTemplate[]>;
+  getPlans(): Promise<GuidedBoardSummary[]>;
+  newPlan(req: NewPlanRequest): Promise<GuidedBoard>;
+  getPlan(name: string): Promise<GuidedBoard>;
+  /** Where a part could go; writes nothing. */
+  suggestPart(name: string, req: SuggestRequest): Promise<PartSuggestion>;
+  /** `422 invalid-plan` lists every problem in the error's `problems`. */
+  savePlan(name: string, req: SavePlanRequest): Promise<GuidedBoard>;
+  /** "Take over the code": one way (docs/wiring.md §8). */
+  takeOverPlan(name: string): Promise<GuidedBoard>;
   getParts(): Promise<PartInfo[]>;
   addPart(part: NewPart): Promise<PartInfo>;
   removePart(name: string): Promise<void>;
@@ -296,6 +317,7 @@ export function createHttp(
     if (err && typeof err.code === 'string' && typeof err.message === 'string') {
       const body: ErrorBody = { code: err.code, message: err.message, hint: err.hint ?? '' };
       if (err.needs) body.needs = err.needs;
+      if (Array.isArray(err.problems)) body.problems = err.problems;
       return new CoreError(res.status, body);
     }
     return new CoreError(res.status, {
@@ -312,6 +334,7 @@ export function createHttp(
   const q = (path: string) => `?path=${encodeURIComponent(path)}`;
   const named = (name: string) => `name=${encodeURIComponent(name)}`;
   const partPath = (name: string) => `/parts/${encodeURIComponent(name)}`;
+  const plan = (name: string) => `/arduino/plans/${encodeURIComponent(name)}`;
 
   return {
     getSystem: () => request('GET', '/system'),
@@ -351,6 +374,14 @@ export function createHttp(
       ),
     openFlashed: (id, copy) =>
       request('POST', `/arduino/flashed/${encodeURIComponent(id)}/open`, copy ? { copy } : {}),
+    getPinMap: (board) => request('GET', `/arduino/pins/${encodeURIComponent(board)}`),
+    getPartTemplates: () => request('GET', '/arduino/parts'),
+    getPlans: () => request('GET', '/arduino/plans'),
+    newPlan: (req) => request('POST', '/arduino/plans', req),
+    getPlan: (name) => request('GET', plan(name)),
+    suggestPart: (name, req) => request('POST', `${plan(name)}/suggest`, req),
+    savePlan: (name, req) => request('PUT', plan(name), req),
+    takeOverPlan: (name) => request('POST', `${plan(name)}/take-over`),
     getParts: () => request('GET', '/parts'),
     addPart: (part) => request('POST', '/parts', part),
     removePart: (name) => request('DELETE', `/parts/${encodeURIComponent(name)}`),

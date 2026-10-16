@@ -109,3 +109,45 @@ reason = "D0 and D1 carry the USB link to Faber (Serial). Serial1-3 on D14-D19 a
 pins = ["D13"]
 note = "D13 also drives the on-board LED: fine for an output, weak as an input with a pull-up."
 avoid = ["digital-in"]
+
+# The headers, for drawing the board in the pin picker: only the order of the positions along
+# each header. From Arduino's published Mega 2560 Rev3 pinout (top view, USB and power jack on
+# the left): along the top the Uno's digital headers (SCL/SDA copies of D21/D20, AREF, GND,
+# D13 … D8, D7 … D0) and then D14 … D21; along the bottom the power header (NC, IOREF, RESET, 3V3,
+# 5V, GND, GND, VIN), A0 … A7 and A8 … A15; at the right end the double header, pair by pair
+# from the top: 5V 5V, D22 D23, … D52 D53, GND GND (even pins on the inner row).
+[[headers]]
+edge = "top"
+positions = ["SCL", "SDA", "AREF", "GND", "D13", "D12", "D11", "D10", "D9", "D8"]
+
+[[headers]]
+edge = "top"
+positions = ["D7", "D6", "D5", "D4", "D3", "D2", "D1", "D0"]
+
+[[headers]]
+edge = "top"
+positions = ["D14", "D15", "D16", "D17", "D18", "D19", "D20", "D21"]
+
+[[headers]]
+edge = "bottom"
+positions = ["NC", "IOREF", "RESET", "3V3", "5V", "GND", "GND", "VIN"]
+
+[[headers]]
+edge = "bottom"
+positions = ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7"]
+
+[[headers]]
+edge = "bottom"
+positions = ["A8", "A9", "A10", "A11", "A12", "A13", "A14", "A15"]
+
+[[headers]]
+edge = "right"
+rows = 2
+positions = [
+  "5V", "5V",
+  "D22", "D23", "D24", "D25", "D26", "D27", "D28", "D29", "D30", "D31",
+  "D32", "D33", "D34", "D35", "D36", "D37", "D38", "D39", "D40", "D41",
+  "D42", "D43", "D44", "D45", "D46", "D47", "D48", "D49", "D50", "D51",
+  "D52", "D53",
+  "GND", "GND",
+]

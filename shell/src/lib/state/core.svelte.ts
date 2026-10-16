@@ -65,6 +65,13 @@ import type {
   Simulation,
   WorldInfo,
   WorldView,
+  BoardPlan,
+  GuidedBoard,
+  GuidedBoardSummary,
+  PartSuggestion,
+  PartTemplate,
+  PinMap,
+  SuggestRequest,
 } from './types';
 import type { ServerMessage } from '../api/generated/ServerMessage';
 import { canMove } from './driving';
@@ -561,6 +568,47 @@ export class CoreState {
 
   openFlashed(id: string, copy = false): Promise<Result<SketchRef>> {
     return this.call(() => this.http.openFlashed(id, copy));
+  }
+
+  /** A board's pins and headers (docs/wiring.md §4). */
+  pinMap(board: string): Promise<Result<PinMap>> {
+    return this.call(() => this.http.getPinMap(board));
+  }
+
+  /** The part templates, in catalogue order. */
+  partTemplates(): Promise<Result<PartTemplate[]>> {
+    return this.call(() => this.http.getPartTemplates());
+  }
+
+  /** The guided boards. */
+  plans(): Promise<Result<GuidedBoardSummary[]>> {
+    return this.call(() => this.http.getPlans());
+  }
+
+  /** Starts a guided board: its folder, an empty plan, its sketch and `my_code.h`. */
+  newPlan(name: string, board: string): Promise<Result<GuidedBoard>> {
+    return this.call(() => this.http.newPlan({ name, board }));
+  }
+
+  plan(name: string): Promise<Result<GuidedBoard>> {
+    return this.call(() => this.http.getPlan(name));
+  }
+
+  /** Where a part could go on a guided board; writes nothing. */
+  suggestPart(plan: string, req: SuggestRequest): Promise<Result<PartSuggestion>> {
+    return this.call(() => this.http.suggestPart(plan, req));
+  }
+
+  /** Saves the plan and rewrites the sketch; refusals carry `problems`. */
+  savePlan(plan: BoardPlan, overwriteEdits = false): Promise<Result<GuidedBoard>> {
+    return this.call(() =>
+      this.http.savePlan(plan.name, { plan, ...(overwriteEdits ? { overwriteEdits } : {}) }),
+    );
+  }
+
+  /** "Take over the code": the board is code mode from then on. One way. */
+  takeOverPlan(name: string): Promise<Result<GuidedBoard>> {
+    return this.call(() => this.http.takeOverPlan(name));
   }
 
   /** The flasher's progress on every port, while watched. */

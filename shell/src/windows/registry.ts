@@ -20,6 +20,7 @@ import PropertiesWindow from './PropertiesWindow.svelte';
 import SerialMonitorWindow from './SerialMonitorWindow.svelte';
 import SettingsWindow from './SettingsWindow.svelte';
 import WorldWindow from './WorldWindow.svelte';
+import WiringWindow from './WiringWindow.svelte';
 import TemperatureWindow from './TemperatureWindow.svelte';
 import LevelWindow from './LevelWindow.svelte';
 import FractionWindow from './FractionWindow.svelte';
@@ -456,6 +457,22 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 560, h: 620 },
     minSize: { w: 340, h: 360 },
     component: InstallPackageWindow,
+  },
+  {
+    kind: 'wiring',
+    get title() {
+      return t('programs.wiring.title');
+    },
+    get description() {
+      return t('programs.wiring.description');
+    },
+    icon: 'list',
+    menu: null,
+    colour: 'parts',
+    multiple: true,
+    defaultSize: { w: 420, h: 520 },
+    minSize: { w: 300, h: 280 },
+    component: WiringWindow,
   },
   {
     kind: 'properties',

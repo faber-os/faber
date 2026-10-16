@@ -57,3 +57,16 @@ reason = "D0 and D1 carry the USB link to Faber (Serial)."
 pins = ["D13"]
 note = "D13 also drives the on-board LED: fine for an output, weak as an input with a pull-up."
 avoid = ["digital-in"]
+
+# The headers, for drawing the board in the pin picker: only the order of the positions along
+# each header. From the Nano's DIP-30 pin numbering in Arduino's published pinout (top view, USB
+# on the left): pin 1 is TX1 at the far end from the USB connector, pins 1-15 run towards the USB
+# end along one side (TX1, RX0, RESET, GND, D2 … D12) and pins 16-30 back along the other (D13,
+# 3V3, AREF, A0 … A7, 5V, RESET, GND, VIN). Drawn with pins 15 … 1 along the top.
+[[headers]]
+edge = "top"
+positions = ["D12", "D11", "D10", "D9", "D8", "D7", "D6", "D5", "D4", "D3", "D2", "GND", "RESET", "D0", "D1"]
+
+[[headers]]
+edge = "bottom"
+positions = ["D13", "3V3", "AREF", "A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7", "5V", "RESET", "GND", "VIN"]

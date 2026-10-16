@@ -19,6 +19,31 @@ compiling the example for an Uno and a Mega. Steps marked *(needs hardware)* hav
 checked with a real board on a real USB port. Faber's own [Arduino flasher](#flash-from-faber) is
 tested against simulated bootloaders only: it still needs a run on a real Uno and a real Mega.
 
+## The easy way: guided boards
+
+If you'd rather not write the sketch, let Faber write it. In **Parts → Add part**, switch to
+**On a board's pins**:
+
+1. Pick the board, or *A new board*: its type (Uno, Nano, Mega) and a name.
+2. Pick the part (an ultrasonic or infrared distance sensor, a DC motor on a driver, a battery's
+   voltage), how it is wired if it can be wired several ways (a motor driver's pins), its name and
+   its settings.
+3. Pick its pins on a drawing of the board. Faber suggests free pins that can do the job and fills
+   them in, so usually you only press *Save the plan*. Pins that can't do it, are in use or are
+   reserved say why.
+4. Wire it with the checklist (tick each wire; *Open in a window* keeps it beside you, *Print*
+   prints it). Warnings come first: motors need their own supply.
+5. *Verify*, then *Upload* (an admin's). If the board isn't in Parts yet, *Add the board to Parts*;
+   its parts then appear under it with live values.
+
+Faber keeps the board's plan in `home:/Arduino/<name>/board.toml` and writes `<name>.ino` from it.
+Your own code goes in `my_code.h` in the same folder, which Faber never overwrites. To change the
+parts or pins later, use *Edit plan* on the board in Parts. If you want the whole sketch for
+yourself, *Take over the code* in the Arduino editor: from then on it's an ordinary sketch, as in
+the rest of this guide (this is one way). The design: [wiring.md](wiring.md).
+
+The rest of this guide is the hand-written way: your own sketch with the FaberLink library.
+
 ## What you need
 
 - An Arduino: Uno, Nano, Mega or similar, and its USB cable.

@@ -285,6 +285,67 @@ What exists, and where it differs in detail from the design above. The decisions
   `userLoop()`. Golden files for every template on every board are in `fixtures/wiring/`; the
   real `arduino-cli` compiles them with `--warnings all` in a test when the computer has one (it
   did, with no warnings, on 2026-10-16) and in CI's Arduino job.
-- **Not built yet**: the shell (wizard, pin drawing, wiring checklist, the editor's read-only bar),
-  the `PINS` message (§6), Verify's warning for `delay()` in `userLoop()` (§5), the live check
+- **Not built yet** (core): the `PINS` message (§6), Verify's warning for `delay()` in `userLoop()` (§5), the live check
   after upload (§3 step 6), and the new library classes of §9 step 7.
+
+## 14. As built: the shell (step 5 of §9)
+
+What the user sees, and where it differs from §3. The decisions stand.
+
+- **Where.** Parts → Add part has two ways, *On a port* (the connector form) and *On a board's
+  pins*, a segmented switch in both forms' toolbars. The guided form is
+  `shell/src/windows/guided/` (`GuidedBoardForm`, `PinPicker`, `PartSettingsForm`,
+  `WiringChecklist`, `GuidedUpload`); its logic is plain TypeScript and tested on its own
+  (`lib/state/guided.ts`: how a pin looks for a role, the catalogue's groups, settings, names,
+  which wires move; `lib/desktop/boardDrawing.ts`: the drawing's layout and keyboard order;
+  `lib/desktop/wiringChecklist.ts`: the ticks). It works from what the core serves, with no
+  per-part code: a new template appears in the catalogue by itself.
+- **Steps**: Board → Part → Pins → Wiring → Upload, shown in the toolbar. *Board*: an existing
+  guided board, or a new one (its type and a name, checked like a sketch name while typing; the
+  default is `uno`, `nano` or `mega`). *Part*: cards grouped by what the part does (distance,
+  motors, inputs, outputs, power, other sensors, other parts; a capability Faber has no group for
+  lands under other sensors), each with a simple icon, its description and the products it covers;
+  the driver shape when a template has several (the shape's name carries the drivers, "EN + IN1
+  + IN2 (L298N, L293D, TB6612)", with its roles); the name (the template's default, made free:
+  `front`, `front_2`; checked live, and the core's own refusal shows at the field); the settings
+  form from the template, with units, limits, help, and whether a change needs an upload.
+  *Pins*: below. *Save the plan* is the Pins step's button: saving writes `board.toml` and the
+  sketch, but nothing goes on the board until Upload.
+- **The pin drawing** is an SVG Faber draws from the pin map's `headers` (the order of each
+  header from Arduino's published pinouts; USB on the left), not Arduino's artwork. Each pin is
+  a button named for the role being filled ("D8, suitable for Trig", "D9, in use: rear (Trig)",
+  "D0, reserved: …", "A6, unsuitable for Echo: …"); its shape and colour say the same (chosen,
+  Faber's pick, suitable, this part's other pin, in use, reserved, can't do it, with a legend of
+  what is on the board), and pointing at a pin or moving to it with the keyboard writes the reason
+  out beside the drawing. The drawing is one tab stop; the arrow keys move along the top headers,
+  down the right one and along the bottom, Home/End to the ends, Enter or Space picks. A pin on
+  another role of the same part swaps the two. Optional roles (STBY) say so, start unconnected
+  and can be left unconnected again. Every pick asks the core again (`suggest` with the pins so
+  far), so its problems for the plan show under the drawing before saving. The window grows to
+  fit the drawing when there is room (not the size it remembers).
+- **Refusals**: `422 invalid-plan` lists each problem with its part, role and pin; `409
+  sketch-edited` offers to replace the changed sketch (`overwriteEdits`) or to open it.
+- **Wiring checklist**: the template's lines with the chosen pins, the plan's warnings first
+  (own supply, logic level, interrupts off), a box per wire kept per board in the browser's
+  storage (a moved wire's line is new, so it is unticked), "Open in a window" (a `wiring` window
+  that stays open while wiring) and Print (a print stylesheet that prints only the checklist).
+  After an edit, the wires that moved or went are listed on top.
+- **Upload** uses the editor's compile and upload calls and its confirm; Verify needs an operator,
+  Upload an admin (disabled with the reason). After an upload it points at the parts: if a
+  FaberLink board is in Parts on that port, "look for `board.part`" and *Show it in Parts*;
+  otherwise *Add the board to Parts* adds it (the bridge connector on that port), and the
+  board's parts then appear under it with live values. The guarded actuator test of §3 step 6 is
+  not built.
+- **Editing later**: a FaberLink board in Parts whose board name (or last flashed sketch) is a
+  guided board that isn't taken over says "Guided board" and has *Edit plan* (on the row and in
+  its menu, an operator's). The plan view lists the parts with their pins: *Move pins*,
+  *Settings* and *Remove* (with a confirm), each saving the plan and showing the wiring with the
+  wires that change; *Add a part*, *Wiring*, *Upload* and *Open the sketch*.
+- **The editor**: a guided board's `<name>.ino` opens read-only (`aria-readonly`) with a bar,
+  "Faber writes this file from the board's plan", *Edit the plan* (opens it in Parts) and *Take
+  over the code* (a confirm that says it is one way, then `POST …/take-over` and the sketch opens
+  again, editable). `my_code.h` opens normally. The board is set to the plan's.
+- **Not built**: "Start a guided plan for this board" for a code-mode board that reports its pins
+  (§8): it needs the reported roles matched to templates and shapes; Parts already shows those
+  pins. The Settings tab of §11 on the part's own page (settings are edited through the plan
+  view's *Settings* for now). The Pi header in the wizard (data only, as in §13).

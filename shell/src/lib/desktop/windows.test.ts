@@ -3,6 +3,7 @@ import {
   clampRect,
   closeWindow,
   emptyDesktop,
+  ensureSize,
   focusWindow,
   isCompactScreen,
   minimiseWindow,
@@ -284,6 +285,20 @@ describe('refit', () => {
     st = setRect(st, s.id, { x: 10, y: 10, w: 500, h: 300 });
     st = refit(st, area, () => parts.minSize);
     expect(st.windows[0]!.rect).toEqual({ x: 10, y: 10, w: 500, h: 300 });
+  });
+});
+
+describe('ensureSize', () => {
+  it('grows a window for a task, on the screen, without changing the size it remembers', () => {
+    const saved = { x: 900, y: 450, w: 600, h: 400 };
+    const s = openWindow(emptyDesktop(), { kind: parts, saved }, area);
+    const st = ensureSize(s.state, s.id, { w: 980, h: 680 }, area);
+    expect(st.windows[0]!.rect).toEqual({ x: 620, y: 220, w: 980, h: 680 });
+    expect(st.windows[0]!.chosen).toEqual(saved);
+    // Big enough already, or on a small screen: as big as the screen allows.
+    expect(ensureSize(st, s.id, { w: 500, h: 300 }, area)).toBe(st);
+    const small = ensureSize(s.state, s.id, { w: 980, h: 680 }, { width: 800, height: 500 });
+    expect(small.windows[0]!.rect).toEqual({ x: 0, y: 0, w: 800, h: 500 });
   });
 });
 
