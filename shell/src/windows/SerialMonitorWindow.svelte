@@ -28,6 +28,8 @@
   const HEX_LINES_SHOWN = 2000;
 
   const core = useCore();
+  // The serial monitor writes to a device: an operator's (docs/auth.md).
+  const lock = $derived(core.auth.lock('operator'));
   const desktop = useDesktop();
 
   let port = $state('');
@@ -216,8 +218,11 @@
     {#if status !== 'closed'}
       <button class="btn" onclick={close}>{t('serial.close')}</button>
     {:else}
-      <button class="btn primary" onclick={open} disabled={!port || core.connection !== 'connected'}
-        >{t('serial.open')}</button
+      <button
+        class="btn primary"
+        onclick={open}
+        disabled={!port || core.connection !== 'connected' || lock !== null}
+        title={lock ?? undefined}>{t('serial.open')}</button
       >
     {/if}
   </div>

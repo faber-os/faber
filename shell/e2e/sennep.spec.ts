@@ -73,7 +73,7 @@ test.afterEach(async ({ request }) => clean(request));
 test('install SENNEP, bind its roles, drive it with a key and stop it', async ({ page }) => {
   await page.goto('/');
   const taskbar = page.getByRole('navigation', { name: 'Taskbar' });
-  await expect(taskbar.getByText('Connected')).toBeVisible();
+  await expect(taskbar.getByText('Connected', { exact: true })).toBeVisible();
 
   await taskbar.getByRole('button', { name: 'Start' }).click();
   await page.getByRole('menuitem', { name: /^Files/ }).click();

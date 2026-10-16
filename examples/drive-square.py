@@ -22,9 +22,17 @@ What you need
 
     From the apartment's start, the square (turning right) fits in the living room.
 
+    An API token with the operator role: in the shell, Settings → Users → API tokens → Make
+    token (name it drive-square, role Operator), and copy it. Faber shows it only once.
+
     Python 3.8 or newer. Nothing to install: only the standard library is used.
 
 Steps
+    Give the program the token in the environment variable FABER_TOKEN:
+
+        export FABER_TOKEN=faber_…                  # Linux, macOS
+        $env:FABER_TOKEN = "faber_…"                # Windows PowerShell
+
     python examples/drive-square.py                 # the part called "base" on 127.0.0.1:7878
     python examples/drive-square.py my-base http://127.0.0.1:7878
 
@@ -33,6 +41,9 @@ What you should see
     base's viewer in the shell: its commanded velocity follows the program.
 
 If it doesn't work
+    "FABER_TOKEN isn't set."      Make a token (above) and set the variable in this terminal.
+    "That API token isn't valid"  It was revoked, or mistyped. Make a new one.
+    "This needs the operator role" The token's role is viewer. Make one with Operator.
     "Is the Faber core running?"  Start it, or check the address.
     "… is driving base."          Someone else holds the lease (the Drive window?). Let go there.
     "The e-stop is engaged …"     Release it in the shell when it is safe.
@@ -45,10 +56,15 @@ How it works
     command renews it, so a program sends its velocity about 10 times a second even while it
     stays the same. If the program stops (it crashes, you press Ctrl+C, the network drops), the
     lease runs out and Faber stops the base by itself. That is the lease's whole point.
+
+    Every request carries the token as "Authorization: Bearer faber_…": that is how Faber knows
+    who is driving, and that they may (docs/auth.md). Keep the token out of the code itself, so
+    it isn't shared along with the program.
 """
 
 import json
 import math
+import os
 import sys
 import time
 import urllib.error
@@ -56,6 +72,7 @@ import urllib.request
 
 PART = sys.argv[1] if len(sys.argv) > 1 else "base"
 CORE = (sys.argv[2] if len(sys.argv) > 2 else "http://127.0.0.1:7878").rstrip("/")
+TOKEN = os.environ.get("FABER_TOKEN", "").strip()
 
 SIDE = 0.8  # m
 SPEED = 0.25  # m/s along each side
@@ -81,6 +98,7 @@ def call(method, path, body=None):
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(CORE + path, data=data, method=method)
     req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", f"Bearer {TOKEN}")
     try:
         with urllib.request.urlopen(req, timeout=2) as res:
             text = res.read()
@@ -114,6 +132,14 @@ def bumped():
 
 
 def main():
+    # The core's messages may hold arrows and quotes a Windows console can't show: never crash on one.
+    sys.stdout.reconfigure(errors="replace")
+    if not TOKEN:
+        print(
+            "FABER_TOKEN isn't set. Make an API token in the shell (Settings > Users > API tokens,\n"
+            "role Operator), set it in this terminal (export FABER_TOKEN=faber_...) and run this again."
+        )
+        return 1
     try:
         grant = call("POST", f"/api/v0/parts/{PART}/lease", {"holder": "drive-square.py"})
     except urllib.error.URLError:

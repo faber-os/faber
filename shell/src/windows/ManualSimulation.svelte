@@ -17,6 +17,8 @@
   let { part }: { part: PartInfo } = $props();
 
   const core = useCore();
+  // Setting a simulated value is an operator's (docs/auth.md).
+  const lock = $derived(core.auth.lock('operator'));
   const name = $derived(part.name);
   const range = $derived(sensorRange(part));
   const kinds = $derived(patternKinds(part));
@@ -81,7 +83,8 @@
     max={range.max}
     step={(range.max - range.min) / 200}
     value={value ?? range.min}
-    disabled={value === null}
+    disabled={value === null || lock !== null}
+    title={lock ?? undefined}
     aria-label={t('parts.manual.value', { name })}
     aria-valuetext={value === null ? undefined : show(value)}
     oninput={(e) => change(Number(e.currentTarget.value), kind)}
@@ -90,7 +93,8 @@
   <select
     class="input"
     value={kind}
-    disabled={value === null}
+    disabled={value === null || lock !== null}
+    title={lock ?? undefined}
     aria-label={t('parts.manual.pattern', { name })}
     onchange={(e) => change(value ?? range.min, e.currentTarget.value as PatternKind)}
   >

@@ -21,6 +21,8 @@
   let { win, visible }: WindowProps = $props();
 
   const core = useCore();
+  // Installing is an admin's (docs/auth.md).
+  const lock = $derived(core.auth.lock('admin'));
   const desktop = useDesktop();
 
   const name = $derived(win.params.name ?? '');
@@ -186,7 +188,12 @@
     <div class="actions">
       <button class="btn" onclick={() => desktop.close(win.id)}>{t('install.cancel')}</button>
       {#if preview}
-        <button class="btn primary" disabled={phase === 'installing'} onclick={install}>
+        <button
+          class="btn primary"
+          disabled={phase === 'installing' || lock !== null}
+          title={lock ?? undefined}
+          onclick={install}
+        >
           {phase === 'installing'
             ? t('install.installing')
             : preview.replaces

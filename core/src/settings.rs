@@ -208,6 +208,27 @@ impl Default for MachineIdentity {
 
 pub const DEFAULT_MACHINE_NAME: &str = "faber";
 
+/// The role the attached screen (the kiosk) is signed in as (docs/auth.md). Never admin: the
+/// screen is reachable by anyone standing at the machine.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum ScreenRole {
+    /// Sees everything and can press Stop.
+    #[default]
+    Viewer,
+    /// Can also drive.
+    Operator,
+}
+
+/// The screen attached to the machine (D14).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct ScreenSettings {
+    pub role: ScreenRole,
+}
+
 /// English: the catalogue built into the shell.
 pub const DEFAULT_LANGUAGE: &str = "en";
 
@@ -230,7 +251,16 @@ pub struct Settings {
     pub time: TimeSettings,
     pub desktop: DesktopLayout,
     pub taskbar: Taskbar,
+    pub screen: ScreenSettings,
     pub developer: DeveloperSettings,
+}
+
+impl Settings {
+    /// Whether `new` changes a setting only admins may change: the machine's name, its time, the
+    /// attached screen's role (docs/auth.md). Developer settings have their own endpoint.
+    pub fn admin_only_changes(&self, new: &Settings) -> bool {
+        self.machine != new.machine || self.time != new.time || self.screen != new.screen
+    }
 }
 
 /// Body of `POST /api/v0/settings/developer`.
@@ -450,6 +480,26 @@ mod tests {
         let s = SettingsStore::load(dir.path());
         assert_eq!(s.get(), Settings::default());
         assert_eq!(s.get().appearance.wallpaper, "aluminium");
+        assert_eq!(s.get().screen.role, ScreenRole::Viewer, "the attached screen only watches by default");
+    }
+
+    #[test]
+    fn the_machine_time_and_screen_are_admin_only() {
+        let old = Settings::default();
+        let mut look = old.clone();
+        look.appearance.theme = Theme::Dark;
+        look.taskbar.pinned.clear();
+        look.accessibility.text_size = TextSize::Larger130;
+        assert!(!old.admin_only_changes(&look));
+        let mut name = old.clone();
+        name.machine.name = "sennep".into();
+        assert!(old.admin_only_changes(&name));
+        let mut time = old.clone();
+        time.time.clock = ClockFormat::H12;
+        assert!(old.admin_only_changes(&time));
+        let mut screen = old.clone();
+        screen.screen.role = ScreenRole::Operator;
+        assert!(old.admin_only_changes(&screen));
     }
 
     #[test]

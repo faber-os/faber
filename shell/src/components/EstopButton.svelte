@@ -15,6 +15,8 @@
   const engaged = $derived(core.estop?.engaged === true);
   const shown = $derived(engaged || core.movableParts.length > 0);
   const reason = $derived(core.estop?.engagedBy?.reason ?? '');
+  // Releasing needs an operator; stopping never needs anything (docs/auth.md).
+  const releaseLock = $derived(core.auth.lock('operator'));
 
   function engage(why: string) {
     void core.engageEstop(why);
@@ -38,7 +40,12 @@
       <Icon name="stop" size={16} />
       {t('estop.engaged')}
     </span>
-    <button class="release" onclick={onrelease}>{t('estop.release')}</button>
+    <button
+      class="release"
+      onclick={onrelease}
+      disabled={releaseLock !== null}
+      title={releaseLock ?? undefined}>{t('estop.release')}</button
+    >
   </div>
 {:else if shown}
   <button

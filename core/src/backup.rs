@@ -6,6 +6,7 @@
 //! config/settings.toml
 //! config/packages.toml    the installed packages (connectors and apps)
 //! config/apps.toml        which apps are on, and which parts fill their roles
+//! config/users.toml       the users and API tokens (hashes only; not in a setup)
 //! connectors/<id>/…       each installed package's connector
 //! apps/<id>/…             each installed app, with its saved state (state.toml)
 //! files/Desktop/…
@@ -33,6 +34,8 @@ pub const PARTS: &str = "config/parts.toml";
 pub const SETTINGS: &str = "config/settings.toml";
 pub const PACKAGES: &str = "config/packages.toml";
 pub const APPS_TOML: &str = "config/apps.toml";
+/// The users and API tokens (docs/auth.md). Restored only when asked for.
+pub const USERS: &str = "config/users.toml";
 /// Marks a setup: a backup without the user's files or the machine's name.
 pub const SETUP: &str = "config/setup.toml";
 const SETUP_TEXT: &str = "# A Faber setup (Settings → Storage → Share setup): this machine's parts, apps and\n\
@@ -85,6 +88,8 @@ pub struct Sources<'a> {
     /// `<data>/apps`, and which folders in it to back up: the installed apps.
     pub apps: &'a Path,
     pub app_ids: &'a [String],
+    /// `users.toml`'s text, if there are users. Never in a setup.
+    pub users_toml: Option<&'a str>,
     /// The home folder (`<data>/files`).
     pub home: &'a Path,
     pub include_recordings: bool,
@@ -208,6 +213,9 @@ fn write_zip(src: &Sources, out: &Path) -> Result<(), BackupError> {
     if let Ok(meta) = fs::metadata(src.apps_toml) {
         add_file(&mut zip, APPS_TOML, src.apps_toml, meta.len())?;
     }
+    if let (Some(users), None) = (src.users_toml, src.setup) {
+        add_text(&mut zip, USERS, users)?;
+    }
     for (name, path, size) in package_files(src) {
         add_file(&mut zip, &name, &path, size)?;
     }
@@ -286,6 +294,7 @@ pub struct Archive {
     settings_toml: Option<String>,
     packages_toml: Option<String>,
     apps_toml: Option<String>,
+    users_toml: Option<String>,
     /// It is a setup (`config/setup.toml`): no files, and not the machine's name.
     setup: bool,
     /// By the connector folder's name, as the backup has it (not checked yet).
@@ -301,6 +310,7 @@ impl Archive {
         let mut zip = ZipArchive::new(file)
             .map_err(|e| BackupError::invalid(format!("This isn't a zip file Faber can read ({e}).")))?;
         let (mut parts_toml, mut settings_toml, mut packages_toml, mut apps_toml) = (None, None, None, None);
+        let mut users_toml = None;
         let mut items = Vec::new();
         let mut connectors = BTreeMap::<String, Vec<PackageFile>>::new();
         let mut apps = BTreeMap::<String, Vec<PackageFile>>::new();
@@ -318,12 +328,13 @@ impl Archive {
                 setup = read_config(&mut entry, &name)?.contains("kind = \"setup\"");
                 continue;
             }
-            if name == PARTS || name == SETTINGS || name == PACKAGES || name == APPS_TOML {
+            if name == PARTS || name == SETTINGS || name == PACKAGES || name == APPS_TOML || name == USERS {
                 let text = Some(read_config(&mut entry, &name)?);
                 match name.as_str() {
                     PARTS => parts_toml = text,
                     SETTINGS => settings_toml = text,
                     APPS_TOML => apps_toml = text,
+                    USERS => users_toml = text,
                     _ => packages_toml = text,
                 }
                 continue;
@@ -380,6 +391,7 @@ impl Archive {
             settings_toml,
             packages_toml,
             apps_toml,
+            users_toml,
             setup,
             connectors,
             apps,
@@ -411,6 +423,11 @@ impl Archive {
     /// that never had an app.
     pub fn apps_toml(&self) -> Option<&str> {
         self.apps_toml.as_deref()
+    }
+
+    /// `config/users.toml`; `None` in a setup, or a backup made before there were users.
+    pub fn users_toml(&self) -> Option<&str> {
+        self.users_toml.as_deref()
     }
 
     fn folders(&self, folder: Folder) -> &BTreeMap<String, Vec<PackageFile>> {
@@ -584,6 +601,7 @@ mod tests {
             apps_toml: &apps_toml,
             apps: &apps,
             app_ids: &app_ids,
+            users_toml: Some(USERS_TEXT),
             home: &home,
             include_recordings,
             setup: None,
@@ -595,6 +613,15 @@ mod tests {
 
     fn paths(a: &Archive) -> Vec<String> {
         a.items().iter().map(|i| format!("{}{}", i.path, if i.folder { "/" } else { "" })).collect()
+    }
+
+    const USERS_TEXT: &str = "[[users]]\nname = \"mikkel\"\n";
+
+    #[test]
+    fn a_backup_holds_the_users_but_a_setup_does_not() {
+        let data = Data::new();
+        let a = Archive::open(&make(&data, false)).unwrap();
+        assert_eq!(a.users_toml(), Some(USERS_TEXT));
     }
 
     #[test]
@@ -667,6 +694,7 @@ mod tests {
             apps_toml: &apps_toml,
             apps: &apps,
             app_ids: &app_ids,
+            users_toml: Some(USERS_TEXT),
             home: &home,
             include_recordings: true,
             setup: Some("[units]\nlength = \"imperial\"\n"),
@@ -674,6 +702,7 @@ mod tests {
         create(&src, &dest).unwrap();
         let mut a = Archive::open(&dest).unwrap();
         assert!(a.is_setup());
+        assert_eq!(a.users_toml(), None, "a setup never carries the users");
         assert!(a.items().is_empty(), "no Desktop, Documents or Recordings: {:?}", paths(&a));
         assert_eq!(a.settings_toml(), Some("[units]\nlength = \"imperial\"\n"), "its own settings text");
         assert_eq!(a.parts_toml(), "# my parts\n");
@@ -706,6 +735,7 @@ mod tests {
             apps_toml: &apps_toml,
             apps: &apps,
             app_ids: &[],
+            users_toml: None,
             home: &home,
             include_recordings: true,
             setup: None,

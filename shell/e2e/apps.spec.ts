@@ -61,7 +61,7 @@ test('install the wall follower, pick its parts, run it and watch it in its wind
 }) => {
   await page.goto('/');
   const taskbar = page.getByRole('navigation', { name: 'Taskbar' });
-  await expect(taskbar.getByText('Connected')).toBeVisible();
+  await expect(taskbar.getByText('Connected', { exact: true })).toBeVisible();
 
   await taskbar.getByRole('button', { name: 'Start' }).click();
   await page.getByRole('menuitem', { name: /^Files/ }).click();

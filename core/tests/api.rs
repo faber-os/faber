@@ -1,10 +1,12 @@
 //! The whole core, end to end: the built-in LD19 recording goes through a replay port, the
 //! connector, the router and the WebSocket, exactly as the shell uses it (docs/api.md).
 
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use faber_capabilities::Reading;
-use faber_core::api::{self, dto};
+use faber_core::api::dto;
 use faber_core::clock::MonotonicClock;
 use faber_core::disks::{Disk, DiskDiscovery};
 use faber_core::logs::LogBook;
@@ -86,7 +88,7 @@ fn core() -> TestCore {
         world: Arc::new(faber_core::simparts::SimWorld::new()),
     })
     .unwrap();
-    let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+    let app = crate::support::signed_in_api(&machine, LogBook::new(clock));
     TestCore { app, machine, serial, usb_problems, disks, _dir: dir }
 }
 

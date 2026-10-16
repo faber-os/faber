@@ -8,7 +8,6 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use faber_core::api;
 use faber_core::clock::{MonotonicClock, SharedClock};
 use faber_core::disks::{Disk, DiskDiscovery};
 use faber_core::logs::LogBook;
@@ -187,7 +186,7 @@ fn core_with(board: FakeBoard) -> TestCore {
         world: Arc::new(faber_core::simparts::SimWorld::new()),
     })
     .unwrap();
-    let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+    let app = crate::support::signed_in_api(&machine, LogBook::new(clock));
     TestCore { app, machine, cable, _dir: dir }
 }
 

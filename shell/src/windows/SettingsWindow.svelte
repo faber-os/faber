@@ -17,6 +17,8 @@
   import TimeSection from './settings/TimeSection.svelte';
   import MachineSection from './settings/MachineSection.svelte';
   import UnitsSection from './settings/UnitsSection.svelte';
+  import UsersSection from './settings/UsersSection.svelte';
+  import RoleLock from '../components/RoleLock.svelte';
   import LanguageRow from './settings/LanguageRow.svelte';
   import RichText from '../components/RichText.svelte';
   import { t } from '../lib/i18n';
@@ -44,6 +46,7 @@
     {
       group: 'settings.nav.group.machine',
       items: [
+        { id: 'users', label: 'settings.nav.users', icon: 'user' },
         { id: 'machine', label: 'settings.nav.machine', icon: 'nut' },
         { id: 'time', label: 'settings.nav.time', icon: 'clock' },
         { id: 'storage', label: 'settings.nav.storage', icon: 'archive' },
@@ -72,6 +75,10 @@
   let typed = $state('');
 
   const settings = $derived(core.settings);
+  // What the role may change (docs/auth.md): the look needs an operator, the machine an admin.
+  const changeLock = $derived(core.auth.lock('operator'));
+  const adminLock = $derived(core.auth.lock('admin'));
+  const busy = $derived(saving || changeLock !== null);
   const wallpaper = $derived(resolveWallpaper(settings?.appearance.wallpaper));
   const style = $derived(resolveStyle(settings?.appearance.style).id);
   const pinned = $derived(settings?.taskbar.pinned ?? []);
@@ -194,6 +201,7 @@
   {:else}
     <div class="scroll" bind:this={scroller} onscroll={onScroll}>
       {#if error}<ErrorNotice {error} />{/if}
+      <RoleLock reason={changeLock} />
 
       <section id="{win.id}-appearance" aria-labelledby="{win.id}-appearance-h">
         <h3 id="{win.id}-appearance-h">{t('settings.appearance.title')}</h3>
@@ -210,7 +218,7 @@
                   name="{win.id}-theme"
                   {value}
                   checked={settings.appearance.theme === value}
-                  disabled={saving}
+                  disabled={busy}
                   onchange={() => setTheme(value)}
                 />{label}</label
               >
@@ -230,7 +238,7 @@
                   name="{win.id}-style"
                   value={st.id}
                   checked={style === st.id}
-                  disabled={saving}
+                  disabled={busy}
                   onchange={() => setStyle(st.id)}
                 />
                 <span class="style-swatch" aria-hidden="true">
@@ -261,7 +269,7 @@
                   name="{win.id}-wallpaper"
                   value={w.id}
                   checked={wallpaper === w.id}
-                  disabled={saving}
+                  disabled={busy}
                   onchange={() => setWallpaper(w.id)}
                 />
                 <span class="swatch wallpaper" data-wallpaper={w.id} aria-hidden="true"></span>
@@ -271,11 +279,16 @@
             {/each}
           </div>
         </fieldset>
-        <LanguageRow winId={win.id} {settings} {saving} change={(p) => void change(p)} />
+        <LanguageRow winId={win.id} {settings} saving={busy} change={(p) => void change(p)} />
       </section>
 
-      <AccessibilitySection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
-      <UnitsSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
+      <AccessibilitySection
+        winId={win.id}
+        {settings}
+        saving={busy}
+        change={(p) => void change(p)}
+      />
+      <UnitsSection winId={win.id} {settings} saving={busy} change={(p) => void change(p)} />
 
       <section id="{win.id}-desktop" aria-labelledby="{win.id}-desktop-h">
         <h3 id="{win.id}-desktop-h">{t('settings.desktop.title')}</h3>
@@ -292,7 +305,7 @@
                   name="{win.id}-size"
                   {value}
                   checked={settings.taskbar.size === value}
-                  disabled={saving}
+                  disabled={busy}
                   onchange={() => setTaskbarSize(value)}
                 />{label}</label
               >
@@ -314,7 +327,7 @@
                     role="switch"
                     aria-label={t('settings.desktop.pinned.pin', { program: d.title })}
                     checked={isPinned(pinned, d.program!)}
-                    disabled={saving}
+                    disabled={busy}
                     onchange={(e) => setPin(d.program!, e.currentTarget.checked)}
                   />
                 </label>
@@ -324,8 +337,21 @@
         </fieldset>
       </section>
 
-      <MachineSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
-      <TimeSection winId={win.id} {settings} {saving} change={(p) => void change(p)} />
+      <UsersSection winId={win.id} />
+      <MachineSection
+        winId={win.id}
+        {settings}
+        saving={saving || adminLock !== null}
+        lock={adminLock}
+        change={(p) => void change(p)}
+      />
+      <TimeSection
+        winId={win.id}
+        {settings}
+        saving={saving || adminLock !== null}
+        lock={adminLock}
+        change={(p) => void change(p)}
+      />
       <StorageSection winId={win.id} />
       <ConnectorsSection winId={win.id} />
       <AboutSection winId={win.id} />
@@ -333,6 +359,7 @@
       <section id="{win.id}-developer" aria-labelledby="{win.id}-developer-h">
         <h3 id="{win.id}-developer-h">{t('settings.developer.title')}</h3>
         <p class="intro">{t('settings.developer.intro')}</p>
+        <RoleLock reason={adminLock} />
         <div class="row danger-card">
           <div class="text">
             <label class="name" for="{win.id}-full-machine"
@@ -351,7 +378,7 @@
             role="switch"
             aria-describedby="{win.id}-full-machine-desc"
             checked={fullMachine}
-            disabled={saving}
+            disabled={saving || adminLock !== null}
             onchange={toggleMachine}
           />
         </div>

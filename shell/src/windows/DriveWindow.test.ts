@@ -13,7 +13,7 @@ const GRANT = {
   locks: [],
 };
 
-function setup(opts: { confirmed?: boolean } = {}) {
+function setup(opts: { confirmed?: boolean; role?: 'viewer' } = {}) {
   const shell = fakeShell([
     { path: '/api/v0/connectors', body: [GENERIC_BASE] },
     { method: 'POST', path: '/api/v0/parts/base/lease', status: 201, body: GRANT },
@@ -27,6 +27,7 @@ function setup(opts: { confirmed?: boolean } = {}) {
     { method: 'POST', path: '/api/v0/estop', body: { engaged: true } },
   ]);
   if (opts.confirmed) shell.core.confirmDriving();
+  if (opts.role) shell.signInAs(opts.role);
   const id = shell.desktop.open('drive');
   const win = shell.desktop.state.windows.find((w) => w.id === id)!;
   const view = render(DriveWindow, { props: { win, visible: true }, context: shell.context });
@@ -42,6 +43,20 @@ const commands = (calls: ReturnType<typeof setup>['calls']) =>
       (c.body as { command: { command: { vx: number; vy: number; omega: number } } }).command
         .command,
   );
+
+describe('Drive window, as a viewer', () => {
+  it('shows driving as disabled with the reason, and still stops everything', async () => {
+    const { calls } = setup({ role: 'viewer' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    const start = await screen.findByRole('button', { name: 'Start driving' });
+    expect(start).toBeDisabled();
+    expect(start).toHaveAttribute('title', 'Needs the operator role');
+    expect(screen.getByText('Needs the operator role')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^Stop/ }));
+    await waitFor(() => expect(calls('POST', '/estop')).toHaveLength(1));
+    expect(calls('POST', '/lease')).toEqual([]);
+  });
+});
 
 describe('Drive window', () => {
   it('says what to do when nothing can move', async () => {

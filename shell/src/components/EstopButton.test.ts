@@ -19,6 +19,19 @@ const nav = () => screen.getByRole('navigation', { name: 'Taskbar' });
 const posts = (shell: ReturnType<typeof setup>, path: string) =>
   shell.fetch.calls.filter((c) => c.method === 'POST' && c.path === path);
 
+describe('E-stop on the taskbar, by role', () => {
+  it('lets a viewer stop, but shows Release as disabled with the reason', async () => {
+    const shell = setup();
+    shell.signInAs('viewer');
+    shell.pushParts([simBase('base')]);
+    await userEvent.click(await within(nav()).findByRole('button', { name: /^Stop/ }));
+    await waitFor(() => expect(posts(shell, '/api/v0/estop')).toHaveLength(1));
+    const release = within(nav()).getByRole('button', { name: 'Release' });
+    expect(release).toBeDisabled();
+    expect(release).toHaveAttribute('title', 'Needs the operator role');
+  });
+});
+
 describe('E-stop on the taskbar', () => {
   it('shows a Stop button only while a part can move', async () => {
     const shell = setup();

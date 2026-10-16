@@ -9,4 +9,6 @@ export interface SectionProps {
   saving: boolean;
   /** Saves a change made to the current settings. */
   change: (patch: (s: Settings) => Settings) => void;
+  /** Why this section's controls are disabled for the current role ("Needs the admin role"). */
+  lock?: string | null;
 }

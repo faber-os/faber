@@ -258,6 +258,7 @@ describe('settings', () => {
   const settings = {
     appearance: { theme: 'system', wallpaper: 'aluminium' },
     desktop: { icons: [] },
+    screen: { role: 'viewer' },
     developer: { fullMachineFiles: false },
   };
 
@@ -413,6 +414,55 @@ describe('the simulated world', () => {
       ['GET', undefined],
       ['PUT', { name: 'apartment' }],
       ['POST', undefined],
+    ]);
+  });
+});
+
+describe('signing in and roles', () => {
+  it('keeps the role a refusal names', async () => {
+    const f = fakeFetch([
+      {
+        method: 'POST',
+        path: '/api/v0/estop/release',
+        status: 403,
+        body: {
+          error: {
+            code: 'not-allowed',
+            message: 'This needs the operator role; you are a viewer.',
+            hint: 'Ask an admin.',
+            needs: 'operator',
+          },
+        },
+      },
+    ]);
+    const err = await createHttp(f.fetch)
+      .releaseEstop()
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CoreError);
+    expect((err as CoreError).body).toMatchObject({ code: 'not-allowed', needs: 'operator' });
+  });
+
+  it('restores a backup with or without its users', async () => {
+    const f = fakeFetch([{ method: 'POST', path: '/api/v0/backups/restore', status: 204 }]);
+    const http = createHttp(f.fetch);
+    await http.restoreBackup('home:/Backups/b.zip');
+    expect(f.calls.at(-1)?.body).toEqual({ path: 'home:/Backups/b.zip' });
+    await http.restoreBackup('home:/Backups/b.zip', true);
+    expect(f.calls.at(-1)?.body).toEqual({ path: 'home:/Backups/b.zip', users: true });
+  });
+
+  it('sends a sign-in and a first admin as name and password', async () => {
+    const info = { machineName: 'faber', language: 'en', needsSetup: false, signInOff: false };
+    const f = fakeFetch([
+      { method: 'POST', path: '/api/v0/session', body: info },
+      { method: 'POST', path: '/api/v0/setup', status: 201, body: info },
+    ]);
+    const http = createHttp(f.fetch);
+    await http.signIn('mikkel', 'correct horse');
+    await http.setup('mikkel', 'correct horse');
+    expect(f.calls.map((c) => c.body)).toEqual([
+      { name: 'mikkel', password: 'correct horse' },
+      { name: 'mikkel', password: 'correct horse' },
     ]);
   });
 });

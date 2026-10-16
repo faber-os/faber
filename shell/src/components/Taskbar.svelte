@@ -23,6 +23,7 @@
     setTaskbarSize,
   } from './programs';
   import StartMenu from './StartMenu.svelte';
+  import UserMenu from './UserMenu.svelte';
   import type { WindowDef } from './windowDefs';
 
   /**
@@ -263,6 +264,7 @@
     <div class="side right">
       <EstopButton {large} onrelease={() => (releasing = true)} />
       <ConnectionIndicator status={core.connection} />
+      <UserMenu {large} />
       <Clock withDate={large} />
     </div>
   </nav>

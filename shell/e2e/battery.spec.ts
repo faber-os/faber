@@ -30,7 +30,7 @@ test.afterEach(async ({ request }) => clean(request));
 test('a manual battery set low shows in its viewer and raises a notice', async ({ page }) => {
   await page.goto('/');
   const taskbar = page.getByRole('navigation', { name: 'Taskbar' });
-  await expect(taskbar.getByText('Connected')).toBeVisible();
+  await expect(taskbar.getByText('Connected', { exact: true })).toBeVisible();
   // The shell starts with Parts open.
   const parts = page.getByRole('dialog', { name: 'Parts' });
 

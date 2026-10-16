@@ -26,6 +26,8 @@
   }: WindowProps & { preview: AppPackagePreview; file: Blob; name: string } = $props();
 
   const core = useCore();
+  // Installing is an admin's (docs/auth.md).
+  const lock = $derived(core.auth.lock('admin'));
   const desktop = useDesktop();
 
   const app = $derived(preview.app);
@@ -206,7 +208,12 @@
 
   <div class="actions">
     <button class="btn" onclick={() => desktop.close(win.id)}>{t('install.cancel')}</button>
-    <button class="btn primary" disabled={phase === 'installing'} onclick={install}>
+    <button
+      class="btn primary"
+      disabled={phase === 'installing' || lock !== null}
+      title={lock ?? undefined}
+      onclick={install}
+    >
       {phase === 'installing'
         ? t('install.installing')
         : replaces

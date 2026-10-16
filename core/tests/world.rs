@@ -3,10 +3,11 @@
 //! the base with the lease held, the simulated LiDAR scan shows the room, and dropping the lease
 //! or pressing the e-stop stops the base. Everything runs on the core's own clock, at test speed.
 
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use faber_capabilities::{Reading, distance, laser_scan, planar_base};
-use faber_core::api;
 use faber_core::clock::MonotonicClock;
 use faber_core::disks::{Disk, DiskDiscovery};
 use faber_core::logs::LogBook;
@@ -73,7 +74,7 @@ fn core() -> TestCore {
         world: Arc::new(faber_core::simparts::SimWorld::new()),
     })
     .unwrap();
-    let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+    let app = crate::support::signed_in_api(&machine, LogBook::new(clock));
     TestCore { app, machine, _dir: dir }
 }
 

@@ -26,6 +26,8 @@ const LAYERS: &[(&str, u8)] = &[
     ("router", 2),
     ("sandbox", 2),
     ("translations", 2),
+    ("sessions", 2),
+    ("users", 2),
     ("apps", 3),
     ("bridge", 3),
     ("declarative", 3),

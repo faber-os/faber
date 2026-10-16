@@ -35,6 +35,14 @@ import type { Pattern } from './generated/Pattern';
 import type { Simulation } from './generated/Simulation';
 import type { WorldInfo } from './generated/WorldInfo';
 import type { WorldView } from './generated/WorldView';
+import type { NewToken } from './generated/NewToken';
+import type { NewUser } from './generated/NewUser';
+import type { PasswordChange } from './generated/PasswordChange';
+import type { SessionInfo } from './generated/SessionInfo';
+import type { TokenCreated } from './generated/TokenCreated';
+import type { TokenInfo } from './generated/TokenInfo';
+import type { UserInfo } from './generated/UserInfo';
+import type { UserRole } from './generated/UserRole';
 import { dropNullFields } from './wire';
 
 /** Something the core (or the way to it) said no to, with what to try next. */
@@ -130,8 +138,31 @@ export interface CoreHttp {
   createBackup(includeRecordings: boolean): Promise<BackupInfo>;
   /** Saves this machine's setup: a backup without the user's files or the machine's name. */
   shareSetup(): Promise<BackupInfo>;
-  /** Restores a backup from the home folder; checked first (`422 config-invalid` …). */
-  restoreBackup(path: string): Promise<void>;
+  /**
+   * Restores a backup from the home folder; checked first (`422 config-invalid` …). `users` also
+   * replaces this machine's users and API tokens with the backup's, and signs everyone out.
+   */
+  restoreBackup(path: string, users?: boolean): Promise<void>;
+
+  // Users and signing in (docs/auth.md).
+  /** Who this browser is (public: the sign-in screen asks it first). */
+  getSession(): Promise<SessionInfo>;
+  /** `401 sign-in-failed`, `429 too-many-attempts`. Sets the session cookie. */
+  signIn(name: string, password: string): Promise<SessionInfo>;
+  signOut(): Promise<void>;
+  /** The first admin, only while there are no users (`409 already-set-up`). Signs them in. */
+  setup(name: string, password: string): Promise<SessionInfo>;
+  getUsers(): Promise<UserInfo[]>;
+  addUser(user: NewUser): Promise<UserInfo>;
+  removeUser(name: string): Promise<void>;
+  setUserRole(name: string, role: UserRole): Promise<void>;
+  /** Your own needs `current`; an admin may set anyone's without it. */
+  setPassword(name: string, change: PasswordChange): Promise<void>;
+  /** Your API tokens (an admin's lists everyone's), never the tokens themselves. */
+  getTokens(): Promise<TokenInfo[]>;
+  /** The token's secret is in the answer, this once. */
+  createToken(token: NewToken): Promise<TokenCreated>;
+  revokeToken(id: string): Promise<void>;
 
   /** The translations installed in the machine's `config/translations` (docs/translations.md). */
   getTranslations(): Promise<TranslationInfo[]>;
@@ -232,11 +263,9 @@ export function createHttp(
   function failure(res: Response, method: string, path: string, text: string): CoreError {
     const err = (parseJson(text) as Partial<ApiError> | undefined)?.error;
     if (err && typeof err.code === 'string' && typeof err.message === 'string') {
-      return new CoreError(res.status, {
-        code: err.code,
-        message: err.message,
-        hint: err.hint ?? '',
-      });
+      const body: ErrorBody = { code: err.code, message: err.message, hint: err.hint ?? '' };
+      if (err.needs) body.needs = err.needs;
+      return new CoreError(res.status, body);
     }
     return new CoreError(res.status, {
       code: 'bad-response',
@@ -308,7 +337,23 @@ export function createHttp(
     getStorage: () => request('GET', '/storage'),
     createBackup: (includeRecordings) => request('POST', '/backups', { includeRecordings }),
     shareSetup: () => request('POST', '/backups/setup'),
-    restoreBackup: (path) => request('POST', '/backups/restore', { path }),
+    restoreBackup: (path, users) =>
+      request('POST', '/backups/restore', users ? { path, users } : { path }),
+
+    getSession: () => request('GET', '/session'),
+    signIn: (name, password) => request('POST', '/session', { name, password }),
+    signOut: () => request('DELETE', '/session'),
+    setup: (name, password) => request('POST', '/setup', { name, password }),
+    getUsers: () => request('GET', '/users'),
+    addUser: (user) => request('POST', '/users', user),
+    removeUser: (name) => request('DELETE', `/users/${encodeURIComponent(name)}`),
+    setUserRole: (name, role) =>
+      request('PUT', `/users/${encodeURIComponent(name)}/role`, { role }),
+    setPassword: (name, change) =>
+      request('PUT', `/users/${encodeURIComponent(name)}/password`, change),
+    getTokens: () => request('GET', '/tokens'),
+    createToken: (token) => request('POST', '/tokens', token),
+    revokeToken: (id) => request('DELETE', `/tokens/${encodeURIComponent(id)}`),
 
     getTranslations: () => request('GET', '/translations'),
     getTranslation: (code) => request('GET', `/translations/${encodeURIComponent(code)}`),

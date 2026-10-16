@@ -21,7 +21,7 @@ test.afterEach(async ({ request }) => {
 test('add the sample recording, add a part on it and watch its scan', async ({ page }) => {
   await page.goto('/');
   const taskbar = page.getByRole('navigation', { name: 'Taskbar' });
-  await expect(taskbar.getByText('Connected')).toBeVisible();
+  await expect(taskbar.getByText('Connected', { exact: true })).toBeVisible();
 
   // Files → Recordings → Add sample recordings (only offered while Recordings is empty).
   await page.getByRole('button', { name: 'Start' }).click();

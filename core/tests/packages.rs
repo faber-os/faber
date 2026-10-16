@@ -3,10 +3,11 @@
 //! uninstall refused while a part uses it. Declarative packages here; the wasm path is proven
 //! end to end, from the template, in tools/faber-cli/tests/first_connector.rs.
 
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use faber_connector::capture::Chunk;
-use faber_core::api;
 use faber_core::clock::MonotonicClock;
 use faber_core::logs::LogBook;
 use faber_core::machine::{Machine, MachineOptions};
@@ -69,7 +70,7 @@ fn core() -> TestCore {
     })
     .unwrap();
     machine.refresh_ports();
-    let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+    let app = crate::support::signed_in_api(&machine, LogBook::new(clock));
     TestCore { app, machine, dir }
 }
 

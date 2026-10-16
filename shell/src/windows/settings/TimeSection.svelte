@@ -3,9 +3,10 @@
   import { formatClockTime, formatLongDate, timeZones } from '../../lib/desktop/wallClock';
   import ChoiceRow from './ChoiceRow.svelte';
   import type { SectionProps } from './types';
+  import RoleLock from '../../components/RoleLock.svelte';
   import { t } from '../../lib/i18n';
 
-  let { winId, settings, saving, change }: SectionProps = $props();
+  let { winId, settings, saving, change, lock = null }: SectionProps = $props();
 
   const core = useCore();
   const zones = timeZones();
@@ -26,6 +27,7 @@
 
 <section id="{winId}-time" aria-labelledby="{winId}-time-h">
   <h3 id="{winId}-time-h">{t('settings.time.title')}</h3>
+  <RoleLock reason={lock} />
   <p class="intro">{t('settings.time.intro')}</p>
   <div class="row">
     <div class="text">

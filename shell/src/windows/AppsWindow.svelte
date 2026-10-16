@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RoleLock from '../components/RoleLock.svelte';
   import { untrack } from 'svelte';
   import { useCore } from '../lib/state/context';
   import type { AppInfo, ErrorBody } from '../lib/state/types';
@@ -26,6 +27,8 @@
   let { win }: WindowProps = $props();
 
   const core = useCore();
+  // Turning apps on and off, their parts and removing them: an admin's (docs/auth.md).
+  const lock = $derived(core.auth.lock('admin'));
   const desktop = useDesktop();
 
   let error = $state.raw<{ app: string; error: ErrorBody } | null>(null);
@@ -125,7 +128,8 @@
                 type="checkbox"
                 role="switch"
                 checked={app.enabled}
-                disabled={busy === app.id}
+                disabled={busy === app.id || lock !== null}
+                title={lock ?? undefined}
                 aria-label={t('apps.onNamed', { name: app.name })}
                 onchange={(e) => {
                   const on = e.currentTarget.checked;
@@ -147,7 +151,8 @@
             <span class="spacer"></span>
             <button
               class="btn danger"
-              disabled={app.enabled || busy === app.id}
+              disabled={app.enabled || busy === app.id || lock !== null}
+              title={lock ?? undefined}
               aria-label={t('apps.uninstallNamed', { name: app.name })}
               onclick={() => (confirming = app)}>{t('apps.uninstall')}</button
             >
@@ -170,9 +175,11 @@
                 <div class="save">
                   <button
                     class="btn primary"
-                    disabled={busy === app.id}
+                    disabled={busy === app.id || lock !== null}
+                    title={lock ?? undefined}
                     onclick={() => void saveRoles(app)}>{t('apps.roles.save')}</button
                   >
+                  <RoleLock reason={lock} />
                   {#if app.enabled}<span class="muted small">{t('apps.roles.restarts')}</span>{/if}
                 </div>
               {/if}

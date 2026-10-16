@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use ts_rs::TS;
 
+pub use crate::users::UserRole;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -46,6 +48,10 @@ pub struct ErrorBody {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<LeaseEndReason>,
+    /// On `not-allowed`: the role that would be allowed (docs/auth.md).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs: Option<UserRole>,
 }
 
 /// The body of every non-2xx REST response.
@@ -1439,10 +1445,158 @@ pub struct EstopStatus {
 // Settings types live in `crate::settings` (layer 2 owns its data); re-exported for the wire.
 pub use crate::settings::{
     Accessibility, Appearance, ClockFormat, DesktopLayout, DeveloperChange, DeveloperSettings, IconPosition,
-    LengthUnit, MachineIdentity, Preference, Settings, Taskbar, TaskbarSize, TextSize, Theme, TimeSettings,
-    Units,
+    LengthUnit, MachineIdentity, Preference, ScreenRole, ScreenSettings, Settings, Taskbar, TaskbarSize,
+    TextSize, Theme, TimeSettings, Units,
 };
 pub use crate::translations::TranslationInfo;
+
+// Users and signing in (docs/auth.md).
+
+/// How a request proved who sent it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum SignedInVia {
+    /// The `faber-session` cookie of a browser that signed in.
+    Session,
+    /// An API token (`Authorization: Bearer`).
+    Token,
+    /// The attached screen's own listener.
+    Screen,
+    /// `--no-auth`: sign-in is off.
+    Developer,
+}
+
+/// Who is asking, as `GET /api/v0/session` tells it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct IdentityInfo {
+    /// The user; left out for the attached screen and under `--no-auth`.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    pub role: UserRole,
+    pub via: SignedInVia,
+}
+
+/// `GET /api/v0/session`, and the answer to signing in and to setup. Public: the sign-in screen
+/// needs it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SessionInfo {
+    /// The machine's name, shown on the sign-in screen.
+    pub machine_name: String,
+    /// The shell's language, so the sign-in screen speaks it too.
+    pub language: String,
+    /// No users yet: the first browser creates the admin (`POST /api/v0/setup`).
+    pub needs_setup: bool,
+    /// The core runs with `--no-auth`: everyone is an admin. The shell shows a warning.
+    pub sign_in_off: bool,
+    /// Who this is; left out when nobody is signed in.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<IdentityInfo>,
+}
+
+/// Body of `POST /api/v0/session` (signing in) and `POST /api/v0/setup` (the first admin).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SignIn {
+    pub name: String,
+    pub password: String,
+}
+
+/// A user, as `GET /api/v0/users` lists them (never the password).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UserInfo {
+    pub name: String,
+    pub role: UserRole,
+}
+
+/// Body of `POST /api/v0/users`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct NewUser {
+    pub name: String,
+    pub password: String,
+    pub role: UserRole,
+}
+
+/// Body of `PUT /api/v0/users/{name}/role`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RoleChange {
+    pub role: UserRole,
+}
+
+/// Body of `PUT /api/v0/users/{name}/password`. Your own needs `current`; an admin setting
+/// someone else's doesn't.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PasswordChange {
+    pub password: String,
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
+}
+
+/// An API token, as listed: never the token itself.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TokenInfo {
+    /// A short public id, to revoke it with.
+    pub id: String,
+    pub name: String,
+    /// Whose token it is.
+    pub user: String,
+    /// The most it may do; its user's current role caps it.
+    pub role: UserRole,
+    /// When it was made (RFC 3339, UTC).
+    pub created: String,
+}
+
+/// Body of `POST /api/v0/tokens`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct NewToken {
+    /// What it is for, e.g. the program's name.
+    pub name: String,
+    /// At most your own role.
+    pub role: UserRole,
+}
+
+/// Answer of `POST /api/v0/tokens`: the token, shown this once. Only its hash is kept.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TokenCreated {
+    pub token: TokenInfo,
+    /// `faber_…`: send it as `Authorization: Bearer faber_…`.
+    pub secret: String,
+}
+
+/// Body of `POST /api/v0/backups/restore`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RestoreRequest {
+    /// The backup, e.g. `home:/Backups/faber-backup-2026-10-15-1430.zip`.
+    pub path: String,
+    /// Also replace this machine's users and API tokens with the backup's. Everyone is then
+    /// signed out. Off by default: the machine keeps its own users.
+    #[serde(default)]
+    pub users: bool,
+}
 
 /// What a port's USB ids say about the Arduino on it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1629,6 +1783,7 @@ mod tests {
                 message: "m".into(),
                 hint: "h".into(),
                 reason: None,
+                needs: None,
             },
         };
         assert_eq!(

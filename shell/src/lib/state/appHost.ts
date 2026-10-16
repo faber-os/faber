@@ -11,6 +11,7 @@ import type {
 import type { AppMessageData, AppWindowHandlers, AppWindowSession } from '../api/socket';
 import { LeaseKeeper, type LeaseClient, type LeaseStatus } from './driving';
 import type { Result } from './result';
+import { roleAllows } from './session.svelte';
 import type {
   AppInfo,
   AppRole,
@@ -20,6 +21,7 @@ import type {
   PartInfo,
   Reading,
   SignalValue,
+  UserRole,
 } from './types';
 
 /**
@@ -130,6 +132,11 @@ export interface AppHostDeps {
   openChannel(handlers: AppWindowHandlers): AppWindowSession;
   /** Called with the parts the window drives, whenever that changes (the window shows them). */
   onDriving?: (parts: string[]) => void;
+  /**
+   * The role of whoever uses the shell (docs/auth.md): the window acts with it, so a viewer's
+   * window can watch but not drive. Left out (tests), it may.
+   */
+  role?: () => UserRole | null;
   /** Milliseconds, for the message rate. */
   now?: () => number;
 }
@@ -155,7 +162,8 @@ type ErrorCode =
   | 'bad-kind'
   | 'message-too-large'
   | 'too-many-messages'
-  | 'not-connected';
+  | 'not-connected'
+  | 'not-allowed';
 
 function fail(
   code: ErrorCode,
@@ -254,6 +262,12 @@ function fail(
         code,
         message: t('appHost.tooManyMessages.message'),
         hint: t('appHost.tooManyMessages.hint'),
+      };
+    case 'not-allowed':
+      return {
+        code,
+        message: t('auth.needs.operator'),
+        hint: t('appHost.notAllowed.hint'),
       };
     case 'not-connected':
       return {
@@ -934,8 +948,16 @@ export class AppHost {
     return { role, index };
   }
 
+  /** Driving needs an operator: the window acts with the role of whoever uses the shell. */
+  private mayDrive(): void {
+    if (this.deps.role && !roleAllows(this.deps.role(), 'operator')) {
+      throw new Refused(fail('not-allowed'));
+    }
+  }
+
   private async drive(roleName: unknown, rawIndex: unknown): Promise<null> {
     const { role, index } = this.drivable(roleName, rawIndex);
+    this.mayDrive();
     const app = this.app();
     if (!app.enabled) throw new Refused(fail('app-off', { app: app.name }));
     const part = this.part(role, index);
@@ -1049,6 +1071,7 @@ export class AppHost {
 
   private async driveVia(roleName: unknown, rawIndex: unknown): Promise<null> {
     const { role, index } = this.drivable(roleName, rawIndex);
+    this.mayDrive();
     if (role.drive !== 'window') throw new Refused(fail('not-window-driven', { role: role.role }));
     const app = this.app();
     if (!app.enabled) throw new Refused(fail('app-off', { app: app.name }));

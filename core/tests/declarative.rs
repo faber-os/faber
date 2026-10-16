@@ -1,10 +1,11 @@
 //! Declarative connectors end to end: a `faber.toml` in `<data>/connectors/<id>/` is loaded when
 //! the core starts, listed by the API, and runs a part on a replay port like any connector.
 
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use faber_connector::capture::Chunk;
-use faber_core::api;
 use faber_core::clock::MonotonicClock;
 use faber_core::logs::LogBook;
 use faber_core::machine::{Machine, MachineOptions};
@@ -74,7 +75,7 @@ pub fn core(connectors: &[(&str, &str)], replays: Vec<(&str, Vec<Chunk>)>) -> Te
     })
     .unwrap();
     machine.refresh_ports();
-    let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+    let app = crate::support::signed_in_api(&machine, LogBook::new(clock));
     TestCore { app, machine, _dir: dir }
 }
 

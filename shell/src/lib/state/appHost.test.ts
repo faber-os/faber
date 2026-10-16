@@ -13,7 +13,7 @@ import {
 } from './appHost';
 import type { LeaseClient } from './driving';
 import type { Result } from './result';
-import type { AppInfo, ErrorBody, LeaseEndReason, LeaseInfo, Reading } from './types';
+import type { AppInfo, ErrorBody, LeaseEndReason, LeaseInfo, Reading, UserRole } from './types';
 
 const APP: AppInfo = {
   id: 'wall-follower',
@@ -70,7 +70,7 @@ const flush = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 };
 
-function setup(options: { confirm?: boolean } = {}) {
+function setup(options: { confirm?: boolean; role?: UserRole } = {}) {
   const frame = { name: 'the app frame' };
   const posted: Record<string, unknown>[] = [];
   let app: AppInfo | null = structuredClone(APP);
@@ -199,6 +199,7 @@ function setup(options: { confirm?: boolean } = {}) {
       };
     },
     onDriving: (parts) => void driving.push(parts),
+    ...(options.role ? { role: () => options.role ?? null } : {}),
   };
   const host = new AppHost(deps);
   let nextId = 1;
@@ -466,6 +467,24 @@ describe('the app window host: what an app may do', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('refuses a viewer’s window to drive, before asking, and says why', async () => {
+    const s = setup({ role: 'viewer' });
+    const r = await s.ask({ type: 'drive', role: 'wheels' });
+    expect(r.error).toMatchObject({ code: 'not-allowed', message: 'Needs the operator role' });
+    expect(s.confirm).not.toHaveBeenCalled();
+    expect(s.core).toEqual([]);
+    s.windowDriven();
+    expect((await s.ask({ type: 'drive-via', role: 'wheels' })).error?.code).toBe('not-allowed');
+    expect(s.link.opens).toBe(0);
+    // Watching still works.
+    expect((await s.ask({ type: 'latest', source: { role: 'ring', index: 1 } })).ok).toBe(true);
+  });
+
+  it('lets an operator’s window drive', async () => {
+    const s = setup({ role: 'operator' });
+    expect((await s.ask({ type: 'drive', role: 'wheels' })).ok).toBe(true);
   });
 
   it('refuses to drive when the user says no, or the app is off', async () => {

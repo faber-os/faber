@@ -5,8 +5,10 @@ types are defined once in Rust (`core/src/api/dto.rs`, `sdk/rust/capabilities`),
 versions in `shell/src/lib/api/generated/` are generated from them by `cargo test`. Never edit
 the generated files by hand.
 
-Phase 1 listens on **`127.0.0.1:7878` only** and has no login (D16: auth comes before any remote
-access, in Phase 6).
+The core listens on `127.0.0.1:7878` by default (`--listen 0.0.0.0:7878` opens it to the
+network). **Every request says who sent it** (D16): a browser signs in and sends the session
+cookie, a program sends an API token. See [Users and signing in](#users-and-signing-in) and
+[auth.md](auth.md).
 
 ## Conventions
 
@@ -23,6 +25,12 @@ access, in Phase 6).
   ```json
   { "error": { "code": "port-claimed", "message": "COM3 is used by the part \"lidar\".", "hint": "Remove or stop \"lidar\" first, or pick another port." } }
   ```
+- **Who may call what:** each route has a minimum role (`viewer` < `operator` < `admin`), listed
+  in [auth.md](auth.md#roles) and enforced from one table in the core (`core/src/api/access.rs`).
+  Every endpoint can answer `401 not-signed-in` (no or an ended session, or an invalid API token)
+  and `403 not-allowed`, whose body names the role it needs in `needs` (`"operator"`). A request
+  to a host name that can't be this machine gets `421 unknown-host`; a request whose `Origin` isn't
+  this machine's address gets `403 bad-origin` (the [details](#users-and-signing-in)).
 
 ## REST (JSON)
 
@@ -66,6 +74,14 @@ simple programs that poll over plain HTTP (e.g. `examples/drive-square.py` check
 
 One connection carries everything live. The default `format` is `msgpack`, sent as binary frames.
 `json` uses text frames, for debugging (D26).
+
+It is signed in when it opens, like any request (the cookie, an API token, or the attached
+screen), and needs a viewer; a browser's upgrade must carry this machine's `Origin`. Each message
+is then checked against the sender's role **at that moment** (a role change applies to the next
+one): `serial-*`, `app-window-send` and `app-window-drive` need an operator, the rest a viewer.
+A refused message is answered with an `error` (`not-allowed`, `needs`) for its `id`, and a refused
+`app-window-drive` with `app-window-drive-refused`. When the session ends (signed out, password
+changed, user removed), the core closes the socket with code **4401**.
 
 **Client → core** (`ClientMessage`, tagged by `type`):
 
@@ -219,8 +235,8 @@ got, and `clamped` says whether it differs from what was sent. A base that is no
 | Method and path | Body / result |
 |---|---|
 | `GET /api/v0/estop` | `EstopStatus`: `engaged`, `engagedBy?` (an `estop@1` reading: `tUs`, `source`, `reason`), `history` (recent engages and releases, oldest first) |
-| `POST /api/v0/estop` | `{"reason"?: …, "source"?: "app" \| "shell" \| "part"}` → `200 EstopStatus`. **Always allowed, from anyone, and never fails**: an empty body is fine, and a body the core can't read still engages it. Every lease ends (`estop`), every actuator gets its safe state, and new leases and commands get `423 estop-engaged` until it is released. Engaging it again keeps the first reason. |
-| `POST /api/v0/estop/release` | `{"source"?: …}` (optional) → `200 EstopStatus`. Until Phase 6 (operators) anyone may release it; the shell asks to confirm. Releasing restarts nothing: a new command does. Errors: `400 bad-request` (an unreadable body), `409 estop-latched` (a FaberLink board's own stop button is still pressed: reset it on the board first). |
+| `POST /api/v0/estop` | `{"reason"?: …, "source"?: "app" \| "shell" \| "part"}` → `200 EstopStatus`. **Always allowed, from anyone (signed in or not), and never fails**: an empty body is fine, and a body the core can't read still engages it. Every lease ends (`estop`), every actuator gets its safe state, and new leases and commands get `423 estop-engaged` until it is released. Engaging it again keeps the first reason. |
+| `POST /api/v0/estop/release` | `{"source"?: …}` (optional) → `200 EstopStatus`. Needs an operator; the shell asks to confirm. Releasing restarts nothing: a new command does. Errors: `400 bad-request` (an unreadable body), `409 estop-latched` (a FaberLink board's own stop button is still pressed: reset it on the board first). |
 
 **FaberLink boards.** A board's motors are leased and commanded like any part, by their sub-part
 names (`POST /api/v0/parts/mega.left/lease`). The core sends a `COMMAND` to the board only for a
@@ -423,7 +439,7 @@ File error codes: `bad-path`, `not-found`, `already-exists`, `protected`, `not-a
 | `GET /api/v0/storage` | `StorageInfo`: bytes used by `home:/Recordings`, `Documents`, `Desktop` and `Backups` (`recordingsBytes` …), and `freeBytes` / `totalBytes` of the disk that holds the data folder. |
 | `POST /api/v0/backups` | `BackupRequest` `{includeRecordings}` → `201 BackupInfo` `{path, bytes}`. Errors: `507 disk-full` (checked before anything is written), `500 io-error`. |
 | `POST /api/v0/backups/setup` | No body → `201 BackupInfo`: **Share setup**, a backup without the user's files (below). Errors as for a backup. |
-| `POST /api/v0/backups/restore` | `PathRequest` with a `.zip` in the home folder → `204`. Errors: `400 bad-path` (not in home), `404 not-found`, `422 backup-invalid`, `422 config-invalid` (with the line), `507 disk-full`. |
+| `POST /api/v0/backups/restore` | `RestoreRequest` `{path, users?}` with a `.zip` in the home folder → `204`. `users: true` also replaces this machine's users and API tokens with the backup's and then signs everyone out; without it the machine keeps its own users ([auth.md](auth.md#backups)). `422 backup-invalid` when the backup's users file has no admin. Errors: `400 bad-path` (not in home), `404 not-found`, `422 backup-invalid`, `422 config-invalid` (with the line), `507 disk-full`. |
 
 A backup (D41) is `home:/Backups/faber-backup-YYYY-MM-DD-HHMM.zip`, named after the minute it was
 made in the shown time zone (`time.timeZone`, else the machine's); a second one in the same minute
@@ -434,6 +450,7 @@ config/parts.toml
 config/settings.toml        (if the settings were ever changed)
 config/packages.toml        (if a package was ever installed)
 config/apps.toml            (if an app was ever turned on or given parts)
+config/users.toml           (the users and API tokens, as hashes; never in a setup)
 connectors/<id>/…           each installed package's connector, as installed
 apps/<id>/…                 each installed app, as installed, with its saved state.toml
 files/Desktop/…
@@ -499,7 +516,7 @@ screen. Every field has a default, so a settings.toml from an older Faber still 
 | Method and path | Body / result |
 |---|---|
 | `GET /api/v0/settings` | `Settings` |
-| `PUT /api/v0/settings` | `Settings` → `Settings`. `developer` must be unchanged (`use-developer-endpoint` otherwise). `time.timeZone` must be empty or a zone the core knows (`invalid-time-zone`). |
+| `PUT /api/v0/settings` | `Settings` → `Settings`. Needs an operator, and an **admin** when it changes `machine`, `time` or `screen` (`403 not-allowed`, `needs: "admin"`). `developer` must be unchanged (`use-developer-endpoint` otherwise). `time.timeZone` must be empty or a zone the core knows (`invalid-time-zone`). |
 | `POST /api/v0/settings/developer` | `DeveloperChange` → `Settings`. Turning `fullMachineFiles` on needs `acknowledgedRisk: true` (`risk-not-acknowledged` otherwise). |
 | `POST /api/v0/settings/reset` | → `Settings`: every setting back to its default, **including** `developer` (whole-machine files off). Parts and files are not settings and stay. |
 
@@ -517,13 +534,55 @@ screen. Every field has a default, so a settings.toml from an older Faber still 
 | `time.clock` | `24h`, `12h` | |
 | `taskbar.size`, `desktop.icons` | | |
 | `taskbar.pinned` | program keys, in order: `tool:<id>`, `accessory:<id>`, `app:<id>` | an app whose `[window] pinned = true` is added at the end when it is first installed (not on an update, so unpinning it sticks); uninstalling an app takes it out |
-| `developer.fullMachineFiles` | `false`, `true` | only through `/settings/developer` |
+| `screen.role` | `viewer`, `operator` | the role the attached screen is signed in as ([auth.md](auth.md#the-attached-screen-kiosk)); admins only |
+| `developer.fullMachineFiles` | `false`, `true` | only through `/settings/developer` (admins only) |
 
 Reset is its own endpoint rather than a `PUT` of the defaults because the defaults live in one
 place (the core), and because reset must also turn whole-machine files off, which `PUT` refuses on
 purpose.
 
 The WebSocket topic `settings` sends the settings now and after every change.
+
+## Users and signing in
+
+The design, the roles and the reasons are in [auth.md](auth.md). A browser signs in and gets the
+session cookie `faber-session` (`HttpOnly`, `SameSite=Strict`); a program sends an API token as
+`Authorization: Bearer faber_…`. The attached screen, on its own listener (`--screen-listen`), is
+signed in as its role without either.
+
+| Method and path | Who | Body / result |
+|---|---|---|
+| `GET /api/v0/session` | anyone | `SessionInfo`: `machineName`, `language`, `needsSetup` (no users yet), `signInOff` (`--no-auth`), and `identity?` (`user?`, `role`, `via`: `session`, `token`, `screen` or `developer`) when the request is signed in. |
+| `POST /api/v0/session` | anyone | `SignIn` `{name, password}` → `200 SessionInfo` and the cookie. Errors: `401 sign-in-failed` (the same for a wrong name and a wrong password), `429 too-many-attempts` with `Retry-After` (seconds) after 5 failures from the address or for the name, doubling from 1 s up to 15 min. |
+| `DELETE /api/v0/session` | anyone | `204`, the session ended and the cookie cleared. |
+| `POST /api/v0/setup` | anyone, once | `SignIn` → `201 SessionInfo` and the cookie: the first admin, signed in. Only while no users exist: `409 already-set-up` after. Errors: `400 invalid-name` (1–32 of `a-z 0-9 - _ .`), `400 password-too-short` (under 8 characters), `400 password-too-long` (over 256 bytes), `500 users-file-broken` (users.toml exists but can't be read: never treated as a fresh machine). |
+| `GET /api/v0/users` | admin | `UserInfo[]` (`name`, `role`), never a password. |
+| `POST /api/v0/users` | admin | `NewUser` `{name, password, role}` → `201 UserInfo`. Errors as for setup, and `409 name-taken`. |
+| `DELETE /api/v0/users/{name}` | admin | `204`; their tokens go and their sessions end. `409 remove-yourself`, `409 last-admin`, `404 unknown-user`. |
+| `PUT /api/v0/users/{name}/role` | admin | `RoleChange` `{role}` → `204`. It applies at once to their sessions and tokens. `409 last-admin` (demoting the only admin). |
+| `PUT /api/v0/users/{name}/password` | viewer | `PasswordChange` `{password, current?}` → `204`. Your own needs `current` (`403 wrong-password`) and ends your other sessions; an admin may set anyone's (no `current`), which ends all of theirs. Someone else's as a non-admin: `403 not-allowed`. |
+| `GET /api/v0/tokens` | viewer | `TokenInfo[]` (`id`, `name`, `user`, `role`, `created`): your own; an admin's lists everyone's. Never the token itself. |
+| `POST /api/v0/tokens` | viewer | `NewToken` `{name, role}` → `201 TokenCreated` `{token, secret}`. The `secret` (`faber_` + 43 characters) is **shown this once**. `role` is at most your own (`403 role-too-high`). Only a browser that signed in with a password can make one (`403 not-allowed` with a token). |
+| `DELETE /api/v0/tokens/{id}` | viewer | `204`: your own, or anyone's for an admin. `404 unknown-token`. |
+
+A token acts with the lower of its own role and its user's current role. A revoked or unknown
+token gets `401 not-signed-in` (never treated as "nobody").
+
+**Checks on every request** (`core/src/api/auth.rs`):
+
+- **Host:** only names that can be this machine are answered: an IP address, a name without dots,
+  `localhost`, names under `.local`, `.internal`, `.localhost`, `.lan`, `.home.arpa`, `.ts.net`,
+  and the machine's name. Anything else is `421 unknown-host`, so a web page that points its own
+  domain at the machine (DNS rebinding) gets nowhere.
+- **Origin:** a request other than `GET`/`HEAD`, and a WebSocket upgrade, that carries an `Origin`
+  must carry this machine's (`http://` or `https://` + the `Host` it was sent to), or it gets
+  `403 bad-origin`. Browsers always send `Origin` on these, so only programs leave it out.
+- **Role:** the route's entry in `core/src/api/access.rs`. A route without one is refused for
+  everyone (`500 no-access-rule`, logged); a test fails if any route lacks one.
+
+The **files** routes also check each path: `machine:/…` and `home:/Backups/…` need an admin
+(backups hold the users' password hashes), reading the rest of the home folder a viewer, and
+changing it an operator.
 
 ## Translations
 

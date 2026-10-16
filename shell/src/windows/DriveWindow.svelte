@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RoleLock from '../components/RoleLock.svelte';
   import { untrack } from 'svelte';
   import { t } from '../lib/i18n';
   import { useCore } from '../lib/state/context';
@@ -36,6 +37,8 @@
   const READINGS_HZ = 10;
 
   const core = useCore();
+  // Driving is an operator's; Stop is everyone's (docs/auth.md).
+  const lock = $derived(core.auth.lock('operator'));
   const desktop = useDesktop();
 
   const movable = $derived(core.movableParts);
@@ -77,9 +80,10 @@
   let keeper: LeaseKeeper | null = null;
   let loop: DriveLoop | null = null;
 
-  // D46: ask once per session, the first time a part could be driven here.
+  // D46: ask once per session, the first time a part could be driven here (not a viewer, who
+  // can't drive: the window says so instead).
   $effect(() => {
-    if (part && !core.drivingConfirmed && !declined) asking = true;
+    if (part && !core.drivingConfirmed && !declined && lock === null) asking = true;
   });
 
   // One lease keeper per part; closing the window or picking another part lets go.
@@ -273,11 +277,19 @@
       <span class="dot" aria-hidden="true"></span>
       <span class="text">{statusLine.text}</span>
       {#if other && status.kind !== 'held' && !estopped}
-        <button class="btn" onclick={takeOver}>{t('drive.takeOver')}</button>
+        <button class="btn" disabled={lock !== null} title={lock ?? undefined} onclick={takeOver}
+          >{t('drive.takeOver')}</button
+        >
       {:else if !core.drivingConfirmed}
-        <button class="btn primary" onclick={() => (asking = true)}>{t('drive.start')}</button>
+        <button
+          class="btn primary"
+          disabled={lock !== null}
+          title={lock ?? undefined}
+          onclick={() => (asking = true)}>{t('drive.start')}</button
+        >
       {/if}
     </div>
+    {#if lock}<div class="pad-x"><RoleLock reason={lock} /></div>{/if}
     {#if estopped}<p class="hint">{t('drive.status.estopHint')}</p>{/if}
     {#if refused}<div class="pad-x"><ErrorNotice error={refused} /></div>{/if}
 

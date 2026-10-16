@@ -27,6 +27,7 @@ pub fn error_body(e: &MachineError) -> dto::ErrorBody {
         message: e.message.clone(),
         hint: e.hint.clone(),
         reason: e.lease_ended.map(lease_end_reason),
+        needs: None,
     }
 }
 
