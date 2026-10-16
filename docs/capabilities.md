@@ -162,6 +162,18 @@ Viewer for all three: the value plus a plot.
   `cell-volts[]?`, `level` (ok / low / critical).
 - The core raises a notification whenever `level` changes.
 - **Info:** chemistry, cells-in-series, capacity-ah.
+- **As built** (Phase 5c, `sdk/rust/capabilities/src/battery.rs`): chemistry is one of `li-ion`,
+  `lipo`, `lifepo4`, `nimh`, `lead-acid`; `capacity-ah` is optional. `level` comes from typical
+  datasheet values per cell for a resting cell, not measurements: Li-ion and LiPo low below 3.5 V
+  and critical below 3.3 V (a 3S pack: 10.5 V and 9.9 V; full 4.2 V, empty 3.0 V); LiFePO4 3.0 V
+  and 2.8 V (full 3.4 V, empty 2.5 V); NiMH 1.1 V and 1.0 V; lead-acid 11.8 V and 11.5 V for a
+  12 V battery. A level gets worse as soon as the voltage crosses a threshold, and better only
+  once it is a little above it (0.05 V a cell for lithium), so a wobbling voltage doesn't flip it.
+  A battery under load reads lower than at rest, so a robot driving hard may see `low` a little
+  early. `charge` from the voltage (a typical resting curve per chemistry) is a rough guide only.
+  The notification is a `battery-level` notice (api.md, "Notices"): a log entry as the part or
+  app, and a toast in every shell. FaberLink code 5 (faberlink.md §4), `FaberBattery` on an
+  Arduino, `generic-battery` for the simulator (simulation.md §3), the Battery viewer in the shell.
 
 **`rc-input`** (ROS Joy)
 - **Signal (L):** `axes[]` −1 to 1, `buttons[]`, `connected`, `link-quality?` 0–1.
