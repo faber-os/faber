@@ -1,6 +1,10 @@
 //! A mutex that knows who holds it and who is waiting for it, so a core that stops answering can
 //! say why instead of going quiet. The machine's own locks use it, and a watchdog thread logs any
 //! lock held too long, with the code that holds it and the code waiting for it.
+//!
+//! Each lock also has a **rank**: a thread may only take locks in rising rank order. In debug
+//! builds (and so in every test) taking a lower-ranked lock while holding a higher one panics at
+//! once, naming both, instead of deadlocking now and then under the right timing.
 
 use std::panic::Location;
 use std::sync::{Mutex, MutexGuard, TryLockError};
@@ -8,8 +12,14 @@ use std::time::{Duration, Instant};
 
 pub struct Watched<T> {
     name: &'static str,
+    rank: u8,
     inner: Mutex<T>,
     book: Mutex<Book>,
+}
+
+thread_local! {
+    /// The watched locks this thread holds: (rank, name).
+    static HELD: std::cell::RefCell<Vec<(u8, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[derive(Default)]
@@ -66,18 +76,36 @@ impl<T> std::ops::DerefMut for WatchedGuard<'_, T> {
 impl<T> Drop for WatchedGuard<'_, T> {
     fn drop(&mut self) {
         self.owner.book().holder = None;
+        let me = (self.owner.rank, self.owner.name);
+        HELD.with(|h| {
+            let mut h = h.borrow_mut();
+            if let Some(i) = h.iter().rposition(|x| *x == me) {
+                h.remove(i);
+            }
+        });
     }
 }
 
 impl<T> Watched<T> {
-    pub fn new(name: &'static str, value: T) -> Watched<T> {
-        Watched { name, inner: Mutex::new(value), book: Mutex::new(Book::default()) }
+    /// A lock of `rank`: a thread holding it may only take locks of a higher rank.
+    pub fn new(name: &'static str, rank: u8, value: T) -> Watched<T> {
+        Watched { name, rank, inner: Mutex::new(value), book: Mutex::new(Book::default()) }
     }
 
     /// Waits for the lock. A poisoned lock (a thread panicked holding it) panics here too, like
-    /// `lock().expect(…)` did.
+    /// `lock().expect(…)` did. In debug builds, taking it out of rank order panics.
     #[track_caller]
     pub fn lock(&self) -> WatchedGuard<'_, T> {
+        // The list is let go before panicking: the unwinding drops guards, which change it.
+        let above = HELD.with(|h| h.borrow().iter().find(|(rank, _)| *rank >= self.rank).map(|(_, n)| *n));
+        if cfg!(debug_assertions)
+            && let Some(above) = above
+        {
+            panic!(
+                "lock order: the {} lock is taken while this thread holds the {} lock; take the {} lock first",
+                self.name, above, self.name
+            );
+        }
         let me = Who::here(Location::caller());
         let ticket = {
             let mut b = self.book();
@@ -91,6 +119,7 @@ impl<T> Watched<T> {
         b.waiting.retain(|(t, _)| *t != ticket);
         b.holder = Some(Who { since: Instant::now(), ..me });
         drop(b);
+        HELD.with(|h| h.borrow_mut().push((self.rank, self.name)));
         WatchedGuard { guard, owner: self }
     }
 
@@ -99,8 +128,10 @@ impl<T> Watched<T> {
     pub fn try_lock(&self) -> Option<WatchedGuard<'_, T>> {
         let at = Location::caller();
         match self.inner.try_lock() {
+            // Never waits, so it can't deadlock whatever this thread holds.
             Ok(guard) => {
                 self.book().holder = Some(Who::here(at));
+                HELD.with(|h| h.borrow_mut().push((self.rank, self.name)));
                 Some(WatchedGuard { guard, owner: self })
             }
             Err(TryLockError::WouldBlock) => None,
@@ -135,7 +166,7 @@ mod tests {
 
     #[test]
     fn a_lock_held_too_long_names_its_holder_and_who_waits() {
-        let w = Arc::new(Watched::new("test", 0));
+        let w = Arc::new(Watched::new("test", 1, 0));
         let held = w.lock();
         assert_eq!(w.held_too_long(Duration::from_millis(20)), None, "not long yet");
         let w2 = Arc::clone(&w);
@@ -160,8 +191,27 @@ mod tests {
     }
 
     #[test]
+    fn locks_taken_in_rank_order_are_fine_and_the_reverse_panics() {
+        let low = Watched::new("low", 1, ());
+        let high = Watched::new("high", 2, ());
+        {
+            let _a = low.lock();
+            let _b = high.lock();
+        }
+        let _b = high.lock();
+        let wrong = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(low.lock())));
+        let message = *wrong.unwrap_err().downcast::<String>().unwrap();
+        assert_eq!(
+            message,
+            "lock order: the low lock is taken while this thread holds the high lock; take the low lock first"
+        );
+        drop(_b);
+        drop(low.lock()); // free of it, any order is fine again
+    }
+
+    #[test]
     fn try_lock_says_when_it_is_taken() {
-        let w = Watched::new("test", ());
+        let w = Watched::new("test", 1, ());
         let held = w.lock();
         assert!(w.try_lock().is_none());
         drop(held);

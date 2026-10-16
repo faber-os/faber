@@ -776,6 +776,20 @@ count = \"0..\"
     call(&c.app, "POST", "/api/v0/apps/trapper/disable", None).await;
 }
 
+/// Listing packages with an app installed reads the app's load problems. It must do that before
+/// it locks the machine (the lock order is apps, then machine): the other way round deadlocked
+/// with the sweeper's app check now and then, and froze the whole core.
+#[tokio::test(flavor = "multi_thread")]
+async fn packages_with_an_app_are_listed_in_lock_order() {
+    let Some(wasm) = component("wall-follower") else { return };
+    let c = sennep_by_a_wall().await;
+    let (s, _) = install(&c, wall_follower_package(&wasm), "wall-follower-0.1.0.faberpkg").await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (s, list) = call(&c.app, "GET", "/api/v0/packages", None).await;
+    assert_eq!(s, StatusCode::OK, "{list}");
+    assert!(list.as_array().unwrap().iter().any(|p| p["id"] == "wall-follower"), "{list}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_connector_is_not_an_app() {
     let Some(wasm) = component("faber-test-guest") else { return };

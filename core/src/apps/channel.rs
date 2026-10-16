@@ -279,27 +279,45 @@ fn check(kind: &str, payload: &Payload) -> Result<(), ChannelError> {
     Ok(())
 }
 
-fn release(list: Vec<Release>) {
-    for (driver, part, lease) in list {
-        driver.release(&part, &lease);
+/// What to do once the channel's lock is let go: end leases, then tell windows. In that order,
+/// so a window told its drive ended never finds the lease still held.
+#[derive(Default)]
+struct After {
+    releases: Vec<Release>,
+    tell: Vec<(Sink, ToWindow)>,
+}
+
+impl After {
+    fn push(&mut self, release: Release) {
+        self.releases.push(release);
+    }
+
+    fn finish(self) {
+        for (driver, part, lease) in self.releases {
+            driver.release(&part, &lease);
+        }
+        for (sink, message) in self.tell {
+            sink(message);
+        }
     }
 }
 
 impl Inner {
     /// Ends `window`'s drive of `key`: the window hears it (unless it is closing), the logic gets
     /// `drive-ended`, and when no window drives the role any more the logic's lease ends.
-    fn end(&mut self, window: u64, key: &Key, reason: EndReason, out: &mut Vec<Release>) {
+    fn end(&mut self, window: u64, key: &Key, reason: EndReason, out: &mut After) {
         let Some(w) = self.windows.get_mut(&window) else { return };
         if !w.drives.remove(key) {
             return;
         }
         if reason != EndReason::WindowClosed {
-            (w.sink)(ToWindow::DriveEnded { role: key.0.clone(), index: key.1, reason });
+            let ended = ToWindow::DriveEnded { role: key.0.clone(), index: key.1, reason };
+            out.tell.push((Arc::clone(&w.sink), ended));
         }
         self.after_end(window, key, reason, out);
     }
 
-    fn after_end(&mut self, window: u64, key: &Key, reason: EndReason, out: &mut Vec<Release>) {
+    fn after_end(&mut self, window: u64, key: &Key, reason: EndReason, out: &mut After) {
         let still = self.windows.values().any(|w| w.drives.contains(key));
         let Some(run) = self.run.as_mut() else { return };
         run.inbox.push_back(Message {
@@ -312,7 +330,7 @@ impl Inner {
         }
     }
 
-    fn end_all(&mut self, window: u64, reason: EndReason, out: &mut Vec<Release>) {
+    fn end_all(&mut self, window: u64, reason: EndReason, out: &mut After) {
         let keys: Vec<Key> =
             self.windows.get(&window).map(|w| w.drives.iter().cloned().collect()).unwrap_or_default();
         for key in keys {
@@ -321,7 +339,7 @@ impl Inner {
     }
 
     /// Ends the drives of every window whose heartbeat is overdue.
-    fn expire(&mut self, now: Instant, out: &mut Vec<Release>) {
+    fn expire(&mut self, now: Instant, out: &mut After) {
         let late: Vec<u64> = self
             .windows
             .iter()
@@ -336,7 +354,7 @@ impl Inner {
     }
 
     /// Ends the run: every window's drive ends (`app-stopped`), its leases end, its inbox goes.
-    fn end_run(&mut self, out: &mut Vec<Release>) {
+    fn end_run(&mut self, out: &mut After) {
         if self.run.is_none() {
             return;
         }
@@ -366,10 +384,10 @@ impl Channel {
     }
 
     /// Runs `f` with the lock, then ends the leases it collected without it.
-    fn with<T>(&self, f: impl FnOnce(&mut Inner, &mut Vec<Release>) -> T) -> T {
-        let mut out = Vec::new();
+    fn with<T>(&self, f: impl FnOnce(&mut Inner, &mut After) -> T) -> T {
+        let mut out = After::default();
         let value = f(&mut self.lock(), &mut out);
-        release(out);
+        out.finish();
         value
     }
 
@@ -820,6 +838,34 @@ mod tests {
             }
             // The logic may try again: there is no intent, so no lease is kept for it.
             assert!(!c.took_lease(token, "base", 0, p("base"), "lease-2".into(), later), "{how}");
+        }
+    }
+
+    /// A window told its drive ended must never find the logic's lease still held: the lease
+    /// ends first, then the window hears it.
+    #[test]
+    fn the_lease_has_ended_by_the_time_the_window_hears_it() {
+        for reason in
+            [EndReason::Released, EndReason::Stopped, EndReason::HeartbeatLost, EndReason::AppStopped]
+        {
+            let (c, driver, token, t0) = running();
+            let released_when_told = Arc::new(Mutex::new(None));
+            let (d, r) = (Arc::clone(&driver), Arc::clone(&released_when_told));
+            let s: Sink = Arc::new(move |m| {
+                if matches!(m, ToWindow::DriveEnded { .. }) {
+                    *r.lock().unwrap() = Some(!d.log.lock().unwrap().is_empty());
+                }
+            });
+            let w = c.open_window(s, t0);
+            c.drive_via(w, "base", 0, t0).unwrap();
+            assert!(c.took_lease(token, "base", 0, p("base"), "lease-1".into(), t0));
+            match reason {
+                EndReason::Released => c.end_drive(w, "base", 0),
+                EndReason::Stopped => c.stop(w),
+                EndReason::HeartbeatLost => c.sweep(t0 + Duration::from_secs(1)),
+                _ => c.detach(token),
+            }
+            assert_eq!(*released_when_told.lock().unwrap(), Some(true), "{reason:?}");
         }
     }
 

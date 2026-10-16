@@ -421,6 +421,7 @@ impl Machine {
             translations,
             state: Watched::new(
                 "machine",
+                MACHINE_RANK,
                 State {
                     text,
                     config,
@@ -452,7 +453,7 @@ impl Machine {
             bridge_inbox: Mutex::new(bridge_inbox),
             stop_sweeping: Arc::new(AtomicBool::new(false)),
             sweeper: Mutex::new(None),
-            apps: Watched::new("apps", apps::Apps::default()),
+            apps: Watched::new("apps", APPS_RANK, apps::Apps::default()),
             app_status: Arc::new(crate::apps::StatusBoard::default()),
             app_states: Mutex::new(BTreeMap::new()),
             app_channels: Mutex::new(BTreeMap::new()),
@@ -2079,6 +2080,11 @@ fn watch_locks(machine: Weak<Machine>, stop: Arc<AtomicBool>) {
         }
     }
 }
+
+/// The lock order: a thread holding the machine lock never takes the apps lock (reconciling the
+/// apps holds the apps lock and reads the machine's parts). Debug builds panic on the reverse.
+const APPS_RANK: u8 = 1;
+const MACHINE_RANK: u8 = 2;
 
 /// How long a machine lock may be held before the watchdog says so.
 const LOCK_TOO_LONG: Duration = Duration::from_secs(2);

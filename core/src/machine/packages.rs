@@ -219,14 +219,16 @@ impl Machine {
     /// Every installed package (`GET /api/v0/packages`).
     pub fn packages(&self) -> Result<Vec<PackageView>, MachineError> {
         let list = self.package_store().list()?;
+        let app_problems = self.app_problems(); // before the machine lock: apps, then machine
         let st = self.state.lock();
-        Ok(list.into_iter().map(|p| self.package_view(&st, p)).collect())
+        Ok(list.into_iter().map(|p| self.package_view(&st, &app_problems, p)).collect())
     }
 
-    fn package_view(&self, st: &State, installed: Installed) -> PackageView {
+    /// `app_problems` is read before `st` is locked: the apps lock is never taken while the machine
+    /// lock is held (the lock order is apps, then machine; see `Machine`).
+    fn package_view(&self, st: &State, app_problems: &[LoadProblem], installed: Installed) -> PackageView {
         if installed.kind == APP_TYPE {
-            let problem =
-                self.app_problems().into_iter().find(|p| p.folder == installed.id).map(|p| p.problem);
+            let problem = app_problems.iter().find(|p| p.folder == installed.id).map(|p| p.problem.clone());
             return PackageView { installed, used_by: Vec::new(), problem, firmware: Vec::new() };
         }
         let used_by = parts_using(st, &installed.id);
@@ -332,7 +334,7 @@ impl Machine {
         tracing::info!(target: "core::machine", "installed the package {id} {} from {source}", installed.version);
         self.restart_parts_on(&mut st, &id);
         self.announce_packages();
-        let view = self.package_view(&st, installed);
+        let view = self.package_view(&st, &[], installed); // a connector: no app problems
         Ok((preview_of, Some(view)))
     }
 
@@ -372,8 +374,9 @@ impl Machine {
         }
         self.announce_packages();
         self.app_status.touch();
+        let app_problems = self.app_problems();
         let st = self.state.lock();
-        let view = self.package_view(&st, installed);
+        let view = self.package_view(&st, &app_problems, installed);
         Ok((preview_of, Some(view)))
     }
 
