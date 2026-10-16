@@ -11,10 +11,11 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use faber_capabilities::{Reading, planar_base};
 use faber_core::api;
+use faber_core::apps::{EndReason, ToWindow};
 use faber_core::clock::MonotonicClock;
 use faber_core::disks::{Disk, DiskDiscovery};
 use faber_core::logs::LogBook;
-use faber_core::machine::{Machine, MachineOptions};
+use faber_core::machine::{AppWindowLink, Machine, MachineOptions};
 use faber_core::names::SignalAddress;
 use faber_core::packages;
 use faber_core::ports::{
@@ -53,6 +54,25 @@ fn trapper_package(wasm: &[u8]) -> Vec<u8> {
     let files: BTreeMap<String, Vec<u8>> = [
         ("faber.toml", TRAPPER.as_bytes()),
         ("README.md", b"# Trapper".as_slice()),
+        ("LICENSE", b"MIT".as_slice()),
+        ("app.wasm", wasm),
+    ]
+    .into_iter()
+    .map(|(n, d)| (n.to_string(), d.to_vec()))
+    .collect();
+    packages::pack(&files).unwrap()
+}
+
+/// The trapper with its base declared `drive = "window"`, as "ignorer": it drives whenever it
+/// may and never reads `drive-ended`.
+fn ignorer_package(wasm: &[u8]) -> Vec<u8> {
+    let manifest = TRAPPER
+        .replace("id = \"trapper\"", "id = \"ignorer\"")
+        .replace("name = \"Trapper\"", "name = \"Ignorer\"")
+        .replace("command = true\n", "command = true\ndrive = \"window\"\n");
+    let files: BTreeMap<String, Vec<u8>> = [
+        ("faber.toml", manifest.as_bytes()),
+        ("README.md", b"# Ignorer".as_slice()),
         ("LICENSE", b"MIT".as_slice()),
         ("app.wasm", wasm),
     ]
@@ -255,7 +275,7 @@ async fn the_wall_follower_drives_along_a_wall_and_stops_when_turned_off() {
     assert_eq!(preview["app"]["id"], "wall-follower", "{preview}");
     assert_eq!(
         preview["app"]["roles"][1],
-        json!({"role": "base", "capability": "planar-base@1", "command": true, "count": "1", "parts": []})
+        json!({"role": "base", "capability": "planar-base@1", "command": true, "count": "1", "parts": [], "drive": "logic"})
     );
     let (s, installed) = install(&c, wall_follower_package(&wasm), "wall-follower-0.1.0.faberpkg").await;
     assert_eq!(s, StatusCode::CREATED, "{installed}");
@@ -501,6 +521,113 @@ async fn a_trap_ends_the_lease_and_stops_the_base() {
     let a = app_state_where(&c, "trapper", "the memory limit", kind_is("failed")).await;
     assert!(a["state"]["message"].as_str().unwrap().contains("needed more than 32 MB"), "{a}");
     assert_eq!(holder(&c, "base"), None);
+}
+
+/// What a window hears from the core, collected.
+fn window_sink() -> (faber_core::apps::channel::Sink, Arc<std::sync::Mutex<Vec<ToWindow>>>) {
+    let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let h = Arc::clone(&heard);
+    (Arc::new(move |m| h.lock().unwrap().push(m)), heard)
+}
+
+/// A window's SDK beating every 100 ms, until it is dropped (the page hung or went away).
+struct Beating(tokio::task::JoinHandle<()>);
+
+impl Beating {
+    fn start(link: &Arc<AppWindowLink>) -> Beating {
+        let link = Arc::downgrade(link);
+        Beating(tokio::spawn(async move {
+            while let Some(l) = link.upgrade() {
+                let _ = l.heartbeat();
+                drop(l);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }))
+    }
+}
+
+impl Drop for Beating {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// The guarantee of `drive = "window"` (docs/apps.md §12), held by the core alone: an app that
+/// takes the lease whenever it can and never reads `drive-ended` drives only while a window
+/// drives through it, and the lease ends at once when the user presses Stop, when the window's
+/// heartbeat stops, or when the window closes.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_core_ends_a_window_driven_lease_even_when_the_app_ignores_drive_ended() {
+    let Some(wasm) = component("faber-test-app") else { return };
+    let c = sennep_by_a_wall().await;
+    let (s, e) = install(&c, ignorer_package(&wasm), "ignorer.faberpkg").await;
+    assert_eq!(s, StatusCode::CREATED, "{e}");
+    let (_, a) =
+        call(&c.app, "PUT", "/api/v0/apps/ignorer/roles", Some(json!({"roles": {"base": "base"}}))).await;
+    assert_eq!(a["roles"][0]["drive"], "window", "{a}");
+    call(&c.app, "POST", "/api/v0/apps/ignorer/enable", None).await;
+    app_state_where(&c, "ignorer", "it runs", kind_is("running")).await;
+
+    // It tries on every tick, but no window drives the base.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(holder(&c, "base"), None, "no window, no lease");
+
+    let drives = || async {
+        wait_for("the app to drive", 3.0, || {
+            (holder(&c, "base").as_deref() == Some("app:ignorer") && base(&c).commanded.vx > 0.1)
+                .then_some(())
+        })
+        .await
+    };
+    // It stays let go, however often the app asks again.
+    let stays_stopped = |how: &'static str| {
+        let c = &c;
+        async move {
+            let ended = Instant::now();
+            wait_for(how, 1.0, || holder(c, "base").is_none().then_some(())).await;
+            let took = ended.elapsed();
+            for _ in 0..30 {
+                assert_eq!(holder(c, "base"), None, "{how}: the app took the base again");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            took
+        }
+    };
+
+    // 1. The user presses Stop (the shell's bar, outside the app's page).
+    let (sink, heard) = window_sink();
+    let link = Arc::new(c.machine.open_app_window("ignorer", sink).unwrap());
+    let beating = Beating::start(&link);
+    link.drive_via("base", 0).unwrap();
+    drives().await;
+    link.stop();
+    let took = stays_stopped("Stop").await;
+    assert!(took < Duration::from_millis(50), "Stop ends the lease at once: {took:?}");
+    assert_eq!(
+        heard.lock().unwrap().last(),
+        Some(&ToWindow::DriveEnded { role: "base".into(), index: 0, reason: EndReason::Stopped })
+    );
+
+    // 2. The page hangs: no heartbeat for 300 ms ends it.
+    link.drive_via("base", 0).unwrap();
+    drives().await;
+    drop(beating);
+    let took = stays_stopped("the heartbeat to be missed").await;
+    assert!(took < Duration::from_millis(500), "300 ms after the last beat (every 100 ms): {took:?}");
+    assert_eq!(
+        heard.lock().unwrap().last(),
+        Some(&ToWindow::DriveEnded { role: "base".into(), index: 0, reason: EndReason::HeartbeatLost })
+    );
+
+    // 3. The window closes.
+    let _beating = Beating::start(&link);
+    link.drive_via("base", 0).unwrap();
+    drives().await;
+    drop(link); // still beating: closing alone ends it
+    let took = stays_stopped("the window to close").await;
+    assert!(took < Duration::from_millis(50), "closing ends the lease at once: {took:?}");
+    assert_eq!(base(&c).commanded, faber_capabilities::Twist2d::ZERO, "and the base got its safe state");
+    call(&c.app, "POST", "/api/v0/apps/ignorer/disable", None).await;
 }
 
 /// A role with `count = "0..1"` or `"0.."` may stay empty: the app runs without it, and a part

@@ -313,6 +313,18 @@ pub struct AppRole {
     pub count: String,
     /// The parts picked for it, in order. Empty: none yet (the app can't run).
     pub parts: Vec<String>,
+    /// For a command role: `logic` (the app's logic drives it on its own while the app is on) or
+    /// `window` (only while one of its windows drives it through the logic, docs/apps.md §12).
+    pub drive: AppDrive,
+}
+
+/// Who decides when an app drives a command role (`drive` in its `[[requires]]`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum AppDrive {
+    Logic,
+    Window,
 }
 
 /// A derived signal an app publishes (`[[publishes]]`, D24): read-only, never a part's.

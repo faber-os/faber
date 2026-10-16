@@ -17,6 +17,7 @@ const lidar: AppRole = {
   command: false,
   count: '1',
   parts: [],
+  drive: 'logic',
 };
 const base: AppRole = {
   role: 'base',
@@ -24,6 +25,7 @@ const base: AppRole = {
   command: true,
   count: '1',
   parts: [],
+  drive: 'logic',
 };
 const ring: AppRole = {
   role: 'ring',
@@ -31,6 +33,7 @@ const ring: AppRole = {
   command: false,
   count: '1..',
   parts: [],
+  drive: 'logic',
 };
 const pack: AppRole = {
   role: 'pack',
@@ -38,6 +41,7 @@ const pack: AppRole = {
   command: false,
   count: '0..1',
   parts: [],
+  drive: 'logic',
 };
 const near: AppRole = { ...ring, role: 'near', count: '0..' };
 const parts = [part('lidar'), simBase('base'), simDistance('front'), simDistance('back')];

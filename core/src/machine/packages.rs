@@ -391,6 +391,7 @@ impl Machine {
                 ));
             }
             self.drop_app_state(id);
+            self.close_app_windows(id);
             self.package_store().uninstall(id)?;
             tracing::info!(target: "core::machine", "uninstalled the app {id}");
             if let Err(e) = self.settings.set_pinned(&app_program(id), false) {

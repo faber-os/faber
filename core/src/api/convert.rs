@@ -315,6 +315,10 @@ pub fn app_info(a: &AppView) -> dto::AppInfo {
                 capability: r.capability,
                 command: r.command,
                 count: r.count.id().to_string(),
+                drive: match r.drive {
+                    crate::apps::manifest::DrivenBy::Logic => dto::AppDrive::Logic,
+                    crate::apps::manifest::DrivenBy::Window => dto::AppDrive::Window,
+                },
                 parts: a
                     .bindings
                     .get(&r.role)

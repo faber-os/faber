@@ -21,14 +21,29 @@ const APP: AppInfo = {
   logic: true,
   tickHz: 20,
   roles: [
-    { role: 'scanner', capability: 'laser-scan@1', command: false, count: '1', parts: ['lidar1'] },
-    { role: 'wheels', capability: 'planar-base@1', command: true, count: '1', parts: ['base1'] },
+    {
+      role: 'scanner',
+      capability: 'laser-scan@1',
+      command: false,
+      count: '1',
+      parts: ['lidar1'],
+      drive: 'logic',
+    },
+    {
+      role: 'wheels',
+      capability: 'planar-base@1',
+      command: true,
+      count: '1',
+      parts: ['base1'],
+      drive: 'logic',
+    },
     {
       role: 'ring',
       capability: 'distance@1',
       command: false,
       count: '1..',
       parts: ['front', 'back'],
+      drive: 'logic',
     },
   ],
   publishes: [

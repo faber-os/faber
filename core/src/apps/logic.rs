@@ -2,6 +2,7 @@
 //! same limits as wasm connectors (memory, time per call). Every import goes to the run's
 //! [`Session`]; nothing else exists inside: no files, network, environment or clock.
 
+use super::channel::Payload;
 use super::session::{DriveError, Session};
 use crate::sandbox::app_bindings::faber::app as wit_app;
 use crate::sandbox::bindings::faber::capabilities as cap;
@@ -19,6 +20,7 @@ const ALLOWED: &[&str] = &[
     "faber:app/drive@0.1.0",
     "faber:app/publish@0.1.0",
     "faber:app/state@0.1.0",
+    "faber:app/messages@0.1.0",
     "faber:app/log@0.1.0",
 ];
 
@@ -60,7 +62,7 @@ pub fn compile(name: &str, wasm: &[u8], limits: Limits) -> Result<Compiled, Prob
     if !forbidden.is_empty() {
         return Err(Problem::new(
             format!("{name} asks for {}, which Faber doesn't give apps.", forbidden.join(", ")),
-            "Apps see their roles, their leases, their own signals, a small state and the log, nothing else. \
+            "Apps see their roles, their leases, their own signals, a small state, messages with their windows and the log, nothing else. \
              Build it for wasm32-unknown-unknown, not with WASI.",
         ));
     }
@@ -265,6 +267,43 @@ impl wit_app::state::Host for AppHost {
 
     fn keys(&mut self) -> Vec<String> {
         self.session.state.keys()
+    }
+}
+
+fn payload_from_wit(p: wit_app::messages::Payload) -> Payload {
+    match p {
+        wit_app::messages::Payload::Text(t) => Payload::Text(t),
+        wit_app::messages::Payload::Bytes(b) => Payload::Bytes(b),
+    }
+}
+
+fn payload_to_wit(p: Payload) -> wit_app::messages::Payload {
+    match p {
+        Payload::Text(t) => wit_app::messages::Payload::Text(t),
+        Payload::Bytes(b) => wit_app::messages::Payload::Bytes(b),
+    }
+}
+
+impl wit_app::messages::Host for AppHost {
+    fn poll(&mut self) -> Vec<wit_app::messages::Message> {
+        self.session
+            .poll_messages()
+            .into_iter()
+            .map(|m| wit_app::messages::Message {
+                window: m.window,
+                kind: m.kind,
+                payload: payload_to_wit(m.payload),
+            })
+            .collect()
+    }
+
+    fn send(
+        &mut self,
+        window: Option<u64>,
+        kind: String,
+        payload: wit_app::messages::Payload,
+    ) -> Result<(), String> {
+        self.session.send_message(window, &kind, payload_from_wit(payload))
     }
 }
 

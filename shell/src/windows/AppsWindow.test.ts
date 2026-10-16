@@ -16,8 +16,22 @@ const APP: AppInfo = {
   logic: true,
   tickHz: 20,
   roles: [
-    { role: 'lidar', capability: 'laser-scan@1', command: false, count: '1', parts: ['lidar'] },
-    { role: 'base', capability: 'planar-base@1', command: true, count: '1', parts: ['base'] },
+    {
+      role: 'lidar',
+      capability: 'laser-scan@1',
+      command: false,
+      count: '1',
+      parts: ['lidar'],
+      drive: 'logic',
+    },
+    {
+      role: 'base',
+      capability: 'planar-base@1',
+      command: true,
+      count: '1',
+      parts: ['base'],
+      drive: 'logic',
+    },
   ],
   publishes: [
     { name: 'wall-distance', capability: 'distance@1', address: 'app:wall-follower/wall-distance' },

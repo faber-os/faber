@@ -2,8 +2,8 @@
 //!
 //! An app is plain Rust: a type that implements [`App`]. It sees the machine through a [`Host`]:
 //! its roles' readings, leases and commands on the roles it may drive, derived signals it
-//! publishes, a small store that outlives restarts, and the log. One line turns it into a
-//! component:
+//! publishes, a small store that outlives restarts, live messages with its windows, and the log.
+//! One line turns it into a component:
 //!
 //! ```ignore
 //! #[derive(Default)]
@@ -78,6 +78,72 @@ pub enum DriveError {
     PartNotReady(String),
 }
 
+/// What a message between the app's windows and its logic carries.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Payload {
+    Text(String),
+    Bytes(Vec<u8>),
+}
+
+impl Payload {
+    /// The text, if it is text.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Payload::Text(t) => Some(t),
+            Payload::Bytes(_) => None,
+        }
+    }
+}
+
+/// A message from one of the app's windows (`faber.send(kind, data)`), or from the core about a
+/// window ([`DRIVE_STARTED`], [`DRIVE_ENDED`]). Never saved: what isn't polled while the logic
+/// runs is gone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Message {
+    /// The window it is from; answer it with [`Host::send_message`].
+    pub window: u64,
+    /// What it is, e.g. `drive`.
+    pub kind: String,
+    pub payload: Payload,
+}
+
+/// The core says a window started driving a `drive = "window"` role through the logic.
+pub const DRIVE_STARTED: &str = "drive-started";
+/// The core says a window's drive ended. The core has ended the logic's lease on the role
+/// already (unless another window still drives it), whatever the logic does.
+pub const DRIVE_ENDED: &str = "drive-ended";
+
+/// A window's drive through the logic, from a [`DRIVE_STARTED`] or [`DRIVE_ENDED`] message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DriveEvent {
+    Started {
+        role: String,
+        index: u32,
+    },
+    /// `reason`: `released`, `stopped` (the user pressed Stop), `window-closed`,
+    /// `heartbeat-lost` (the window hung) or `app-stopped`.
+    Ended {
+        role: String,
+        index: u32,
+        reason: String,
+    },
+}
+
+impl Message {
+    /// The drive event this message is, if the core sent it.
+    pub fn drive_event(&self) -> Option<DriveEvent> {
+        let text = self.payload.as_text()?;
+        let mut words = text.split(' ');
+        let role = words.next()?.to_string();
+        let index = words.next()?.parse().ok()?;
+        match self.kind.as_str() {
+            DRIVE_STARTED => Some(DriveEvent::Started { role, index }),
+            DRIVE_ENDED => Some(DriveEvent::Ended { role, index, reason: words.next()?.to_string() }),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogLevel {
     Debug,
@@ -110,6 +176,11 @@ pub trait Host {
     fn state_set(&mut self, key: &str, value: &str) -> Result<(), String>;
     fn state_remove(&mut self, key: &str);
     fn state_keys(&mut self) -> Vec<String>;
+    /// Every message from the app's windows since the last call, oldest first. Call it every tick.
+    fn poll_messages(&mut self) -> Vec<Message>;
+    /// Sends a message to one window, or to every open window with `None`. At most 4 KB with its
+    /// kind and 50 a second per window; fails, saying why, otherwise.
+    fn send_message(&mut self, window: Option<u64>, kind: &str, payload: Payload) -> Result<(), String>;
     fn log(&mut self, level: LogLevel, message: &str);
 }
 
@@ -123,7 +194,7 @@ pub trait App {
 
 // ---- inside the component ---------------------------------------------------------------------
 
-use bindings::faber::app::{drive, log, publish, roles, state};
+use bindings::faber::app::{drive, log, messages, publish, roles, state};
 
 /// The core, reached through the component's imports.
 struct Imports;
@@ -210,6 +281,28 @@ impl Host for Imports {
         state::keys()
     }
 
+    fn poll_messages(&mut self) -> Vec<Message> {
+        messages::poll()
+            .into_iter()
+            .map(|m| Message {
+                window: m.window,
+                kind: m.kind,
+                payload: match m.payload {
+                    messages::Payload::Text(t) => Payload::Text(t),
+                    messages::Payload::Bytes(b) => Payload::Bytes(b),
+                },
+            })
+            .collect()
+    }
+
+    fn send_message(&mut self, window: Option<u64>, kind: &str, payload: Payload) -> Result<(), String> {
+        let payload = match payload {
+            Payload::Text(t) => messages::Payload::Text(t),
+            Payload::Bytes(b) => messages::Payload::Bytes(b),
+        };
+        messages::send(window, kind, &payload)
+    }
+
     fn log(&mut self, l: LogLevel, message: &str) {
         log::log(level(l), message)
     }
@@ -277,4 +370,29 @@ macro_rules! export {
 
         $crate::bindings::export!(FaberApp with_types_in $crate::bindings);
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(kind: &str, text: &str) -> Message {
+        Message { window: 3, kind: kind.into(), payload: Payload::Text(text.into()) }
+    }
+
+    #[test]
+    fn the_cores_drive_messages_are_read() {
+        assert_eq!(
+            msg(DRIVE_STARTED, "base 0").drive_event(),
+            Some(DriveEvent::Started { role: "base".into(), index: 0 })
+        );
+        assert_eq!(
+            msg(DRIVE_ENDED, "base 1 heartbeat-lost").drive_event(),
+            Some(DriveEvent::Ended { role: "base".into(), index: 1, reason: "heartbeat-lost".into() })
+        );
+        assert_eq!(msg("drive", "base 0").drive_event(), None, "a window's own message");
+        assert_eq!(msg(DRIVE_ENDED, "base x stopped").drive_event(), None);
+        let bytes = Message { window: 1, kind: DRIVE_ENDED.into(), payload: Payload::Bytes(vec![1]) };
+        assert_eq!(bytes.drive_event(), None);
+    }
 }
