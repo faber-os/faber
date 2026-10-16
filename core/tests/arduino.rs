@@ -789,6 +789,10 @@ async fn pin_maps_and_part_templates_are_served() {
     assert_eq!(d9["pwm"], "timer1a");
     assert_eq!(uno["reserved"][0]["pins"], json!(["D0", "D1"]));
     assert_eq!(uno["servoTimers"], json!(["timer1"]));
+    // The headers, for drawing the board: D7 … D0 along the top.
+    assert_eq!(uno["headers"][1]["edge"], "top");
+    assert_eq!(uno["headers"][1]["positions"][0], "D7");
+    assert_eq!(uno["headers"].as_array().unwrap().len(), 4);
     let (_, pi) = call(&c.app, "GET", "/api/v0/arduino/pins/pi-header", None).await;
     assert_eq!(pi["kind"], "pi");
     assert_eq!(pi["pins"].as_array().unwrap().len() + pi["power"].as_array().unwrap().len(), 40);

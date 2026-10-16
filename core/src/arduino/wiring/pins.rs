@@ -152,6 +152,38 @@ pub struct PowerPin {
     pub name: String,
 }
 
+/// The side of the board a header sits on, in a drawing with the USB connector on the left.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum HeaderEdge {
+    /// Along the top edge, positions left to right.
+    Top,
+    /// Along the bottom edge, positions left to right.
+    Bottom,
+    /// Along the right edge, positions top to bottom.
+    Right,
+}
+
+/// One pin header, for drawing the board (the shell's pin picker): where it sits and what each
+/// position carries, in order along it. Only the logical order, not measured positions: enough
+/// to draw a board people recognise. Headers on the same edge follow each other with a gap.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, rename = "PinHeader")]
+pub struct Header {
+    pub edge: HeaderEdge,
+    /// 1, or 2 for a double header (the Mega's D22–D53, the Pi's 40 pins), whose positions are
+    /// listed pair by pair: the inner row's first, then the one at the board's edge.
+    pub rows: u8,
+    /// A pin's name (`D7`), or what a position without a pin of the map carries: one of
+    /// [`HEADER_LABELS`] (`GND`, `5V`, …).
+    pub positions: Vec<String>,
+}
+
+/// What a header position that isn't one of the map's pins may carry. `SDA` and `SCL` are the
+/// extra copies of the I²C pins an Uno R3 or a Mega has next to AREF.
+pub const HEADER_LABELS: &[&str] = &["GND", "5V", "3V3", "VIN", "AREF", "IOREF", "RESET", "NC", "SDA", "SCL"];
+
 /// A board's pins and its rules (`GET /api/v0/arduino/pins/{board}`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -182,6 +214,8 @@ pub struct PinMap {
     pub tone_timer: Option<String>,
     /// A Pi header's power pins, by position (empty for an Arduino).
     pub power: Vec<PowerPin>,
+    /// The board's headers, for drawing it.
+    pub headers: Vec<Header>,
 }
 
 #[derive(Deserialize)]
@@ -207,6 +241,21 @@ struct RawMap {
     reserved: Vec<Reserved>,
     #[serde(default)]
     notes: Vec<RawNote>,
+    #[serde(default)]
+    headers: Vec<RawHeader>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHeader {
+    edge: HeaderEdge,
+    #[serde(default = "one")]
+    rows: u8,
+    positions: Vec<String>,
+}
+
+fn one() -> u8 {
+    1
 }
 
 #[derive(Deserialize)]
@@ -314,6 +363,11 @@ fn parse(text: &str) -> Result<PinMap, String> {
         servos_per_timer: raw.servos_per_timer,
         tone_timer: raw.tone_timer,
         power: Vec::new(),
+        headers: raw
+            .headers
+            .into_iter()
+            .map(|h| Header { edge: h.edge, rows: h.rows, positions: h.positions })
+            .collect(),
     })
 }
 
@@ -352,7 +406,9 @@ pub fn pi_header<'a>(header: impl IntoIterator<Item = HeaderPosition<'a>>) -> Pi
     let raw = raw(PI_HEADER).unwrap_or_else(|e| panic!("the Pi header's pin map is invalid: {e}"));
     let mut pins = Vec::new();
     let mut power = Vec::new();
+    let mut positions: Vec<(u8, String)> = Vec::new();
     for pos in header {
+        positions.push((pos.physical, pos.name.into()));
         let Some(line) = pos.line else {
             power.push(PowerPin { physical: pos.physical, name: pos.name.into() });
             continue;
@@ -389,6 +445,16 @@ pub fn pi_header<'a>(header: impl IntoIterator<Item = HeaderPosition<'a>>) -> Pi
         servos_per_timer: raw.servos_per_timer,
         tone_timer: raw.tone_timer,
         power,
+        // One double header, drawn along the top: pin 1 (odd pins, the inner row) then pin 2
+        // (even pins, at the board's edge), pair by pair, as the port manager numbers them.
+        headers: {
+            positions.sort_by_key(|(physical, _)| *physical);
+            vec![Header {
+                edge: HeaderEdge::Top,
+                rows: 2,
+                positions: positions.into_iter().map(|(_, name)| name).collect(),
+            }]
+        },
     }
 }
 
@@ -719,6 +785,53 @@ mod tests {
                 assert_eq!(p.pwm.as_ref(), t.as_ref(), "{variant}: {}", p.name);
             }
         }
+    }
+
+    /// Every pin of the map on exactly one header position, every other position a known label,
+    /// and a double header's positions in whole pairs.
+    fn check_headers(map: &PinMap) {
+        assert!(!map.headers.is_empty(), "{}: no headers to draw", map.id);
+        let mut seen = BTreeSet::new();
+        for h in &map.headers {
+            assert!(h.rows == 1 || h.rows == 2, "{}: {} rows", map.id, h.rows);
+            assert_eq!(h.positions.len() % usize::from(h.rows), 0, "{}: half a pair", map.id);
+            for p in &h.positions {
+                if map.pin(p).is_some() {
+                    assert!(seen.insert(p.clone()), "{}: {p} on two header positions", map.id);
+                } else {
+                    assert!(
+                        HEADER_LABELS.contains(&p.as_str()),
+                        "{}: {p} is neither a pin nor a label",
+                        map.id
+                    );
+                }
+            }
+        }
+        let missing: Vec<_> = map.pins.iter().filter(|p| !seen.contains(&p.name)).map(|p| &p.name).collect();
+        assert!(missing.is_empty(), "{}: not on any header: {missing:?}", map.id);
+    }
+
+    #[test]
+    fn every_pin_is_on_a_header_in_the_boards_order() {
+        for map in all() {
+            check_headers(&map);
+        }
+        let uno = arduino("uno").unwrap();
+        let top = &uno.headers[0].positions;
+        assert_eq!((top.first().unwrap().as_str(), top.last().unwrap().as_str()), ("SCL", "D8"));
+        assert_eq!(uno.headers[1].positions, ["D7", "D6", "D5", "D4", "D3", "D2", "D1", "D0"]);
+        // The Nano's DIP numbering: pin 1 (TX1) at the far end from the USB connector.
+        let nano = arduino("nano").unwrap();
+        assert_eq!(nano.headers[0].positions.last().map(String::as_str), Some("D1"));
+        assert_eq!(nano.headers[1].positions.first().map(String::as_str), Some("D13"));
+        let mega = arduino("mega2560").unwrap();
+        let double = mega.headers.iter().find(|h| h.rows == 2).unwrap();
+        assert_eq!(double.edge, HeaderEdge::Right);
+        assert_eq!(&double.positions[..4], ["5V", "5V", "D22", "D23"]);
+        assert_eq!(&double.positions[double.positions.len() - 2..], ["GND", "GND"]);
+        let pi = pi_header(fake_header());
+        assert_eq!(pi.headers.len(), 1);
+        assert_eq!(pi.headers[0].positions, ["3V3", "GPIO2", "GPIO17", "GPIO18", "GPIO0"]);
     }
 
     #[test]

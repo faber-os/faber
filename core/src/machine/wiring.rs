@@ -491,6 +491,10 @@ mod tests {
         assert_eq!(pi.pins.len() + pi.power.len(), 40);
         assert_eq!(pi.pins.len(), 28, "GPIO0 to GPIO27");
         assert_eq!(pi.pin("GPIO17").unwrap().physical, Some(11));
+        // Drawn as one double header, pin 1 first.
+        assert_eq!((pi.headers.len(), pi.headers[0].rows), (1, 2));
+        assert_eq!(&pi.headers[0].positions[..4], ["3V3", "5V", "GPIO2", "5V"]);
+        assert_eq!(pi.headers[0].positions.len(), 40);
         assert_eq!(m.pin_map("esp32").unwrap_err().code, "unknown-board");
     }
 
