@@ -77,6 +77,7 @@ enum Capability : uint8_t {
   DIGITAL_OUT = 8,
   PWM_OUT = 9,
   SERVO = 10,
+  ENCODER = 11,
 };
 
 // Why an actuator's output changed (APPLIED.cause).
@@ -228,6 +229,8 @@ class Part {
   bool added_;
 };
 
+class Encoder;
+
 enum MotorKind : uint8_t { MOTOR_DC = 0, MOTOR_STEPPER = 1, MOTOR_BLDC = 2, MOTOR_CONTINUOUS_SERVO = 3 };
 
 // motor@1, open loop: set-duty always, set-velocity when a maximum velocity is given (it then
@@ -242,6 +245,10 @@ class Motor : public Part {
   // Its speed at full duty (rad/s): with it the motor takes set-velocity too. 0 = unknown.
   // Set it before Faber asks for the parts (in setup() is fine).
   void setMaxVelocity(float radS) { maxVelocity_ = radS > 0 && isFinite(radS) ? radS : 0; }
+  // Measures the motor with an encoder on its shaft (or its wheel): its readings then carry the
+  // measured speed and position, 20 times a second, once the encoder knows its counts per turn.
+  // set-velocity stays open loop (duty = velocity / max). Call it in setup().
+  void useEncoder(Encoder& encoder);
 
   const char* capabilityId() const override { return "motor@1"; }
   uint8_t writeInfo(uint8_t* out) const override;
@@ -256,6 +263,7 @@ class Motor : public Part {
   float maxVelocity_;
 
  private:
+  Encoder* encoder_;
   float duty_;
   MotorKind kind_;
 };
@@ -456,6 +464,35 @@ class ServoPart : public Part {
   float angle_;
   ServoSafeState safeState_;
   bool holding_;
+};
+
+// encoder@1: a quadrature encoder's count. countsPerRev (counts for one turn of the shaft it
+// measures, gearbox included) gives the speed in rad/s too; 0 when not known. It reports the count,
+// the counts since its last reading and the speed 20 times a second.
+class Encoder : public Part {
+ public:
+  explicit Encoder(const char* name, float countsPerRev = 0, uint16_t readingPeriodMs = 50);
+  const char* capabilityId() const override { return "encoder@1"; }
+  uint8_t writeInfo(uint8_t* out) const override;
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+  // Counts since it started; positive is forward.
+  virtual int32_t count() = 0;
+  // 0 when not known.
+  float countsPerRev() const { return countsPerRev_; }
+  // The reading of a motor this encoder measures (motor@1's layout: its speed and position), or
+  // 0 while the counts per turn aren't known. Here, not in Motor, so a sketch without an encoder
+  // doesn't carry it.
+  virtual uint8_t writeMotorReading(uint8_t* out, uint32_t nowMs);
+
+ protected:
+  ~Encoder() {}
+  void setCountsPerRev(float c) { countsPerRev_ = c > 0 && isFinite(c) ? c : 0; }
+
+ private:
+  float countsPerRev_;
+  int32_t last_, motorLast_;
+  uint32_t lastMs_, motorLastMs_;
+  bool started_;
 };
 
 // The board's side of the protocol.

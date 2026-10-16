@@ -85,3 +85,9 @@ template = "button"
 shape = "pin"
 pins = { signal = 24 }
 settings = { wiring = "to-gnd", debounce-ms = 20 }
+
+[parts.wheel]
+template = "encoder"
+shape = "quadrature"
+pins = { a = 2, b = 14 }
+settings = { pulses-per-rev = 0, gear-ratio = 1 }

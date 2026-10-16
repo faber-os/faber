@@ -8,7 +8,7 @@ use crate::bytes::{Reader, Writer};
 use crate::{DecodeError, EncodeError};
 use faber_capabilities::{
     Capability, Command, Info, Reading, Timestamp, Twist2d, battery, digital_in, digital_out, distance,
-    estop, motor, obstacle, planar_base, pwm_out, servo,
+    encoder, estop, motor, obstacle, planar_base, pwm_out, servo,
 };
 
 /// The one-byte code a capability has in `READING`, `COMMAND` and `APPLIED` (protocol v1).
@@ -24,13 +24,13 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::DigitalOut => 8,
         Capability::PwmOut => 9,
         Capability::Servo => 10,
+        Capability::Encoder => 11,
         // No layout yet: the board side (the Arduino library) has none either.
         Capability::LaserScan
         | Capability::Pose
         | Capability::Position
         | Capability::Temperature
         | Capability::AnalogIn
-        | Capability::Encoder
         | Capability::Imu => return None,
     })
 }
@@ -141,6 +141,13 @@ pub fn encode_reading(reading: &Reading, out: &mut Vec<u8>) -> Result<(), Encode
             w.bool(r.angle_rad.is_some());
             w.f32(r.angle_rad.unwrap_or(0.0));
         }
+        Reading::Encoder(r) => {
+            w.bool(r.velocity_rad_s.is_some());
+            w.u64(r.count as u64);
+            w.u32(r.delta as u32);
+            w.f32(r.counts_per_s);
+            w.f32(r.velocity_rad_s.unwrap_or(0.0));
+        }
         other => return Err(unsupported(other.capability())),
     }
     Ok(())
@@ -228,6 +235,21 @@ pub fn decode_reading(capability: Capability, t_us: Timestamp, bytes: &[u8]) -> 
                 return Err(DecodeError::BadValue { field: "angleRad" });
             }
             Reading::Servo(servo::Reading { t_us, angle_rad: holding.then_some(angle) })
+        }
+        Capability::Encoder => {
+            let has_velocity = r.bool("present")?;
+            let (count, delta) = (r.u64()? as i64, r.u32()? as i32);
+            let (counts_per_s, velocity) = (r.f32()?, r.f32()?);
+            if !counts_per_s.is_finite() || (has_velocity && !velocity.is_finite()) {
+                return Err(DecodeError::BadValue { field: "countsPerS" });
+            }
+            Reading::Encoder(encoder::Reading {
+                t_us,
+                count,
+                delta,
+                counts_per_s,
+                velocity_rad_s: has_velocity.then_some(velocity),
+            })
         }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
@@ -366,6 +388,7 @@ pub fn encode_info(info: &Info, out: &mut Vec<u8>) -> Result<(), EncodeError> {
             w.f32(i.max_angle_rad);
             w.u8(enum_index(SERVO_SAFE, i.safe_state));
         }
+        Info::Encoder(i) => w.f32(i.counts_per_rev.unwrap_or(f32::NAN)),
         other => return Err(unsupported(other.capability())),
     }
     Ok(())
@@ -434,6 +457,10 @@ pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Option<Info>,
             max_angle_rad: r.f32()?,
             safe_state: enum_at(SERVO_SAFE, r.u8()?, "safeState")?,
         })),
+        Capability::Encoder => {
+            let cpr = r.f32()?;
+            Some(Info::Encoder(encoder::Info { counts_per_rev: (!cpr.is_nan()).then_some(cpr) }))
+        }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
     r.end()?;
@@ -493,6 +520,11 @@ pub(crate) mod tests {
             (t.clone(), finite()).prop_map(|(t_us, duty)| Reading::PwmOut(pwm_out::Reading { t_us, duty })),
             (t.clone(), proptest::option::of(finite()))
                 .prop_map(|(t_us, angle_rad)| Reading::Servo(servo::Reading { t_us, angle_rad })),
+            (t.clone(), any::<i64>(), any::<i32>(), finite(), proptest::option::of(finite())).prop_map(
+                |(t_us, count, delta, counts_per_s, velocity_rad_s)| {
+                    Reading::Encoder(encoder::Reading { t_us, count, delta, counts_per_s, velocity_rad_s })
+                }
+            ),
             (
                 (t, finite(), 0..3u8),
                 proptest::option::of(finite()),
@@ -569,6 +601,8 @@ pub(crate) mod tests {
             (finite(), finite(), 0..2u8).prop_map(|(min_angle_rad, max_angle_rad, s)| {
                 Info::Servo(servo::Info { min_angle_rad, max_angle_rad, safe_state: SERVO_SAFE[s as usize] })
             }),
+            proptest::option::of(0.0f32..1.0e5)
+                .prop_map(|counts_per_rev| Info::Encoder(encoder::Info { counts_per_rev })),
         ]
     }
 
@@ -669,6 +703,18 @@ pub(crate) mod tests {
         });
         encode_info(&i, &mut out).unwrap();
         assert_eq!(out, [0, 0, 0, 0, 0x00, 0x00, 0x00, 0x40, 1], "servo: min, max, safe state");
+
+        out.clear();
+        let e = Reading::Encoder(encoder::Reading {
+            t_us: 0,
+            count: -2,
+            delta: -1,
+            counts_per_s: 0.0,
+            velocity_rad_s: None,
+        });
+        encode_reading(&e, &mut out).unwrap();
+        assert_eq!(out.len(), 21, "encoder: present, count i64, delta i32, counts/s, rad/s");
+        assert_eq!(out[..13], [0, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
     }
 
     #[test]

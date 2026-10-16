@@ -136,8 +136,14 @@ uint8_t Part::writePins(uint8_t*) const { return 0; }
 Motor::Motor(const char* name, float maxVelocityRadS, MotorKind kind, uint16_t leaseMs)
     : Part(name, MOTOR, leaseMs == 0 ? DEFAULT_LEASE_MS : leaseMs, 0),
       maxVelocity_(maxVelocityRadS > 0 && isFinite(maxVelocityRadS) ? maxVelocityRadS : 0),
+      encoder_(0),
       duty_(0),
       kind_(kind) {}
+
+void Motor::useEncoder(Encoder& encoder) {
+  encoder_ = &encoder;
+  setReadingPeriod(50);
+}
 
 uint8_t Motor::writeInfo(uint8_t* out) const {
   out[0] = kind_;
@@ -150,7 +156,12 @@ uint8_t Motor::writeInfo(uint8_t* out) const {
   return 6;
 }
 
-uint8_t Motor::writeReading(uint8_t*, uint32_t) { return 0; }
+static const float FULL_TURN_RAD = 6.28318531f;
+
+// Without an encoder a motor measures nothing; with one, the encoder writes its reading.
+uint8_t Motor::writeReading(uint8_t* out, uint32_t nowMs) {
+  return encoder_ ? encoder_->writeMotorReading(out, nowMs) : 0;
+}
 
 uint8_t Motor::apply(const uint8_t* c, uint8_t len, uint8_t* out, bool* clamped) {
   if (len != 5) return 0;
@@ -374,6 +385,66 @@ uint8_t ServoPart::enterSafeState(uint8_t* out) {
   out[0] = 0;
   putF32(out + 1, angle_);
   return 5;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Encoders
+
+Encoder::Encoder(const char* name, float countsPerRev, uint16_t readingPeriodMs)
+    : Part(name, ENCODER, 0, readingPeriodMs),
+      countsPerRev_(0),
+      last_(0),
+      motorLast_(0),
+      lastMs_(0),
+      motorLastMs_(0),
+      started_(false) {
+  setCountsPerRev(countsPerRev);
+}
+
+// motor@1 reading layout: present u8 (bit 0 velocity, bit 1 position), velocity, position and
+// current f32: the measured speed (from the counts since the motor's last reading) and position.
+uint8_t Encoder::writeMotorReading(uint8_t* out, uint32_t nowMs) {
+  if (countsPerRev_ <= 0) return 0;
+  const int32_t c = count();
+  const float radPerCount = FULL_TURN_RAD / countsPerRev_;
+  const uint32_t dt = nowMs - motorLastMs_;
+  const float velocity = motorLastMs_ != 0 && dt > 0 ? (c - motorLast_) * radPerCount * 1000.0f / dt : 0;
+  motorLast_ = c;
+  motorLastMs_ = nowMs;
+  out[0] = 3;
+  putF32(out + 1, velocity);
+  putF32(out + 5, c * radPerCount);
+  putF32(out + 9, 0);
+  return 13;
+}
+
+// encoder@1 info layout: counts per rev f32 (NaN = unknown).
+uint8_t Encoder::writeInfo(uint8_t* out) const {
+  if (countsPerRev_ > 0) {
+    putF32(out, countsPerRev_);
+  } else {
+    putU32(out, 0x7FC00000UL);
+  }
+  return 4;
+}
+
+// encoder@1 reading layout: present u8 (bit 0: rad/s), count i64, delta i32, counts/s f32,
+// rad/s f32.
+uint8_t Encoder::writeReading(uint8_t* out, uint32_t nowMs) {
+  const int32_t c = count();
+  const int32_t delta = started_ ? static_cast<int32_t>(static_cast<uint32_t>(c) - static_cast<uint32_t>(last_)) : 0;
+  const uint32_t dt = nowMs - lastMs_;
+  const float perS = started_ && dt > 0 ? delta * 1000.0f / dt : 0;
+  started_ = true;
+  last_ = c;
+  lastMs_ = nowMs;
+  out[0] = countsPerRev_ > 0 ? 1 : 0;
+  putU32(out + 1, static_cast<uint32_t>(c));
+  putU32(out + 5, c < 0 ? 0xFFFFFFFFUL : 0);  // the count's sign, to 64 bits
+  putU32(out + 9, static_cast<uint32_t>(delta));
+  putF32(out + 13, perS);
+  putF32(out + 17, countsPerRev_ > 0 ? perS / countsPerRev_ * FULL_TURN_RAD : 0);
+  return 21;
 }
 
 // ---------------------------------------------------------------------------------------------

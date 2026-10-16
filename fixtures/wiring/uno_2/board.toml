@@ -15,3 +15,9 @@ settings = { min-deg = 0, max-deg = 180, safe-state = "hold", min-pulse-us = 544
 template = "mosfet"
 shape = "sig"
 pins = { out = 5 }
+
+[parts.wheel]
+template = "encoder"
+shape = "quadrature"
+pins = { a = 2, b = 7 }
+settings = { pulses-per-rev = 0, gear-ratio = 1 }

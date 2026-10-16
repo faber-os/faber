@@ -28,7 +28,17 @@ fn main() {
     let lib = root.join("../../firmware/faberlink/src");
     let harness = root.join("harness");
     let arduino = harness.join("arduino");
-    watch(&lib, &["FaberLinkCore.cpp", "FaberLinkCore.h", "FaberLink.cpp", "FaberLink.h", "FaberServo.h"]);
+    watch(
+        &lib,
+        &[
+            "FaberLinkCore.cpp",
+            "FaberLinkCore.h",
+            "FaberLink.cpp",
+            "FaberLink.h",
+            "FaberServo.h",
+            "FaberEncoder.h",
+        ],
+    );
     watch(&harness, &["harness.cpp", "glue.cpp", "arduino/Arduino.h", "arduino/Servo.h"]);
 
     let mut build = cc::Build::new();

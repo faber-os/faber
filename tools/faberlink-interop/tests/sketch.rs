@@ -564,3 +564,98 @@ fn a_servo_can_be_released_and_reports_what_it_holds() {
     l.run(150);
     assert_eq!(last(&l), Some(None), "released: no angle");
 }
+
+fn encoder(b: u8, pulses_per_rev: f32) -> SketchPart {
+    SketchPart::Encoder { name: "wheel", a: 2, b, pulses_per_rev }
+}
+
+/// Turns the encoder on A (D2) and B (`b`) by `steps` quadrature states: forward (A changes
+/// first) for a positive number, backward otherwise. Starts from both channels high (their
+/// pull-ups).
+fn turn(l: &mut Link, b: u8, steps: i32) {
+    // The states (A, B) forward: 11 → 01 → 00 → 10 → 11 (A changes first).
+    const FORWARD: [(bool, bool); 4] = [(true, true), (false, true), (false, false), (true, false)];
+    let mut at = 0usize;
+    for _ in 0..steps.unsigned_abs() {
+        at = if steps > 0 { (at + 1) % 4 } else { (at + 3) % 4 };
+        let (a, bb) = FORWARD[at];
+        l.sketch.set_input(2, Some(a));
+        l.sketch.set_input(b, Some(bb));
+    }
+}
+
+fn last_encoder(l: &Link) -> faber_capabilities::encoder::Reading {
+    l.events
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            Event::Reading { reading: Reading::Encoder(r), .. } => Some(r.clone()),
+            _ => None,
+        })
+        .expect("an encoder reading")
+}
+
+#[test]
+fn an_encoder_on_two_interrupt_pins_counts_every_edge_both_ways() {
+    let mut l = Link::ready(&[encoder(3, 0.0)]);
+    assert_eq!(l.session.parts()[0].capability, "encoder@1");
+    assert_eq!((l.sketch.pin_mode(2), l.sketch.pin_mode(3)), (PinMode::InputPullup, PinMode::InputPullup));
+    turn(&mut l, 3, 8);
+    l.run(60);
+    assert_eq!(last_encoder(&l).count, 8, "4 counts a pulse: two whole pulses forward");
+    turn(&mut l, 3, -12);
+    l.run(60);
+    let r = last_encoder(&l);
+    assert_eq!((r.count, r.delta), (-4, -12), "and back past where it started");
+    assert_eq!(r.velocity_rad_s, None, "no pulses per turn: no rad/s");
+    assert_eq!(l.session.pins()[0], pins(0, &[(PinRole::A, 2), (PinRole::B, 3)]));
+}
+
+#[test]
+fn an_encoder_with_only_a_on_an_interrupt_counts_its_edges_both_ways() {
+    let mut l = Link::ready(&[encoder(4, 0.0)]);
+    turn(&mut l, 4, 8);
+    l.run(60);
+    assert_eq!(last_encoder(&l).count, 4, "2 counts a pulse: A's two edges in each of two pulses");
+    turn(&mut l, 4, -8);
+    l.run(60);
+    assert_eq!(last_encoder(&l).count, 0);
+}
+
+#[test]
+fn an_encoder_that_knows_its_pulses_per_turn_reports_rad_s_and_feeds_its_motor() {
+    // 11 pulses a turn on two interrupt pins: 44 counts a turn.
+    let mut l =
+        Link::ready(&[encoder(3, 11.0), SketchPart::MotorWithEncoder { name: "left", pwm: 9, dir: 8 }]);
+    assert_eq!(
+        l.session.parts()[0].info,
+        PartInfo::Known(Info::Encoder(faber_capabilities::encoder::Info { counts_per_rev: Some(44.0) }))
+    );
+    l.run(60);
+    turn(&mut l, 3, 22); // half a turn
+    l.run(50);
+    let r = last_encoder(&l);
+    assert_eq!(r.count, 22);
+    let rad_s = r.velocity_rad_s.unwrap();
+    assert!((rad_s - r.counts_per_s / 44.0 * std::f32::consts::TAU).abs() < 1e-3, "{r:?}");
+    let motor = l
+        .events
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            Event::Reading { part: 1, reading: Reading::Motor(m) } => Some(m.clone()),
+            _ => None,
+        })
+        .expect("the motor reports what its encoder measures");
+    assert!((motor.position_rad.unwrap() - std::f32::consts::PI).abs() < 1e-4, "half a turn: {motor:?}");
+    assert!(motor.velocity_rad_s.is_some());
+}
+
+#[test]
+fn an_encoder_whose_a_is_no_interrupt_pin_counts_nothing() {
+    let mut l = Link::ready(&[SketchPart::Encoder { name: "wheel", a: 4, b: 5, pulses_per_rev: 0.0 }]);
+    l.sketch.set_input(4, Some(false));
+    l.sketch.set_input(5, Some(false));
+    l.run(60);
+    assert_eq!(last_encoder(&l).count, 0);
+}

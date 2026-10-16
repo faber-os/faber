@@ -272,7 +272,9 @@ What exists, and where it differs in detail from the design above. The decisions
   or dimmable on a PWM pin), `relay` (on/off, active low by default, with the coil-current,
   flyback-diode and mains warnings) and `mosfet` (PWM, own supply, the IRF520 warning). `servo`
   (`FaberServo`, `include = "FaberServo.h"`, `uses = ["servo"]` so the allocator's timer rules
-  apply: no PWM on D9/D10 of an Uno once a servo is in the plan).
+  apply: no PWM on D9/D10 of an Uno once a servo is in the plan). `encoder` (`FaberEncoder`: A
+  needs an interrupt pin, B any digital pin; the allocator keeps interrupt pins for roles that need
+  them, so B lands on a plain pin and counts 2 a pulse unless the plan puts it on one).
 - **Libraries a part needs.** A part whose class needs another library has its own header
   (`FaberServo.h` needs the Arduino Servo library). The Servo library comes with the Arduino IDE,
   but an `arduino-cli` run on its own (Faber's own copy, or the IDE's run by Faber) doesn't look

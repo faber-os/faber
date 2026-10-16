@@ -19,9 +19,11 @@
 //   left_3: Driver IN1 (IA, AIN1, RPWM) → D11, Driver IN2 (IB, AIN2, LPWM) → D12, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
 //   relay: Module VCC → 5V, Module GND → GND, Module IN → D28
 //   start: One leg → D24, The other leg → GND (or, for a TTP223: VCC → 5V, GND → GND, I/O → D24)
+//   wheel: Encoder VCC → 5V, Encoder GND → GND, Encoder A (C1, CLK) → D2, Encoder B (C2, DT) → D14
 
 #include <FaberLink.h>
 #include <FaberServo.h>
+#include <FaberEncoder.h>
 
 FaberLink link(Serial);
 
@@ -74,6 +76,9 @@ FaberOutput relay("relay", 28, faberlink::OUTPUT_ON_OFF, faberlink::ACTIVE_LOW);
 
 // start: Button or switch, Signal D24
 FaberButton start("start", 24, faberlink::ACTIVE_LOW, 20);
+
+// wheel: Quadrature encoder, A D2, B D14
+FaberEncoder wheel("wheel", 2, 14, 0.0, 1.0);
 
 #include "my_code.h"
 

@@ -491,6 +491,11 @@ pub enum SketchPart {
     Output { name: &'static str, pin: u8, pwm: bool, active_low: bool },
     /// `FaberServo name(name, pin)`: 0 to 180°, 544 to 2400 µs; or released when stopped.
     Servo { name: &'static str, pin: u8, release: bool },
+    /// `FaberEncoder name(name, a, b, pulses_per_rev)`.
+    Encoder { name: &'static str, a: u8, b: u8, pulses_per_rev: f32 },
+    /// `FaberMotor name(name, pwm, dir)` with `name.useEncoder(...)` of the encoder declared just
+    /// before it.
+    MotorWithEncoder { name: &'static str, pwm: u8, dir: u8 },
 }
 
 impl SketchPart {
@@ -504,7 +509,9 @@ impl SketchPart {
             | SketchPart::Button { name, .. }
             | SketchPart::Obstacle { name, .. }
             | SketchPart::Output { name, .. }
-            | SketchPart::Servo { name, .. } => name,
+            | SketchPart::Servo { name, .. }
+            | SketchPart::Encoder { name, .. }
+            | SketchPart::MotorWithEncoder { name, .. } => name,
         }
     }
 }
@@ -592,6 +599,10 @@ impl Sketch {
                     SketchPart::Servo { pin, release, .. } => {
                         (8, release as u8, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0)
                     }
+                    SketchPart::Encoder { a, b, pulses_per_rev, .. } => {
+                        (9, 0, [a, b, NO_PIN, NO_PIN], pulses_per_rev)
+                    }
+                    SketchPart::MotorWithEncoder { pwm, dir, .. } => (10, 0, [pwm, dir, NO_PIN, NO_PIN], 0.0),
                 };
                 ffi::PartSpec { kind, name: name.as_ptr(), driver, pins, max_velocity }
             })

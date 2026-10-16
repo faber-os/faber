@@ -225,7 +225,7 @@ Viewer for all three: the value plus a plot.
 | Capability | Signal | Commands (shared) | Settings / info | Typical parts |
 |---|---|---|---|---|
 | `button` | `event` (press / release / long-press / double-press), `pressed` (**E**) | — | long-press-ms, double-press-ms, debounce-ms | push buttons, TTP223, MPR121 |
-| `encoder` | `count`, `delta`, `counts-per-s`, `velocity-rad-s?` (when counts-per-rev is known) (L) | `reset-count` (not built: the core has no shared commands yet) | info: counts-per-rev (f32: gear ratios aren't whole) | rotary knobs, wheel encoders |
+| `encoder` | `count`, `delta`, `counts-per-s`, `velocity-rad-s?` (when counts-per-rev is known) (L) | `reset-count` (not built: the core has no shared commands yet) | info: counts-per-rev (f32: gear ratios aren't whole) | rotary knobs, wheel encoders (FaberLink code 11, `FaberEncoder`) |
 | `keypad` | `key`, `pressed` (**E**) | — | info: layout | 4×4 matrix keypads |
 | `presence` | `detected`, `distance-m?` (**E** on change) | — | hold-time-ms | PIR, mmWave radar |
 | `illuminance` | `lux` (L) | — | rate-hz | LDR, BH1750, TSL2561 |

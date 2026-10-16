@@ -217,6 +217,7 @@ layout maps 1:1 onto the types in `sdk/rust/capabilities` (and `wit/capabilities
 | 8 | `digital-out@1` (added 2026-10-16) |
 | 9 | `pwm-out@1` (added 2026-10-16) |
 | 10 | `servo@1` (added 2026-10-16) |
+| 11 | `encoder@1` (added 2026-10-16) |
 
 Other capabilities have no FaberLink layout yet; one is added (with a new code) when a board needs
 it. A capability without info (`digital-in@1`) has an empty info layout, and the core's
@@ -233,6 +234,7 @@ it. A capability without info (`digital-in@1`) has an empty info layout, and the
 | `digital-out@1` | `level u8` (1 B): the logical level, 1 = on. | `kind u8 (0 = set) · level u8` (2 B). The safe state is set 0 (off). | — (0 B) |
 | `pwm-out@1` | `duty f32` (4 B), 0..1; always finite. | `kind u8 (0 = set-duty) · duty f32` (5 B). The safe state is duty 0. | — (0 B) |
 | `servo@1` | `holding u8 · angle_rad f32` (5 B): the angle it holds, 0 while released (holding 0). | `kind u8 · angle_rad f32` (5 B). `kind`: 0 set-angle, 1 release, 2 safe (the angle is 0 for 1 and 2). The safe state is `safe`: the board answers with set-angle to the angle it holds (hold) or release. | `min_angle_rad f32 · max_angle_rad f32 · safe_state u8` (9 B). `safe_state`: 0 hold, 1 release. |
+| `encoder@1` | `present u8 · count i64 · delta i32 · counts_per_s f32 · velocity_rad_s f32` (21 B). `present` bit 0: the rad/s are known (else sent as 0). `delta` is the counts since the previous reading. | — | `counts_per_rev f32` (4 B), NaN when not known. |
 | `obstacle@1` | `detected u8` (1 B) | — | `kind u8 · trigger_distance_m f32` (5 B). `kind`: 0 bumper, 1 infrared, 2 limit. A NaN trigger distance means "unknown". |
 
 ## 5. Rules a board follows (the library enforces them, not the sketch)
@@ -374,14 +376,25 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   e-stop or when the heartbeat stops it holds its angle (`faberlink::SERVO_HOLD`, D29's default)
   or goes limp (`faberlink::SERVO_RELEASE`). A sketch with a servo loses PWM on D9/D10 of an Uno
   (D44-D46 of a Mega): the Servo library takes their timer.
+- `FaberEncoder` (`encoder@1`, `#include <FaberEncoder.h>`, 2026-10-16) counts a quadrature
+  encoder with interrupts: `FaberEncoder wheel("wheel", 2, 3, 11, 34.02f);` (A, B, the pulses per
+  motor turn, the gear ratio). A must be on an external-interrupt pin; with B on one too it counts
+  every edge of both channels (4 counts a pulse, a state table that ignores a skipped state), else
+  A's edges (2 a pulse, A differing from B is forward). Up to 4 encoders, each with its own
+  interrupt routine. It is an optional header although it needs no other library: referring to
+  `attachInterrupt()` links the core's two interrupt routines into every sketch (about 160 B of
+  flash and 4 B of RAM), so only a sketch that includes it pays for them.
+  `left.useEncoder(wheel)` makes a `FaberMotor` report the speed and position the encoder measures
+  (its `motor@1` readings, 20 times a second); set-velocity stays open loop. That costs a sketch
+  with motors 34 B of flash and 2 B of RAM per motor; the code is in the encoder's class.
 - Examples: `examples/MotorAndDistance`, `examples/MotorL298N` (two motors on an L298N),
   `examples/Ultrasonic`, `examples/BatteryMonitor`, `examples/ButtonAndBumper`,
-  `examples/LedAndRelay` and `examples/ServoArm`. CI compiles every example for an Uno and a
+  `examples/LedAndRelay`, `examples/ServoArm` and `examples/WheelEncoder`. CI compiles every example for an Uno and a
   Mega.
 - **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
   does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
   sends it at the end of every `HELLO_ACK` (§3). Faber then shows which sketch the board runs.
-- Not built yet: VL53L0X, encoders, a planar-base part with
+- Not built yet: VL53L0X, a closed speed loop with an encoder, a planar-base part with
   on-board ramp-down (the interop harness has a plain test one, for SENNEP's fake Mega:
   `FakeBoard::sennep`), and negotiating 1 Mbaud.
 - **Where it lives:** inside the Faber repo for now. Moving it to its own repo
@@ -466,6 +479,9 @@ flash and 2 B of RAM (a virtual table entry per part class, and the loop in `pol
 | `ButtonAndBumper` (new) | 6 556 B | 635 B | 7 370 B | 1 007 B |
 | `LedAndRelay` (new, outputs) | 7 592 B | 588 B | 8 680 B | 960 B |
 | `ServoArm` (new, with the Servo library 1.3.0) | 8 576 B | 588 B | 9 808 B | 1 071 B |
+| `WheelEncoder` (new: a motor using an encoder) | 10 716 B | 673 B | 12 618 B | 1 057 B |
+| `MotorAndDistance` (with `useEncoder` in `Motor`) | 10 108 B (+34) | 638 B (+2) | 11 242 B (+34) | 1 010 B (+2) |
+| `MotorL298N` | 8 514 B (+42) | 594 B (+4) | 9 596 B (+42) | 966 B (+4) |
 
 A servo doesn't change any other sketch: the figures above are the same with `FaberServo.h` in
 the library.

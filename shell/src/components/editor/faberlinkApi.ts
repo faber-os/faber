@@ -72,6 +72,10 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
       ...inherited([
         ...PART_MEMBERS,
         f(
+          'void useEncoder(faberlink::Encoder& encoder)',
+          'Reports the speed and position a FaberEncoder on its shaft or wheel measures. Call it in setup().',
+        ),
+        f(
           'void setMaxVelocity(float radS)',
           'Its speed at full power, in rad/s: Faber can then drive it by speed as well as by power. Call it in setup().',
         ),
@@ -185,6 +189,30 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
       f('bool holding() const', 'True while it holds an angle (it gets pulses), false while limp.'),
       f('float angle() const', 'The angle it holds, in radians, as Faber last told it.'),
     ]),
+  },
+  {
+    name: 'FaberEncoder',
+    doc: 'A quadrature encoder counted with interrupts: a wheel encoder on a gear motor, a rotary knob. Needs #include <FaberEncoder.h>. Channel A must be on an interrupt pin (2 or 3 on an Uno); with B on one too it counts 4 times a pulse, else twice. With the pulses per motor turn and the gear ratio, Faber gets the speed in rad/s, and a FaberMotor can report it: left.useEncoder(wheel).',
+    library: 'faberlink',
+    include: 'FaberEncoder.h',
+    constructors: [
+      parseSignature(
+        'FaberEncoder(const char* name, uint8_t pinA, uint8_t pinB, float pulsesPerRev = 0, float gearRatio = 1)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pins and interrupts; FaberLink calls it from begin().'),
+      f('int32_t count()', 'Counts since it started; up is forward (A changing before B).'),
+      f(
+        'uint8_t countsPerPulse() const',
+        '4 with both pins on interrupt pins, 2 with only A, 0 when A is no interrupt pin (it can’t count).',
+      ),
+      f('void onEdge()', 'Its interrupt routine: the library attaches it, don’t call it.'),
+      ...inherited([
+        ...PART_MEMBERS,
+        f('float countsPerRev() const', 'Counts for one turn of the shaft, or 0 when not known.'),
+      ]),
+    ],
   },
   {
     name: 'FaberBattery',

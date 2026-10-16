@@ -12,6 +12,7 @@
 #include "Arduino.h"
 #include "FaberLink.h"
 #include "FaberServo.h"
+#include "FaberEncoder.h"
 
 namespace {
 
@@ -49,6 +50,8 @@ struct Pins {
   // The pulse each pin's servo gets (us), or -1 for none; and the range it was attached with.
   int servoUs[256];
   int servoMin[256], servoMax[256];
+  // The routine attached to each external interrupt (D2, D3).
+  void (*isr[2])(void) = {0, 0};
   std::vector<PinWrite> log;
   unsigned long nowMs;
   unsigned long echoUs;
@@ -78,7 +81,9 @@ class FakeSerial : public HardwareSerial {
 // trig, echo), 4 FaberBattery(name, pin, 3.0, 3), 5 FaberButton(name, pin, driver as the active
 // level), 6 FaberObstacle(name, pin, pins[1] as the kind, driver as the active level,
 // maxVelocity as the trigger distance), 7 FaberOutput(name, pin, driver as the mode, pins[1] as
-// the active level), 8 FaberServo(name, pin, 0, 180, driver as the safe state).
+// the active level), 8 FaberServo(name, pin, 0, 180, driver as the safe state), 9 FaberEncoder(name,
+// pins[0], pins[1], maxVelocity as the pulses per rev), 10 FaberMotor(name, pins[0], pins[1]) using
+// the encoder declared just before it.
 struct PartSpec {
   uint8_t type;
   const char* name;
@@ -101,6 +106,7 @@ struct Sketch {
   std::vector<std::unique_ptr<FaberObstacle>> obstacles;
   std::vector<std::unique_ptr<FaberOutput>> outputs;
   std::vector<std::unique_ptr<FaberServo>> servos;
+  std::vector<std::unique_ptr<FaberEncoder>> encoders;
 };
 
 // Parts register themselves in a global table until the next FaberLink::begin(), as globals in a
@@ -152,6 +158,14 @@ unsigned long pulseIn(uint8_t, uint8_t, unsigned long timeoutUs) {
   if (!current || current->echoUs > timeoutUs) return 0;
   return current->echoUs;
 }
+
+void attachInterrupt(uint8_t interrupt, void (*isr)(void), int) {
+  if (current && interrupt < 2) current->isr[interrupt] = isr;
+}
+
+void noInterrupts() {}
+
+void interrupts() {}
 
 // The stand-in Servo library: the pulse goes to the pin while attached.
 uint8_t Servo::attach(int pin) { return attach(pin, 544, 2400); }
@@ -244,6 +258,13 @@ void* fla_new(const PartSpec* parts, size_t n) {
           s->servos.emplace_back(new FaberServo(name, p.pins[0], 0, 180, static_cast<faberlink::ServoSafeState>(p.driver)));
         }
         break;
+      case 9:
+        s->encoders.emplace_back(new FaberEncoder(name, p.pins[0], p.pins[1], p.maxVelocity));
+        break;
+      case 10:
+        s->motors.emplace_back(new FaberMotor(name, p.pins[0], p.pins[1]));
+        s->motors.back()->useEncoder(*s->encoders.back());
+        break;
       default:
         s->batteries.emplace_back(new FaberBattery(name, p.pins[0], 3.0f, 3));
         break;
@@ -305,7 +326,14 @@ void fla_set_analog(void* h, uint8_t pin, int32_t value) { use(h)->pins.analogIn
 
 void fla_set_echo_us(void* h, uint32_t us) { use(h)->pins.echoUs = us; }
 
-void fla_set_digital(void* h, uint8_t pin, int32_t level) { use(h)->pins.digitalIn[pin] = level; }
+// A changed level on an interrupt pin runs its routine, as CHANGE does.
+void fla_set_digital(void* h, uint8_t pin, int32_t level) {
+  Sketch* s = use(h);
+  const int before = digitalRead(pin);
+  s->pins.digitalIn[pin] = level;
+  const int irq = digitalPinToInterrupt(pin);
+  if (irq != NOT_AN_INTERRUPT && s->pins.isr[irq] && digitalRead(pin) != before) s->pins.isr[irq]();
+}
 
 int32_t fla_servo_us(void* h, uint8_t pin) { return use(h)->pins.servoUs[pin]; }
 }
