@@ -2,7 +2,8 @@
   import { tick } from 'svelte';
   import { useCore } from '../lib/state/context';
   import { t } from '../lib/i18n';
-  import type { FileEntry, IconPosition } from '../lib/state/types';
+  import type { DesktopLayout, FileEntry } from '../lib/state/types';
+  import { onDesktop, removeFromDesktop } from '../lib/desktop/desktopPrograms';
   import { item, separator } from '../lib/desktop/contextMenu';
   import { DESKTOP, childPath, isAffected, stem, uniqueName } from '../lib/desktop/filePaths';
   import {
@@ -29,7 +30,7 @@
   import { openDroppedPackage } from './installWindow';
   import { fileLook } from './fileLook';
   import { menuTrigger, useMenu } from './menuController.svelte';
-  import { pinItem, runPinItem } from './programs';
+  import { desktopItem, pinItem, runDesktopItem, runPinItem } from './programs';
   import type { WindowDef } from './windowDefs';
 
   let { defs }: { defs: WindowDef[] } = $props();
@@ -50,8 +51,8 @@
   let selected = $state<string | null>(null);
   let renaming = $state<string | null>(null);
   let renameValue = $state('');
-  /** Positions just saved, shown until the core's answer arrives. */
-  let pending = $state.raw<IconPosition[] | null>(null);
+  /** The layout just saved, shown until the core's answer arrives. */
+  let pending = $state.raw<DesktopLayout | null>(null);
   let drag = $state<{ key: string; dx: number; dy: number } | null>(null);
   let root: HTMLElement | undefined = $state();
   let lastClick = { key: '', at: 0 };
@@ -76,13 +77,25 @@
     pending = null;
   });
 
+  const layout = $derived<DesktopLayout>(
+    pending ?? core.settings?.desktop ?? { icons: [], removed: [] },
+  );
+  // Every program, unless the user removed it: one added in a later version shows up by itself.
+  const shown = $derived(
+    new Set(
+      onDesktop(
+        defs.flatMap((d) => (d.program ? [d.program] : [])),
+        layout,
+      ),
+    ),
+  );
   const icons = $derived<DesktopIcon[]>([
     ...defs.flatMap((d) =>
-      d.program && d.onDesktop ? [{ key: d.program, label: d.title, def: d }] : [],
+      d.program && shown.has(d.program) ? [{ key: d.program, label: d.title, def: d }] : [],
     ),
     ...files.map((e) => ({ key: e.path, label: e.name, entry: e })),
   ]);
-  const saved = $derived(pending ?? core.settings?.desktop.icons ?? []);
+  const saved = $derived(layout.icons);
   const placement = $derived(
     placeIcons(
       icons.map((i) => i.key),
@@ -103,9 +116,9 @@
   async function save(next: Placement) {
     const settings = core.settings;
     const icons = positionsForSettings(next, ICON_GRID);
-    pending = icons;
+    pending = { ...layout, icons };
     if (!settings) return;
-    const r = await core.saveSettings({ ...settings, desktop: { ...settings.desktop, icons } });
+    const r = await core.saveSettings({ ...settings, desktop: { ...layout, icons } });
     if (!r.ok) {
       pending = null;
       core.lastError = r.error;
@@ -263,7 +276,7 @@
     const settings = core.settings;
     if (!settings?.desktop.icons.some((p) => p.key === from)) return;
     const icons = settings.desktop.icons.map((p) => (p.key === from ? { ...p, key: to } : p));
-    pending = icons;
+    pending = { ...settings.desktop, icons };
     await core.saveSettings({ ...settings, desktop: { ...settings.desktop, icons } });
   }
 
@@ -304,9 +317,14 @@
         entries: [
           item('open', t('menu.open'), { icon: 'open', shortcut: 'Enter' }),
           pinItem(core, i.key),
+          desktopItem(core, i.key),
         ],
         onSelect: (id: string) => {
-          if (!runPinItem(core, i.key, id)) open(i);
+          if (id === 'desktop-remove') {
+            pending = removeFromDesktop(layout, i.key);
+            selected = null;
+          }
+          if (!runPinItem(core, i.key, id) && !runDesktopItem(core, i.key, id)) open(i);
         },
       };
     }

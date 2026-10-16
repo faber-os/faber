@@ -319,7 +319,7 @@ export const DEFAULT_SETTINGS: Settings = {
   accessibility: { reduceMotion: 'system', higherContrast: 'system', textSize: '100' },
   units: { length: 'metric' },
   time: { timeZone: '', clock: '24h' },
-  desktop: { icons: [] },
+  desktop: { icons: [], removed: [] },
   taskbar: {
     pinned: ['tool:parts', 'accessory:files', 'accessory:notes', 'tool:serial-monitor'],
     size: 'small',

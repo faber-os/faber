@@ -45,6 +45,7 @@ export type { FileKind } from '../api/generated/FileKind';
 export type { FileRoot } from '../api/generated/FileRoot';
 export type { FolderListing } from '../api/generated/FolderListing';
 export type { IconPosition } from '../api/generated/IconPosition';
+export type { DesktopLayout } from '../api/generated/DesktopLayout';
 export type { Settings } from '../api/generated/Settings';
 export type { SpecialFolder } from '../api/generated/SpecialFolder';
 export type { Theme } from '../api/generated/Theme';

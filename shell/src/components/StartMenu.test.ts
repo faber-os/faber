@@ -109,6 +109,32 @@ describe('Start menu', () => {
     }
   });
 
+  it('adds a program removed from the desktop back from its tile', async () => {
+    const shell = setup();
+    shell.pushSettings({ ...DEFAULT_SETTINGS, desktop: { icons: [], removed: ['tool:logs'] } });
+    const start = await openStart();
+    const tile = within(start).getByRole('menuitem', { name: /^Logs/ });
+    await fireEvent.contextMenu(tile, { clientX: 50, clientY: 50 });
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Add to desktop' }));
+    await waitFor(() =>
+      expect(
+        (shell.fetch.calls.find((c) => c.method === 'PUT')?.body as Settings).desktop.removed,
+      ).toEqual([]),
+    );
+  });
+
+  it('offers Remove from desktop for a program that is on it', async () => {
+    setup();
+    const start = await openStart();
+    await fireEvent.contextMenu(within(start).getByRole('menuitem', { name: /^Logs/ }), {
+      clientX: 50,
+      clientY: 50,
+    });
+    expect(
+      await screen.findByRole('menuitem', { name: 'Remove from desktop' }),
+    ).toBeInTheDocument();
+  });
+
   it('pins a program to the taskbar from its tile', async () => {
     const shell = setup();
     const menu = await openStart();

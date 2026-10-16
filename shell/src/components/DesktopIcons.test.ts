@@ -63,10 +63,40 @@ describe('Desktop icons', () => {
     const shell = setup();
     shell.pushSettings({
       ...DEFAULT_SETTINGS,
-      desktop: { icons: [{ key: 'accessory:notes', x: 380, y: 300 }] },
+      desktop: { icons: [{ key: 'accessory:notes', x: 380, y: 300 }], removed: [] },
     });
     await waitFor(() => expect(icon('Notes').style.left).toBe('380px'));
     expect(icon('Notes').style.top).toBe('300px');
+  });
+
+  it('has an icon for every program, also those a saved layout never had', async () => {
+    const shell = setup();
+    // A layout saved by an older Faber, before World, the flasher and Apps existed.
+    shell.pushSettings({
+      ...DEFAULT_SETTINGS,
+      desktop: { icons: [{ key: 'tool:parts', x: 12, y: 12 }], removed: [] },
+    });
+    for (const d of WINDOW_DEFS.filter((d) => d.program)) {
+      expect(icon(d.title), d.kind).toBeInTheDocument();
+    }
+    expect(icon('World')).toBeInTheDocument();
+    expect(icon('Arduino flasher')).toBeInTheDocument();
+    expect(icon('Apps')).toBeInTheDocument();
+    expect(icon('Parts').style.left).toBe('12px');
+  });
+
+  it('removes a program from the desktop for good, and only that one', async () => {
+    const saved = { ...DEFAULT_SETTINGS, desktop: { icons: [], removed: ['tool:logs'] } };
+    const shell = setup([{ method: 'PUT', path: '/api/v0/settings', body: saved }]);
+    await fireEvent.contextMenu(icon('Logs'), { clientX: 50, clientY: 50 });
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Remove from desktop' }));
+    await waitFor(() => expect(shell.fetch.calls.some((c) => c.method === 'PUT')).toBe(true));
+    const put = shell.fetch.calls.find((c) => c.method === 'PUT')!.body as typeof DEFAULT_SETTINGS;
+    expect(put.desktop.removed).toEqual(['tool:logs']);
+    expect(within(desktopList()).queryByRole('option', { name: 'Logs' })).toBeNull();
+    shell.pushSettings(put);
+    expect(within(desktopList()).queryByRole('option', { name: 'Logs' })).toBeNull();
+    expect(icon('Parts')).toBeInTheDocument();
   });
 
   it('lists the Desktop folder again when the core says it changed', async () => {

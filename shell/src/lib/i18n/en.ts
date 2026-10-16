@@ -76,6 +76,8 @@ export const en = {
   // Program menus (start menu, taskbar, desktop icons)
   'menu.open': 'Open',
   'programs.menu.pin': 'Pin to taskbar',
+  'programs.menu.removeFromDesktop': 'Remove from desktop',
+  'programs.menu.addToDesktop': 'Add to desktop',
   'programs.menu.unpin': 'Unpin from taskbar',
 
   // Taskbar

@@ -518,6 +518,7 @@ screen. Every field has a default, so a settings.toml from an older Faber still 
 | `time.timeZone` | `""`, or an IANA zone | `""` = the machine's own (`SystemInfo.timeZone`) |
 | `time.clock` | `24h`, `12h` | |
 | `taskbar.size`, `desktop.icons` | | |
+| `desktop.removed` | program keys (`tool:<id>`, `accessory:<id>`) | programs the user took off the desktop ("Remove from desktop"). Every other program has a desktop icon, so a program added in a later version appears by itself; missing in older files = none removed |
 | `taskbar.pinned` | program keys, in order: `tool:<id>`, `accessory:<id>`, `app:<id>` | an app whose `[window] pinned = true` is added at the end when it is first installed (not on an update, so unpinning it sticks); uninstalling an app takes it out |
 | `developer.fullMachineFiles` | `false`, `true` | only through `/settings/developer` |
 

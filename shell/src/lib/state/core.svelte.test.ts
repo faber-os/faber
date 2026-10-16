@@ -28,7 +28,7 @@ const SETTINGS: Settings = {
   accessibility: { reduceMotion: 'system', higherContrast: 'system', textSize: '100' },
   units: { length: 'metric' },
   time: { timeZone: '', clock: '24h' },
-  desktop: { icons: [] },
+  desktop: { icons: [], removed: [] },
   taskbar: { pinned: ['tool:parts'], size: 'small' },
   developer: { fullMachineFiles: false },
 };

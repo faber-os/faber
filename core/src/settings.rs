@@ -98,6 +98,9 @@ pub struct IconPosition {
 #[ts(export)]
 pub struct DesktopLayout {
     pub icons: Vec<IconPosition>,
+    /// Programs (`tool:<id>`, `accessory:<id>`) the user removed from the desktop. Every other
+    /// program has an icon, so one added in a later version shows up by itself.
+    pub removed: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -465,6 +468,22 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join(FILE_NAME)).unwrap();
         assert!(text.starts_with("# Faber settings"));
         assert_eq!(SettingsStore::load(dir.path()).get(), new);
+    }
+
+    #[test]
+    fn programs_removed_from_the_desktop_are_remembered_and_older_files_have_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = SettingsStore::load(dir.path());
+        let mut new = s.get();
+        new.desktop.removed.push("tool:logs".into());
+        s.update(new.clone()).unwrap();
+        assert_eq!(SettingsStore::load(dir.path()).get().desktop.removed, ["tool:logs"]);
+        let old = "[desktop]
+icons = [{ key = \"tool:parts\", x = 12.0, y = 12.0 }]
+";
+        std::fs::write(dir.path().join(FILE_NAME), old).unwrap();
+        let loaded = SettingsStore::load(dir.path()).get().desktop;
+        assert_eq!((loaded.icons.len(), loaded.removed.len()), (1, 0));
     }
 
     #[test]
