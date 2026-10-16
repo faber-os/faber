@@ -168,6 +168,10 @@ class Part {
 
   // Called once when the board starts (set pins up here, not in the constructor).
   virtual void begin() {}
+  // The versioned capability id PART sends ("motor@1"). Each capability's class gives its own,
+  // so a sketch carries only the ids of the capabilities it uses (on an AVR every string literal
+  // takes RAM). A part that derives from Part directly returns its own ("planar-base@1").
+  virtual const char* capabilityId() const = 0;
   // The capability's info layout. Returns its length.
   virtual uint8_t writeInfo(uint8_t* out) const = 0;
   // The capability's reading layout, or 0 for "nothing to report".
@@ -217,6 +221,7 @@ class Motor : public Part {
   // Set it before Faber asks for the parts (in setup() is fine).
   void setMaxVelocity(float radS) { maxVelocity_ = radS > 0 && isFinite(radS) ? radS : 0; }
 
+  const char* capabilityId() const override { return "motor@1"; }
   uint8_t writeInfo(uint8_t* out) const override;
   uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
   uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped) override;
@@ -241,6 +246,7 @@ class Distance : public Part {
   Distance(const char* name, DistanceKind kind, float minM, float maxM, float fieldOfViewRad,
            uint16_t readingPeriodMs = 50);
 
+  const char* capabilityId() const override { return "distance@1"; }
   uint8_t writeInfo(uint8_t* out) const override;
   uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
 
@@ -274,6 +280,7 @@ class Battery : public Part {
   Battery(const char* name, BatteryChemistry chemistry, uint8_t cellsInSeries, float capacityAh = 0,
           uint16_t readingPeriodMs = 500);
 
+  const char* capabilityId() const override { return "battery@1"; }
   uint8_t writeInfo(uint8_t* out) const override;
   uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
   // The level at `volts`, coming from `previous` (the level reported last).

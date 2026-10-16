@@ -279,7 +279,9 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   motor's full-duty speed is given) and `FaberDistance` (analog; linear, or a curve function). A
   custom part derives from `faberlink::Part` (or `Motor`/`Distance`) and is added with
   `link.add(part)`; it reports its pins by overriding `writePins()`. Globally declared parts
-  register themselves.
+  register themselves. A part that derives from `Part` directly also names its capability:
+  `const char* capabilityId() const override { return "planar-base@1"; }` (since 2026-10-16;
+  `Motor`, `Distance`, `Battery` and the other capability classes do it themselves).
 - **Every built-in part says its pins** (`PINS`, §3), and on an AVR board the library says where
   the analog pins start, so Faber shows "Trig D7 · Echo D6" under the part in Parts.
 - **`FaberMotor` and motor drivers.** Hobby drivers take speed and direction in three shapes
@@ -387,6 +389,19 @@ more on top: the three driver shapes are chosen at run time, so a sketch carries
 three, plus its pin report. Each `FaberMotor` is 3 B larger (four pins and its driver instead of
 two pins). The stack doesn't grow: `PINS` is built in a 16-byte buffer, beside (not under) the
 32-byte one `PART` already uses.
+
+**Capability ids per class** (2026-10-16): the `"motor@1"`-style id `PART` sends used to come
+from one table in the library with every capability's id, so every sketch carried all of them (on
+an AVR every string literal takes RAM). Each capability class now gives its own
+(`Part::capabilityId()`), so a sketch carries only the ids of the capabilities it uses, and adding
+capabilities to the library costs a sketch that doesn't use them nothing. Measured the same way:
+
+| Example | Uno flash | Uno globals | Mega flash | Mega globals |
+|---|---|---|---|---|
+| `MotorAndDistance` | 10 026 B (−38) | 632 B (−38) | 11 156 B (−30) | 1 004 B (−38) |
+| `MotorL298N` | 8 426 B (−56) | 588 B (−50) | 9 504 B (−52) | 960 B (−50) |
+| `BatteryMonitor` | 7 026 B (−56) | 552 B (−50) | 7 434 B (−52) | 924 B (−50) |
+| `Ultrasonic` | 6 980 B (−54) | 553 B (−48) | 7 768 B (−50) | 925 B (−48) |
 
 ## 8. Interop tests (`tools/faberlink-interop`)
 

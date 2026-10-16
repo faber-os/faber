@@ -114,22 +114,6 @@ FrameDecoder::Result FrameDecoder::push(uint8_t byte) {
 // ---------------------------------------------------------------------------------------------
 // Parts
 
-static const char* capabilityId(Capability c) {
-  switch (c) {
-    case DISTANCE:
-      return "distance@1";
-    case MOTOR:
-      return "motor@1";
-    case PLANAR_BASE:
-      return "planar-base@1";
-    case ESTOP_CAP:
-      return "estop@1";
-    case BATTERY:
-      return "battery@1";
-  }
-  return "";
-}
-
 Part::Part(const char* name, Capability capability, uint16_t leaseMs, uint16_t readingPeriodMs)
     : name_(name),
       next_(0),
@@ -588,7 +572,7 @@ void Board::sendPart(Part& part) {
   o[1] = count_;
   putU16(o + 2, part.leaseMs_);
   size_t n = 4;
-  n += putStr(o + n, capabilityId(part.capability_), 255);
+  n += putStr(o + n, part.capabilityId(), 255);
   uint8_t info[32];
   uint8_t infoLen = part.writeInfo(info);
   size_t room = maxPayload() - n - infoLen;  // the name is cut, never the info
