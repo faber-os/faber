@@ -12,6 +12,11 @@ interface types {
   use faber:capabilities/pose@0.1.0.{reading as pose-reading};
   use faber:capabilities/position@0.1.0.{reading as position-reading};
   use faber:capabilities/battery@0.1.0.{reading as battery-reading};
+  use faber:capabilities/temperature@0.1.0.{reading as temperature-reading};
+  use faber:capabilities/digital-in@0.1.0.{reading as digital-in-reading};
+  use faber:capabilities/digital-out@0.1.0.{reading as digital-out-reading, command as digital-out-command};
+  use faber:capabilities/analog-in@0.1.0.{reading as analog-in-reading};
+  use faber:capabilities/pwm-out@0.1.0.{reading as pwm-out-reading, command as pwm-out-command};
 
   /// One reading of any capability a connector can publish.
   variant reading {
@@ -23,12 +28,19 @@ interface types {
     pose(pose-reading),
     position(position-reading),
     battery(battery-reading),
+    temperature(temperature-reading),
+    digital-in(digital-in-reading),
+    digital-out(digital-out-reading),
+    analog-in(analog-in-reading),
+    pwm-out(pwm-out-reading),
   }
 
   /// One command for an actuator, already lease-checked and clamped by the core.
   variant command {
     motor(motor-command),
     planar-base(planar-base-command),
+    digital-out(digital-out-command),
+    pwm-out(pwm-out-command),
   }
 
   /// What the part did with a command: the command as it was applied (after its own clamping).

@@ -39,6 +39,11 @@ pub mod app_bindings {
             "faber:capabilities/pose@0.1.0": super::bindings::faber::capabilities::pose,
             "faber:capabilities/position@0.1.0": super::bindings::faber::capabilities::position,
             "faber:capabilities/battery@0.1.0": super::bindings::faber::capabilities::battery,
+            "faber:capabilities/temperature@0.1.0": super::bindings::faber::capabilities::temperature,
+            "faber:capabilities/digital-in@0.1.0": super::bindings::faber::capabilities::digital_in,
+            "faber:capabilities/digital-out@0.1.0": super::bindings::faber::capabilities::digital_out,
+            "faber:capabilities/analog-in@0.1.0": super::bindings::faber::capabilities::analog_in,
+            "faber:capabilities/pwm-out@0.1.0": super::bindings::faber::capabilities::pwm_out,
             "faber:connector/types@0.1.0": super::bindings::faber::connector::types,
         },
     });

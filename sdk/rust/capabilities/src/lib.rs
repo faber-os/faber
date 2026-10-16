@@ -6,7 +6,10 @@
 //! Wire conventions (docs/api.md): field names are camelCase, every reading carries `tUs`, and
 //! a [`Reading`], [`Command`] or [`Info`] is tagged with its capability id, e.g. `"laser-scan@1"`.
 
+pub mod analog_in;
 pub mod battery;
+pub mod digital_in;
+pub mod digital_out;
 pub mod distance;
 pub mod estop;
 mod geometry;
@@ -17,6 +20,8 @@ mod non_finite;
 pub mod planar_base;
 pub mod pose;
 pub mod position;
+pub mod pwm_out;
+pub mod temperature;
 
 pub use geometry::{Quaternion, Twist2d, Vec3};
 pub use mount::Mount;
@@ -64,6 +69,16 @@ pub enum Capability {
     Position,
     #[serde(rename = "battery@1")]
     Battery,
+    #[serde(rename = "temperature@1")]
+    Temperature,
+    #[serde(rename = "digital-in@1")]
+    DigitalIn,
+    #[serde(rename = "digital-out@1")]
+    DigitalOut,
+    #[serde(rename = "analog-in@1")]
+    AnalogIn,
+    #[serde(rename = "pwm-out@1")]
+    PwmOut,
 }
 
 impl Capability {
@@ -76,6 +91,11 @@ impl Capability {
         Capability::Pose,
         Capability::Position,
         Capability::Battery,
+        Capability::Temperature,
+        Capability::DigitalIn,
+        Capability::DigitalOut,
+        Capability::AnalogIn,
+        Capability::PwmOut,
     ];
 
     /// The versioned id used in manifests, addresses and on the wire.
@@ -89,6 +109,11 @@ impl Capability {
             Capability::Pose => "pose@1",
             Capability::Position => "position@1",
             Capability::Battery => "battery@1",
+            Capability::Temperature => "temperature@1",
+            Capability::DigitalIn => "digital-in@1",
+            Capability::DigitalOut => "digital-out@1",
+            Capability::AnalogIn => "analog-in@1",
+            Capability::PwmOut => "pwm-out@1",
         }
     }
 
@@ -100,14 +125,18 @@ impl Capability {
 
     pub fn delivery(self) -> Delivery {
         match self {
-            Capability::Estop => Delivery::EveryMessage,
+            Capability::Estop | Capability::DigitalIn => Delivery::EveryMessage,
             Capability::LaserScan
             | Capability::Distance
             | Capability::Motor
             | Capability::PlanarBase
             | Capability::Pose
             | Capability::Position
-            | Capability::Battery => Delivery::LatestValue,
+            | Capability::Battery
+            | Capability::Temperature
+            | Capability::DigitalOut
+            | Capability::AnalogIn
+            | Capability::PwmOut => Delivery::LatestValue,
         }
     }
 
@@ -121,12 +150,24 @@ impl Capability {
                 duration_us: 250_000,
                 safe_state: Command::PlanarBase(planar_base::Command::STOP),
             }),
+            // An output can switch something that moves: 1 s, then its safe level (inactive).
+            Capability::DigitalOut => Some(LeasePolicy {
+                duration_us: 1_000_000,
+                safe_state: Command::DigitalOut(digital_out::Command::SAFE),
+            }),
+            Capability::PwmOut => Some(LeasePolicy {
+                duration_us: 1_000_000,
+                safe_state: Command::PwmOut(pwm_out::Command::OFF),
+            }),
             Capability::LaserScan
             | Capability::Distance
             | Capability::Estop
             | Capability::Pose
             | Capability::Position
-            | Capability::Battery => None,
+            | Capability::Battery
+            | Capability::Temperature
+            | Capability::DigitalIn
+            | Capability::AnalogIn => None,
         }
     }
 
@@ -156,6 +197,16 @@ pub enum Reading {
     Position(position::Reading),
     #[serde(rename = "battery@1")]
     Battery(battery::Reading),
+    #[serde(rename = "temperature@1")]
+    Temperature(temperature::Reading),
+    #[serde(rename = "digital-in@1")]
+    DigitalIn(digital_in::Reading),
+    #[serde(rename = "digital-out@1")]
+    DigitalOut(digital_out::Reading),
+    #[serde(rename = "analog-in@1")]
+    AnalogIn(analog_in::Reading),
+    #[serde(rename = "pwm-out@1")]
+    PwmOut(pwm_out::Reading),
 }
 
 impl Reading {
@@ -169,6 +220,11 @@ impl Reading {
             Reading::Pose(_) => Capability::Pose,
             Reading::Position(_) => Capability::Position,
             Reading::Battery(_) => Capability::Battery,
+            Reading::Temperature(_) => Capability::Temperature,
+            Reading::DigitalIn(_) => Capability::DigitalIn,
+            Reading::DigitalOut(_) => Capability::DigitalOut,
+            Reading::AnalogIn(_) => Capability::AnalogIn,
+            Reading::PwmOut(_) => Capability::PwmOut,
         }
     }
 
@@ -182,6 +238,11 @@ impl Reading {
             Reading::Pose(r) => r.t_us,
             Reading::Position(r) => r.t_us,
             Reading::Battery(r) => r.t_us,
+            Reading::Temperature(r) => r.t_us,
+            Reading::DigitalIn(r) => r.t_us,
+            Reading::DigitalOut(r) => r.t_us,
+            Reading::AnalogIn(r) => r.t_us,
+            Reading::PwmOut(r) => r.t_us,
         }
     }
 }
@@ -196,6 +257,10 @@ pub enum Command {
     Motor(motor::Command),
     #[serde(rename = "planar-base@1")]
     PlanarBase(planar_base::Command),
+    #[serde(rename = "digital-out@1")]
+    DigitalOut(digital_out::Command),
+    #[serde(rename = "pwm-out@1")]
+    PwmOut(pwm_out::Command),
 }
 
 impl Command {
@@ -203,6 +268,8 @@ impl Command {
         match self {
             Command::Motor(_) => Capability::Motor,
             Command::PlanarBase(_) => Capability::PlanarBase,
+            Command::DigitalOut(_) => Capability::DigitalOut,
+            Command::PwmOut(_) => Capability::PwmOut,
         }
     }
 
@@ -211,6 +278,8 @@ impl Command {
         match self {
             Command::Motor(c) => c.kind(),
             Command::PlanarBase(c) => c.kind(),
+            Command::DigitalOut(c) => c.kind(),
+            Command::PwmOut(c) => c.kind(),
         }
     }
 
@@ -221,6 +290,15 @@ impl Command {
             (Command::Motor(c), Info::Motor(i)) => Ok(c.clamp(i)?.map(Command::Motor)),
             (Command::PlanarBase(c), Info::PlanarBase(i)) => Ok(c.clamp(i)?.map(Command::PlanarBase)),
             _ => Err(Refused::WrongCapability { command: self.capability(), part: info.capability() }),
+        }
+    }
+
+    /// Clamps a command for a part that has no info to the limits every part of its capability
+    /// has (a PWM duty is always 0–1). Others pass unchanged.
+    pub fn clamp_bare(self) -> Result<Clamped<Command>, Refused> {
+        match self {
+            Command::PwmOut(c) => Ok(c.clamp()?.map(Command::PwmOut)),
+            other => Ok(Clamped { command: other, clamped: false }),
         }
     }
 }
@@ -337,9 +415,18 @@ mod tests {
             Capability::Pose,
             Capability::Position,
             Capability::Battery,
+            Capability::Temperature,
+            Capability::DigitalIn,
+            Capability::AnalogIn,
         ] {
             assert!(c.lease().is_none(), "{c:?} is not leased");
         }
+        assert_eq!(Capability::DigitalIn.delivery(), Delivery::EveryMessage, "every edge counts");
+        let out = Capability::DigitalOut.lease().unwrap();
+        assert_eq!(out.duration_us, 1_000_000);
+        assert_eq!(out.safe_state, Command::DigitalOut(digital_out::Command::Set { level: false }));
+        let pwm = Capability::PwmOut.lease().unwrap();
+        assert_eq!(pwm.safe_state, Command::PwmOut(pwm_out::Command::SetDuty { duty: 0.0 }));
         for &c in Capability::ALL {
             if let Some(p) = c.lease() {
                 assert_eq!(
@@ -381,6 +468,11 @@ mod tests {
             Reading::Pose(pose::Reading::planar(5, "world", 1.0, 1.0, 0.0)),
             Reading::Position(position::Reading::no_fix(6, 3)),
             Reading::Battery(battery::Reading::volts(7, 11.1, battery::Level::Ok)),
+            Reading::Temperature(temperature::Reading::celsius(8, 21.5)),
+            Reading::DigitalIn(digital_in::Reading { t_us: 9, level: true }),
+            Reading::DigitalOut(digital_out::Reading { t_us: 10, level: false }),
+            Reading::AnalogIn(analog_in::Reading { t_us: 11, fraction: 0.25, volts: Some(0.825) }),
+            Reading::PwmOut(pwm_out::Reading { t_us: 12, duty: 0.5 }),
         ]
     }
 
@@ -450,6 +542,23 @@ mod tests {
         let l = Info::LaserScan(laser_scan::Info { range_min_m: 0.02, range_max_m: 12.0 });
         assert_eq!(rmp_serde::from_slice::<Info>(&rmp_serde::to_vec_named(&l).unwrap()).unwrap(), l);
         assert!(l.built_from().is_empty());
+    }
+
+    #[test]
+    fn gpio_commands_are_tagged_and_a_bare_duty_is_clamped() {
+        let c: Command = serde_json::from_value(serde_json::json!({
+            "capability": "digital-out@1", "command": {"kind": "set", "level": true}
+        }))
+        .unwrap();
+        assert_eq!(c, Command::DigitalOut(digital_out::Command::Set { level: true }));
+        assert_eq!(c.kind(), "set");
+        assert_eq!(c.clamp_bare(), Ok(Clamped { command: c, clamped: false }));
+        let duty = Command::PwmOut(pwm_out::Command::SetDuty { duty: 2.0 });
+        assert_eq!(
+            duty.clamp_bare(),
+            Ok(Clamped { command: Command::PwmOut(pwm_out::Command::SetDuty { duty: 1.0 }), clamped: true })
+        );
+        assert_eq!(duty.capability(), Capability::PwmOut);
     }
 
     #[test]

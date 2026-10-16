@@ -4,7 +4,8 @@
 use crate::bindings::faber::capabilities as cap;
 use crate::bindings::faber::connector::types as wit;
 use faber_capabilities::{
-    Command, Quaternion, Reading, Twist2d, Vec3, battery, distance, estop, motor, planar_base, position,
+    Command, Quaternion, Reading, Twist2d, Vec3, battery, digital_out, distance, estop, motor, planar_base,
+    position, pwm_out,
 };
 use faber_connector::{CommandError, Health, Problem, Settings, SettingsError};
 
@@ -109,6 +110,23 @@ pub fn reading_to_wit(r: Reading) -> wit::Reading {
                 battery::Level::Critical => cap::battery::Level::Critical,
             },
         }),
+        Reading::Temperature(r) => wit::Reading::Temperature(cap::temperature::Reading {
+            t_us: r.t_us,
+            celsius: r.celsius,
+            variance: r.variance,
+        }),
+        Reading::DigitalIn(r) => {
+            wit::Reading::DigitalIn(cap::digital_in::Reading { t_us: r.t_us, level: r.level })
+        }
+        Reading::DigitalOut(r) => {
+            wit::Reading::DigitalOut(cap::digital_out::Reading { t_us: r.t_us, level: r.level })
+        }
+        Reading::AnalogIn(r) => wit::Reading::AnalogIn(cap::analog_in::Reading {
+            t_us: r.t_us,
+            fraction: r.fraction,
+            volts: r.volts,
+        }),
+        Reading::PwmOut(r) => wit::Reading::PwmOut(cap::pwm_out::Reading { t_us: r.t_us, duty: r.duty }),
     }
 }
 
@@ -135,6 +153,12 @@ pub fn command_from_wit(c: wit::Command) -> Command {
         wit::Command::PlanarBase(cap::planar_base::Command::SetVelocity(t)) => {
             Command::PlanarBase(planar_base::Command::SetVelocity(twist_from(t)))
         }
+        wit::Command::DigitalOut(cap::digital_out::Command::Set(level)) => {
+            Command::DigitalOut(digital_out::Command::Set { level })
+        }
+        wit::Command::PwmOut(cap::pwm_out::Command::SetDuty(duty)) => {
+            Command::PwmOut(pwm_out::Command::SetDuty { duty })
+        }
     }
 }
 
@@ -149,6 +173,12 @@ pub fn command_to_wit(c: Command) -> wit::Command {
         }),
         Command::PlanarBase(planar_base::Command::SetVelocity(t)) => {
             wit::Command::PlanarBase(cap::planar_base::Command::SetVelocity(twist(t)))
+        }
+        Command::DigitalOut(digital_out::Command::Set { level }) => {
+            wit::Command::DigitalOut(cap::digital_out::Command::Set(level))
+        }
+        Command::PwmOut(pwm_out::Command::SetDuty { duty }) => {
+            wit::Command::PwmOut(cap::pwm_out::Command::SetDuty(duty))
         }
     }
 }
@@ -190,7 +220,7 @@ fn setting_value(v: wit::SettingValue) -> toml::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use faber_capabilities::{laser_scan, pose};
+    use faber_capabilities::{analog_in, digital_in, laser_scan, pose, temperature};
 
     #[test]
     fn settings_come_back_as_parts_toml_held_them() {
@@ -224,6 +254,8 @@ mod tests {
             Command::Motor(motor::Command::SetPosition { position_rad: 2.0 }),
             Command::Motor(motor::Command::SetDuty { duty: -0.5 }),
             Command::PlanarBase(planar_base::Command::SetVelocity(Twist2d::new(0.1, 0.2, 0.3))),
+            Command::DigitalOut(digital_out::Command::Set { level: true }),
+            Command::PwmOut(pwm_out::Command::SetDuty { duty: 0.25 }),
         ] {
             assert_eq!(command_from_wit(command_to_wit(c)), c);
         }
@@ -259,6 +291,11 @@ mod tests {
                 cell_volts: Some(vec![3.6, 3.61, 3.59]),
                 ..battery::Reading::volts(8, 10.8, battery::Level::Low)
             }),
+            Reading::Temperature(temperature::Reading { t_us: 9, celsius: -4.5, variance: Some(0.1) }),
+            Reading::DigitalIn(digital_in::Reading { t_us: 10, level: true }),
+            Reading::DigitalOut(digital_out::Reading { t_us: 11, level: true }),
+            Reading::AnalogIn(analog_in::Reading { t_us: 12, fraction: 0.5, volts: None }),
+            Reading::PwmOut(pwm_out::Reading { t_us: 13, duty: 0.75 }),
         ];
         let t: Vec<u64> = readings
             .into_iter()
@@ -279,8 +316,28 @@ mod tests {
                     assert_eq!(r.cell_volts.as_deref(), Some(&[3.6, 3.61, 3.59][..]));
                     r.t_us
                 }
+                wit::Reading::Temperature(r) => {
+                    assert_eq!((r.celsius, r.variance), (-4.5, Some(0.1)));
+                    r.t_us
+                }
+                wit::Reading::DigitalIn(r) => {
+                    assert!(r.level);
+                    r.t_us
+                }
+                wit::Reading::DigitalOut(r) => {
+                    assert!(r.level);
+                    r.t_us
+                }
+                wit::Reading::AnalogIn(r) => {
+                    assert_eq!((r.fraction, r.volts), (0.5, None));
+                    r.t_us
+                }
+                wit::Reading::PwmOut(r) => {
+                    assert_eq!(r.duty, 0.75);
+                    r.t_us
+                }
             })
             .collect();
-        assert_eq!(t, [1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(t, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
     }
 }

@@ -202,6 +202,9 @@ impl bindings::faber::capabilities::distance::Host for Host {}
 impl bindings::faber::capabilities::pose::Host for Host {}
 impl bindings::faber::capabilities::position::Host for Host {}
 impl bindings::faber::capabilities::battery::Host for Host {}
+impl bindings::faber::capabilities::temperature::Host for Host {}
+impl bindings::faber::capabilities::digital_in::Host for Host {}
+impl bindings::faber::capabilities::analog_in::Host for Host {}
 
 // These interfaces also declare commands for apps. A connector never gets them: `definition`
 // refuses any component that imports a function outside `context`. Refused here too, in case.
@@ -221,6 +224,18 @@ impl bindings::faber::capabilities::motor::Host for Host {
 
 impl bindings::faber::capabilities::planar_base::Host for Host {
     fn set_velocity(&mut self, _: LeaseId, _: Twist2d) -> Result<(), AppCommandError> {
+        Err(AppCommandError::BadCommand)
+    }
+}
+
+impl bindings::faber::capabilities::digital_out::Host for Host {
+    fn set(&mut self, _: LeaseId, _: bool) -> Result<(), AppCommandError> {
+        Err(AppCommandError::BadCommand)
+    }
+}
+
+impl bindings::faber::capabilities::pwm_out::Host for Host {
+    fn set_duty(&mut self, _: LeaseId, _: f32) -> Result<(), AppCommandError> {
         Err(AppCommandError::BadCommand)
     }
 }

@@ -496,6 +496,11 @@ fn set_t_us(r: &mut Reading, t: u64) {
         Reading::Pose(x) => x.t_us = t,
         Reading::Position(x) => x.t_us = t,
         Reading::Battery(x) => x.t_us = t,
+        Reading::Temperature(x) => x.t_us = t,
+        Reading::DigitalIn(x) => x.t_us = t,
+        Reading::DigitalOut(x) => x.t_us = t,
+        Reading::AnalogIn(x) => x.t_us = t,
+        Reading::PwmOut(x) => x.t_us = t,
     }
 }
 
