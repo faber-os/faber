@@ -59,6 +59,7 @@ describe('decodeServerMessage', () => {
     const settings = {
       appearance: { theme: 'dark', wallpaper: 'graphite' },
       desktop: { icons: [{ key: 'tool:parts', x: 16, y: 16 }] },
+      screen: { role: 'viewer' },
       developer: { fullMachineFiles: false },
     };
     for (const m of [

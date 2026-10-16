@@ -30,6 +30,7 @@ const SETTINGS: Settings = {
   time: { timeZone: '', clock: '24h' },
   desktop: { icons: [] },
   taskbar: { pinned: ['tool:parts'], size: 'small' },
+  screen: { role: 'viewer' },
   developer: { fullMachineFiles: false },
 };
 

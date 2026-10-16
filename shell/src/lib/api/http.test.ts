@@ -258,6 +258,7 @@ describe('settings', () => {
   const settings = {
     appearance: { theme: 'system', wallpaper: 'aluminium' },
     desktop: { icons: [] },
+    screen: { role: 'viewer' },
     developer: { fullMachineFiles: false },
   };
 

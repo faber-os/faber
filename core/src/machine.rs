@@ -9,12 +9,14 @@ mod bridge_tests;
 mod flash;
 mod packages;
 mod safety;
+mod users;
 mod world;
 
 pub use apps::{AppView, AppWindowLink};
 pub use flash::{FirmwareSource, FlashProgress, FlashRequest, Flashed};
 pub use packages::{PackagePreview, PackagePreviewOf, PackageView, installed_connectors};
 pub use safety::{CommandReply, EstopView, LeaseEvent};
+pub use users::{Credential, Identity, SignInError, Via};
 pub use world::{DEFAULT_WORLD, WorldChanged, WorldView};
 
 use crate::backup::{self, Archive, BackupError, Item};
@@ -314,6 +316,12 @@ pub struct Machine {
     app_channels: Mutex<BTreeMap<String, Arc<crate::apps::Channel>>>,
     /// This machine, for what it hands out that must not keep it alive (apps' lease driver).
     me: OnceLock<Weak<Machine>>,
+    /// Users, roles and API tokens (`config/users.toml`, docs/auth.md).
+    users: crate::users::UsersStore,
+    /// Signed-in browsers, in memory.
+    sessions: crate::sessions::Sessions,
+    /// Failed sign-ins per address and name.
+    sign_in_limit: crate::sessions::LoginLimiter,
 }
 
 impl Machine {
@@ -336,6 +344,9 @@ impl Machine {
         let files = Files::open(opts.data_dir.join("files"), config_path.clone())?;
         let settings = SettingsStore::load(&config_dir);
         let translations = Translations::open(&config_dir);
+        let users = crate::users::UsersStore::load(&config_dir);
+        let sessions = crate::sessions::Sessions::new(Arc::clone(&opts.clock));
+        let sign_in_limit = crate::sessions::LoginLimiter::new(Arc::clone(&opts.clock));
         let router = Arc::new(Router::new());
         let notices = Arc::new(Notices::new(Arc::clone(&opts.clock)));
         let tap = Arc::clone(&notices);
@@ -399,6 +410,9 @@ impl Machine {
             app_states: Mutex::new(BTreeMap::new()),
             app_channels: Mutex::new(BTreeMap::new()),
             me: OnceLock::new(),
+            users,
+            sessions,
+            sign_in_limit,
         });
         let _ = machine.me.set(Arc::downgrade(&machine));
         machine.refresh_ports();
@@ -1302,6 +1316,7 @@ impl Machine {
         let (packages_path, connectors, connector_ids) = self.packages_to_back_up()?;
         let (apps_toml, apps, app_ids) = self.apps_to_back_up()?;
         let settings_text = setup.then(|| crate::settings::setup_text(&self.settings.get()));
+        let users_text = self.users_backup_text();
         let src = backup::Sources {
             parts_toml: &self.config_path,
             settings_toml: &settings_path,
@@ -1311,6 +1326,7 @@ impl Machine {
             apps_toml: &apps_toml,
             apps: &apps,
             app_ids: &app_ids,
+            users_toml: users_text.as_deref(),
             home: &home,
             include_recordings,
             setup: settings_text.as_deref(),
@@ -1339,7 +1355,18 @@ impl Machine {
     /// touched, and every connector and app in it is checked and loaded in staging exactly like
     /// installing its package (an app's saved state too).
     /// Files that the backup replaces go to the Trash; files and packages it doesn't have stay.
+    /// Keeps this machine's own users; [`Machine::restore_backup_with_users`] replaces them.
     pub fn restore_backup(&self, path: &str) -> Result<(), MachineError> {
+        self.restore_backup_with(path, false)
+    }
+
+    /// Restores a backup together with its users and API tokens (when it has them), then ends
+    /// every session: the person restoring signs in again with an account from the backup.
+    pub fn restore_backup_with_users(&self, path: &str) -> Result<(), MachineError> {
+        self.restore_backup_with(path, true)
+    }
+
+    fn restore_backup_with(&self, path: &str, users: bool) -> Result<(), MachineError> {
         let p = VPath::parse(path)?;
         let real = self.files.local_path(&p)?;
         if !real.is_file() {
@@ -1357,6 +1384,13 @@ impl Machine {
         if let Some(text) = archive.apps_toml() {
             crate::roles::parse(text).map_err(|e| apps_config_invalid(&e))?;
         }
+        let restored_users = match (users, archive.users_toml()) {
+            (true, Some(text)) => {
+                crate::users::check_backup_text(text)?;
+                Some(text.to_string())
+            }
+            _ => None,
+        };
         let restored_settings = match archive.settings_toml() {
             None => None,
             Some(text) => Some(settings_file::parse(text).map_err(|e| {
@@ -1407,6 +1441,9 @@ impl Machine {
         if let Some(s) = restored_settings {
             // A setup has no name of its own: this machine keeps its own.
             self.settings.restore(s, archive.is_setup())?;
+        }
+        if let Some(text) = restored_users {
+            self.restore_users(&text)?;
         }
         let result = items.iter().try_for_each(|(vp, item)| self.restore_item(&mut archive, vp, item));
         self.notify_folders(&[VPath::home(&[])]);
@@ -2072,6 +2109,13 @@ mod tests {
 
     fn no_ports() -> Arc<FakeDiscovery> {
         Arc::new(FakeDiscovery(Mutex::new(vec![])))
+    }
+
+    /// A machine with no ports in a fresh data folder (kept as long as the folder).
+    pub(crate) fn test_machine() -> (tempfile::TempDir, Arc<Machine>) {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        (dir, m)
     }
 
     #[test]

@@ -324,6 +324,7 @@ export const DEFAULT_SETTINGS: Settings = {
     pinned: ['tool:parts', 'accessory:files', 'accessory:notes', 'tool:serial-monitor'],
     size: 'small',
   },
+  screen: { role: 'viewer' },
   developer: { fullMachineFiles: false },
 };
 
