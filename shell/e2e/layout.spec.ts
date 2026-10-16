@@ -49,10 +49,13 @@ test.afterEach(async ({ request }) => {
   await request.post('/api/v0/files/delete', { data: { paths: ['home:/Arduino'] } });
 });
 
-/** Whether SENNEP's own page (in its sandboxed frame) is wider than its window. */
-async function sennepScrollsSideways(page: Page): Promise<boolean> {
+/**
+ * Whether SENNEP's own page (in its sandboxed frame) is wider than its window; `null` while its
+ * frame hasn't loaded yet, so `expect.poll` waits for it instead of failing on a slow load.
+ */
+async function sennepScrollsSideways(page: Page): Promise<boolean | null> {
   const frame = page.frames().find((f) => f.url().includes('/apps/sennep/ui/'));
-  if (!frame) throw new Error('SENNEP’s window is not open');
+  if (!frame) return null;
   return frame.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
   );
