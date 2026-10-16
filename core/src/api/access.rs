@@ -91,6 +91,9 @@ pub const ROUTES: &[(&str, &str, Need)] = &[
     // The machine itself: parts, packages, apps, flashing, backups, settings and users.
     ("POST", "/api/v0/parts", ADMIN),
     ("DELETE", "/api/v0/parts/{name}", ADMIN),
+    // Pausing writes parts.toml and frees the port, mostly for flashing from elsewhere.
+    ("POST", "/api/v0/parts/{name}/pause", ADMIN),
+    ("POST", "/api/v0/parts/{name}/resume", ADMIN),
     ("POST", "/api/v0/packages", ADMIN),
     ("DELETE", "/api/v0/packages/{id}", ADMIN),
     ("POST", "/api/v0/apps/{id}/enable", ADMIN),

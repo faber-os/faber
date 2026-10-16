@@ -30,6 +30,8 @@
   const core = useCore();
   // The serial monitor writes to a device: an operator's (docs/auth.md).
   const lock = $derived(core.auth.lock('operator'));
+  /** Pausing a part changes parts.toml, so it needs an admin. */
+  const pauseLock = $derived(core.auth.lock('admin'));
   const desktop = useDesktop();
 
   let port = $state('');
@@ -260,8 +262,11 @@
       <ErrorNotice {error}>
         {#snippet actions()}
           {#if holder}
-            <button class="btn" disabled={pausing} onclick={() => pauseAndOpen(holder)}
-              >{t('serial.pausePart', { part: holder })}</button
+            <button
+              class="btn"
+              disabled={pausing || pauseLock !== null}
+              title={pauseLock ?? undefined}
+              onclick={() => pauseAndOpen(holder)}>{t('serial.pausePart', { part: holder })}</button
             >
           {/if}
         {/snippet}

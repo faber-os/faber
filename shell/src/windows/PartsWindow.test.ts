@@ -209,6 +209,22 @@ describe('A FaberLink board in Parts', () => {
 });
 
 describe('Pausing a part', () => {
+  it('needs an admin: an operator sees Pause and Resume disabled, with the reason', async () => {
+    const shell = setup();
+    shell.signInAs('operator');
+    shell.pushParts([part('lidar')]);
+    const row = (await screen.findByText('lidar')).closest('li')!;
+    fireEvent.contextMenu(row);
+    const pause = shell.menu.current!.entries.find((e) => e.kind === 'item' && e.id === 'pause');
+    expect(pause).toMatchObject({ disabledReason: 'Needs the admin role' });
+    shell.menu.close(false);
+
+    shell.pushParts([part('lidar', { state: { kind: 'paused' } })]);
+    const resume = await screen.findByRole('button', { name: 'Resume lidar' });
+    expect(resume).toBeDisabled();
+    expect(resume).toHaveAttribute('title', 'Needs the admin role');
+  });
+
   it('pauses any part from its menu, and shows Paused with Resume', async () => {
     const shell = setup([
       { method: 'POST', path: '/api/v0/parts/lidar/pause', body: part('lidar') },

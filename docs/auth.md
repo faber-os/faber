@@ -235,6 +235,6 @@ they are the package's code, not data, and a sandboxed frame may not send the co
 6. Removing yourself, or the last admin, and demoting the last admin, are refused.
 7. A request without an `Origin` header is not checked for it (only programs leave it out; the
    cookie is `SameSite=Strict` anyway). Requiring it would break `curl` with a cookie, nothing else.
-8. Adding and removing parts needs an **admin** (it changes the machine), not an operator. An
+8. Adding, removing, pausing and resuming parts needs an **admin** (it changes the machine), not an operator. An
    operator drives, simulates and edits files, but can't change what the machine is made of.
 9. Viewers may make API tokens for themselves (viewer tokens only), e.g. for a dashboard script.

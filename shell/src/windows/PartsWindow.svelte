@@ -120,8 +120,12 @@
               disabledReason: busy,
             },
           ),
-        !sub && !paused && item('pause', t('parts.menu.pause')),
-        !sub && paused && item('resume', t('parts.menu.resume')),
+        !sub &&
+          !paused &&
+          item('pause', t('parts.menu.pause'), lock ? { disabledReason: lock } : {}),
+        !sub &&
+          paused &&
+          item('resume', t('parts.menu.resume'), lock ? { disabledReason: lock } : {}),
         removable(p) && separator(),
         removable(p) &&
           item('remove', t('parts.menu.remove'), {
@@ -363,7 +367,8 @@
                   {t('parts.board.uploadHint')}
                   <button
                     class="btn"
-                    disabled={pausing === p.name}
+                    disabled={pausing === p.name || lock !== null}
+                    title={lock ?? undefined}
                     aria-label={t('parts.list.pauseNamed', { name: p.name })}
                     onclick={() => setPaused(p.name, true)}>{t('parts.list.pause')}</button
                   >
@@ -404,7 +409,8 @@
                 {#if paused && !sub}
                   <button
                     class="btn primary"
-                    disabled={pausing === p.name}
+                    disabled={pausing === p.name || lock !== null}
+                    title={lock ?? undefined}
                     aria-label={t('parts.list.resumeNamed', { name: p.name })}
                     onclick={() => setPaused(p.name, false)}
                   >
