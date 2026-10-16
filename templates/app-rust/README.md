@@ -29,5 +29,10 @@ This text is shown in Faber's install dialog. Describe your app here.
 
 - `src/lib.rs` is the logic; `cargo test` runs it on your PC with a pretend machine.
 - `faber.toml` says which roles it needs and what it publishes.
+- `ui/` is its window: `index.html` loads `app.js`, which shows what the app publishes through
+  `faber-shell.js` (the `@faber-os/shell` SDK, copied in by `faber new app`; don't edit it). The
+  window runs in a sandbox and can load only its own files, so put everything it needs in `ui/`.
+  It can also read and set the app's saved state, which the logic shares
+  (`faber.state.get/set/onChange`).
 - `faber check` builds it for WebAssembly and runs it in Faber's sandbox; `faber pack` makes the
   package.

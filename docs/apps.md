@@ -1,8 +1,10 @@
 # Phase 5 design: apps
 
-Status: **design v1; Phase 5a (apps in the core) and 5b (apps in the shell) built** (2026-10-16).
+Status: **design v1; Phase 5a (apps in the core), 5b (apps in the shell) and 5c (shared state,
+the start menu, the template's window, Share setup) built** (2026-10-16).
 Builds on D03, D04, D24, D29 and architecture.md §7. §8 says what 5a built and how it differs, §9
-what 5b built: app windows, the message protocol, `@faber-os/shell`, the role picker and Apps. The open questions in
+what 5b built: app windows, the message protocol, `@faber-os/shell`, the role picker and Apps; §10
+what 5c built. The open questions in
 §7 were answered with their recommendations while Mikkel was away: both wasm logic and UI-only
 apps; SENNEP's app in the SENNEP V2 repo, with a small example app here.
 
@@ -88,7 +90,7 @@ SENNEP through FaberLink (Phase 4).
 | `roles` | `all()` (name, capability, command, how many parts), `latest(role, index)`, `poll(role, index)`: the newest reading only if this app hasn't polled it before ("subscribe by polling") |
 | `drive` | `acquire`, `renew`, `release`, `send(role, index, command) -> result<command, drive-error>`. The core holds the lease for the app as `app:<id>`; the app never sees a lease id. Errors: `no-such-role`, `held(who)`, `lease-required`, `lease-ended(reason)`, `estop-engaged`, `bad-command`, `part-not-ready` |
 | `publish` | `publish(name, reading)`: only `[[publishes]]` names, with their capability; anything else stops the app as a bug |
-| `state` | `get`, `set` (fails past 64 KB of keys and values), `remove`, `keys`; saved in `<data>/apps/<id>/state.toml` at most once a second and when a run ends, kept across updates, removed on uninstall |
+| `state` | `get`, `set` (fails past 64 KB of keys and values), `remove`, `keys`; saved in `<data>/apps/<id>/state.toml` at most once a second and when a run ends, kept across updates, removed on uninstall. Since 5c the store is shared with the app's windows (§10) |
 | `log` | `log(level, message)`, as `app:<id>` in the log, 50 lines a second |
 
 Readings and commands are the connector world's own types (`faber:connector/types`), so an app
@@ -254,8 +256,66 @@ component tests cover the Install pane, Apps and the app window (the sandbox att
 sheet, Stop, closing); `shell/e2e/apps.spec.ts` installs the packed example from the desktop, runs
 it in the apartment and watches its window; the layout test opens an app window.
 
-**Not built in 5b:** a window changing its app's saved state (no `state` messages: the logic owns
-`state.toml` while it runs, so writing it from the API needs a shared store first); apps in the
-start menu and pinning an app's window to the taskbar (`[window] pinned` is read but not used);
-the template (`faber new app`) doesn't carry the SDK yet; roles filled by derived signals
-(`accept`, from 5a).
+**Not built in 5b** (built in 5c, §10): a window changing its app's saved state; apps in the start
+menu and pinning an app's window to the taskbar; the template carrying the SDK. Still not built:
+roles filled by derived signals (`accept`, from 5a).
+
+## 10. As built (Phase 5c: shared state, the start menu, the template's window, Share setup)
+
+**One state store per app.** The machine keeps each installed app's store (`apps::SharedState`):
+every run of its logic gets the same one (the `state` interface), and so do its windows, through
+`GET`/`PUT /api/v0/apps/{id}/state` and the `app-state` topic (api.md, "Apps"). Every change is
+announced, whoever made it. It is written at most once a second (the machine's sweeper), when a
+run ends, before a backup and at shutdown; a restore stops it writing until it has read the
+restored file. Editing `state.toml` by hand while the core runs no longer works (use the API).
+
+**`faber.state` in the SDK.** `faber.state.get(key)`, `.set(key, value)`, `.remove(key)`,
+`.keys()` and `.onChange((key, value) => …)`, carried by four more protocol requests:
+
+| `type` | Fields | Answers |
+|---|---|---|
+| `state-get` | `key` | the value, or `null` |
+| `state-set` | `key`, `value` (a string, or `null` to remove it) | `null` |
+| `state-keys` | | the keys, sorted |
+| `state-watch` | | `null`; then a `state` event (`key`, `value`) for every change |
+
+Values are strings (as in the app world). The host checks every key (1–256 bytes) and keeps the
+total under 64 KB (`bad-key`, `state-full`) before the core checks it again, and follows the core's
+copy on the `app-state` topic, so a window sees what the logic or another window did. A new page
+in the frame stops the `state` events until it asks again.
+
+**The wall follower's speed slider.** Its window has a slider (0.05–0.5 m/s) that saves `speed`
+while sliding (at most every 100 ms) and follows changes made elsewhere. The logic steers by the
+newest scan on every tick and reads `speed` each time, so the base speeds up or slows down at once
+(never past 0.5 m/s).
+
+**Apps in the start menu and on the taskbar.** Installed apps with a window get a group of their
+own in the start menu (with their icon, and in its search); their tile and their window's taskbar
+button have Pin to taskbar / Unpin. A pinned app is the taskbar program `app:<id>`, shown with its
+name and icon, opening its own window; the taskbar tells the windows of one kind apart by their key
+(every app window is of kind `app`). `[window] pinned = true` makes the **core** pin it when it is
+first installed (not on an update, so unpinning sticks); uninstalling unpins it. A reinstall after
+an uninstall is a first install again.
+
+**The app badge** also shows in the title bar of a viewer of a derived signal (`app:<id>/<name>`).
+
+**The template's window.** `faber new app` makes `ui/index.html`, `ui/app.js` and `ui/style.css`:
+a page in the shell's look that shows the app's derived signal through the SDK, and copies the SDK
+in as `ui/faber-shell.js`. That file is the SDK's build output: the `faber` command embeds it
+(`tools/faber-cli/src/ui.rs`), and the SDK's own test keeps the committed copy in
+`templates/app-rust/ui/` identical to a fresh build, as it does for the example. `faber check` now
+also reads every page, script and stylesheet in `ui/` and refuses one that loads a file the package
+lacks, anything on the network, an absolute path or anything outside `ui/`, naming the file; it
+notes (without failing) a `faber-shell.js` other than its own. `faber pack` includes `ui/` as
+before.
+
+**Share setup** (§7, Q3, as recommended): Settings → Storage → Share setup… writes
+`<machine>-setup-<date>.zip` to `home:/Backups`: a backup without the user's files (api.md,
+"Storage and backups"). It restores through the usual restore and its checks, keeping the receiving
+machine's name, files and developer settings.
+
+**Tests.** `core/tests/apps.rs` sets the wall follower's speed through the API and sees the logic
+drive at it, the topic announce it and the file saved; `core/tests/packages.rs` covers pinning on
+first install, a backup holding a change made a moment before, and a setup moved to a second
+machine; `appHost.test.ts` sends the host bad keys, oversized values and changes made elsewhere;
+`shell/e2e/apps.spec.ts` moves the slider and watches the base's commanded speed follow.

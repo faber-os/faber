@@ -65,7 +65,8 @@ pub enum TaskbarSize {
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
 pub struct Taskbar {
-    /// Programs pinned to the taskbar, in order: `tool:<id>` or `accessory:<id>`.
+    /// Programs pinned to the taskbar, in order: `tool:<id>`, `accessory:<id>` or `app:<id>`
+    /// (an installed app's window).
     pub pinned: Vec<String>,
     pub size: TaskbarSize,
 }
@@ -304,6 +305,23 @@ impl SettingsStore {
         self.save(&mut cur, new)
     }
 
+    /// Pins `program` to the end of the taskbar, or unpins it. Nothing changes (and nothing is
+    /// written) when it already is as asked.
+    pub fn set_pinned(&self, program: &str, on: bool) -> Result<Settings, SettingsError> {
+        let mut cur = self.current.lock().expect("settings lock");
+        let pinned = cur.taskbar.pinned.iter().any(|k| k == program);
+        if pinned == on {
+            return Ok(cur.clone());
+        }
+        let mut new = cur.clone();
+        if on {
+            new.taskbar.pinned.push(program.to_string());
+        } else {
+            new.taskbar.pinned.retain(|k| k != program);
+        }
+        self.save(&mut cur, new)
+    }
+
     /// Back to the defaults: every setting, including the developer settings (so whole-machine
     /// files are off again). Parts and files are not settings and stay as they are.
     /// Everything back to its default, except the machine's name: resetting the desktop must
@@ -315,12 +333,13 @@ impl SettingsStore {
     }
 
     /// Takes settings from a backup. This machine's developer settings stay as they are: a
-    /// backup never turns whole-machine access on behind the user's back.
-    pub fn restore(&self, mut restored: Settings) -> Result<Settings, SettingsError> {
+    /// backup never turns whole-machine access on behind the user's back. With `keep_name` (a
+    /// shared setup, which has none) the machine keeps its own name too.
+    pub fn restore(&self, mut restored: Settings, keep_name: bool) -> Result<Settings, SettingsError> {
         let mut cur = self.current.lock().expect("settings lock");
         restored.developer = cur.developer.clone();
         // Anything this machine can't use falls back, one field at a time.
-        if !valid_machine_name(&restored.machine.name) {
+        if keep_name || !valid_machine_name(&restored.machine.name) {
             restored.machine = cur.machine.clone();
         }
         if !crate::names::valid_language_code(&restored.appearance.language) {
@@ -362,6 +381,18 @@ impl SettingsStore {
         }
         Ok(cur.clone())
     }
+}
+
+/// The settings as a shared setup holds them: everything but the machine's name and its
+/// developer settings, which belong to the machine and not to the setup.
+pub fn setup_text(s: &Settings) -> String {
+    let mut table = toml::Table::try_from(s).expect("settings serialise");
+    table.remove("machine");
+    table.remove("developer");
+    format!(
+        "# Faber settings from a shared setup: without the machine's name and developer settings.\n{}",
+        toml::to_string(&table).expect("a table serialises")
+    )
 }
 
 /// Reads the text of a settings.toml. Missing fields get their defaults, so older files load.
@@ -434,6 +465,51 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join(FILE_NAME)).unwrap();
         assert!(text.starts_with("# Faber settings"));
         assert_eq!(SettingsStore::load(dir.path()).get(), new);
+    }
+
+    #[test]
+    fn a_setup_leaves_out_the_name_and_developer_settings_and_restoring_it_keeps_them() {
+        let mut s = Settings::default();
+        s.machine.name = "sennep".into();
+        s.developer.full_machine_files = true;
+        s.appearance.theme = Theme::Dark;
+        let text = setup_text(&s);
+        assert!(
+            !text.contains("sennep") && !text.contains("[developer]") && !text.contains("[machine]"),
+            "{text}"
+        );
+        let read = parse(&text).unwrap();
+        assert_eq!(read.appearance.theme, Theme::Dark);
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path());
+        let mut mine = store.get();
+        mine.machine.name = "bench".into();
+        store.update(mine).unwrap();
+        let after = store.restore(read.clone(), true).unwrap();
+        assert_eq!((after.machine.name.as_str(), after.appearance.theme), ("bench", Theme::Dark));
+        assert!(!after.developer.full_machine_files);
+        let mut named = read;
+        named.machine.name = "other".into();
+        assert_eq!(
+            store.restore(named, false).unwrap().machine.name,
+            "other",
+            "a full backup brings its name"
+        );
+    }
+
+    #[test]
+    fn a_program_is_pinned_once_at_the_end_and_unpinned() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = SettingsStore::load(dir.path());
+        let rx = s.watch();
+        s.set_pinned("app:wall-follower", true).unwrap();
+        s.set_pinned("app:wall-follower", true).unwrap();
+        assert_eq!(s.get().taskbar.pinned.last().map(String::as_str), Some("app:wall-follower"));
+        assert_eq!(s.get().taskbar.pinned.iter().filter(|k| *k == "app:wall-follower").count(), 1);
+        assert_eq!(*rx.borrow(), 1, "pinning twice is one change");
+        s.set_pinned("app:wall-follower", false).unwrap();
+        assert!(!s.get().taskbar.pinned.iter().any(|k| k == "app:wall-follower"));
+        assert_eq!(SettingsStore::load(dir.path()).get(), s.get(), "saved");
     }
 
     #[test]
@@ -594,7 +670,7 @@ fullMachineFiles = true
 ";
         let parsed = parse(restored).unwrap();
         assert!(parsed.developer.full_machine_files);
-        let s = store.restore(parsed).unwrap();
+        let s = store.restore(parsed, false).unwrap();
         assert_eq!(s.appearance.theme, Theme::Dark);
         assert!(!s.developer.full_machine_files, "a backup never turns whole-machine files on");
         assert_eq!(parse("appearance = 5").unwrap_err().code, "settings-invalid");
@@ -665,7 +741,7 @@ language = \"Dansk\"
 [time]
 timeZone = \"Europe/Copenhagen\"
 ";
-        let restored = store.restore(parse(backup).unwrap()).unwrap();
+        let restored = store.restore(parse(backup).unwrap(), false).unwrap();
         assert_eq!(restored.appearance.language, "en", "a bad code in a backup becomes English");
         assert_eq!(restored.time.time_zone, "Europe/Copenhagen", "and nothing else is lost");
     }

@@ -61,6 +61,48 @@ function follow() {
   });
 }
 
+// The speed slider. The speed is the app's saved state ("speed"), shared with its logic, which
+// reads it on every tick: moving the slider changes how fast the base drives at once.
+const speed = document.getElementById("speed");
+const speedValue = document.getElementById("speed-value");
+const DEFAULT_SPEED = 0.25;
+const MAX_SPEED = 0.5; // the logic never drives faster (src/lib.rs, MAX_SPEED)
+
+function speedOf(text) {
+  const v = Number(text);
+  return text !== null && Number.isFinite(v) && v >= 0 && v <= MAX_SPEED ? v : DEFAULT_SPEED;
+}
+function showSpeed(v) {
+  speedValue.textContent = `${v.toFixed(2)} m/s`;
+}
+function setSlider(v) {
+  speed.value = String(v);
+  showSpeed(v);
+}
+faber.state.get("speed").then((v) => setSlider(speedOf(v)), showProblem);
+// Another window (or the logic) changed it: follow, unless the user is sliding right now.
+let sliding = false;
+faber.state.onChange((key, value) => {
+  if (key === "speed" && !sliding) setSlider(speedOf(value));
+});
+
+// Save while sliding, at most every 100 ms, and once more where it stops.
+let saveTimer = null;
+function save() {
+  saveTimer = null;
+  faber.state.set("speed", speed.value).catch(showProblem);
+}
+speed.addEventListener("input", () => {
+  sliding = true;
+  showSpeed(Number(speed.value));
+  saveTimer ??= setTimeout(save, 100);
+});
+speed.addEventListener("change", () => {
+  sliding = false;
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  save();
+});
+
 function showProblem(e) {
   problem.hidden = false;
   problem.textContent = e.hint ? `${e.message} ${e.hint}` : e.message;

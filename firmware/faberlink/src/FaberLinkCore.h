@@ -63,7 +63,7 @@ const uint8_t LOG = 0x40;
 }  // namespace kind
 
 // Capability codes in READING, COMMAND and APPLIED.
-enum Capability : uint8_t { DISTANCE = 1, MOTOR = 2, PLANAR_BASE = 3, ESTOP_CAP = 4 };
+enum Capability : uint8_t { DISTANCE = 1, MOTOR = 2, PLANAR_BASE = 3, ESTOP_CAP = 4, BATTERY = 5 };
 
 // Why an actuator's output changed (APPLIED.cause).
 enum Cause : uint8_t {
@@ -224,6 +224,47 @@ class Distance : public Part {
  private:
   float minM_, maxM_, fov_;
   DistanceKind kind_;
+};
+
+enum BatteryChemistry : uint8_t {
+  BATTERY_LI_ION = 0,
+  BATTERY_LIPO = 1,
+  BATTERY_LIFEPO4 = 2,
+  BATTERY_NIMH = 3,
+  BATTERY_LEAD_ACID = 4,
+};
+
+enum BatteryLevel : uint8_t { BATTERY_OK = 0, BATTERY_LOW = 1, BATTERY_CRITICAL = 2 };
+
+// battery@1 from the pack's voltage. The level comes from typical per-chemistry thresholds per
+// cell (the same numbers as faber-capabilities' battery module; the interop tests check that they
+// agree), with a little hysteresis so a wobbling voltage doesn't flip it: Li-ion and LiPo are low
+// below 3.5 V a cell and critical below 3.3 V (10.5 V and 9.9 V for 3S). It sends the voltage and
+// the level only; no current, charge or temperature.
+class Battery : public Part {
+ public:
+  // capacityAh 0 = unknown. cellsInSeries 0 counts as 1.
+  Battery(const char* name, BatteryChemistry chemistry, uint8_t cellsInSeries, float capacityAh = 0,
+          uint16_t readingPeriodMs = 500);
+
+  uint8_t writeInfo(uint8_t* out) const override;
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+  // The level at `volts`, coming from `previous` (the level reported last).
+  BatteryLevel levelAt(float volts, BatteryLevel previous) const;
+  // The level reported last (BATTERY_OK before the first reading).
+  BatteryLevel level() const { return static_cast<BatteryLevel>(level_); }
+
+ protected:
+  ~Battery() {}
+  // The pack's voltage now (V). A negative or non-finite value means "can't measure": nothing is
+  // sent.
+  virtual float measureVolts() = 0;
+
+ private:
+  float capacityAh_;
+  BatteryChemistry chemistry_;
+  uint8_t cells_;
+  uint8_t level_;
 };
 
 // The board's side of the protocol.

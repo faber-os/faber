@@ -43,6 +43,23 @@ float FaberDistance::measure() {
   return raw * maxM_ / 1023.0f;
 }
 
+FaberBattery::FaberBattery(const char* name, uint8_t analogPin, float dividerRatio, uint8_t cellsInSeries,
+                           faberlink::BatteryChemistry chemistry, float referenceVolts, float capacityAh)
+    : faberlink::Battery(name, chemistry, cellsInSeries, capacityAh),
+      voltsPerCount_(referenceVolts * dividerRatio / 1023.0f),
+      pin_(analogPin) {
+  enqueue(this);
+}
+
+// The average of a few reads: a battery's voltage is noisy while motors run. Under a millisecond
+// twice a second, so loop() stays fast.
+float FaberBattery::measureVolts() {
+  const uint8_t reads = 8;
+  long sum = 0;
+  for (uint8_t i = 0; i < reads; i++) sum += analogRead(pin_);
+  return sum * voltsPerCount_ / reads;
+}
+
 FaberLink::FaberLink(HardwareSerial& port) : port_(port), serial_(&port), output_(port), board_(output_) {}
 
 FaberLink::FaberLink(Stream& port) : port_(port), serial_(0), output_(port), board_(output_) {}

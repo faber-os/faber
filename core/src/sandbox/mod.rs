@@ -38,6 +38,7 @@ pub mod app_bindings {
             "faber:capabilities/estop@0.1.0": super::bindings::faber::capabilities::estop,
             "faber:capabilities/pose@0.1.0": super::bindings::faber::capabilities::pose,
             "faber:capabilities/position@0.1.0": super::bindings::faber::capabilities::position,
+            "faber:capabilities/battery@0.1.0": super::bindings::faber::capabilities::battery,
             "faber:connector/types@0.1.0": super::bindings::faber::connector::types,
         },
     });

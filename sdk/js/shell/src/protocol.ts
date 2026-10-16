@@ -101,7 +101,14 @@ export type Request =
   /** Keep the lease alive without a command: the app must send this or a command every 100 ms. */
   | { type: 'renew'; role: string; index?: number }
   | { type: 'command'; role: string; index?: number; command: Command }
-  | { type: 'release'; role: string; index?: number };
+  | { type: 'release'; role: string; index?: number }
+  /** One value of the app's saved state (shared with its logic), or `null` when it isn't set. */
+  | { type: 'state-get'; key: string }
+  /** Saves one value (`null` removes it). Keys are 1-256 bytes; keys and values 64 KB together. */
+  | { type: 'state-set'; key: string; value: string | null }
+  | { type: 'state-keys' }
+  /** From now on, a `state` event for every change, whoever made it (the logic, any window). */
+  | { type: 'state-watch' };
 
 export type RequestType = Request['type'];
 
@@ -118,6 +125,10 @@ export interface ReplyValues {
   renew: null;
   command: CommandResult;
   release: null;
+  'state-get': string | null;
+  'state-set': null;
+  'state-keys': string[];
+  'state-watch': null;
 }
 
 export type RequestMessage = { faber: ProtocolVersion; id: number } & Request;
@@ -133,6 +144,8 @@ export type Event =
   | { faber: ProtocolVersion; event: 'signal-ended'; subscription: number; error: ErrorBody }
   | { faber: ProtocolVersion; event: 'theme'; theme: Theme }
   | { faber: ProtocolVersion; event: 'status'; status: AppStatus }
+  /** A key of the app's state changed (after `state-watch`); `value` is `null` when removed. */
+  | { faber: ProtocolVersion; event: 'state'; key: string; value: string | null }
   /** A lease ended without the app letting go: `reason` as the core says it (`expired`, `estop`, …). */
   | {
       faber: ProtocolVersion;

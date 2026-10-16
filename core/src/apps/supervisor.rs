@@ -275,7 +275,7 @@ mod tests {
     use super::*;
     use crate::apps::session::tests::{FakeDriver, role};
     use crate::apps::session::{Driver, Session};
-    use crate::apps::state::StateStore;
+    use crate::apps::state::SharedState;
     use crate::clock::MonotonicClock;
     use faber_capabilities::{Capability, Reading, distance};
 
@@ -335,7 +335,7 @@ mod tests {
                 pb.clone(),
                 Arc::clone(&r),
                 driver,
-                StateStore::in_memory(),
+                Arc::new(SharedState::in_memory("t")),
             );
             Ok(Box::new(Fake { session, ticks: Arc::clone(&t), crash_on }) as Box<dyn Logic>)
         });

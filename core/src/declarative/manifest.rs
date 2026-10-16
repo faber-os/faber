@@ -189,11 +189,22 @@ pub enum Parse {
         fields: Vec<FieldRule>,
         /// Fixed reading fields (`set = { status = "ok" }`).
         set: Template,
-        /// `distance@1` without a `status` field: worked out from the info's range (or `ok`).
-        status_from_range: bool,
+        /// A required reading field the line doesn't give, which Faber works out instead.
+        derive: Derive,
     },
     /// The built-in NMEA reader (`format = "nmea"`), for `position@1`.
     Nmea,
+}
+
+/// A required reading field that a pattern rule doesn't give, worked out by the engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Derive {
+    Nothing,
+    /// `distance@1` without a `status` field: from the info's range (or `ok`).
+    StatusFromRange,
+    /// `battery@1` without a `level` field: from `volts` and the battery's info (chemistry and
+    /// cells in series), with the capability's thresholds and hysteresis.
+    LevelFromVolts,
 }
 
 /// One `[[provides]]`: which signal, and how its lines become readings.
@@ -790,7 +801,7 @@ impl Builder<'_> {
                 "Add line = { pattern = \"D:{meters:f32}\" }, or line = { format = \"nmea\" } for a GPS.",
             ));
         };
-        let parse = self.parse(line, capability, settings)?;
+        let parse = self.parse(line, capability, info.is_some(), settings)?;
         Ok(Rule { provide: name, capability, info, parse })
     }
 
@@ -854,6 +865,7 @@ impl Builder<'_> {
         &self,
         line: Spanned<RawLine>,
         capability: Capability,
+        has_info: bool,
         settings: &[SettingSpec],
     ) -> Result<Parse, ManifestError> {
         let span = line.span();
@@ -975,9 +987,22 @@ impl Builder<'_> {
             let stand_in = if f.stays_whole() { Value::from(1) } else { Value::from(1.5) };
             values::set_path(&mut trial, &f.name, stand_in);
         }
-        let status_from_range = capability == Capability::Distance && !values::has_path(&trial, "status");
-        if status_from_range {
-            values::set_path(&mut trial, "status", "ok".into());
+        let derive = match capability {
+            Capability::Distance if !values::has_path(&trial, "status") => Derive::StatusFromRange,
+            Capability::Battery if !values::has_path(&trial, "level") => Derive::LevelFromVolts,
+            _ => Derive::Nothing,
+        };
+        match derive {
+            Derive::StatusFromRange => values::set_path(&mut trial, "status", "ok".into()),
+            Derive::LevelFromVolts if !has_info => {
+                return Err(self.err(
+                    span,
+                    "Faber works out a battery's level from its voltage, and needs its info for that.",
+                    "Add info = { chemistry = \"li-ion\", cells-in-series = 3 } to the provide (with your                      battery's chemistry and cell count), or a level field.",
+                ));
+            }
+            Derive::LevelFromVolts => values::set_path(&mut trial, "level", "ok".into()),
+            Derive::Nothing => {}
         }
         let given: Vec<String> = fields.iter().map(|f| f.name.clone()).chain(set_paths).collect();
         let reading = values::reading(capability, 0, trial.clone()).map_err(|why| {
@@ -1008,7 +1033,7 @@ impl Builder<'_> {
                 "Check the spelling against docs/capabilities.md.",
             ));
         }
-        Ok(Parse::Pattern { pattern, fields, set, status_from_range })
+        Ok(Parse::Pattern { pattern, fields, set, derive })
     }
 }
 
@@ -1058,9 +1083,9 @@ line = { pattern = "D:{meters:f32}", scale = 0.01 }   # "D:123" → 1.23 m
         assert_eq!(d.manifest.provides, [Provide::default_for(Capability::Distance)]);
         assert_eq!(d.manifest.validate(), Ok(()));
         assert_eq!(d.lines, LineOptions::default());
-        let Parse::Pattern { fields, status_from_range, .. } = &d.rules[0].parse else { panic!() };
+        let Parse::Pattern { fields, derive, .. } = &d.rules[0].parse else { panic!() };
         assert_eq!(fields[0].scale, Num::Fixed(0.01));
-        assert!(status_from_range);
+        assert_eq!(*derive, Derive::StatusFromRange);
         assert_eq!(package_kind(SENSOR).as_deref(), Some("declarative"));
     }
 
@@ -1253,8 +1278,8 @@ fields = { meters = { scale = 0.001 } }
             "line = { pattern = \"P {position.x:f32} {position.y:f32}\", set = { frame = \"odom\", position.z = 0, orientation = { x = 0, y = 0, z = 0, w = 1 } } }",
         );
         let d = parse(&text).unwrap();
-        let Parse::Pattern { status_from_range, .. } = d.rules[0].parse else { panic!() };
-        assert!(!status_from_range);
+        let Parse::Pattern { derive, .. } = d.rules[0].parse else { panic!() };
+        assert_eq!(derive, Derive::Nothing);
         let e = parse(&text.replace("frame = \"odom\", ", "")).unwrap_err();
         assert!(e.message.contains("missing field `frame`"), "{e}");
     }

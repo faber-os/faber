@@ -196,6 +196,11 @@ fn parts_phrase(parts: &[PartName]) -> String {
     }
 }
 
+/// An app's program key, as the taskbar pins it: `app:<id>`.
+pub fn app_program(id: &str) -> String {
+    format!("app:{id}")
+}
+
 impl Machine {
     fn package_store(&self) -> Store {
         Store::new(&self.data_dir)
@@ -355,6 +360,16 @@ impl Machine {
         }
         let installed = swapped.keep(&now_rfc3339(), source)?;
         tracing::info!(target: "core::machine", "installed the app {id} {} from {source}", installed.version);
+        // `[window] pinned`: on the taskbar from its first install. An update leaves the taskbar as
+        // the user has it, so unpinning it sticks.
+        let wants_pin =
+            matches!(&preview_of.of, PackagePreviewOf::App(m) if m.window.as_ref().is_some_and(|w| w.pinned));
+        if wants_pin
+            && preview_of.replaces.is_none()
+            && let Err(e) = self.settings.set_pinned(&app_program(&id), true)
+        {
+            tracing::warn!(target: "core::machine", "{id} couldn't be pinned to the taskbar: {} {}", e.message, e.hint);
+        }
         self.announce_packages();
         self.app_status.touch();
         let st = self.state.lock().expect("machine lock");
@@ -375,8 +390,12 @@ impl Machine {
                     format!("Turn it off first (POST /api/v0/apps/{id}/disable), then uninstall it."),
                 ));
             }
+            self.drop_app_state(id);
             self.package_store().uninstall(id)?;
             tracing::info!(target: "core::machine", "uninstalled the app {id}");
+            if let Err(e) = self.settings.set_pinned(&app_program(id), false) {
+                tracing::warn!(target: "core::machine", "{id} couldn't be unpinned: {} {}", e.message, e.hint);
+            }
             self.forget_app(id);
             self.reload_apps();
             self.announce_packages();

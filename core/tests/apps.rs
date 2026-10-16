@@ -289,6 +289,24 @@ async fn app_state_where(c: &TestCore, id: &str, what: &str, ok: impl Fn(&Value)
     }
 }
 
+/// The next WebSocket message `want` says yes to, within 5 s; others are skipped.
+async fn next_where<S>(ws: &mut S, want: impl Fn(&Value) -> bool) -> Value
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        let m = tokio::time::timeout(left, ws.next()).await.expect("a message within 5 s").unwrap().unwrap();
+        if let Message::Text(t) = m {
+            let v: Value = serde_json::from_str(&t).unwrap();
+            if want(&v) {
+                return v;
+            }
+        }
+    }
+}
+
 fn kind_is(kind: &'static str) -> impl Fn(&Value) -> bool {
     move |s| s["kind"] == kind
 }
@@ -425,6 +443,48 @@ async fn the_wall_follower_drives_along_a_wall_and_stops_when_turned_off() {
     assert_eq!((s, v["capability"].as_str()), (StatusCode::OK, Some("distance@1")), "{v}");
     let gap = v["reading"]["reading"]["meters"].as_f64().unwrap_or_else(|| panic!("{v}"));
     assert!((gap - 0.3).abs() < 0.08, "the derived signal says the gap: {gap}");
+    // Its window's speed slider and its logic share one state: a change through the API reaches
+    // the running logic at once, every window hears it, and it is saved within a second.
+    let sub = json!({"type": "subscribe", "id": 10, "topic": {"kind": "app-state", "app": "wall-follower"}});
+    ws.send(Message::Text(sub.to_string().into())).await.unwrap();
+    let on_topic = |want: &'static str| move |v: &Value| v["id"] == 10 && v["type"] == want;
+    let first = next_where(&mut ws, on_topic("app-state")).await;
+    assert_eq!(first["values"], json!({}), "{first}");
+    let (s, st) = call(
+        &c.app,
+        "PUT",
+        "/api/v0/apps/wall-follower/state",
+        Some(json!({"key": "speed", "value": "0.1"})),
+    )
+    .await;
+    assert_eq!((s, &st["values"]), (StatusCode::OK, &json!({"speed": "0.1"})), "{st}");
+    assert_eq!((st["bytes"].as_u64(), st["maxBytes"].as_u64()), (Some(8), Some(65536)));
+    let changed = next_where(&mut ws, on_topic("app-state-changed")).await;
+    assert_eq!((changed["key"].as_str(), changed["value"].as_str()), (Some("speed"), Some("0.1")));
+    wait_for("the logic to drive at the new speed", 3.0, || {
+        ((base(&c).commanded.vx - 0.1).abs() < 1e-4).then_some(())
+    })
+    .await;
+    wait_for("the state to be saved", 3.0, || {
+        std::fs::read_to_string(c.dir.path().join("apps/wall-follower/state.toml"))
+            .ok()
+            .filter(|t| t.contains("speed = \"0.1\""))
+    })
+    .await;
+    let (s, e) = call(
+        &c.app,
+        "PUT",
+        "/api/v0/apps/wall-follower/state",
+        Some(json!({"key": "big", "value": "x".repeat(70_000)})),
+    )
+    .await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::PAYLOAD_TOO_LARGE, Some("state-full")), "{e}");
+    let (s, e) =
+        call(&c.app, "PUT", "/api/v0/apps/wall-follower/state", Some(json!({"key": "", "value": "1"}))).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::BAD_REQUEST, Some("bad-key")), "{e}");
+    let (s, e) = call(&c.app, "GET", "/api/v0/apps/nope/state", None).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("unknown-app")), "{e}");
+
     // Derived signals are read-only: nobody can lease or command them.
     let (s, e) =
         call(&c.app, "POST", "/api/v0/parts/app:wall-follower/lease", Some(json!({"holder": "x"}))).await;
@@ -527,8 +587,13 @@ async fn a_trap_ends_the_lease_and_stops_the_base() {
     assert_eq!(base(&c).commanded, faber_capabilities::Twist2d::ZERO, "and the base stopped");
 
     // A limit is a crash too, and says which.
+    // (While the core runs, an app's state lives in the core: it is set through the API.)
     call(&c.app, "POST", "/api/v0/apps/trapper/disable", None).await;
-    std::fs::write(c.dir.path().join("apps/trapper/state.toml"), "hog = \"yes\"\n").unwrap();
+    for (key, value) in [("trap-after", Value::Null), ("hog", json!("yes"))] {
+        let change = json!({"key": key, "value": value});
+        let (s, e) = call(&c.app, "PUT", "/api/v0/apps/trapper/state", Some(change)).await;
+        assert_eq!(s, StatusCode::OK, "{e}");
+    }
     call(&c.app, "POST", "/api/v0/apps/trapper/enable", None).await;
     let a = app_state_where(&c, "trapper", "the memory limit", kind_is("failed")).await;
     assert!(a["state"]["message"].as_str().unwrap().contains("needed more than 32 MB"), "{a}");

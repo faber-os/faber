@@ -7,6 +7,7 @@
 use crate::sim::world::{Footprint, Geometry, Pose, Twist};
 use faber_capabilities::{Capability, Command, Info, Mount, Reading};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use ts_rs::TS;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -487,6 +488,26 @@ pub struct SignalInfo {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub info: Option<Info>,
+    /// A `battery@1` signal's voltages for its chemistry and cells, so screens show the same
+    /// thresholds the core uses for its level. Absent for anything else.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub battery: Option<BatteryVolts>,
+}
+
+/// A battery pack's voltages (V), from its chemistry's typical per-cell values (docs/capabilities.md).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BatteryVolts {
+    /// Empty, at rest.
+    pub empty: f32,
+    /// Full, at rest.
+    pub full: f32,
+    /// Below this the level is `low`.
+    pub low: f32,
+    /// Below this the level is `critical`.
+    pub critical: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -682,6 +703,12 @@ pub enum Topic {
     /// The installed apps: an `apps` list now and whenever one is installed, removed, turned on
     /// or off, gets other parts, or changes state.
     Apps,
+    /// Things to tell the user once, as they happen: a `notice` each (a battery's level changed).
+    /// Nothing is replayed; the log keeps them too.
+    Notices,
+    /// One app's saved state: an `app-state` message with all of it now, then an
+    /// `app-state-changed` for every key its logic or a window sets or removes.
+    AppState { app: String },
 }
 
 /// Messages from the shell to the core.
@@ -847,12 +874,82 @@ pub enum ServerMessage {
         done: u32,
         total: u32,
     },
+    /// Something to tell the user once (the `notices` topic).
+    Notice {
+        id: u32,
+        notice: Notice,
+    },
+    /// Everything an app has saved (the `app-state` topic, now and after a missed change).
+    AppState {
+        id: u32,
+        app: String,
+        values: BTreeMap<String, String>,
+    },
+    /// One key of an app's state was set (`value`) or removed (no `value`).
+    AppStateChanged {
+        id: u32,
+        app: String,
+        key: String,
+        #[ts(optional)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<String>,
+    },
     /// Something the client asked for failed. `id` is absent when it isn't tied to one request.
     Error {
         #[ts(optional)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<u32>,
         error: ErrorBody,
+    },
+}
+
+/// An app's saved state (`GET /api/v0/apps/{id}/state`): what its logic and its windows share.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppState {
+    pub values: BTreeMap<String, String>,
+    /// Its keys and values together, in bytes.
+    pub bytes: u32,
+    /// The most it may hold (64 KB).
+    pub max_bytes: u32,
+}
+
+impl AppState {
+    pub fn of(values: BTreeMap<String, String>) -> AppState {
+        let bytes = values.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as u32;
+        AppState { values, bytes, max_bytes: crate::apps::STATE_MAX_BYTES as u32 }
+    }
+}
+
+/// Body of `PUT /api/v0/apps/{id}/state`: one key, and its new value or `null` to remove it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AppStateChange {
+    pub key: String,
+    pub value: Option<String>,
+}
+
+/// Something the core tells every screen once, as it happens (docs/api.md, "Notices").
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case", tag = "kind")]
+#[ts(export)]
+pub enum Notice {
+    /// A battery's level changed: to `low` or `critical`, or back to `ok`.
+    #[serde(rename_all = "camelCase")]
+    BatteryLevel {
+        /// When (µs, core clock).
+        #[ts(type = "number")]
+        t_us: u64,
+        /// The battery's signal, e.g. `sennep.battery/battery`.
+        address: String,
+        level: faber_capabilities::battery::Level,
+        /// Left out for a battery seen for the first time.
+        #[ts(optional)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous: Option<faber_capabilities::battery::Level>,
+        volts: f32,
     },
 }
 
@@ -1172,6 +1269,13 @@ pub enum Pattern {
     Step {
         low: f32,
         high: f32,
+        period_s: f32,
+    },
+    /// From `from` to `to` in a straight line over `periodS`, then `to`: a battery running down.
+    #[serde(rename_all = "camelCase")]
+    Drain {
+        from: f32,
+        to: f32,
         period_s: f32,
     },
 }

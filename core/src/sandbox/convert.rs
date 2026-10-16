@@ -5,8 +5,8 @@
 use super::bindings::faber::capabilities as cap;
 use super::bindings::faber::connector::types as wit;
 use faber_capabilities::{
-    Command, Quaternion, Reading, Twist2d, Vec3, distance, estop, laser_scan, motor, planar_base, pose,
-    position,
+    Command, Quaternion, Reading, Twist2d, Vec3, battery, distance, estop, laser_scan, motor, planar_base,
+    pose, position,
 };
 use faber_connector::{CommandError, Health, Problem, Settings};
 
@@ -99,6 +99,19 @@ pub fn reading_from_wit(r: wit::Reading) -> Reading {
             speed_m_s: r.speed_m_s,
             course_rad: r.course_rad,
         }),
+        wit::Reading::Battery(r) => Reading::Battery(battery::Reading {
+            t_us: r.t_us,
+            volts: r.volts,
+            amps: r.amps,
+            charge: r.charge,
+            celsius: r.celsius,
+            cell_volts: r.cell_volts,
+            level: match r.level {
+                cap::battery::Level::Ok => battery::Level::Ok,
+                cap::battery::Level::Low => battery::Level::Low,
+                cap::battery::Level::Critical => battery::Level::Critical,
+            },
+        }),
     }
 }
 
@@ -182,6 +195,19 @@ pub fn reading_to_wit(r: Reading) -> wit::Reading {
             vertical_accuracy_m: r.vertical_accuracy_m,
             speed_m_s: r.speed_m_s,
             course_rad: r.course_rad,
+        }),
+        Reading::Battery(r) => wit::Reading::Battery(cap::battery::Reading {
+            t_us: r.t_us,
+            volts: r.volts,
+            amps: r.amps,
+            charge: r.charge,
+            celsius: r.celsius,
+            cell_volts: r.cell_volts,
+            level: match r.level {
+                battery::Level::Ok => cap::battery::Level::Ok,
+                battery::Level::Low => cap::battery::Level::Low,
+                battery::Level::Critical => cap::battery::Level::Critical,
+            },
         }),
     }
 }
@@ -284,6 +310,13 @@ mod tests {
                 engaged: true,
                 source: estop::Source::App,
                 reason: "x".into(),
+            }),
+            Reading::Battery(battery::Reading {
+                amps: Some(-2.0),
+                charge: Some(0.4),
+                celsius: Some(31.0),
+                cell_volts: Some(vec![3.7, 3.71, 3.69]),
+                ..battery::Reading::volts(5, 11.1, battery::Level::Low)
             }),
         ];
         for r in readings {

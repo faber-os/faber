@@ -32,6 +32,7 @@ pub fn routes() -> axum::Router<AppState> {
         .route("/api/v0/apps/{id}/enable", post(enable))
         .route("/api/v0/apps/{id}/disable", post(disable))
         .route("/api/v0/apps/{id}/roles", put(roles))
+        .route("/api/v0/apps/{id}/state", get(state).put(set_state))
         .route("/apps/{id}/ui/{*path}", get(ui_file))
         .route("/apps/{id}/icon.svg", get(icon))
 }
@@ -74,6 +75,26 @@ async fn roles(
         .collect();
     let app = blocking(move || s.machine.set_app_roles(&id, wanted)).await??;
     Ok(Json(convert::app_info(&app)))
+}
+
+/// Everything an app has saved: what its logic and its windows share.
+async fn state(State(s): State<AppState>, Path(id): Path<String>) -> Result<Json<dto::AppState>, Failure> {
+    let values = blocking(move || s.machine.app_state(&id)).await??;
+    Ok(Json(dto::AppState::of(values)))
+}
+
+/// Sets one key, or removes it with `"value": null`. The app's logic and windows hear it at once.
+async fn set_state(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<dto::AppStateChange>,
+) -> Result<Json<dto::AppState>, Failure> {
+    let values = blocking(move || {
+        s.machine.set_app_state(&id, &body.key, body.value.as_deref())?;
+        s.machine.app_state(&id)
+    })
+    .await??;
+    Ok(Json(dto::AppState::of(values)))
 }
 
 /// One file of an app's UI, with a strict content security policy and no type sniffing.

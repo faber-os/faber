@@ -112,11 +112,14 @@ drives a motor, and killing the app stops the motor.
 
 ## Phase 5: Apps and the SENNEP app
 
-- App manifest, roles, install-time role assignment
-- `@faber-os/shell` JS SDK for app UIs
+- [x] App manifest, roles, install-time role assignment (5a, 5b)
+- [x] `@faber-os/shell` JS SDK for app UIs (5b), with the app's shared state (5c)
+- [x] `battery@1` everywhere, for SENNEP's battery: types, WIT, FaberLink and `FaberBattery`, the
+  declarative engine, `generic-battery`, level notices and the Battery viewer (5c)
+- [x] Apps in the start menu and pinned to the taskbar; `faber new app` with a window (5c)
 - **`sennep` app v0:** LiDAR view, manual drive (on-screen joystick), battery, proximity ring
 - Derived signals: `sennep:pose` published and shown in the shell (D24)
-- Machine-config export/import
+- [x] Machine-config export/import: Share setup, a backup without the user's files (5c)
 
 **Done when:** SENNEP drives by hand from a browser window through Faber on the PC (Mega over USB).
 

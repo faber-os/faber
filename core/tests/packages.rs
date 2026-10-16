@@ -432,6 +432,63 @@ mod backups {
         reading_where(&c.app, "front/distance", |r| r["reading"]["meters"] == 1.5).await;
     }
 
+    /// Share setup (docs/apps.md §7, Q3): a backup without the user's files, to set up another
+    /// machine the same way. It holds the parts, the settings (but not the machine's name or its
+    /// developer settings), the apps and the installed packages; restored through the usual
+    /// checks, the receiving machine keeps its own name and files.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_shared_setup_sets_up_another_machine_but_keeps_its_name_and_files() {
+        let a = core();
+        call(
+            &a.app,
+            "POST",
+            "/api/v0/packages?name=my-sensor-0.1.0.faberpkg",
+            Some(Body::from(package(SENSOR))),
+        )
+        .await;
+        let part = json!({"name": "front", "connector": "my-sensor", "port": "replay:bench"});
+        assert_eq!(json_call(&a.app, "POST", "/api/v0/parts", part).await.0, StatusCode::CREATED);
+        let (_, mut settings) = call(&a.app, "GET", "/api/v0/settings", None).await;
+        settings["machine"]["name"] = json!("bench");
+        settings["appearance"]["theme"] = json!("dark");
+        assert_eq!(json_call(&a.app, "PUT", "/api/v0/settings", settings).await.0, StatusCode::OK);
+        std::fs::write(a.dir.path().join("files/Documents/secret.txt"), "mine").unwrap();
+        let (s, info) = call(&a.app, "POST", "/api/v0/backups/setup", None).await;
+        assert_eq!(s, StatusCode::CREATED, "{info}");
+        let path = info["path"].as_str().unwrap();
+        assert!(path.starts_with("home:/Backups/bench-setup-") && path.ends_with(".zip"), "{path}");
+        let zip = on_disk(&a, path);
+        let names: Vec<String> = {
+            let z = zip::ZipArchive::new(std::fs::File::open(&zip).unwrap()).unwrap();
+            z.file_names().map(|n| n.unwrap().into_owned()).collect()
+        };
+        assert!(
+            names.iter().all(|n| !n.starts_with("files/")),
+            "no Desktop, Documents or Recordings: {names:?}"
+        );
+        assert!(names.contains(&"connectors/my-sensor/faber.toml".to_string()), "{names:?}");
+
+        let b = core();
+        let (_, mut theirs) = call(&b.app, "GET", "/api/v0/settings", None).await;
+        theirs["machine"]["name"] = json!("other");
+        assert_eq!(json_call(&b.app, "PUT", "/api/v0/settings", theirs).await.0, StatusCode::OK);
+        std::fs::write(b.dir.path().join("files/Documents/theirs.txt"), "keep").unwrap();
+        let dest = b.dir.path().join("files/Backups");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::copy(&zip, dest.join(zip.file_name().unwrap())).unwrap();
+        let (s, e) = restore(&b, path).await;
+        assert_eq!(s, StatusCode::NO_CONTENT, "{e}");
+        let (_, after) = call(&b.app, "GET", "/api/v0/settings", None).await;
+        assert_eq!(
+            (after["machine"]["name"].as_str(), after["appearance"]["theme"].as_str()),
+            (Some("other"), Some("dark"))
+        );
+        assert_eq!(package_ids(&b).await, [("my-sensor".to_string(), "0.1.0".to_string())]);
+        reading_where(&b.app, "front/distance", |r| r["reading"]["meters"] == 1.5).await;
+        assert_eq!(std::fs::read_to_string(b.dir.path().join("files/Documents/theirs.txt")).unwrap(), "keep");
+        assert!(!b.dir.path().join("files/Documents/secret.txt").exists(), "nothing of the other's files");
+    }
+
     /// Connector code in a backup is never copied in blind: it goes through the package checks
     /// and the staging load first, and a connector that fails fails the whole restore.
     #[tokio::test(flavor = "multi_thread")]
@@ -579,6 +636,51 @@ mod backups {
         assert_eq!(gauges(&c).await["version"], "0.1.0");
         assert_eq!(std::fs::read_to_string(state_file(&c)).unwrap(), "laps = \"3\"\n");
         assert!(!c.dir.path().join("packages/staging/gauges").exists(), "staging cleaned");
+    }
+
+    async fn pinned(c: &TestCore) -> Vec<String> {
+        let (_, s) = call(&c.app, "GET", "/api/v0/settings", None).await;
+        serde_json::from_value(s["taskbar"]["pinned"].clone()).unwrap()
+    }
+
+    /// `[window] pinned = true` pins an app's window to the taskbar when it is first installed;
+    /// an update leaves the taskbar as the user has it, and uninstalling unpins it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_app_that_asks_is_pinned_on_its_first_install_and_unpinning_sticks() {
+        let c = core();
+        let pinned_app = GAUGES.replace("[[requires]]", "[window]\npinned = true\n[[requires]]");
+        install(&c, &pinned_app).await;
+        assert_eq!(pinned(&c).await.last().map(String::as_str), Some("app:gauges"));
+        let (_, mut settings) = call(&c.app, "GET", "/api/v0/settings", None).await;
+        let without: Vec<String> = pinned(&c).await.into_iter().filter(|k| k != "app:gauges").collect();
+        settings["taskbar"]["pinned"] = json!(without);
+        assert_eq!(json_call(&c.app, "PUT", "/api/v0/settings", settings).await.0, StatusCode::OK);
+        install(&c, &pinned_app.replace("0.1.0", "0.2.0")).await;
+        assert!(!pinned(&c).await.contains(&"app:gauges".to_string()), "unpinned stays unpinned");
+        call(&c.app, "DELETE", "/api/v0/packages/gauges", None).await;
+        install(&c, &pinned_app).await;
+        assert!(pinned(&c).await.contains(&"app:gauges".to_string()), "a fresh install pins again");
+        call(&c.app, "DELETE", "/api/v0/packages/gauges", None).await;
+        assert!(!pinned(&c).await.contains(&"app:gauges".to_string()), "uninstalling unpins");
+        install(&c, GAUGES).await;
+        assert!(!pinned(&c).await.contains(&"app:gauges".to_string()), "only an app that asks");
+    }
+
+    /// An app's state lives in the core and is written at most once a second; a backup made right
+    /// after a window changed it still holds the change.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backup_holds_what_a_window_has_just_set() {
+        let c = core();
+        install(&c, GAUGES).await;
+        let change = json!({"key": "speed", "value": "0.4"});
+        let (s, e) = json_call(&c.app, "PUT", "/api/v0/apps/gauges/state", change).await;
+        assert_eq!(s, StatusCode::OK, "{e}");
+        let path = back_up(&c).await;
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(on_disk(&c, &path)).unwrap()).unwrap();
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut zip.by_name("apps/gauges/state.toml").unwrap(), &mut text)
+            .unwrap();
+        assert!(text.contains("speed = \"0.4\""), "{text}");
     }
 
     /// App code in a backup is never copied in blind either: every app goes through the package

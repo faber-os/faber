@@ -243,6 +243,45 @@ export function simDistance(name = 'front', overrides: Partial<PartInfo> = {}): 
   });
 }
 
+/** A manual simulated 3S Li-ion battery, as the core describes `generic-battery`. */
+export function simBattery(name = 'pack', overrides: Partial<PartInfo> = {}): PartInfo {
+  return part(name, {
+    connector: 'generic-battery',
+    port: undefined,
+    simulate: 'manual',
+    signals: [
+      {
+        address: `${name}/battery`,
+        capability: 'battery@1',
+        info: {
+          capability: 'battery@1',
+          info: { chemistry: 'li-ion', cellsInSeries: 3, capacityAh: 2.2 },
+        },
+        battery: { empty: 9, full: 12.6, low: 10.5, critical: 9.9 },
+      },
+    ],
+    ...overrides,
+  });
+}
+
+/** An installed app with a window, as `GET /api/v0/apps` describes the wall follower. */
+export const WALL_FOLLOWER = {
+  id: 'wall-follower',
+  name: 'Wall follower',
+  version: '0.1.0',
+  enabled: false,
+  state: { kind: 'stopped' },
+  logic: true,
+  tickHz: 20,
+  roles: [],
+  publishes: [
+    { name: 'wall-distance', capability: 'distance@1', address: 'app:wall-follower/wall-distance' },
+  ],
+  ui: '/apps/wall-follower/ui/index.html',
+  icon: '/apps/wall-follower/icon.svg',
+  window: { title: 'Wall follower', width: 420, height: 340, pinned: false },
+};
+
 export const SAMPLE_PORT: PortInfo = {
   id: 'replay:ld19-sample',
   kind: 'replay',
@@ -432,6 +471,12 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
     /** What another browser tab's install or uninstall sends every tab (the `packages` topic). */
     pushPackages: (packages: unknown[]) =>
       ws.receive(bin({ type: 'packages', id: subscriptionId('packages'), packages })),
+    /** The installed apps, as the `apps` topic says them. */
+    pushApps: (apps: unknown[]) =>
+      ws.receive(bin({ type: 'apps', id: subscriptionId('apps'), apps })),
+    /** A notice from the core (the `notices` topic), e.g. a battery's level changing. */
+    pushNotice: (notice: unknown) =>
+      ws.receive(bin({ type: 'notice', id: subscriptionId('notices'), notice })),
     filesChanged: (folders: string[]) =>
       ws.receive(bin({ type: 'files-changed', id: subscriptionId('files'), folders })),
   };

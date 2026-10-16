@@ -37,6 +37,9 @@ import type {
  *   logic: the core's lease rules don't depend on the holder's name, and every lease list shows
  *   the user which app drives. It is renewed only by the page itself (its commands and `renew`),
  *   so a page that hangs lets it lapse within 250 ms and the part stops.
+ * - State: the app's saved state (`state-get/set/keys/watch`), shared with its logic through the
+ *   core. Keys are 1-256 bytes and everything together at most 64 KB, checked here before the
+ *   core checks it again.
  * - A new page in the frame, the app turned off or a role given another part end what the old
  *   page had; closing the window ends everything.
  *
@@ -54,6 +57,22 @@ export const DEFAULT_HZ = 10;
 export const MAX_SUBSCRIPTIONS = 16;
 /** The most messages one window may send a second (commands at 20 Hz need far fewer). */
 export const MAX_MESSAGES_PER_S = 200;
+/** An app's state: its keys and values together, in bytes, as the core counts them (UTF-8). */
+export const MAX_STATE_BYTES = 64 * 1024;
+/** The longest state key (bytes). */
+export const MAX_STATE_KEY_BYTES = 256;
+
+/** The app's saved state in the core (docs/api.md, "Apps"), as the host reaches it. */
+export interface AppStateClient {
+  /** Everything now (`onValues`, again after missed changes), then every change. */
+  watch(handlers: {
+    onValues(values: Record<string, string>): void;
+    onChange(key: string, value: string | null): void;
+    onError(e: ErrorBody): void;
+  }): () => void;
+  /** Sets a key, or removes it with `null`. */
+  set(key: string, value: string | null): Promise<Result<unknown>>;
+}
 
 /** A message as `window` hands it over: who sent it, from which origin, and what. */
 export interface Incoming {
@@ -86,6 +105,8 @@ export interface AppHostDeps {
    */
   confirmDriving(part: string): Promise<boolean>;
   theme(): Theme;
+  /** The app's saved state, shared with its logic. */
+  appState: AppStateClient;
   /** Called with the parts the window drives, whenever that changes (the window shows them). */
   onDriving?: (parts: string[]) => void;
   /** Milliseconds, for the message rate. */
@@ -106,7 +127,9 @@ type ErrorCode =
   | 'bad-command'
   | 'too-many-requests'
   | 'too-many-subscriptions'
-  | 'app-gone';
+  | 'app-gone'
+  | 'bad-key'
+  | 'state-full';
 
 function fail(
   code: ErrorCode,
@@ -182,7 +205,17 @@ function fail(
       };
     case 'app-gone':
       return { code, message: t('appHost.appGone.message'), hint: t('appHost.appGone.hint') };
+    case 'bad-key':
+      return { code, message: t('appHost.badKey.message'), hint: t('appHost.badKey.hint') };
+    case 'state-full':
+      return { code, message: t('appHost.stateFull.message'), hint: t('appHost.stateFull.hint') };
   }
+}
+
+const utf8 = new TextEncoder();
+
+function bytes(s: string): number {
+  return utf8.encode(s).length;
 }
 
 /** What a lease holder is called for an app: `app:<id>`, as the core names the app's logic. */
@@ -247,6 +280,12 @@ export class AppHost {
   private disposed = false;
   private readonly stopLeaseWatch: () => void;
   private readonly now: () => number;
+  /** The app's state as the core has it, once a page asked for it; kept by the `app-state` topic. */
+  private stateValues: Map<string, string> | null = null;
+  private stateReady: Promise<Map<string, string>> | null = null;
+  private stopStateWatch: (() => void) | null = null;
+  /** The page asked for `state` events (`state-watch`). */
+  private stateWatched = false;
 
   constructor(private readonly deps: AppHostDeps) {
     this.now = deps.now ?? Date.now;
@@ -296,6 +335,7 @@ export class AppHost {
     this.generation++;
     void this.endAll();
     this.count = 0;
+    this.stateWatched = false;
   }
 
   /** The app changed (the `apps` topic): tell the page, and end what it may no longer have. */
@@ -351,6 +391,8 @@ export class AppHost {
     this.disposed = true;
     this.generation++;
     this.stopLeaseWatch();
+    this.stopStateWatch?.();
+    this.stopStateWatch = null;
     await this.endAll();
   }
 
@@ -496,9 +538,84 @@ export class AppHost {
         return this.command(m.role, m.index, m.command);
       case 'release':
         return this.release(m.role, m.index);
+      case 'state-get':
+        return (await this.state()).get(this.stateKey(m.key)) ?? null;
+      case 'state-keys':
+        return [...(await this.state()).keys()].sort();
+      case 'state-set':
+        return this.setState(m.key, m.value);
+      case 'state-watch':
+        await this.state();
+        this.stateWatched = true;
+        return null;
       default:
         throw new Refused(fail('unknown-request', { name: type }));
     }
+  }
+
+  /** A state key, checked: 1 to 256 bytes. */
+  private stateKey(key: unknown): string {
+    if (typeof key !== 'string') throw new Refused(fail('bad-request'));
+    const n = bytes(key);
+    if (n === 0 || n > MAX_STATE_KEY_BYTES) throw new Refused(fail('bad-key'));
+    return key;
+  }
+
+  /** The app's state, following the core's from the first time a page asks. */
+  private state(): Promise<Map<string, string>> {
+    this.app();
+    this.stateReady ??= new Promise((resolve, reject) => {
+      this.stopStateWatch = this.deps.appState.watch({
+        onValues: (values) => {
+          const before = this.stateValues;
+          const now = new Map(Object.entries(values));
+          this.stateValues = now;
+          if (before) {
+            for (const [k] of before) if (!now.has(k)) this.stateChanged(k, null);
+            for (const [k, v] of now) if (before.get(k) !== v) this.stateChanged(k, v);
+          }
+          resolve(now);
+        },
+        onChange: (key, value) => {
+          const values = this.stateValues;
+          if (!values) return;
+          if (value === null) values.delete(key);
+          else values.set(key, value);
+          this.stateChanged(key, value);
+        },
+        onError: (e) => {
+          this.stopStateWatch?.();
+          this.stopStateWatch = null;
+          this.stateReady = null;
+          this.stateValues = null;
+          reject(new Refused(e));
+        },
+      });
+    });
+    return this.stateReady;
+  }
+
+  private stateChanged(key: string, value: string | null): void {
+    if (this.stateWatched && !this.disposed)
+      this.deps.post({ faber: PROTOCOL, event: 'state', key, value });
+  }
+
+  private async setState(rawKey: unknown, value: unknown): Promise<null> {
+    const key = this.stateKey(rawKey);
+    if (value !== null && typeof value !== 'string') throw new Refused(fail('bad-request'));
+    const values = await this.state();
+    const old = values.get(key);
+    let total = 0;
+    for (const [k, v] of values) total += bytes(k) + bytes(v);
+    if (old !== undefined) total -= bytes(key) + bytes(old);
+    if (value !== null && total + bytes(key) + bytes(value) > MAX_STATE_BYTES)
+      throw new Refused(fail('state-full'));
+    const r = await this.deps.appState.set(key, value);
+    if (!r.ok) throw new Refused(r.error);
+    // The topic says so too; keep the copy right for the next request already.
+    if (value === null) values.delete(key);
+    else values.set(key, value);
+    return null;
   }
 
   private hello(): Hello {

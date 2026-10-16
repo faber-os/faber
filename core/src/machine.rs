@@ -30,6 +30,7 @@ use crate::files::{self, Entry, FileError, Files, Special, VPath, WriteMode};
 use crate::host;
 use crate::leases::{EndReason, Leases};
 use crate::names::{PartName, SignalAddress};
+use crate::notices::Notices;
 use crate::ports::{
     Claimant, Claims, PortEntry, PortEvent, PortId, PortOpener, PortProblem, PortReader, PortWriter,
     ReplayLibrary, SAMPLE_LD19_BYTES, SAMPLE_LD19_NAME, SerialDiscovery, UsbProblemDiscovery, catalog,
@@ -294,6 +295,8 @@ pub struct Machine {
     estop_events: broadcast::Sender<estop::Reading>,
     world_events: broadcast::Sender<WorldChanged>,
     flash_events: broadcast::Sender<FlashProgress>,
+    /// Battery level changes and the like, seen on every published reading.
+    notices: Arc<Notices>,
     /// What bridges need the machine to do. Their threads send without waiting; the sweeper
     /// handles it, so a bridge never waits for the machine's lock.
     bridge_events: mpsc::Sender<BridgeEvent>,
@@ -303,6 +306,9 @@ pub struct Machine {
     /// The installed apps and the running ones (docs/apps.md). Locked before `state`, never after.
     apps: Mutex<apps::Apps>,
     app_status: Arc<crate::apps::StatusBoard>,
+    /// Each installed app's state, shared by its logic and its windows. A leaf lock: nothing
+    /// else is taken while it is held.
+    app_states: Mutex<BTreeMap<String, Arc<crate::apps::SharedState>>>,
     /// This machine, for what it hands out that must not keep it alive (apps' lease driver).
     me: OnceLock<Weak<Machine>>,
 }
@@ -328,6 +334,11 @@ impl Machine {
         let settings = SettingsStore::load(&config_dir);
         let translations = Translations::open(&config_dir);
         let router = Arc::new(Router::new());
+        let notices = Arc::new(Notices::new(Arc::clone(&opts.clock)));
+        let tap = Arc::clone(&notices);
+        router.set_tap(Arc::new(move |address, reading| {
+            tap.observe(address, reading);
+        }));
         opts.world.attach(Arc::clone(&router));
         let (connectors, connector_problems) =
             installed_connectors(opts.connectors.clone(), &opts.data_dir.join("connectors"));
@@ -375,12 +386,14 @@ impl Machine {
             estop_events: broadcast::channel(64).0,
             world_events: broadcast::channel(16).0,
             flash_events: broadcast::channel(256).0,
+            notices,
             bridge_events,
             bridge_inbox: Mutex::new(bridge_inbox),
             stop_sweeping: Arc::new(AtomicBool::new(false)),
             sweeper: Mutex::new(None),
             apps: Mutex::new(apps::Apps::default()),
             app_status: Arc::new(crate::apps::StatusBoard::default()),
+            app_states: Mutex::new(BTreeMap::new()),
             me: OnceLock::new(),
         });
         let _ = machine.me.set(Arc::downgrade(&machine));
@@ -417,6 +430,7 @@ impl Machine {
         }
         // The sweeper is gone, so nothing starts them again; their leases end as they stop.
         self.stop_apps();
+        self.save_app_states();
         let mut st = self.state.lock().expect("machine lock");
         self.revoke_all(&mut st, EndReason::Shutdown);
         let names: Vec<_> = st.running.keys().cloned().collect();
@@ -1264,12 +1278,26 @@ impl Machine {
 
     /// Saves a backup in `home:/Backups` (D41). Returns its path and size.
     pub fn create_backup(&self, include_recordings: bool) -> Result<(String, u64), MachineError> {
+        self.write_backup(include_recordings, false)
+    }
+
+    /// Saves this machine's setup in `home:/Backups` (Settings → Storage → Share setup): a backup
+    /// without the user's files, the machine's name or its developer settings, to set up another
+    /// machine the same way. It restores like a backup. Returns its path and size.
+    pub fn share_setup(&self) -> Result<(String, u64), MachineError> {
+        self.write_backup(false, true)
+    }
+
+    fn write_backup(&self, include_recordings: bool, setup: bool) -> Result<(String, u64), MachineError> {
         let home = self.files.home_dir().to_path_buf();
         let settings_path = self.config_path.with_file_name(settings_file::FILE_NAME);
         // No install or uninstall half-way through while the connectors are copied.
         let _one_at_a_time = self.package_lock.lock().expect("package lock");
+        // What an app's window changed in the last second is in memory still: write it first.
+        self.save_app_states();
         let (packages_path, connectors, connector_ids) = self.packages_to_back_up()?;
         let (apps_toml, apps, app_ids) = self.apps_to_back_up()?;
+        let settings_text = setup.then(|| crate::settings::setup_text(&self.settings.get()));
         let src = backup::Sources {
             parts_toml: &self.config_path,
             settings_toml: &settings_path,
@@ -1281,20 +1309,23 @@ impl Machine {
             app_ids: &app_ids,
             home: &home,
             include_recordings,
+            setup: settings_text.as_deref(),
         };
         self.check_room(
             backup::source_bytes(&src),
-            "The backup",
+            if setup { "The setup" } else { "The backup" },
             "Delete old backups or recordings and empty the Trash, or leave the recordings out.",
         )?;
         let folder = home.join(Special::Backups.name());
+        let named = if setup { backup::setup_file_name } else { backup::file_name };
         let name = files::unique_name(
             &folder,
-            &backup::file_name(jiff::Timestamp::now(), &self.display_zone(), &self.settings().machine.name),
+            &named(jiff::Timestamp::now(), &self.display_zone(), &self.settings().machine.name),
         );
         let bytes = backup::create(&src, &folder.join(&name))?;
         let p = VPath::home(&["Backups", &name]);
-        tracing::info!(target: "core::backup", "saved the backup {p} ({bytes} bytes)");
+        let what = if setup { "setup" } else { "backup" };
+        tracing::info!(target: "core::backup", "saved the {what} {p} ({bytes} bytes)");
         self.notify_files(std::slice::from_ref(&p));
         Ok((p.to_string(), bytes))
     }
@@ -1370,7 +1401,8 @@ impl Machine {
             self.restore_apps_config(text)?;
         }
         if let Some(s) = restored_settings {
-            self.settings.restore(s)?;
+            // A setup has no name of its own: this machine keeps its own.
+            self.settings.restore(s, archive.is_setup())?;
         }
         let result = items.iter().try_for_each(|(vp, item)| self.restore_item(&mut archive, vp, item));
         self.notify_folders(&[VPath::home(&[])]);
@@ -2911,6 +2943,28 @@ connector =
         assert_eq!(m.set_pattern("front", bad).unwrap_err().code, "bad-pattern");
         m.add_part(demo("lidar")).unwrap();
         assert_eq!(m.set_pattern("lidar", Pattern::Steady { value: 1.0 }).unwrap_err().code, "not-manual");
+        m.shutdown();
+    }
+
+    #[test]
+    fn a_manual_battery_is_a_voltage_that_can_drain() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = machine(dir.path(), no_ports());
+        sim(&m, "battery", "generic-battery", Simulate::Manual, "rate-hz = 100\n");
+        let level = |m: &Machine| match latest(m, "battery/battery") {
+            Some(Reading::Battery(b)) => Some((b.volts, b.level)),
+            _ => None,
+        };
+        let start = Instant::now();
+        while level(&m) != Some((12.3, faber_capabilities::battery::Level::Ok)) {
+            assert!(start.elapsed() < Duration::from_secs(2), "{:?}", level(&m));
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        m.set_pattern("battery", Pattern::Drain { from: 10.0, to: 9.0, period_s: 0.2 }).unwrap();
+        while level(&m) != Some((9.0, faber_capabilities::battery::Level::Critical)) {
+            assert!(start.elapsed() < Duration::from_secs(3), "{:?}", level(&m));
+            std::thread::sleep(Duration::from_millis(5));
+        }
         m.shutdown();
     }
 

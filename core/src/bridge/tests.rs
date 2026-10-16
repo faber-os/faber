@@ -1,7 +1,7 @@
 use super::testboard::{ScriptedBoard, Wire, motor_info};
 use super::*;
 use crate::clock::MonotonicClock;
-use faber_capabilities::{Info, Twist2d, motor, planar_base};
+use faber_capabilities::{Info, Twist2d, battery, motor, planar_base};
 use faberlink::Message;
 use faberlink_interop::{FakeBoard, Motor, Sensor};
 use std::collections::BTreeMap;
@@ -125,6 +125,31 @@ fn the_boards_parts_become_sub_parts_whose_readings_reach_their_signals() {
     });
     let declared: Vec<_> = r.router.signals().into_iter().map(|(a, _)| a.to_string()).collect();
     assert!(declared.contains(&"mega/estop".to_string()), "{declared:?}");
+}
+
+#[test]
+fn a_boards_battery_becomes_a_sub_part_with_its_voltage_and_level() {
+    let r = rig(FakeBoard::with_battery(250, 0, 3, 15.0));
+    running(&r, "mega.battery");
+    let sub = r.handle.sub_parts().into_iter().find(|s| s.name.to_string() == "mega.battery").unwrap();
+    assert_eq!(
+        sub.provide.and_then(|p| p.info),
+        Some(Info::Battery(battery::Info {
+            chemistry: battery::Chemistry::LiIon,
+            cells_in_series: 3,
+            capacity_ah: Some(15.0)
+        }))
+    );
+    r.wire.board(|b| b.set_battery_volts(10.2));
+    let address = SignalAddress::parse("mega.battery/battery").unwrap();
+    eventually("a low battery at 10.2 V", || {
+        let latest = r.router.latest(&address).flatten();
+        let seen = latest.as_deref().map(|r| match r {
+            Reading::Battery(b) => (b.volts, b.level),
+            _ => (-1.0, battery::Level::Ok),
+        });
+        (seen == Some((10.2, battery::Level::Low)), seen)
+    });
 }
 
 #[test]

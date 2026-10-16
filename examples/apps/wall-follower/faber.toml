@@ -13,7 +13,7 @@ tick-hz = 20                    # 20 times a second: more often than the LiDAR's
 [window]
 title = "Wall follower"
 width = 420
-height = 260
+height = 340
 
 # The LiDAR it looks at the wall with.
 [[requires]]

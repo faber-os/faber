@@ -135,6 +135,11 @@ impl Machine {
         self.lease_events.subscribe()
     }
 
+    /// Every notice from now on: a battery's level changing (docs/capabilities.md).
+    pub fn notices(&self) -> tokio::sync::broadcast::Receiver<crate::notices::Notice> {
+        self.notices.subscribe()
+    }
+
     /// Fires on every engage and release of the e-stop. None is lost (every-message).
     pub fn estop_events(&self) -> tokio::sync::broadcast::Receiver<estop::Reading> {
         self.estop_events.subscribe()
@@ -576,6 +581,7 @@ pub(super) fn sweep_leases(machine: Weak<Machine>, stop: Arc<AtomicBool>) {
                 m.sweep();
                 if apps_checked.elapsed() >= APPS_EVERY {
                     m.reconcile_apps();
+                    m.flush_app_states();
                     apps_checked = std::time::Instant::now();
                 }
             }

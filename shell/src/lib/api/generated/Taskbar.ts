@@ -3,6 +3,7 @@ import type { TaskbarSize } from "./TaskbarSize";
 
 export type Taskbar = { 
 /**
- * Programs pinned to the taskbar, in order: `tool:<id>` or `accessory:<id>`.
+ * Programs pinned to the taskbar, in order: `tool:<id>`, `accessory:<id>` or `app:<id>`
+ * (an installed app's window).
  */
 pinned: Array<string>, size: TaskbarSize, };

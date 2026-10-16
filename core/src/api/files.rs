@@ -29,6 +29,7 @@ pub fn routes() -> axum::Router<AppState> {
         .route("/api/v0/storage", get(storage))
         .route("/api/v0/backups", post(create_backup))
         .route("/api/v0/backups/restore", post(restore_backup))
+        .route("/api/v0/backups/setup", post(share_setup))
         .route("/api/v0/settings", get(settings).put(update_settings))
         .route("/api/v0/settings/reset", post(reset_settings))
         .route("/api/v0/settings/developer", post(change_developer))
@@ -214,6 +215,12 @@ async fn create_backup(
     ApiJson(body): ApiJson<dto::BackupRequest>,
 ) -> Result<(StatusCode, Json<dto::BackupInfo>), Failure> {
     let (path, bytes) = blocking(move || s.machine.create_backup(body.include_recordings)).await??;
+    Ok((StatusCode::CREATED, Json(dto::BackupInfo { path, bytes })))
+}
+
+/// Saves this machine's setup (a backup without the user's files or the machine's name).
+async fn share_setup(State(s): State<AppState>) -> Result<(StatusCode, Json<dto::BackupInfo>), Failure> {
+    let (path, bytes) = blocking(move || s.machine.share_setup()).await??;
     Ok((StatusCode::CREATED, Json(dto::BackupInfo { path, bytes })))
 }
 

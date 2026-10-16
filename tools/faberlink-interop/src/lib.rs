@@ -15,6 +15,14 @@ mod ffi {
     unsafe extern "C" {
         pub fn flh_new(heartbeat_timeout_ms: u16) -> *mut c_void;
         pub fn flh_new_mega(heartbeat_timeout_ms: u16, motor_lease_ms: u16) -> *mut c_void;
+        pub fn flh_new_with_battery(
+            heartbeat_timeout_ms: u16,
+            chemistry: u8,
+            cells: u8,
+            capacity_ah: f32,
+        ) -> *mut c_void;
+        pub fn flh_set_battery_volts(h: *mut c_void, volts: f32);
+        pub fn flh_battery_level_at(h: *mut c_void, volts: f32, previous: u8) -> u8;
         pub fn flh_motor_output_at(h: *mut c_void, i: i32) -> f32;
         pub fn flh_set_distance_at(h: *mut c_void, i: i32, meters: f32);
         pub fn flh_free(h: *mut c_void);
@@ -50,6 +58,27 @@ mod ffi {
         pub fn new_mega(heartbeat_timeout_ms: u16, motor_lease_ms: u16) -> Handle {
             // SAFETY: flh_new_mega allocates a harness and returns a valid pointer to it.
             Handle(unsafe { flh_new_mega(heartbeat_timeout_ms, motor_lease_ms) })
+        }
+
+        pub fn new_with_battery(
+            heartbeat_timeout_ms: u16,
+            chemistry: u8,
+            cells: u8,
+            capacity_ah: f32,
+        ) -> Handle {
+            // SAFETY: flh_new_with_battery allocates a harness and returns a valid pointer to it;
+            // an unknown chemistry is treated as Li-ion by the library.
+            Handle(unsafe { flh_new_with_battery(heartbeat_timeout_ms, chemistry, cells, capacity_ah) })
+        }
+
+        pub fn set_battery_volts(&mut self, volts: f32) {
+            // SAFETY: self.0 is a live harness.
+            unsafe { flh_set_battery_volts(self.0, volts) }
+        }
+
+        pub fn battery_level_at(&self, volts: f32, previous: u8) -> u8 {
+            // SAFETY: self.0 is a live harness; any byte is a valid previous level to compare.
+            unsafe { flh_battery_level_at(self.0, volts, previous) }
         }
 
         pub fn motor_output_at(&self, i: i32) -> f32 {
@@ -175,6 +204,26 @@ impl FakeBoard {
     /// SAFE from the board's own lease running out.
     pub fn mega_with_motor_lease(heartbeat_timeout_ms: u16, motor_lease_ms: u16) -> FakeBoard {
         FakeBoard { handle: ffi::Handle::new_mega(heartbeat_timeout_ms, motor_lease_ms) }
+    }
+
+    /// The small board plus a battery, `battery` (part 2), reporting every 100 ms. `chemistry` is
+    /// its code in the FaberLink info layout (0 li-ion, 1 lipo, 2 lifepo4, 3 nimh, 4 lead-acid),
+    /// `capacity_ah` 0 for unknown.
+    pub fn with_battery(heartbeat_timeout_ms: u16, chemistry: u8, cells: u8, capacity_ah: f32) -> FakeBoard {
+        FakeBoard {
+            handle: ffi::Handle::new_with_battery(heartbeat_timeout_ms, chemistry, cells, capacity_ah),
+        }
+    }
+
+    /// Sets the voltage the board's battery measures.
+    pub fn set_battery_volts(&mut self, volts: f32) {
+        self.handle.set_battery_volts(volts);
+    }
+
+    /// The level the C++ library gives `volts`, coming from `previous`, both as their codes in the
+    /// reading layout (0 ok, 1 low, 2 critical).
+    pub fn battery_level_at(&self, volts: f32, previous: u8) -> u8 {
+        self.handle.battery_level_at(volts, previous)
     }
 
     /// What one motor of a [`FakeBoard::mega`] is driven at now: [`Motor::Left`] or

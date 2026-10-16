@@ -13,6 +13,11 @@
 //! files/Recordings/…      only when asked for (recordings are big)
 //! ```
 //!
+//! A **setup** (Settings → Storage → Share setup) is a backup without the user's files: the same
+//! layout with no `files/`, settings without the machine's name or its developer settings, and
+//! `config/setup.toml` to say so. It restores through the same checks, keeping the receiving
+//! machine's name and files.
+//!
 //! This module only packs and unpacks. Checking what is inside before anything changes (for a
 //! connector or an app: the same checks and staging load as installing its package), and putting
 //! it back, is the machine's job.
@@ -28,6 +33,10 @@ pub const PARTS: &str = "config/parts.toml";
 pub const SETTINGS: &str = "config/settings.toml";
 pub const PACKAGES: &str = "config/packages.toml";
 pub const APPS_TOML: &str = "config/apps.toml";
+/// Marks a setup: a backup without the user's files or the machine's name.
+pub const SETUP: &str = "config/setup.toml";
+const SETUP_TEXT: &str = "# A Faber setup (Settings → Storage → Share setup): this machine's parts, apps and\n\
+    # settings, without its files, its name or its developer settings.\nkind = \"setup\"\n";
 const CONNECTORS: &str = "connectors/";
 const APPS: &str = "apps/";
 const FILES: &str = "files/";
@@ -79,11 +88,15 @@ pub struct Sources<'a> {
     /// The home folder (`<data>/files`).
     pub home: &'a Path,
     pub include_recordings: bool,
+    /// `Some` for a setup: these settings (without the machine's name and developer settings)
+    /// instead of `settings_toml`, and none of the home folder's files.
+    pub setup: Option<&'a str>,
 }
 
 impl Sources<'_> {
     fn folders(&self) -> impl Iterator<Item = &'static str> + '_ {
-        FOLDERS.into_iter().filter(|f| self.include_recordings || *f != "Recordings")
+        let files = self.setup.is_none();
+        FOLDERS.into_iter().filter(move |f| files && (self.include_recordings || *f != "Recordings"))
     }
 }
 
@@ -174,8 +187,20 @@ fn write_zip(src: &Sources, out: &Path) -> Result<(), BackupError> {
     };
     let parts = fs::metadata(src.parts_toml).map_err(|e| BackupError::io("read parts.toml", &e))?;
     add_file(&mut zip, PARTS, src.parts_toml, parts.len())?;
-    if let Ok(meta) = fs::metadata(src.settings_toml) {
-        add_file(&mut zip, SETTINGS, src.settings_toml, meta.len())?;
+    let add_text = |zip: &mut ZipWriter<File>, name: &str, text: &str| {
+        zip.start_file(name, options).map_err(zip_err)?;
+        zip.write_all(text.as_bytes()).map_err(io_err)
+    };
+    match src.setup {
+        Some(settings) => {
+            add_text(&mut zip, SETUP, SETUP_TEXT)?;
+            add_text(&mut zip, SETTINGS, settings)?;
+        }
+        None => {
+            if let Ok(meta) = fs::metadata(src.settings_toml) {
+                add_file(&mut zip, SETTINGS, src.settings_toml, meta.len())?;
+            }
+        }
     }
     if let Ok(meta) = fs::metadata(src.packages_toml) {
         add_file(&mut zip, PACKAGES, src.packages_toml, meta.len())?;
@@ -203,6 +228,11 @@ fn write_zip(src: &Sources, out: &Path) -> Result<(), BackupError> {
 pub fn file_name(now: jiff::Timestamp, zone: &str, machine: &str) -> String {
     let tz = jiff::tz::TimeZone::get(zone).unwrap_or(jiff::tz::TimeZone::UTC);
     format!("{machine}-backup-{}.zip", now.to_zoned(tz).strftime("%Y-%m-%d-%H%M"))
+}
+
+/// `sennep-setup-2026-10-15-1430.zip`, like [`file_name`].
+pub fn setup_file_name(now: jiff::Timestamp, zone: &str, machine: &str) -> String {
+    file_name(now, zone, machine).replacen("-backup-", "-setup-", 1)
 }
 
 /// One file or folder from the home folder, inside a backup.
@@ -256,6 +286,8 @@ pub struct Archive {
     settings_toml: Option<String>,
     packages_toml: Option<String>,
     apps_toml: Option<String>,
+    /// It is a setup (`config/setup.toml`): no files, and not the machine's name.
+    setup: bool,
     /// By the connector folder's name, as the backup has it (not checked yet).
     connectors: BTreeMap<String, Vec<PackageFile>>,
     /// By the app folder's name, as the backup has it (not checked yet).
@@ -273,6 +305,7 @@ impl Archive {
         let mut connectors = BTreeMap::<String, Vec<PackageFile>>::new();
         let mut apps = BTreeMap::<String, Vec<PackageFile>>::new();
         let mut unexpected: Option<String> = None;
+        let mut setup = false;
         for index in 0..zip.len() {
             let mut entry = zip
                 .by_index(index)
@@ -281,6 +314,10 @@ impl Archive {
                 .name()
                 .map_err(|e| BackupError::invalid(format!("A name in the backup can't be read ({e}).")))?
                 .into_owned();
+            if name == SETUP {
+                setup = read_config(&mut entry, &name)?.contains("kind = \"setup\"");
+                continue;
+            }
             if name == PARTS || name == SETTINGS || name == PACKAGES || name == APPS_TOML {
                 let text = Some(read_config(&mut entry, &name)?);
                 match name.as_str() {
@@ -334,7 +371,25 @@ impl Archive {
                 "The backup holds {name}, which a Faber backup never does."
             )));
         }
-        Ok(Archive { zip, parts_toml, settings_toml, packages_toml, apps_toml, connectors, apps, items })
+        if setup && !items.is_empty() {
+            return Err(BackupError::invalid("The setup holds files, which a Faber setup never does."));
+        }
+        Ok(Archive {
+            zip,
+            parts_toml,
+            settings_toml,
+            packages_toml,
+            apps_toml,
+            setup,
+            connectors,
+            apps,
+            items,
+        })
+    }
+
+    /// A setup (Share setup): it restores without touching the machine's name or files.
+    pub fn is_setup(&self) -> bool {
+        self.setup
     }
 
     pub fn parts_toml(&self) -> &str {
@@ -531,6 +586,7 @@ mod tests {
             app_ids: &app_ids,
             home: &home,
             include_recordings,
+            setup: None,
         };
         let bytes = create(&src, &dest).unwrap();
         assert_eq!(bytes, fs::metadata(&dest).unwrap().len());
@@ -595,6 +651,45 @@ mod tests {
     }
 
     #[test]
+    fn a_setup_holds_the_machine_without_its_files() {
+        let data = Data::new();
+        let (parts, settings, home) = data.sources();
+        let (packages, connectors) = data.packages();
+        let (apps_toml, apps) = data.apps();
+        let dest = data.dir.path().join("files/Backups/s.zip");
+        let (ids, app_ids) = (["my-sensor".to_string()], ["gauges".to_string()]);
+        let src = Sources {
+            parts_toml: &parts,
+            settings_toml: &settings,
+            packages_toml: &packages,
+            connectors: &connectors,
+            connector_ids: &ids,
+            apps_toml: &apps_toml,
+            apps: &apps,
+            app_ids: &app_ids,
+            home: &home,
+            include_recordings: true,
+            setup: Some("[units]\nlength = \"imperial\"\n"),
+        };
+        create(&src, &dest).unwrap();
+        let mut a = Archive::open(&dest).unwrap();
+        assert!(a.is_setup());
+        assert!(a.items().is_empty(), "no Desktop, Documents or Recordings: {:?}", paths(&a));
+        assert_eq!(a.settings_toml(), Some("[units]\nlength = \"imperial\"\n"), "its own settings text");
+        assert_eq!(a.parts_toml(), "# my parts\n");
+        assert_eq!(
+            (a.connector_ids(), a.package_ids(Folder::Apps)),
+            (vec!["my-sensor".into()], vec!["gauges".into()])
+        );
+        assert_eq!(a.package_files(Folder::Apps, "gauges", 100).unwrap()["state.toml"], b"laps = \"3\"\n");
+        assert!(!Archive::open(&make(&data, false)).unwrap().is_setup(), "a backup isn't a setup");
+        assert_eq!(
+            setup_file_name("2026-10-15T12:30:00Z".parse().unwrap(), "Europe/Copenhagen", "sennep"),
+            "sennep-setup-2026-10-15-1430.zip"
+        );
+    }
+
+    #[test]
     fn recordings_only_when_asked_for() {
         let data = Data::new();
         let a = Archive::open(&make(&data, true)).unwrap();
@@ -613,6 +708,7 @@ mod tests {
             app_ids: &[],
             home: &home,
             include_recordings: true,
+            setup: None,
         };
         let without = Sources { include_recordings: false, ..with };
         assert_eq!(source_bytes(&with) - source_bytes(&without), 5000);

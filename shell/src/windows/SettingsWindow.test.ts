@@ -320,6 +320,32 @@ describe('Settings: storage and backups', () => {
     expect(await screen.findByText(/problem on line 2/)).toBeInTheDocument();
   });
 
+  it("shares this machine's setup, and restores a setup keeping this machine's name and files", async () => {
+    const shell = setup([
+      { path: '/api/v0/storage', body: STORAGE },
+      listing('home:/Backups', [{ name: 'bench-setup-2026-10-15-1430.zip', size: 900 }]),
+      {
+        method: 'POST',
+        path: '/api/v0/backups/setup',
+        status: 201,
+        body: { path: 'home:/Backups/faber-setup-2026-10-16-0900.zip', bytes: 900 },
+      },
+      { method: 'POST', path: '/api/v0/backups/restore', status: 204 },
+    ]);
+    await userEvent.click(await screen.findByRole('button', { name: 'Share setup…' }));
+    expect(await screen.findByText(/Saved faber-setup-2026-10-16-0900\.zip/)).toBeInTheDocument();
+    expect(shell.fetch.calls.some((c) => c.path === '/api/v0/backups/setup')).toBe(true);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Restore bench-setup-2026-10-15-1430.zip' }),
+    );
+    const dialog = screen.getByRole('alertdialog', {
+      name: /Set up this machine from this setup\?/,
+    });
+    expect(dialog).toHaveTextContent('keeps its name, its files');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Restore' }));
+    expect(await screen.findByText(/This machine kept its name and files/)).toBeInTheDocument();
+  });
+
   it('shows how full the disk is, and warns above 80 %', async () => {
     const full = { ...STORAGE, freeBytes: 15 * 1024 ** 3 };
     setup([{ path: '/api/v0/storage', body: full }]);

@@ -22,6 +22,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("packages", 2),
     ("ports", 2),
     ("roles", 2),
+    ("notices", 2),
     ("router", 2),
     ("sandbox", 2),
     ("translations", 2),

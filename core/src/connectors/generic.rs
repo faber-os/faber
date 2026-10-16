@@ -1,5 +1,5 @@
-//! Generic connectors (docs/simulation.md, section 3): a motor, a drive base and a distance
-//! sensor described by their settings alone. Real ones sit on a FaberLink board and appear as its
+//! Generic connectors (docs/simulation.md, section 3): a motor, a drive base, a distance sensor
+//! and a battery described by their settings alone. Real ones sit on a FaberLink board and appear as its
 //! sub-parts by themselves (`faber-bridge`), so a generic part is only ever simulated; their
 //! manifests say so with [`PortRequirement::Bridge`].
 //!
@@ -7,7 +7,7 @@
 //! command to them, and simulations respect them. Each manifest declares its settings
 //! ([`SettingSpec`]); the shell builds its form from them and a [`Reader`] reads them.
 
-use faber_capabilities::{Info, Twist2d, distance, motor, planar_base};
+use faber_capabilities::{Info, Twist2d, battery, distance, motor, planar_base};
 use faber_connector::settings::Reader;
 use faber_connector::{
     Choice, Connector, Context, Definition, Manifest, PortRequirement, Provide, SettingSpec, Settings,
@@ -17,12 +17,14 @@ use faber_connector::{
 pub const PLANAR_BASE: &str = "generic-planar-base";
 pub const MOTOR: &str = "generic-motor";
 pub const DISTANCE: &str = "generic-distance";
+pub const BATTERY: &str = "generic-battery";
 
 pub fn definitions() -> Vec<Definition> {
     vec![
         definition(PLANAR_BASE, "Generic drive base", base_settings(), base_provides),
         definition(MOTOR, "Generic motor", motor_settings(), motor_provides),
         definition(DISTANCE, "Generic distance sensor", distance_settings(), distance_provides),
+        definition(BATTERY, "Generic battery", battery_settings(), battery_provides),
     ]
 }
 
@@ -45,6 +47,7 @@ fn definition(
     let create = match id {
         PLANAR_BASE => create_base,
         MOTOR => create_motor,
+        BATTERY => create_battery,
         _ => create_distance,
     };
     Definition::new(manifest, create).with_provides(provides)
@@ -194,6 +197,88 @@ fn distance_settings() -> Vec<SettingSpec> {
     ]
 }
 
+/// The defaults are a 3S Li-ion pack of 2.2 Ah, a common size for small robots. The currents
+/// only matter in the simulated world, where the battery drains as the machine drives.
+fn battery_settings() -> Vec<SettingSpec> {
+    vec![
+        SettingSpec::choice(
+            "chemistry",
+            "Kind of battery",
+            "What its cells are made of. It sets when the battery counts as low and critical.",
+            "li-ion",
+            vec![
+                Choice::new("li-ion", "Li-ion (e.g. 18650 cells)"),
+                Choice::new("lipo", "LiPo"),
+                Choice::new("lifepo4", "LiFePO4"),
+                Choice::new("nimh", "NiMH"),
+                Choice::new("lead-acid", "Lead-acid"),
+            ],
+        ),
+        SettingSpec::number(
+            "cells-in-series",
+            "Cells in series",
+            "The 3 in \"3S\": how many cells add up to its voltage.",
+            "",
+            3.0,
+        )
+        .at_least(1.0)
+        .at_most(24.0),
+        SettingSpec::number("capacity-ah", "Capacity", "How much it holds, from its label.", "Ah", 2.2).positive(),
+        SettingSpec::number(
+            "idle-current-a",
+            "Current when standing still",
+            "What the machine draws while it stands still (the computer, the sensors). Used by the simulated world.",
+            "A",
+            0.5,
+        )
+        .at_least(0.0),
+        SettingSpec::number(
+            "moving-current-a",
+            "Extra current at full speed",
+            "What driving at top speed adds on top. Used by the simulated world.",
+            "A",
+            3.0,
+        )
+        .at_least(0.0),
+        SettingSpec::number(
+            "start-charge",
+            "Charge at start",
+            "How full it starts in the simulated world: 1 is full.",
+            "",
+            1.0,
+        )
+        .at_least(0.0)
+        .at_most(1.0)
+        .advanced(),
+        rate(2.0),
+    ]
+}
+
+/// How a world battery drains: the currents (A) and its charge (0-1) when it starts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Drain {
+    pub idle_a: f32,
+    pub moving_a: f32,
+    pub start_charge: f32,
+}
+
+/// A generic battery's drain settings (docs/simulation.md, section 3). Settings were checked when
+/// the part was added; anything unreadable falls back to the defaults.
+pub fn battery_drain(s: &Settings) -> Drain {
+    let read = |key: &str, default: f32| {
+        s.get(key)
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+            .map(|n| n as f32)
+            .filter(|n| n.is_finite() && *n >= 0.0)
+            .unwrap_or(default)
+    };
+    Drain {
+        idle_a: read("idle-current-a", 0.5),
+        moving_a: read("moving-current-a", 3.0),
+        start_charge: read("start-charge", 1.0).min(1.0),
+    }
+}
+
 /// A generic part has nothing to run until bridges arrive; creating one only checks its settings.
 struct Generic;
 
@@ -213,6 +298,10 @@ fn create_distance(s: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
     distance_info(s).map(|_| Box::new(Generic) as Box<dyn Connector>)
 }
 
+fn create_battery(s: &Settings) -> Result<Box<dyn Connector>, SettingsError> {
+    battery_info(s).map(|_| Box::new(Generic) as Box<dyn Connector>)
+}
+
 fn base_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, SettingsError> {
     Ok(vec![Provide::with_info(Info::PlanarBase(base_info(s)?))])
 }
@@ -223,6 +312,10 @@ fn motor_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, SettingsEr
 
 fn distance_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, SettingsError> {
     Ok(vec![Provide::with_info(Info::Distance(distance_info(s)?))])
+}
+
+fn battery_provides(_: &Manifest, s: &Settings) -> Result<Vec<Provide>, SettingsError> {
+    Ok(vec![Provide::with_info(Info::Battery(battery_info(s)?))])
 }
 
 /// A drive base's footprint, `length` × `width` (m), from its settings. The world shows and
@@ -266,6 +359,28 @@ fn motor_info(s: &Settings) -> Result<motor::Info, SettingsError> {
         kind: motor::Kind::ALL.iter().copied().find(|k| k.id() == kind).expect("declared kinds exist"),
         modes: motor::Modes { velocity: true, position: false, duty: true },
         max_velocity_rad_s: Some(r.number("max-velocity")? as f32),
+    })
+}
+
+fn battery_info(s: &Settings) -> Result<battery::Info, SettingsError> {
+    let specs = battery_settings();
+    let r = Reader::new(s, &specs, "a generic battery")?;
+    for key in ["idle-current-a", "moving-current-a", "start-charge", "rate-hz"] {
+        r.number(key)?;
+    }
+    let cells = r.number("cells-in-series")?;
+    if cells.fract() != 0.0 {
+        return Err(SettingsError {
+            key: "cells-in-series".into(),
+            message: format!("cells-in-series = {cells} is not a whole number of cells."),
+            hint: "Count the cells in series: a \"3S\" pack has cells-in-series = 3.".into(),
+        });
+    }
+    let chemistry = r.choice("chemistry")?;
+    Ok(battery::Info {
+        chemistry: battery::Chemistry::from_id(chemistry).expect("declared chemistries exist"),
+        cells_in_series: cells as u8,
+        capacity_ah: Some(r.number("capacity-ah")? as f32),
     })
 }
 
@@ -313,7 +428,10 @@ mod tests {
             assert!(d.manifest.provides[0].info.is_some(), "{}", d.manifest.id);
         }
         let caps: Vec<_> = definitions().iter().map(|d| d.manifest.provides[0].capability).collect();
-        assert_eq!(caps, [Capability::PlanarBase, Capability::Motor, Capability::Distance]);
+        assert_eq!(
+            caps,
+            [Capability::PlanarBase, Capability::Motor, Capability::Distance, Capability::Battery]
+        );
     }
 
     #[test]
@@ -363,6 +481,11 @@ mod tests {
             (MOTOR, "kind = \"diesel\"", "kind"),
             (DISTANCE, "min-m = 5", "min-m"),
             (DISTANCE, "max-m = \"far\"", "max-m"),
+            (BATTERY, "chemistry = \"potato\"", "chemistry"),
+            (BATTERY, "cells-in-series = 2.5", "cells-in-series"),
+            (BATTERY, "cells-in-series = 0", "cells-in-series"),
+            (BATTERY, "start-charge = 1.5", "start-charge"),
+            (BATTERY, "capacity-ah = 0", "capacity-ah"),
         ];
         for (id, text, key) in cases {
             let e = info_of(id, &settings(text)).unwrap_err();
@@ -402,6 +525,18 @@ mod tests {
         );
         assert_eq!(keys(MOTOR), ["max-velocity", "kind", "rate-hz"]);
         assert_eq!(keys(DISTANCE), ["min-m", "max-m", "fov-rad", "kind", "rate-hz"]);
+        assert_eq!(
+            keys(BATTERY),
+            [
+                "chemistry",
+                "cells-in-series",
+                "capacity-ah",
+                "idle-current-a",
+                "moving-current-a",
+                "start-charge",
+                "rate-hz"
+            ]
+        );
     }
 
     #[test]
@@ -416,6 +551,11 @@ mod tests {
         let sensors: Vec<_> = distance::Kind::ALL.iter().map(|k| k.id().to_string()).collect();
         assert_eq!(choices(MOTOR), motors);
         assert_eq!(choices(DISTANCE), sensors);
+        let chemistries: Vec<_> = battery::Chemistry::ALL.iter().map(|c| c.id().to_string()).collect();
+        let d = definitions().into_iter().find(|d| d.manifest.id == BATTERY).unwrap();
+        let spec = d.manifest.settings.into_iter().find(|s| s.key == "chemistry").unwrap();
+        let faber_connector::SettingKind::Choice { choices, .. } = spec.kind else { panic!() };
+        assert_eq!(choices.into_iter().map(|c| c.value).collect::<Vec<_>>(), chemistries);
     }
 
     /// An old parts.toml that leaves the settings out keeps meaning what it always meant.
@@ -439,8 +579,24 @@ mod tests {
 
     #[test]
     fn every_generic_part_accepts_a_rate() {
-        for id in [PLANAR_BASE, MOTOR, DISTANCE] {
+        for id in [PLANAR_BASE, MOTOR, DISTANCE, BATTERY] {
             assert!(info_of(id, &settings("rate-hz = 5")).is_ok(), "{id}");
         }
+    }
+
+    #[test]
+    fn battery_settings_become_its_info_and_its_drain() {
+        let s = settings("chemistry = \"lipo\"\ncells-in-series = 4\ncapacity-ah = 5\nidle-current-a = 1\n");
+        let Info::Battery(b) = info_of(BATTERY, &s).unwrap() else { panic!() };
+        assert_eq!(
+            b,
+            battery::Info { chemistry: battery::Chemistry::Lipo, cells_in_series: 4, capacity_ah: Some(5.0) }
+        );
+        assert_eq!(battery_drain(&s), Drain { idle_a: 1.0, moving_a: 3.0, start_charge: 1.0 });
+        let Info::Battery(d) = info_of(BATTERY, &Settings::new()).unwrap() else { panic!() };
+        assert_eq!(
+            (d.chemistry, d.cells_in_series, d.capacity_ah),
+            (battery::Chemistry::LiIon, 3, Some(2.2))
+        );
     }
 }

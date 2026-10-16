@@ -40,6 +40,8 @@ export function connect(options = {}) {
     const drives = new Map();
     const statusWatchers = new Set();
     const themeWatchers = new Set();
+    const stateWatchers = new Set();
+    let stateWatch = null;
     let hello = null;
     let closed = false;
     function request(req) {
@@ -92,6 +94,10 @@ export function connect(options = {}) {
             case 'theme':
                 for (const w of [...themeWatchers])
                     w(m.theme);
+                break;
+            case 'state':
+                for (const w of [...stateWatchers])
+                    w(m.key, m.value);
                 break;
             case 'lease-ended':
                 drives.get(key(m.role, m.index))?.lost(new FaberError(m.error));
@@ -218,6 +224,22 @@ export function connect(options = {}) {
             themeWatchers.add(callback);
             return () => void themeWatchers.delete(callback);
         },
+        state: {
+            get: (key) => request({ type: 'state-get', key }),
+            set: (key, value) => request({ type: 'state-set', key, value }).then(() => undefined),
+            remove: (key) => request({ type: 'state-set', key, value: null }).then(() => undefined),
+            keys: () => request({ type: 'state-keys' }),
+            onChange(callback) {
+                stateWatchers.add(callback);
+                // The shell sends changes once asked; ask once for every watcher (again after a failure).
+                stateWatch ??= request({ type: 'state-watch' }).catch((e) => {
+                    stateWatch = null;
+                    throw e;
+                });
+                stateWatch.catch(() => undefined);
+                return () => void stateWatchers.delete(callback);
+            },
+        },
         close() {
             closed = true;
             self.removeEventListener('message', onMessage);
@@ -252,6 +274,8 @@ export const faber = new Proxy({}, {
     get(_, name) {
         shared ??= connect();
         const value = shared[name];
-        return typeof value === 'function' ? value.bind(shared) : value;
+        return typeof value === 'function'
+            ? value.bind(shared)
+            : value;
     },
 });

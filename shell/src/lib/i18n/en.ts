@@ -37,15 +37,25 @@ export const en = {
   // Desktop
   'desktop.windowsArea': 'Windows',
   'desktop.toast.dismiss': 'Dismiss',
+  // Notices from the core, shown as toasts (docs/api.md, "Notices")
+  'notice.battery.low': 'The battery of {part} is low ({volts}).',
+  'notice.battery.low.hint': 'Finish what you are doing and charge it soon.',
+  'notice.battery.critical': 'The battery of {part} is critical ({volts}).',
+  'notice.battery.critical.hint': 'Stop and charge it now: going on can damage the cells.',
+  'notice.battery.ok': 'The battery of {part} is ok again ({volts}).',
+  'notice.region': 'Notices',
 
   // Start menu
   'startMenu.label': 'Start',
-  'startMenu.search.placeholder': 'Search programs, parts and files',
+  'startMenu.search.placeholder': 'Search programs, apps, parts and files',
   'startMenu.search.label': 'Search Faber',
   'startMenu.search.nothing': 'Nothing called “{query}”.',
   'startMenu.programs': 'Programs',
   'startMenu.parts': 'Parts',
   'startMenu.viewers': 'Viewers',
+  'startMenu.apps': 'Apps',
+  'startMenu.app.desc': 'App, version {version}',
+  'startMenu.group.app': 'App',
   'startMenu.recent': 'Recent files',
   'startMenu.recent.empty': 'Files you open show up here.',
   'startMenu.recent.home': 'Home',
@@ -166,6 +176,9 @@ export const en = {
   'programs.install.description': 'Install a connector package (.faberpkg)',
   'programs.position.title': 'Position viewer',
   'programs.position.description': 'Live position of a GPS: coordinates, fix and satellites',
+  'programs.battery.title': 'Battery viewer',
+  'programs.battery.description':
+    'Live voltage of a battery, how full it is, and whether it needs charging',
 
   // Errors the shell makes itself (errors the core sends are shown as sent)
   'errors.coreUnreachable.message': 'The shell could not reach the Faber core.',
@@ -248,12 +261,14 @@ export const en = {
   'parts.manual.pattern.sine': 'Wave',
   'parts.manual.pattern.noise': 'Noise',
   'parts.manual.pattern.step': 'Steps',
+  'parts.manual.pattern.drain': 'Drain',
 
   // Window titles opened from the Parts window
   'parts.title.viewer': '{name} · scan',
   'parts.title.distance': '{name} · distance',
   'parts.title.base': '{name} · base',
   'parts.title.position': '{name} · position',
+  'parts.title.battery': '{name} · battery',
   'parts.title.recordings': 'Recordings · Files',
 
   // What kind of link a port is
@@ -505,6 +520,30 @@ export const en = {
   'distance.plot.label': 'The last {seconds} seconds',
   'distance.range': 'Range {min} to {max}',
 
+  // Battery viewer (battery@1)
+  'battery.waiting': 'Waiting for the first reading from <code>{address}</code>…',
+  'battery.level.ok': 'OK',
+  'battery.level.low': 'Low: charge it soon',
+  'battery.level.critical': 'Critical: stop and charge it now',
+  'battery.volts': 'Voltage',
+  'battery.charge': 'Charge',
+  'battery.charge.value': '{percent} %',
+  'battery.charge.label': 'How full it is',
+  'battery.current': 'Current',
+  'battery.current.discharging': '{amps} out',
+  'battery.current.charging': '{amps} in',
+  'battery.temperature': 'Temperature',
+  'battery.cells': 'Cells',
+  'battery.cell': 'Cell {index}',
+  'battery.kind': 'Battery',
+  'battery.kind.value': '{chemistry}, {cells} in series',
+  'battery.kind.capacity': '{chemistry}, {cells} in series, {capacity} Ah',
+  'battery.thresholds': 'Low below {low}, critical below {critical}',
+  'battery.chemistry.li-ion': 'Li-ion',
+  'battery.chemistry.lipo': 'LiPo',
+  'battery.chemistry.lifepo4': 'LiFePO4',
+  'battery.chemistry.nimh': 'NiMH',
+  'battery.chemistry.lead-acid': 'Lead-acid',
   // Position viewer (position@1, e.g. a GPS)
   'position.waiting': 'Waiting for the first reading from <code>{address}</code>…',
   'position.noFix': 'No fix yet',
@@ -626,6 +665,10 @@ export const en = {
   'appHost.tooManyRequests.hint': 'Send at most 200 a second; 20 commands a second is plenty.',
   'appHost.tooManySubscriptions.message': 'The app follows too many signals at once.',
   'appHost.tooManySubscriptions.hint': 'Stop one first; a window may follow 16.',
+  'appHost.badKey.message': 'That state key is empty or longer than 256 bytes.',
+  'appHost.badKey.hint': 'Use a short name for each value, like "speed".',
+  'appHost.stateFull.message': "The app's saved state would be larger than 64 KB.",
+  'appHost.stateFull.hint': 'Save less, or remove values the app no longer needs.',
   'appHost.appGone.message': 'The app isn’t installed any more, or its page changed.',
   'appHost.appGone.hint': 'Close its window, and open it again from Apps.',
   'appHost.leaseEnded.message': 'The app stopped driving “{role}”.',
@@ -1221,6 +1264,17 @@ export const en = {
   'settings.storage.backup.now': 'Back up now',
   'settings.storage.backup.busy': 'Backing up…',
   'settings.storage.backup.saved': 'Saved {name} ({size}).',
+  'settings.storage.setup.name': "Share this machine's setup",
+  'settings.storage.setup.desc':
+    "Saves parts, settings, installed connectors and apps as one .zip in Backups, without your files, this machine's name or its developer settings. Restore it on another machine to set it up the same way.",
+  'settings.storage.setup.now': 'Share setup…',
+  'settings.storage.setup.busy': 'Saving…',
+  'settings.storage.setup.saved':
+    'Saved {name} ({size}). Download it, put it in the other machine’s Backups folder and restore it there.',
+  'settings.storage.setup.restoreTitle': 'Set up this machine from this setup?',
+  'settings.storage.setup.restoreBody':
+    'Parts, apps, installed connectors and settings become the ones in the setup. This machine keeps its name, its files and its developer settings.',
+  'settings.storage.setup.restored': 'Set up from {name}. This machine kept its name and files.',
   'settings.storage.backups.name': 'Backups',
   'settings.storage.backups.open': 'Open in Files',
   'settings.storage.backups.loading': 'Loading…',

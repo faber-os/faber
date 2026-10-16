@@ -7,6 +7,7 @@ import type { PackageInfo } from './generated/PackageInfo';
 import type { PackagePreview } from './generated/PackagePreview';
 import type { AppInfo } from './generated/AppInfo';
 import type { AppPackagePreview } from './generated/AppPackagePreview';
+import type { AppState } from './generated/AppState';
 import type { RoleParts } from './generated/RoleParts';
 import type { SignalValue } from './generated/SignalValue';
 import type { ErrorBody } from './generated/ErrorBody';
@@ -75,6 +76,8 @@ export interface CoreHttp {
   setAppEnabled(id: string, enabled: boolean): Promise<AppInfo>;
   /** Exactly these parts for these roles; roles left out get none. */
   setAppRoles(id: string, roles: Record<string, RoleParts>): Promise<AppInfo>;
+  /** Sets one key of an app's saved state, or removes it with `null`. */
+  setAppState(id: string, key: string, value: string | null): Promise<AppState>;
   /** The newest reading of a signal (`part/name`, or an app's `app:<id>/<name>`). */
   getSignal(address: string): Promise<SignalValue>;
   getPorts(): Promise<PortInfo[]>;
@@ -125,6 +128,8 @@ export interface CoreHttp {
   getStorage(): Promise<StorageInfo>;
   /** Saves a backup in `home:/Backups`. `507 disk-full` if it won't fit. */
   createBackup(includeRecordings: boolean): Promise<BackupInfo>;
+  /** Saves this machine's setup: a backup without the user's files or the machine's name. */
+  shareSetup(): Promise<BackupInfo>;
   /** Restores a backup from the home folder; checked first (`422 config-invalid` …). */
   restoreBackup(path: string): Promise<void>;
 
@@ -262,6 +267,8 @@ export function createHttp(
     setAppEnabled: (id, enabled) =>
       request('POST', `/apps/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`),
     setAppRoles: (id, roles) => request('PUT', `/apps/${encodeURIComponent(id)}/roles`, { roles }),
+    setAppState: (id, key, value) =>
+      request('PUT', `/apps/${encodeURIComponent(id)}/state`, { key, value }),
     getSignal: (address) =>
       request('GET', `/signals/${address.split('/').map(encodeURIComponent).join('/')}`),
     getPorts: () => request('GET', '/ports'),
@@ -300,6 +307,7 @@ export function createHttp(
 
     getStorage: () => request('GET', '/storage'),
     createBackup: (includeRecordings) => request('POST', '/backups', { includeRecordings }),
+    shareSetup: () => request('POST', '/backups/setup'),
     restoreBackup: (path) => request('POST', '/backups/restore', { path }),
 
     getTranslations: () => request('GET', '/translations'),

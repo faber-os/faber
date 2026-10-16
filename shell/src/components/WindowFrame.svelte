@@ -4,6 +4,7 @@
   import { t } from '../lib/i18n';
   import { useDesktop } from './desktopController.svelte';
   import Icon, { type IconName } from './Icon.svelte';
+  import AppBadge from './AppBadge.svelte';
   import { item, separator } from '../lib/desktop/contextMenu';
   import { menuTrigger, useMenu, type MenuRequest } from './menuController.svelte';
 
@@ -35,6 +36,10 @@
     win.maximised ? { x: 0, y: 0, w: desktop.area.width, h: desktop.area.height } : win.rect,
   );
   const titleId = $derived(`${win.id}-title`);
+  /** A viewer of an app's derived signal (`app:<id>/<name>`, D24) says so in its title bar. */
+  const derivedFrom = $derived(
+    win.params.address?.startsWith('app:') ? win.params.address.slice(4).split('/')[0] : null,
+  );
 
   // Keyboard users land in a window when it comes to the front (opened, or picked in the taskbar).
   $effect(() => {
@@ -243,6 +248,7 @@
               />{:else}<Icon name={icon} size={15} />{/if}</span
           >
           <h2 id={titleId} class="title">{title}</h2>
+          {#if derivedFrom}<AppBadge app={derivedFrom} />{/if}
         </div>
       </div>
     {/if}

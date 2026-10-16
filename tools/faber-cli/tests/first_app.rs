@@ -1,6 +1,6 @@
 //! An app from the template, end to end (docs/apps.md): `faber new app` makes a project outside
-//! Faber's tree whose own tests pass, `faber check` builds it and runs it in the sandbox, `faber
-//! pack` packs it with its UI, and the package installs on a running core, where it runs once
+//! Faber's tree whose own tests pass, `faber check` builds it, checks its window's files and runs
+//! it in the sandbox, `faber pack` packs it with its UI (built on @faber-os/shell), and the package installs on a running core, where it runs once
 //! its role has a part.
 //!
 //! Needs the wasm32-unknown-unknown target: without it the test says so and passes, unless
@@ -70,6 +70,7 @@ fn an_app_from_the_template_checks_packs_installs_and_runs() {
     let text = String::from_utf8(log.clone()).unwrap();
     assert!(text.starts_with("Checking nearest-wall 0.1.0 (app)"), "{text}");
     assert!(text.contains("asks only for the app world") && text.contains("runs 20 ticks"), "{text}");
+    assert!(text.contains("everything they load is in ui/") && !text.contains("note "), "{text}");
     assert!(report.passed());
     let file = pack::pack(&project, None, &opts, &mut log).unwrap();
     let opened = packages::open(&std::fs::read(&file).unwrap()).unwrap();
@@ -93,7 +94,9 @@ fn an_app_from_the_template_checks_packs_installs_and_runs() {
     })
     .unwrap();
     machine.install_package(&std::fs::read(&file).unwrap(), "nearest-wall-0.1.0.faberpkg", false).unwrap();
-    assert!(data.path().join("apps/nearest-wall/ui/index.html").is_file());
+    for file in ["index.html", "app.js", "style.css", "faber-shell.js"] {
+        assert!(data.path().join("apps/nearest-wall/ui").join(file).is_file(), "{file} is packed");
+    }
     machine
         .add_part(NewPart {
             name: "front".into(),

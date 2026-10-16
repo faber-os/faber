@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { DEFAULT_SETTINGS, fakeShell, part } from '../test/fakeShell';
+import { DEFAULT_SETTINGS, WALL_FOLLOWER, fakeShell, part } from '../test/fakeShell';
 import type { Settings } from '../lib/state/types';
 import { WINDOW_DEFS } from '../windows/registry';
 import Desktop from './Desktop.svelte';
@@ -11,6 +11,13 @@ function setup() {
   shell.pushSettings();
   render(Desktop, { props: { defs: WINDOW_DEFS }, context: shell.context });
   return shell;
+}
+
+/** Opens the start menu again, after something closed it. */
+async function openStartAgain() {
+  if (!screen.queryByRole('menu', { name: 'Start' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Start' }));
+  return screen.getByRole('menu', { name: 'Start' });
 }
 
 async function openStart() {
@@ -113,5 +120,40 @@ describe('Start menu', () => {
         (shell.fetch.calls.find((c) => c.method === 'PUT')?.body as Settings).taskbar.pinned,
       ).toContain('tool:logs'),
     );
+  });
+
+  it('lists the apps that have a window, opens one, and pins it from its menu', async () => {
+    const shell = setup();
+    shell.pushApps([
+      WALL_FOLLOWER,
+      { ...WALL_FOLLOWER, id: 'logger', name: 'Logger', ui: undefined },
+    ]);
+    const menu = await openStart();
+    const apps = within(menu).getByRole('group', { name: 'Apps' });
+    const tiles = within(apps).getAllByRole('menuitem');
+    expect(tiles.map((m) => m.textContent?.trim())).toEqual(['Wall follower']);
+    expect(tiles[0]!.querySelector('img')).toHaveAttribute('src', '/apps/wall-follower/icon.svg');
+    await fireEvent.contextMenu(tiles[0]!, { clientX: 100, clientY: 300 });
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Pin to taskbar' }));
+    await waitFor(() =>
+      expect(
+        (shell.fetch.calls.filter((c) => c.method === 'PUT').at(-1)?.body as Settings).taskbar
+          .pinned,
+      ).toContain('app:wall-follower'),
+    );
+    await userEvent.click(
+      within(await openStartAgain()).getByRole('menuitem', { name: 'Wall follower' }),
+    );
+    const w = shell.desktop.state.windows.at(-1)!;
+    expect([w.kind, w.key, w.params.app]).toEqual(['app', 'wall-follower', 'wall-follower']);
+  });
+
+  it('finds apps by name', async () => {
+    const shell = setup();
+    shell.pushApps([WALL_FOLLOWER]);
+    await openStart();
+    await userEvent.keyboard('wall');
+    const found = screen.getByRole('group', { name: 'Apps' });
+    expect(within(found).getByRole('menuitem')).toHaveTextContent('App, version 0.1.0');
   });
 });

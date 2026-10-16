@@ -270,3 +270,58 @@ describe('status and theme', () => {
     await expect(faber.roles()).rejects.toMatchObject({ code: 'no-shell' });
   });
 });
+
+describe('state', () => {
+  it('gets, sets, removes and lists values through the shell', async () => {
+    const got = faber.state.get('speed');
+    expect(shell.last('state-get')).toMatchObject({ faber: 1, key: 'speed' });
+    shell.ok('state-get', '0.3');
+    await expect(got).resolves.toBe('0.3');
+
+    const set = faber.state.set('speed', '0.4');
+    expect(shell.last('state-set')).toMatchObject({ key: 'speed', value: '0.4' });
+    shell.ok('state-set', null);
+    await expect(set).resolves.toBeUndefined();
+
+    const removed = faber.state.remove('speed');
+    expect(shell.last('state-set')).toMatchObject({ key: 'speed', value: null });
+    shell.ok('state-set', null);
+    await removed;
+
+    const keys = faber.state.keys();
+    shell.ok('state-keys', ['laps']);
+    await expect(keys).resolves.toEqual(['laps']);
+  });
+
+  it('says why a value was refused', async () => {
+    const set = faber.state.set('big', 'x');
+    shell.fail('state-set', 'state-full');
+    await expect(set).rejects.toMatchObject({ code: 'state-full', hint: 'fix state-full' });
+  });
+
+  it('asks for changes once, and hands every change to every watcher until it stops', async () => {
+    const a: unknown[] = [];
+    const b: unknown[] = [];
+    const stopA = faber.state.onChange((key, value) => a.push([key, value]));
+    faber.state.onChange((key, value) => b.push([key, value]));
+    expect(shell.requests('state-watch')).toHaveLength(1);
+    shell.ok('state-watch', null);
+    await flush();
+    shell.deliver({ faber: 1, event: 'state', key: 'speed', value: '0.2' });
+    stopA();
+    shell.deliver({ faber: 1, event: 'state', key: 'speed', value: null });
+    expect(a).toEqual([['speed', '0.2']]);
+    expect(b).toEqual([
+      ['speed', '0.2'],
+      ['speed', null],
+    ]);
+  });
+
+  it('asks again for changes after the shell refused', async () => {
+    faber.state.onChange(() => undefined);
+    shell.fail('state-watch', 'app-gone');
+    await flush();
+    faber.state.onChange(() => undefined);
+    expect(shell.requests('state-watch')).toHaveLength(2);
+  });
+});

@@ -8,7 +8,7 @@
     actions,
   }: {
     error: Pick<ErrorBody, 'message' | 'hint'> & { code?: string };
-    tone?: 'danger' | 'warn';
+    tone?: 'danger' | 'warn' | 'ok';
     actions?: Snippet;
   } = $props();
 </script>
@@ -36,6 +36,9 @@
   }
   .warn {
     background: var(--warn-soft);
+  }
+  .ok {
+    background: var(--ok-soft);
   }
   .message {
     font-weight: 650;

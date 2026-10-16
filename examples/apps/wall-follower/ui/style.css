@@ -83,6 +83,27 @@ h1 {
   background: var(--text);
 }
 
+section + section {
+  margin-top: 1rem;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.small-value {
+  min-width: 5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .problem {
   color: var(--danger);
   font-size: 0.85rem;

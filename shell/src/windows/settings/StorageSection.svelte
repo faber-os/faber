@@ -22,8 +22,9 @@
   let backups = $state<FileEntry[] | null>(null);
   let error = $state<ErrorBody | null>(null);
   let includeRecordings = $state(false);
-  let busy = $state<'backup' | 'restore' | null>(null);
+  let busy = $state<'backup' | 'setup' | 'restore' | null>(null);
   let saved = $state<BackupInfo | null>(null);
+  let shared = $state<BackupInfo | null>(null);
   let restored = $state<string | null>(null);
   let confirming = $state<FileEntry | null>(null);
 
@@ -84,10 +85,26 @@
     ];
   });
 
+  async function shareSetup() {
+    busy = 'setup';
+    error = null;
+    saved = null;
+    shared = null;
+    restored = null;
+    const r = await core.shareSetup();
+    busy = null;
+    if (r.ok) shared = r.value;
+    else error = r.error;
+  }
+
+  /** A setup is named `<machine>-setup-<date>.zip` (a backup `…-backup-…`). */
+  const isSetup = (name: string) => /-setup-[^/]*\.zip$/.test(name);
+
   async function backUp() {
     busy = 'backup';
     error = null;
     saved = null;
+    shared = null;
     restored = null;
     const r = await core.createBackup(includeRecordings);
     busy = null;
@@ -100,6 +117,7 @@
     busy = 'restore';
     error = null;
     saved = null;
+    shared = null;
     restored = null;
     const r = await core.restoreBackup(entry.path);
     busy = null;
@@ -186,7 +204,29 @@
     </p>
   {/if}
   {#if restored}
-    <p class="done" role="status">{t('settings.storage.restore.done', { name: restored })}</p>
+    <p class="done" role="status">
+      {isSetup(restored)
+        ? t('settings.storage.setup.restored', { name: restored })
+        : t('settings.storage.restore.done', { name: restored })}
+    </p>
+  {/if}
+
+  <div class="row">
+    <div class="text">
+      <p class="name">{t('settings.storage.setup.name')}</p>
+      <p class="desc">{t('settings.storage.setup.desc')}</p>
+    </div>
+    <button class="btn" onclick={shareSetup} disabled={busy !== null}>
+      {busy === 'setup' ? t('settings.storage.setup.busy') : t('settings.storage.setup.now')}
+    </button>
+  </div>
+  {#if shared}
+    <p class="done" role="status">
+      {t('settings.storage.setup.saved', {
+        name: nameOf(shared.path),
+        size: formatBytes(shared.bytes),
+      })}
+    </p>
   {/if}
 
   <div class="block">
@@ -231,9 +271,18 @@
 
 {#if confirming}
   {@const entry = confirming}
-  <Dialog title={t('settings.storage.restore.title')} oncancel={() => (confirming = null)}>
+  <Dialog
+    title={isSetup(entry.name)
+      ? t('settings.storage.setup.restoreTitle')
+      : t('settings.storage.restore.title')}
+    oncancel={() => (confirming = null)}
+  >
     <p><strong>{entry.name}</strong></p>
-    <p>{t('settings.storage.restore.body')}</p>
+    <p>
+      {isSetup(entry.name)
+        ? t('settings.storage.setup.restoreBody')
+        : t('settings.storage.restore.body')}
+    </p>
     {#snippet actions()}
       <button class="btn" onclick={() => (confirming = null)}
         >{t('settings.storage.restore.cancel')}</button

@@ -47,6 +47,15 @@ as its sub-parts by themselves (Phase 4, [faberlink.md §9](faberlink.md)). So t
 - `generic-motor`: settings `max-velocity`, `kind`.
 - `generic-distance`: settings `min-m`, `max-m`, `fov-rad`, `kind` (ultrasonic / laser-tof /
   infrared).
+- `generic-battery` (`battery@1`, added in Phase 5c): settings `chemistry` (li-ion / lipo / lifepo4
+  / nimh / lead-acid), `cells-in-series`, `capacity-ah` (its info), and for the world
+  `idle-current-a`, `moving-current-a` and `start-charge`. Defaults: a 3S Li-ion pack of 2.2 Ah,
+  0.5 A standing still and 3 A more at top speed. Manual, it is a voltage slider (empty to full
+  for its chemistry) with two patterns: steady, and **drain** (from the slider's value to empty in
+  two minutes). In the world it drains with the base's **commanded** speed: idle current, plus the
+  moving current times the largest share of top speed on any axis; its voltage is the resting
+  voltage at its charge (no sag under load), and it reports `amps` (negative: discharging) and
+  `charge`. Reset position doesn't recharge it; restarting the part does.
 - Existing real connectors (`ldrobot-ld19`) can be simulated too: their manifest gives the
   capability and info (range limits), the world gives the values.
 
@@ -78,7 +87,8 @@ simulate = "manual"           # a value you set by hand, or a pattern
 - `simulate = "world"`: values come from the world (raycasts from the part's `mount`; the base
   moves the machine's pose).
 - `simulate = "manual"`: values come from a slider or a pattern (`steady`, `sine`, `noise`,
-  `step`) set through the API; actuators accept commands and report them back as their state.
+  `step`, and `drain` for a battery) set through the API; actuators accept commands and report
+  them back as their state.
 - `port` and `simulate` are mutually exclusive (config error with the line). A simulated part
   claims no port.
 - At most one `planar-base` may be simulated in the world: it is the machine.

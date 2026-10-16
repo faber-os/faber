@@ -6,7 +6,7 @@
 use crate::bytes::{Reader, Writer};
 use crate::{DecodeError, EncodeError};
 use faber_capabilities::{
-    Capability, Command, Info, Reading, Timestamp, Twist2d, distance, estop, motor, planar_base,
+    Capability, Command, Info, Reading, Timestamp, Twist2d, battery, distance, estop, motor, planar_base,
 };
 
 /// The one-byte code a capability has in `READING`, `COMMAND` and `APPLIED` (protocol v1).
@@ -16,6 +16,7 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::Motor => 2,
         Capability::PlanarBase => 3,
         Capability::Estop => 4,
+        Capability::Battery => 5,
         Capability::LaserScan | Capability::Pose | Capability::Position => return None,
     })
 }
@@ -61,6 +62,14 @@ const DISTANCE_STATUS: &[distance::Status] = &[
     distance::Status::Error,
 ];
 const ESTOP_SOURCE: &[estop::Source] = &[estop::Source::Part, estop::Source::App, estop::Source::Shell];
+const BATTERY_LEVEL: &[battery::Level] = &[battery::Level::Ok, battery::Level::Low, battery::Level::Critical];
+const CHEMISTRY: &[battery::Chemistry] = &[
+    battery::Chemistry::LiIon,
+    battery::Chemistry::Lipo,
+    battery::Chemistry::Lifepo4,
+    battery::Chemistry::Nimh,
+    battery::Chemistry::LeadAcid,
+];
 
 /// Writes a reading's layout (its `t_us` travels separately, as board milliseconds).
 pub fn encode_reading(reading: &Reading, out: &mut Vec<u8>) -> Result<(), EncodeError> {
@@ -88,6 +97,24 @@ pub fn encode_reading(reading: &Reading, out: &mut Vec<u8>) -> Result<(), Encode
             w.bool(r.engaged);
             w.u8(enum_index(ESTOP_SOURCE, r.source));
             w.str8(&r.reason, "reason")?;
+        }
+        Reading::Battery(r) => {
+            let cells = r.cell_volts.as_deref();
+            let present = r.amps.is_some() as u8
+                | (r.charge.is_some() as u8) << 1
+                | (r.celsius.is_some() as u8) << 2
+                | (cells.is_some() as u8) << 3;
+            w.u8(present);
+            w.f32(r.volts);
+            w.f32(r.amps.unwrap_or(0.0));
+            w.f32(r.charge.unwrap_or(0.0));
+            w.f32(r.celsius.unwrap_or(0.0));
+            w.u8(enum_index(BATTERY_LEVEL, r.level));
+            let cells = cells.unwrap_or_default();
+            w.u8(u8::try_from(cells.len()).map_err(|_| EncodeError::TooLong { field: "cellVolts" })?);
+            for &v in cells {
+                w.f32(v);
+            }
         }
         other => return Err(unsupported(other.capability())),
     }
@@ -136,6 +163,29 @@ pub fn decode_reading(capability: Capability, t_us: Timestamp, bytes: &[u8]) -> 
             source: enum_at(ESTOP_SOURCE, r.u8()?, "source")?,
             reason: r.str8("reason")?,
         }),
+        Capability::Battery => {
+            let present = flags(r, 0b1111, "present")?;
+            let volts = r.f32()?;
+            if !volts.is_finite() {
+                return Err(DecodeError::BadValue { field: "volts" });
+            }
+            let (amps, charge, celsius) = (r.f32()?, r.f32()?, r.f32()?);
+            let level = enum_at(BATTERY_LEVEL, r.u8()?, "level")?;
+            let n = r.u8()?;
+            if n != 0 && present & 8 == 0 {
+                return Err(DecodeError::BadValue { field: "cellVolts" });
+            }
+            let cells = (0..n).map(|_| r.f32()).collect::<Result<Vec<_>, _>>()?;
+            Reading::Battery(battery::Reading {
+                t_us,
+                volts,
+                amps: (present & 1 != 0).then_some(amps),
+                charge: (present & 2 != 0).then_some(charge),
+                celsius: (present & 4 != 0).then_some(celsius),
+                cell_volts: (present & 8 != 0).then_some(cells),
+                level,
+            })
+        }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
     r.end()?;
@@ -220,6 +270,11 @@ pub fn encode_info(info: &Info, out: &mut Vec<u8>) -> Result<(), EncodeError> {
             }
         }
         Info::Estop(i) => w.bool(i.hardware_latching),
+        Info::Battery(i) => {
+            w.u8(enum_index(CHEMISTRY, i.chemistry));
+            w.u8(i.cells_in_series);
+            w.f32(i.capacity_ah.unwrap_or(f32::NAN));
+        }
         other => return Err(unsupported(other.capability())),
     }
     Ok(())
@@ -253,6 +308,19 @@ pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Info, DecodeE
             Info::PlanarBase(planar_base::Info { holonomic, max_velocity, max_acceleration, built_from })
         }
         Capability::Estop => Info::Estop(estop::Info { hardware_latching: r.bool("hardwareLatching")? }),
+        Capability::Battery => {
+            let chemistry = enum_at(CHEMISTRY, r.u8()?, "chemistry")?;
+            let cells_in_series = r.u8()?;
+            if cells_in_series == 0 {
+                return Err(DecodeError::BadValue { field: "cellsInSeries" });
+            }
+            let capacity = r.f32()?;
+            Info::Battery(battery::Info {
+                chemistry,
+                cells_in_series,
+                capacity_ah: (!capacity.is_nan()).then_some(capacity),
+            })
+        }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
     r.end()?;
@@ -300,9 +368,27 @@ pub(crate) mod tests {
                     bumped
                 })
             ),
-            (t, any::<bool>(), 0..3u8, "[ -~]{0,60}").prop_map(|(t_us, engaged, s, reason)| Reading::Estop(
-                estop::Reading { t_us, engaged, source: ESTOP_SOURCE[s as usize], reason }
-            )),
+            (t.clone(), any::<bool>(), 0..3u8, "[ -~]{0,60}").prop_map(|(t_us, engaged, s, reason)| {
+                Reading::Estop(estop::Reading { t_us, engaged, source: ESTOP_SOURCE[s as usize], reason })
+            }),
+            (
+                (t, finite(), 0..3u8),
+                proptest::option::of(finite()),
+                proptest::option::of(0.0f32..=1.0),
+                proptest::option::of(finite()),
+                proptest::option::of(proptest::collection::vec(finite(), 0..13)),
+            )
+                .prop_map(|((t_us, volts, l), amps, charge, celsius, cell_volts)| {
+                    Reading::Battery(battery::Reading {
+                        t_us,
+                        volts,
+                        amps,
+                        charge,
+                        celsius,
+                        cell_volts,
+                        level: BATTERY_LEVEL[l as usize],
+                    })
+                }),
         ]
     }
 
@@ -343,6 +429,13 @@ pub(crate) mod tests {
                 }
             ),
             any::<bool>().prop_map(|h| Info::Estop(estop::Info { hardware_latching: h })),
+            (0..5u8, 1..=255u8, proptest::option::of(0.0f32..1000.0)).prop_map(|(c, cells, capacity_ah)| {
+                Info::Battery(battery::Info {
+                    chemistry: CHEMISTRY[c as usize],
+                    cells_in_series: cells,
+                    capacity_ah,
+                })
+            }),
         ]
     }
 
@@ -389,6 +482,22 @@ pub(crate) mod tests {
         encode_reading(&m, &mut out).unwrap();
         assert_eq!(out.len(), 13);
         assert_eq!(out[..5], [0b001, 0x00, 0x00, 0x00, 0x40]);
+
+        out.clear();
+        let b = Reading::Battery(battery::Reading::volts(0, 12.0, battery::Level::Low));
+        encode_reading(&b, &mut out).unwrap();
+        assert_eq!(out.len(), 19, "a voltage divider's reading");
+        assert_eq!(out[..5], [0, 0x00, 0x00, 0x40, 0x41]);
+        assert_eq!(out[17..], [1, 0]);
+
+        out.clear();
+        let i = Info::Battery(battery::Info {
+            chemistry: battery::Chemistry::Lifepo4,
+            cells_in_series: 4,
+            capacity_ah: None,
+        });
+        encode_info(&i, &mut out).unwrap();
+        assert_eq!(out, [2, 4, 0x00, 0x00, 0xC0, 0x7F]);
     }
 
     #[test]
@@ -415,6 +524,28 @@ pub(crate) mod tests {
             Err(DecodeError::BadValue { field: "hardwareLatching" })
         );
         assert_eq!(decode_info(Capability::Estop, &[1, 0]), Err(DecodeError::TrailingBytes));
+        let mut battery = vec![0u8; 19];
+        battery[17] = 3;
+        assert_eq!(
+            decode_reading(Capability::Battery, 0, &battery),
+            Err(DecodeError::BadValue { field: "level" })
+        );
+        battery[17] = 0;
+        battery[18] = 1;
+        battery.extend_from_slice(&3.7f32.to_le_bytes());
+        assert_eq!(
+            decode_reading(Capability::Battery, 0, &battery),
+            Err(DecodeError::BadValue { field: "cellVolts" }),
+            "cell voltages without their present bit"
+        );
+        assert_eq!(
+            decode_info(Capability::Battery, &[0, 0, 0, 0, 0, 0]),
+            Err(DecodeError::BadValue { field: "cellsInSeries" })
+        );
+        assert_eq!(
+            decode_info(Capability::Battery, &[5, 3, 0, 0, 0, 0]),
+            Err(DecodeError::BadValue { field: "chemistry" })
+        );
         assert_eq!(decode_command(Capability::Motor, &[0, 0]), Err(DecodeError::Truncated));
         assert_eq!(
             decode_command(Capability::Distance, &[]),

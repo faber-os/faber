@@ -104,4 +104,47 @@ describe('Desktop', () => {
     });
     await expect.poll(() => wall.getAttribute('data-wallpaper')).toBe('cutting-mat');
   });
+
+  it("shows a battery's level changes as toasts, one per battery, until dismissed", async () => {
+    const shell = setup();
+    const battery = (level: string, volts: number, previous?: string) => ({
+      kind: 'battery-level',
+      tUs: 1,
+      address: 'sennep.battery/battery',
+      level,
+      volts,
+      ...(previous ? { previous } : {}),
+    });
+    shell.pushNotice(battery('low', 10.4, 'ok'));
+    const region = await screen.findByRole('region', { name: 'Notices' });
+    expect(
+      within(region).getByText('The battery of sennep.battery is low (10.4 V).'),
+    ).toBeInTheDocument();
+    expect(within(region).getByText('Finish what you are doing and charge it soon.')).toBeVisible();
+    shell.pushNotice(battery('critical', 9.8, 'low'));
+    await screen.findByText('The battery of sennep.battery is critical (9.8 V).');
+    expect(screen.queryByText(/is low/)).not.toBeInTheDocument();
+    await userEvent.click(within(region).getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByRole('region', { name: 'Notices' })).not.toBeInTheDocument();
+  });
+
+  it("marks a viewer of an app's derived signal with the app badge in its title bar", async () => {
+    const shell = setup();
+    shell.desktop.open('distance', {
+      key: 'app:wall-follower/wall-distance',
+      title: 'Wall follower · wall-distance',
+      params: { address: 'app:wall-follower/wall-distance', part: 'app:wall-follower' },
+    });
+    shell.desktop.open('distance', {
+      key: 'front/distance',
+      title: 'front · distance',
+      params: { address: 'front/distance', part: 'front' },
+    });
+    const derived = await screen.findByRole('dialog', { name: 'Wall follower · wall-distance' });
+    expect(
+      within(derived).getByTitle('Computed and published by the app wall-follower, not a part'),
+    ).toHaveTextContent('app');
+    const own = screen.getByRole('dialog', { name: 'front · distance' });
+    expect(within(own).queryByText('app')).toBeNull();
+  });
 });

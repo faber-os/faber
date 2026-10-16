@@ -2,7 +2,7 @@
 //! over an in-memory pipe with a fake clock. No hardware: what passes here is the same code that
 //! runs on the Arduino.
 
-use faber_capabilities::{Command, Info, Reading, distance, estop, motor};
+use faber_capabilities::{Command, Info, Reading, battery, distance, estop, motor};
 use faberlink::frame;
 use faberlink::message::{Applied, Cause, HelloAck, PartInfo, Status, kind};
 use faberlink::session::{Event, Session, SessionConfig, SessionError, State};
@@ -26,9 +26,13 @@ const SENSOR: u8 = 1;
 
 impl Link {
     fn new(heartbeat_timeout_ms: u16) -> Link {
+        Link::on(FakeBoard::new(heartbeat_timeout_ms))
+    }
+
+    fn on(board: FakeBoard) -> Link {
         Link {
             session: Session::new(SessionConfig::default(), 0),
-            board: FakeBoard::new(heartbeat_timeout_ms),
+            board,
             now_ms: 0,
             events: vec![],
             to_board: Box::new(|b| b),
@@ -43,6 +47,12 @@ impl Link {
         assert_eq!(l.session.state(), State::Ready, "{:?}", l.events);
         l.events.clear();
         l
+    }
+
+    /// The parts the board describes, once the handshake is done.
+    fn ready_parts(mut self) -> Vec<faberlink::message::PartDescription> {
+        self.run(20);
+        self.session.parts().to_vec()
     }
 
     fn now_us(&self) -> u64 {
@@ -204,6 +214,90 @@ fn readings_decode_to_the_right_capability_types() {
     let s = l.statuses();
     assert_eq!(s.len(), 5, "a status every 100 ms");
     assert!(!s[0].failsafe && !s[0].estop);
+}
+
+#[test]
+fn a_battery_reports_its_voltage_and_level() {
+    let info =
+        battery::Info { chemistry: battery::Chemistry::LiIon, cells_in_series: 3, capacity_ah: Some(15.0) };
+    let mut l = Link::on(FakeBoard::with_battery(250, 0, 3, 15.0));
+    l.run(20);
+    assert_eq!(l.session.state(), State::Ready, "{:?}", l.events);
+    let parts = l.session.parts();
+    assert_eq!(parts.len(), 3);
+    assert_eq!(
+        (parts[2].name.as_str(), parts[2].capability.as_str(), parts[2].lease_ms),
+        ("battery", "battery@1", 0)
+    );
+    assert_eq!(parts[2].info, PartInfo::Known(Info::Battery(info.clone())));
+    let mut previous = None;
+    for (volts, level) in [
+        (12.0, battery::Level::Ok),
+        (10.4, battery::Level::Low),
+        (10.55, battery::Level::Low),
+        (10.7, battery::Level::Ok),
+        (9.8, battery::Level::Critical),
+        (10.0, battery::Level::Critical),
+    ] {
+        l.board.set_battery_volts(volts);
+        l.events.clear();
+        l.run(110);
+        let r = l
+            .events
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                Event::Reading { part: 2, reading: Reading::Battery(r) } => Some(r.clone()),
+                _ => None,
+            })
+            .expect("a battery reading every 100 ms");
+        assert_eq!(
+            r,
+            battery::Reading { t_us: r.t_us, ..battery::Reading::volts(0, volts, level) },
+            "{volts} V"
+        );
+        assert_eq!(info.level(volts, previous), level, "the core's types agree at {volts} V");
+        previous = Some(level);
+    }
+    l.board.set_battery_volts(-1.0);
+    l.events.clear();
+    l.run(300);
+    assert!(
+        !l.events.iter().any(|e| matches!(e, Event::Reading { part: 2, .. })),
+        "a battery it can't measure sends nothing"
+    );
+    let unknown = Link::on(FakeBoard::with_battery(250, 2, 4, 0.0)).ready_parts();
+    assert_eq!(
+        unknown[2].info,
+        PartInfo::Known(Info::Battery(battery::Info {
+            chemistry: battery::Chemistry::Lifepo4,
+            cells_in_series: 4,
+            capacity_ah: None
+        }))
+    );
+}
+
+/// The library's thresholds are a copy of the capability types' (it can't link Rust): they must
+/// give the same level at every voltage, for every chemistry, from every previous level.
+#[test]
+fn the_board_and_the_core_agree_on_every_battery_level() {
+    for (code, &chemistry) in battery::Chemistry::ALL.iter().enumerate() {
+        for cells in [1u8, 3, 4, 6] {
+            let board = FakeBoard::with_battery(250, code as u8, cells, 0.0);
+            let info = battery::Info { chemistry, cells_in_series: cells, capacity_ah: None };
+            let (empty, full) = info.range_volts();
+            for &previous in battery::Level::ALL {
+                for i in 0..=500 {
+                    let v = empty * 0.9 + (full * 1.05 - empty * 0.9) * i as f32 / 500.0;
+                    assert_eq!(
+                        board.battery_level_at(v, previous as u8),
+                        info.level(v, Some(previous)) as u8,
+                        "{chemistry:?} {cells}S at {v} V from {previous:?}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

@@ -338,6 +338,40 @@ async fn every_screen_hears_who_drives_and_the_estop() {
     assert_eq!(released, json!({"type": "estop", "id": 2, "status": {"engaged": false}}));
 }
 
+/// docs/capabilities.md, battery@1: "The core raises a notification whenever level changes".
+#[tokio::test(flavor = "multi_thread")]
+async fn every_screen_hears_when_a_batterys_level_changes() {
+    let c = core();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = c.app.clone();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let (mut ws, _) =
+        tokio_tungstenite::connect_async(format!("ws://{addr}/api/v0/ws?format=json")).await.unwrap();
+    let msg = json!({"type": "subscribe", "id": 3, "topic": {"kind": "notices"}});
+    ws.send(Message::Text(msg.to_string().into())).await.unwrap();
+    let pack = json!({"name": "pack", "connector": "generic-battery", "simulate": "manual", "settings": {"rate-hz": 50}});
+    assert_eq!(call(&c.app, "POST", "/api/v0/parts", Some(pack)).await.0, StatusCode::CREATED);
+    let low = json!({"pattern": {"kind": "steady", "value": 10.2}});
+    assert_eq!(call(&c.app, "PUT", "/api/v0/parts/pack/simulation", Some(low)).await.0, StatusCode::OK);
+    let notice = next(&mut ws).await;
+    assert_eq!((notice["type"].as_str(), notice["id"].as_u64()), (Some("notice"), Some(3)));
+    let n = &notice["notice"];
+    assert_eq!(
+        (n["kind"].as_str(), n["address"].as_str(), n["level"].as_str(), n["previous"].as_str()),
+        (Some("battery-level"), Some("pack/battery"), Some("low"), Some("ok")),
+        "{notice}"
+    );
+    assert!((n["volts"].as_f64().unwrap() - 10.2).abs() < 1e-4);
+    let ok = json!({"pattern": {"kind": "steady", "value": 12.0}});
+    call(&c.app, "PUT", "/api/v0/parts/pack/simulation", Some(ok)).await;
+    let back = next(&mut ws).await;
+    assert_eq!(
+        (back["notice"]["level"].as_str(), back["notice"]["previous"].as_str()),
+        (Some("ok"), Some("low"))
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_program_can_read_the_latest_value_of_a_signal() {
     let c = core();

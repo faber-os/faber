@@ -518,6 +518,60 @@ fn subscribe(
                 }
             }))
         }
+        dto::Topic::AppState { app } => {
+            let (values, mut rx) = state
+                .machine
+                .watch_app_state(&app)
+                .map_err(|e| Box::new(error(Some(id), e.code, e.message, e.hint)))?;
+            let machine = Arc::clone(&state.machine);
+            Ok(tokio::spawn(async move {
+                if out.send(dto::ServerMessage::AppState { id, app: app.clone(), values }).await.is_err() {
+                    return;
+                }
+                loop {
+                    let msg = match rx.recv().await {
+                        Ok(c) => dto::ServerMessage::AppStateChanged {
+                            id,
+                            app: app.clone(),
+                            key: c.key,
+                            value: c.value,
+                        },
+                        // Missed some changes: send everything again.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            let (m, a) = (Arc::clone(&machine), app.clone());
+                            match tokio::task::spawn_blocking(move || m.app_state(&a)).await {
+                                Ok(Ok(values)) => {
+                                    dto::ServerMessage::AppState { id, app: app.clone(), values }
+                                }
+                                _ => return,
+                            }
+                        }
+                        Err(_) => return,
+                    };
+                    if out.send(msg).await.is_err() {
+                        return;
+                    }
+                }
+            }))
+        }
+        dto::Topic::Notices => {
+            let mut rx = state.machine.notices();
+            Ok(tokio::spawn(async move {
+                loop {
+                    match rx.recv().await {
+                        Ok(n) => {
+                            let msg = dto::ServerMessage::Notice { id, notice: convert::notice(&n) };
+                            if out.send(msg).await.is_err() {
+                                return;
+                            }
+                        }
+                        // Fell behind: those were logged as well, and the next one comes.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(_) => return,
+                    }
+                }
+            }))
+        }
         dto::Topic::Flash => {
             let mut rx = state.machine.flash_events();
             Ok(tokio::spawn(async move {

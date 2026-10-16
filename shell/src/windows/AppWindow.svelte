@@ -50,6 +50,19 @@
             asking = { part, answer };
           }),
     theme: () => themeForApps(theme.resolved),
+    appState: {
+      watch: (handlers) =>
+        core.watchAppState(
+          untrack(() => appId),
+          handlers,
+        ),
+      set: (key, value) =>
+        core.setAppState(
+          untrack(() => appId),
+          key,
+          value,
+        ),
+    },
     onDriving: (parts) => (driving = parts),
   });
 

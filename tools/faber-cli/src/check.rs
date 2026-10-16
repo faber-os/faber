@@ -232,7 +232,16 @@ fn check_app(
     );
     let ui = if manifest.ui { ui_files(dir)? } else { Vec::new() };
     if manifest.ui {
-        let _ = writeln!(out, "ok   ui/: {} files, starting at ui/index.html.", ui.len());
+        let in_ui: Vec<String> = ui.iter().map(|f| f.trim_start_matches("ui/").to_string()).collect();
+        let notes = crate::ui::check_references(dir, &in_ui)?;
+        let _ = writeln!(
+            out,
+            "ok   ui/: {} files, starting at ui/index.html; everything they load is in ui/.",
+            ui.len()
+        );
+        for note in notes {
+            let _ = writeln!(out, "note {note}");
+        }
     }
     let (component, module) = match &manifest.module {
         None => (None, None),
@@ -269,7 +278,7 @@ fn smoke_run(manifest: &apps::manifest::AppManifest, compiled: &apps::Compiled) 
         manifest.publishes.clone(),
         std::sync::Arc::new(faber_core::router::Router::new()),
         std::sync::Arc::new(NoParts),
-        apps::StateStore::in_memory(),
+        std::sync::Arc::new(apps::SharedState::in_memory(&manifest.id)),
     );
     let crashed = |p: Problem| {
         CliError::new(

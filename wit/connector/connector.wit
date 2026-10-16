@@ -11,6 +11,7 @@ interface types {
   use faber:capabilities/estop@0.1.0.{reading as estop-reading};
   use faber:capabilities/pose@0.1.0.{reading as pose-reading};
   use faber:capabilities/position@0.1.0.{reading as position-reading};
+  use faber:capabilities/battery@0.1.0.{reading as battery-reading};
 
   /// One reading of any capability a connector can publish.
   variant reading {
@@ -21,6 +22,7 @@ interface types {
     estop(estop-reading),
     pose(pose-reading),
     position(position-reading),
+    battery(battery-reading),
   }
 
   /// One command for an actuator, already lease-checked and clamped by the core.
