@@ -40,6 +40,8 @@ pub(super) struct Workshop {
     /// One compile at a time: `arduino-cli` is heavy on a Pi, and the build folders are shared.
     compiling: Mutex<()>,
     installing: Mutex<()>,
+    /// One guided board's plan change at a time (machine/wiring.rs). A leaf lock.
+    pub(super) plans: Mutex<()>,
     events: broadcast::Sender<ToolsProgress>,
 }
 
@@ -51,6 +53,7 @@ impl Workshop {
             records: Mutex::new(Records::open(&data_dir.join("arduino"))),
             compiling: Mutex::new(()),
             installing: Mutex::new(()),
+            plans: Mutex::new(()),
             events: broadcast::channel(64).0,
         }
     }
@@ -428,6 +431,7 @@ impl Machine {
         })?;
         let fqbn = crate::arduino::fqbn(board.id).expect("every flasher board has an FQBN");
         let (folder, name, local) = self.sketch_at(path)?;
+        self.check_plan_board(&local, &name, board.id)?;
         let toolchain = self.ready_toolchain()?;
         let sources = Sources::collect(&local).map_err(|e| match e {
             CollectError::Io(e) => internal("read the sketch", e),

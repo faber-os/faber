@@ -121,7 +121,7 @@ fn the_arguments_come_from_pins_settings_and_the_board() {
     battery.settings.insert("capacity-ah".into(), SettingValue::Number(15.0));
     p.parts.insert("battery".into(), battery);
     let mut side = PlannedPart { template: "ir-distance".into(), ..Default::default() };
-    side.pins.insert("out".into(), "A0".into());
+    side.pins.insert("signal".into(), "A0".into());
     p.parts.insert("side".into(), side);
     let s = sketch(&p.normalized(&map, &BuiltIn), &map, &BuiltIn).unwrap();
     assert!(
@@ -260,4 +260,42 @@ fn every_generated_sketch_compiles_with_the_real_arduino_cli() {
             compiler.lines().find(|l| l.starts_with("Sketch uses")).unwrap_or("size unknown")
         );
     }
+}
+
+/// The motor's driver shapes as they will be offered once FaberMotor has them (they are `todo`
+/// until then): the driver constant first, an optional pin only when it is placed, and the speed
+/// at full power set in `setup()`.
+#[test]
+fn the_motor_driver_shapes_write_the_calls_faber_motor_takes() {
+    let mut motor = BuiltIn.template("motor").unwrap().clone();
+    let pending = std::mem::take(&mut motor.pending_shapes);
+    motor.shapes.extend(pending);
+    let catalog = vec![motor];
+    let map = pins::arduino("uno").unwrap();
+    let place = |shape: &str, pins: &[(&str, &str)]| {
+        let mut p = Plan::new("uno", "rover");
+        let mut part =
+            PlannedPart { template: "motor".into(), shape: Some(shape.into()), ..Default::default() };
+        part.pins = pins.iter().map(|(r, p)| (r.to_string(), p.to_string())).collect();
+        part.settings.insert("max-velocity-rad-s".into(), SettingValue::Number(15.0));
+        p.parts.insert("left".into(), part);
+        p.normalized(&map, &catalog)
+    };
+    let s =
+        sketch(&place("en-in1-in2", &[("en", "D5"), ("in1", "D4"), ("in2", "D7")]), &map, &catalog).unwrap();
+    assert!(s.contains("FaberMotor left(\"left\", faberlink::DRIVER_EN_IN1_IN2, 5, 4, 7);"), "{s}");
+    assert!(s.contains("void setup() {\n  left.setMaxVelocity(15);\n  link.begin("), "{s}");
+    assert!(!s.contains("STBY"), "no wiring line for an unused optional pin: {s}");
+    let with_stby = place("en-in1-in2", &[("en", "D5"), ("in1", "D4"), ("in2", "D7"), ("stby", "D8")]);
+    let s = sketch(&with_stby, &map, &catalog).unwrap();
+    assert!(s.contains("FaberMotor left(\"left\", faberlink::DRIVER_EN_IN1_IN2, 5, 4, 7, 8);"), "{s}");
+    assert!(s.contains("Driver STBY → D8"), "{s}");
+    let s = sketch(&place("two-pwm", &[("in1", "D5"), ("in2", "D6")]), &map, &catalog).unwrap();
+    assert!(s.contains("FaberMotor left(\"left\", faberlink::DRIVER_TWO_PWM, 5, 6);"), "{s}");
+    // Both inputs of a two-PWM driver need PWM; the allocator leaves the optional pin out.
+    let c = Candidate { template: "motor".into(), shape: Some("two-pwm".into()), ..Default::default() };
+    let sug = suggest(&map, &Plan::new("uno", "rover"), &catalog, &[], &c).unwrap();
+    assert_eq!(sug.part.pins.keys().collect::<Vec<_>>(), ["in1", "in2"]);
+    assert!(sug.roles.iter().find(|r| r.role == "stby").unwrap().suggested.is_none());
+    assert!(sug.problems.iter().all(|p| p.code != "missing-pin"), "{:?}", sug.problems);
 }

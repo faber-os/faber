@@ -207,6 +207,20 @@ the example `Ultrasonic` compiled for an Uno with `--library firmware/faberlink`
 gave the errors the reader expects (its test uses that output). Every example compiles with and
 without a build id, for an Uno and a Mega, with no warnings from the library. Nothing was flashed.
 
+## Guided boards
+
+A guided board ([wiring.md](wiring.md)) is a sketch folder too: `Arduino/<name>/` with the plan
+`board.toml`, the sketch `<name>.ino` that Faber writes from it, and `my_code.h` for your own
+code. The editor compiles and uploads it like any sketch, with the same confirm and the same-code
+check, but refuses to compile it for a board its plan isn't for (a Nano's two bootloaders count as
+one), until its code is taken over. *(tested through the API with the stand-in `arduino-cli`)*
+
+The core of it is built (pin maps, part templates, the allocator, plans and the generated sketch,
+[api.md](api.md#guided-boards)); the editor's side is not yet: opening the generated `.ino`
+read-only with the bar "Faber writes this file from the board's plan" and the buttons *Edit the
+plan* and *Take over the code* is shell work for the wizard. Until then, a sketch edited outside
+Faber is noticed (`edited`) and never overwritten without asking.
+
 ## Not built yet
 
 - Installing other libraries (`arduino-cli lib install`, behind a confirm).

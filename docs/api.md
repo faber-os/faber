@@ -25,6 +25,9 @@ cookie, a program sends an API token. See [Users and signing in](#users-and-sign
   ```json
   { "error": { "code": "port-claimed", "message": "COM3 is used by the part \"lidar\".", "hint": "Pause or remove \"lidar\" in Parts first, or pick another port." } }
   ```
+
+  A refused guided-board plan (`422 invalid-plan`) also lists everything wrong with it in
+  `problems` ([Guided boards](#guided-boards)).
 - **Who may call what:** each route has a minimum role (`viewer` < `operator` < `admin`), listed
   in [auth.md](auth.md#roles) and enforced from one table in the core (`core/src/api/access.rs`).
   Every endpoint can answer `401 not-signed-in` (no or an ended session, or an invalid API token)
@@ -49,6 +52,7 @@ cookie, a program sends an API token. See [Users and signing in](#users-and-sign
 | `POST /api/v0/ports/check-board` | `{"port": "usb:2341:0042"}` → `200 BoardCheck`, after up to 2.5 s: is a FaberLink board on this port? See [FaberLink boards](#faberlink-boards-bridges). |
 | `GET /api/v0/flasher/boards`, `POST /api/v0/ports/{id}/flash` | The Arduino flasher: puts a program on an Uno, Nano or Mega. See [The Arduino flasher](#the-arduino-flasher). |
 | `GET /api/v0/arduino`, `POST /api/v0/arduino/…` | The Arduino editor: sketches, compiling, uploading and "what's on this board". See [The Arduino editor](#the-arduino-editor). |
+| `GET /api/v0/arduino/pins/{board}`, `GET /api/v0/arduino/parts`, `/api/v0/arduino/plans…` | Guided boards: pin maps, part templates, the allocator and plans Faber writes a sketch from. See [Guided boards](#guided-boards). |
 | `GET /api/v0/parts` | `PartInfo[]` |
 | `POST /api/v0/parts` | `NewPart` → `201 PartInfo`. A real part has a `port`; a simulated one has `simulate` (`manual` or `world`) instead (see [Driving](#driving-leases-commands-and-the-e-stop)). A part on an I²C bus has an `address` (7-bit, e.g. `72` for 0x48; left out, the connector's `default`), written to parts.toml as `address = 0x48`. `settings` (optional) are the connector's settings, as in `[parts.<name>.settings]`. Errors: `400 invalid-name` (including `world`, the simulated world's own name), `400 unknown-connector`, `400 unknown-port`, `400 wrong-port` (the connector needs another kind of port, or the port is `reserved`), `400 unknown-address` (not one of the connector's `addresses`), `400 address-not-used` (an address for a part that isn't on an I²C bus), `400 invalid-settings`, `400 port-and-simulate` (both given), `400 needs-bridge` (a generic part without `simulate`: add the FaberLink board it sits on instead), `400 bridge-not-simulated` (a `faber-bridge` with `simulate`: a board is real hardware), `409 name-taken`, `409 port-claimed` (on an I²C bus: that address is taken; two parts on one bus need different addresses), `409 world-has-a-base` (a second `planar-base` with `simulate = "world"`: the world has one machine) |
 | `DELETE /api/v0/parts/{name}` | `204`. Errors: `404 unknown-part`. Ends any lease on the part (`part-removed`); removing a bridge ends those on its sub-parts too. For a sub-part (`mega.arm`) it removes `[parts.mega.parts.arm]` from parts.toml, which works only while the board doesn't have that part: `409 part-on-board` otherwise. |
@@ -404,6 +408,54 @@ id) or `read-back` (with `elapsedMs`). A `FlashRecord` has `id`, `board`, `board
 
 The records are in `<data>/arduino/boards.toml`, with an exact copy of each board's last sketch and
 program in `<data>/arduino/flashed/<id>/`.
+
+## Guided boards
+
+The core of guided mode ([wiring.md](wiring.md), D57): each board's pins, the part templates, the
+allocator that suggests pins and checks a plan, and plans that Faber turns into a sketch. A guided
+board is a sketch folder, `home:/Arduino/<name>/`, with the plan `board.toml`, the generated
+`<name>.ino` and your own `my_code.h`; compiling and uploading it is the editor's
+[compile and upload](#the-arduino-editor), as for any sketch. The shell's wizard is not built yet.
+
+Who may: anyone signed in reads, and asks for a suggestion (it writes nothing); an **operator**
+starts, saves and takes over a plan; uploading stays an **admin**'s.
+
+| Method and path | Body / result |
+|---|---|
+| `GET /api/v0/arduino/pins/{board}` | `PinMap` for `uno`, `nano`, `nano-old`, `mega2560` or `pi-header`: `id`, `name`, `chip`, `kind` (`arduino` or `pi`), `logicVolts`, `analogReferenceVolts?` (none on a Pi), `pins` (`BoardPin[]`: `name` (`D7`, `A0`, `GPIO17`), `number?` (the Arduino pin number, or the GPIO line), `physical?` (a Pi header pin), `digital`, `analog?` (its channel), `pwm?` (`timer2b`; `pwm0-ch2` on a Pi), `interrupt?`, `pinChange`, `buses` (`PinBus[]`: `kind` `i2c`/`spi`/`serial`, `bus`, `line`), `led`, `volts`, `providedBy?`), `reserved` (`ReservedPins[]`: `pins`, `reason`), `notes` (`PinNote[]`: `pins`, `note`, `avoid`: the needs the allocator keeps them for last), `servoTimers` (in the order the Servo library takes them), `servosPerTimer`, `toneTimer?`, and `power` (a Pi header's 3V3/5V/GND positions). Errors: `404 unknown-board`. |
+| `GET /api/v0/arduino/parts` | `PartTemplate[]`, in catalogue order: `id`, `name`, `description`, `covers` (products), `capability?`, `class` (the FaberLink class), `include`, `defaultName`, `warnings`, `power` (`supply`: `5V`, `3V3`, `own` or `none`; `currentMa?`; `ownSupply`; `logicVolts?`; `maxInputVolts?`), `settings` (`PartSetting[]`: `id`, `name`, `unit?`, `type` `number`/`integer`/`choice`, `default`, `min?`, `max?`, `options` (`id`, `name`), `apply` (`live`: no upload; `build`: compiled in, docs/wiring.md §11), `help?`), `shapes` (`PartShape[]`: `id`, `name`, `description?`, `roles` (`PartRole[]`: `id`, `name`, `needs` (`digital-out`, `digital-in`, `analog-in`, `pwm`, `interrupt`), `help`, `provided`: it may go on a pin a part provides, `optional`: it may be left unconnected, and a suggestion leaves it out unless it is asked for). Role ids are the `PINS` message's role names (`pwm`, `dir`, `en`, `in1`, `in2`, `stby`, `trig`, `echo`, `signal`, `sense`), so a plan's pins and a code-mode board's reported pins mean the same, `wiring` (lines with `{pin:<role>}` and `{setting:<id>}`)), `uses` (`servo`, `tone`, `interrupts-off`), `bus?`, `i2cAddresses`, `addressSetting?`, `addressHint?` and `provides?` (`PinProvider`: `count`, `name`, `abilities`, `volts`: the pins such a part adds). Only shapes the FaberLink library can drive are listed. |
+| `GET /api/v0/arduino/plans` | `GuidedBoardSummary[]`, by name: `name`, `board?`, `parts`, `takenOver`, `problem?` (the first thing wrong). A sketch folder without `board.toml` is a code-mode sketch and isn't listed. |
+| `POST /api/v0/arduino/plans` | `NewPlanRequest` `{"name": "mega", "board": "mega2560"}` → `201 GuidedBoard`: makes the folder with an empty plan, its sketch and `my_code.h`. Errors: `400 invalid-board-name` (a sketch name), `404`/`422 unknown-board`, `422 board-not-guided` (`pi-header`: not built yet), `409 already-exists`. |
+| `GET /api/v0/arduino/plans/{name}` | → `200 GuidedBoard`: `name`, `folder`, `sketch` (its `.ino`, for compile and upload), `plan?` (`BoardPlan`: `board`, `name`, `parts` by name, each a `PlannedPart`: `template`, `shape?`, `pins` (role → pin name), `settings` (id → number or choice id, every setting filled in), and `takenOver?`), `fileProblem?` (`board.toml` itself can't be read: a `PlanProblem` with its `line`), `problems` (`PlanProblem[]`, below, with the `line` in `board.toml` where one applies), `wiring` (`PartWiring[]`: `part`, `template`, `lines` (`Trig → D7`), `warnings`), `generated` (the sketch still has Faber's mark) and `edited` (the sketch was changed outside Faber since Faber wrote it). Errors: `404 unknown-plan`. |
+| `POST /api/v0/arduino/plans/{name}/suggest` | `SuggestRequest` (`template`, `shape?`, `name?` (an existing part's name edits that part), `pins?` (roles already chosen), `settings?`) → `200 PartSuggestion`: `name` (the one asked for, or a free one: `front`, `front_2`), `template`, `shape`, `roles` (`RoleOptions[]`: `role`, `name`, `needs`, `suggested?`, `suitable` (best first), `unsuitable`, `inUse` (`pin`, `by`: `front (Trig)`, `the I²C bus, SDA (imu)`), `reserved` (`pin`, `reason`)), `part` (the `PlannedPart` with the suggested pins and every setting) and `problems` (what the part would add to the plan's problems, including those it causes for other parts, like a servo stopping a motor's PWM). Writes nothing. Errors: `404 unknown-plan`, `400 invalid-part` (an unknown template or shape, a shape not ready yet, or a bad name), `422 plan-file-invalid`, `422 board-not-guided`. |
+| `PUT /api/v0/arduino/plans/{name}` | `SavePlanRequest` `{"plan": BoardPlan, "overwriteEdits"?: true}` → `200 GuidedBoard`: checks the plan, writes `board.toml` (keeping its comments; pins as numbers for plain digital pins and names otherwise, every setting written out), rewrites `<name>.ino` and creates `my_code.h` if it is missing (never overwritten). The plan's `name` is the path's. Errors: `422 invalid-plan` (the error body's `problems` lists every error; nothing is written), `409 sketch-edited` (the sketch was changed outside Faber: take it over, or send `overwriteEdits`), `409 plan-taken-over`, `422 board-not-guided`, `404 unknown-plan`. |
+| `POST /api/v0/arduino/plans/{name}/take-over` | → `200 GuidedBoard`: "Take over the code" (docs/wiring.md §8). The sketch's generated header becomes a note that it is your code, the rest of it stays byte for byte, and `board.toml` gets `taken-over` (RFC 3339) and a comment: from then on it is only a note, and saving the plan is refused. One way; doing it again changes nothing. The sketch then compiles for any board, like any code-mode sketch. |
+
+A `PlanProblem` is `severity` (`error`: the plan can't be saved like this; `warning`: worth
+knowing), `code`, `part?`, `role?`, `setting?`, `pin?`, `message`, `hint` and `line?`. The codes:
+
+| Code | Severity | When |
+|---|---|---|
+| `unknown-template`, `unknown-shape`, `shape-not-ready`, `invalid-part-name` | error | The part itself (a name the sketch uses, like `link` or `loop`, isn't a part name). |
+| `unknown-setting`, `invalid-setting` | error | A setting the template doesn't have, or a value out of its range or not one of its choices. |
+| `unknown-role`, `missing-pin`, `unknown-pin` | error | Pins that don't match the shape's roles, or a pin the board doesn't have. |
+| `reserved-pin` | error | D0/D1 (the USB link to Faber), a Pi's GPIO0/1. |
+| `unsuitable-pin` | error | The pin can't do the role's job (`Echo needs a digital pin: A6 on an Arduino Nano is analog only.`). |
+| `pin-used-twice` | error | Two roles on one pin, or a pin something outside the plan uses. |
+| `bus-pin-used` | error | A plain pin on SDA/SCL (or SPI) while a part uses that bus. |
+| `servo-timer-conflict`, `tone-timer-conflict` | error | A PWM role on a pin whose timer the Servo library (Uno: Timer1, D9/D10; Mega: Timer5 first, D44–D46) or `tone()` (Timer2) takes. |
+| `too-many-servos` | error | More servos than the Servo library drives on the board. |
+| `i2c-address-clash` | error | Two I²C parts on one address (0x68 MPU6050 and DS3231, …); the hint is the template's way to move one. |
+| `divider-too-high` | error | A battery divider that would put more than the analog reference on its pin with a full battery; the hint gives the smallest R1. |
+| `interrupt-pins-used` | warning | Every free interrupt pin is used as a plain pin. |
+| `interrupts-off` | warning | A part that turns interrupts off while it works (an LED strip). |
+| `own-supply` | warning | A part that needs its own supply (motors). |
+| `level-shift-needed` | warning | A part whose signals or inputs don't match the board's logic level. |
+| `power-budget` | warning | The parts take more than about 400 mA from the board's own supply. |
+
+The editor's compile and upload refuse a guided board's sketch for a board its plan isn't for
+(`409 plan-for-another-board`; a Nano's two bootloaders count as one board), until it is taken
+over.
 
 ## The simulated world
 

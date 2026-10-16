@@ -125,6 +125,9 @@ struct RawPlan {
     board: String,
     name: String,
     taken_over: Option<String>,
+    /// The machine's record of the sketch it last wrote (machine/wiring.rs); not part of the plan.
+    #[serde(rename = "sketch-sha256")]
+    _sketch_sha256: Option<String>,
     #[serde(default)]
     parts: BTreeMap<String, RawPart>,
 }

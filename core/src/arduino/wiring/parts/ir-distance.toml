@@ -58,8 +58,8 @@ help = "Anything further reads as no target."
 [[shapes]]
 id = "analog"
 name = "Analog output"
-args = ["name", "pin:out", "setting:min-m", "setting:max-m", "code:faberlink::DISTANCE_INFRARED", "code:{var}ToMeters"]
-wiring = ["Vcc → 5V", "GND → GND", "Vo → {pin:out}"]
+args = ["name", "pin:signal", "setting:min-m", "setting:max-m", "code:faberlink::DISTANCE_INFRARED", "code:{var}ToMeters"]
+wiring = ["Vcc → 5V", "GND → GND", "Vo → {pin:signal}"]
 roles = [
-  { id = "out", name = "Out", needs = "analog-in", help = "A voltage that falls as the distance grows." },
+  { id = "signal", name = "Signal", needs = "analog-in", help = "A voltage that falls as the distance grows." },
 ]

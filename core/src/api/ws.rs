@@ -115,6 +115,7 @@ fn error(
             hint: hint.into(),
             reason: None,
             needs: None,
+            problems: None,
         },
     }
 }

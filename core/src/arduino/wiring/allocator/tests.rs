@@ -211,12 +211,12 @@ fn a_motor_takes_a_pwm_pin_that_no_servo_or_tone_needs() {
 fn an_ir_sensor_on_a_nano_takes_an_analog_pin_and_a6_is_analog_only() {
     let nano = board("nano");
     let s = suggest_on(&nano, &plan("nano", vec![]), &want("ir-distance"));
-    assert_eq!(picks(&s), [("out", Some("A0"))]);
-    let out = role(&s, "out");
+    assert_eq!(picks(&s), [("signal", Some("A0"))]);
+    let out = role(&s, "signal");
     assert!(out.suitable.contains(&"A6".to_string()) && out.suitable.contains(&"A7".to_string()));
     assert_eq!(
         reason(&out.unsuitable, "D7"),
-        "Out needs an analog input: D7 isn't an analog input; the Arduino Nano's are A0–A7."
+        "Signal needs an analog input: D7 isn't an analog input; the Arduino Nano's are A0–A7."
     );
     let sonar = suggest_on(&nano, &plan("nano", vec![]), &want("ultrasonic"));
     assert_eq!(
@@ -279,7 +279,7 @@ fn a_valid_plan_has_no_errors() {
             ("front", part("ultrasonic", &[("trig", "7"), ("echo", "6")])),
             ("left", part("motor", &[("pwm", "D5"), ("dir", "D4")])),
             ("battery", part("battery", &[("sense", "A1")])),
-            ("side", part("ir-distance", &[("out", "A0")])),
+            ("side", part("ir-distance", &[("signal", "A0")])),
         ],
     );
     let problems = check(&uno, &p, &catalog(), &[]);

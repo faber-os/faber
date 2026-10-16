@@ -20,7 +20,7 @@ settings = { min-m = 0.02, max-m = 4 }
 [parts.front_2]
 template = "ir-distance"
 shape = "analog"
-pins = { out = "A0" }
+pins = { signal = "A0" }
 settings = { min-m = 0.1, max-m = 0.8 }
 
 [parts.left]

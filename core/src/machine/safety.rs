@@ -531,6 +531,7 @@ fn lease_error(st: &State, part: &PartName, e: LeaseError) -> MachineError {
     match e {
         LeaseError::Ended(reason) => MachineError {
             lease_ended: Some(reason),
+            plan_problems: Vec::new(),
             ..err(
                 ErrorKind::Forbidden,
                 "lease-ended",

@@ -16,4 +16,9 @@ name: string, needs: PinNeed, help: string,
 /**
  * It can also go on a pin a part provides (a PCA9685's channel), not only on the board's own.
  */
-provided: boolean, };
+provided: boolean, 
+/**
+ * It may be left unconnected (a TB6612's STBY tied high). Its argument then is left out, so
+ * optional roles come last in the constructor.
+ */
+optional: boolean, };

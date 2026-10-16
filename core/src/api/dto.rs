@@ -71,6 +71,10 @@ pub struct ErrorBody {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub needs: Option<UserRole>,
+    /// On `invalid-plan`: everything wrong with the guided board's plan (docs/wiring.md).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problems: Option<Vec<crate::arduino::wiring::Problem>>,
 }
 
 /// The body of every non-2xx REST response.
@@ -1940,6 +1944,7 @@ mod tests {
                 hint: "h".into(),
                 reason: None,
                 needs: None,
+                problems: None,
             },
         };
         assert_eq!(

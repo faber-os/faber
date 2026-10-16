@@ -13,6 +13,7 @@ mod flash;
 mod packages;
 mod safety;
 mod users;
+mod wiring;
 mod world;
 
 pub use apps::{AppView, AppWindowLink};
@@ -24,6 +25,7 @@ pub use flash::{FirmwareSource, FlashProgress, FlashRequest, Flashed};
 pub use packages::{PackagePreview, PackagePreviewOf, PackageView, installed_connectors};
 pub use safety::{CommandReply, EstopView, LeaseEvent};
 pub use users::{Credential, Identity, SignInError, Via};
+pub use wiring::{GuidedBoard, GuidedBoardSummary};
 pub use world::{DEFAULT_WORLD, WorldChanged, WorldView};
 
 use crate::backup::{self, Archive, BackupError, Item};
@@ -107,6 +109,8 @@ pub struct MachineError {
     pub hint: String,
     /// Why the lease ended, on `lease-ended`, so a program needn't read the message.
     pub lease_ended: Option<EndReason>,
+    /// Everything wrong with a guided board's plan, on `invalid-plan` (docs/wiring.md).
+    pub plan_problems: Vec<crate::arduino::wiring::Problem>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,27 +141,55 @@ impl From<FileError> for MachineError {
             "io-error" => ErrorKind::Internal,
             _ => ErrorKind::BadRequest,
         };
-        MachineError { kind, code: e.code, message: e.message, hint: e.hint, lease_ended: None }
+        MachineError {
+            kind,
+            code: e.code,
+            message: e.message,
+            hint: e.hint,
+            lease_ended: None,
+            plan_problems: Vec::new(),
+        }
     }
 }
 
 impl From<SettingsError> for MachineError {
     fn from(e: SettingsError) -> Self {
         let kind = if e.code == "settings-not-saved" { ErrorKind::Internal } else { ErrorKind::BadRequest };
-        MachineError { kind, code: e.code, message: e.message, hint: e.hint, lease_ended: None }
+        MachineError {
+            kind,
+            code: e.code,
+            message: e.message,
+            hint: e.hint,
+            lease_ended: None,
+            plan_problems: Vec::new(),
+        }
     }
 }
 
 impl From<BackupError> for MachineError {
     fn from(e: BackupError) -> Self {
         let kind = if e.code == "backup-invalid" { ErrorKind::Unprocessable } else { ErrorKind::Internal };
-        MachineError { kind, code: e.code, message: e.message, hint: e.hint, lease_ended: None }
+        MachineError {
+            kind,
+            code: e.code,
+            message: e.message,
+            hint: e.hint,
+            lease_ended: None,
+            plan_problems: Vec::new(),
+        }
     }
 }
 
 impl MachineError {
     fn new(kind: ErrorKind, code: &'static str, message: impl Into<String>, hint: impl Into<String>) -> Self {
-        MachineError { kind, code, message: message.into(), hint: hint.into(), lease_ended: None }
+        MachineError {
+            kind,
+            code,
+            message: message.into(),
+            hint: hint.into(),
+            lease_ended: None,
+            plan_problems: Vec::new(),
+        }
     }
 }
 

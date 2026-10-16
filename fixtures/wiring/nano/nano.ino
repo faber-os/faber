@@ -28,7 +28,7 @@ float front_2ToMeters(int raw) {
   return 0.29988f * pow(volts, -1.173f);
 }
 
-// front_2: Infrared distance sensor (Sharp GP2Y0A21), Out A0
+// front_2: Infrared distance sensor (Sharp GP2Y0A21), Signal A0
 FaberDistance front_2("front_2", A0, 0.1, 0.8, faberlink::DISTANCE_INFRARED, front_2ToMeters);
 
 // left: DC motor with a driver, PWM D5, DIR D8

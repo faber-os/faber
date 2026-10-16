@@ -71,7 +71,14 @@ impl From<UsersError> for MachineError {
             "backup-invalid" => ErrorKind::Unprocessable,
             _ => ErrorKind::BadRequest,
         };
-        MachineError { kind, code: e.code, message: e.message, hint: e.hint, lease_ended: None }
+        MachineError {
+            kind,
+            code: e.code,
+            message: e.message,
+            hint: e.hint,
+            lease_ended: None,
+            plan_problems: Vec::new(),
+        }
     }
 }
 

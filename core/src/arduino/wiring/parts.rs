@@ -223,6 +223,9 @@ pub struct Role {
     pub help: String,
     /// It can also go on a pin a part provides (a PCA9685's channel), not only on the board's own.
     pub provided: bool,
+    /// It may be left unconnected (a TB6612's STBY tied high). Its argument then is left out, so
+    /// optional roles come last in the constructor.
+    pub optional: bool,
 }
 
 /// One argument of a part's constructor in the sketch.
@@ -273,6 +276,9 @@ pub struct Shape {
     pub wiring: Vec<String>,
     #[serde(skip)]
     pub args: Vec<Arg>,
+    /// C++ lines for `setup()`, before `link.begin(...)` (`{var}.setMaxVelocity(...)`).
+    #[serde(skip)]
+    pub setup: Vec<String>,
     /// Why it isn't offered yet (its constructor isn't in the library).
     #[serde(skip)]
     pub todo: Option<String>,
@@ -544,6 +550,8 @@ struct RawShape {
     description: Option<String>,
     todo: Option<String>,
     args: Vec<String>,
+    #[serde(default)]
+    setup: Vec<String>,
     wiring: Vec<String>,
     roles: Vec<RawRole>,
 }
@@ -557,6 +565,8 @@ struct RawRole {
     help: String,
     #[serde(default)]
     provided: bool,
+    #[serde(default)]
+    optional: bool,
 }
 
 #[derive(Deserialize)]
@@ -626,6 +636,7 @@ pub fn parse(text: &str) -> Result<Template, String> {
                         name: r.name,
                         help: r.help,
                         provided: r.provided,
+                        optional: r.optional,
                     })
                 })
                 .collect::<Result<_, String>>()?,
@@ -633,6 +644,7 @@ pub fn parse(text: &str) -> Result<Template, String> {
             name: s.name,
             description: s.description,
             wiring: s.wiring,
+            setup: s.setup,
             todo: s.todo,
         };
         if shape.todo.is_some() { pending_shapes.push(shape) } else { shapes.push(shape) }
@@ -770,6 +782,21 @@ pub fn check(t: &Template) -> Result<(), String> {
             if !known {
                 return Err(format!("shape {}: the argument {a:?} names nothing", shape.id));
             }
+        }
+        // Optional pins are left out of the call, so they must be its last arguments.
+        let first_optional = shape
+            .args
+            .iter()
+            .position(|a| matches!(a, Arg::Pin(r) if shape.role(r).is_some_and(|x| x.optional)));
+        if let Some(i) = first_optional
+            && !shape.args[i..]
+                .iter()
+                .all(|a| matches!(a, Arg::Pin(r) if shape.role(r).is_some_and(|x| x.optional)))
+        {
+            return Err(format!(
+                "shape {}: optional pins must be the constructor's last arguments",
+                shape.id
+            ));
         }
         for r in &shape.roles {
             if !shape.args.contains(&Arg::Pin(r.id.clone())) {
@@ -1059,6 +1086,18 @@ pub(crate) mod tests {
     #[ignore = "waits for FaberMotor's EN + IN1 + IN2 and two-PWM constructors (branch pins-motor): fill in their args in parts/motor.toml, remove their `todo`, and delete this #[ignore]"]
     fn drift_pending_shapes_match_the_library_too() {
         check_against_library(|t| t.all_shapes().collect());
+        // The methods `setup` lines call (`{var}.setMaxVelocity(...)`) exist too.
+        let header = crate::arduino::library::FILES.iter().find(|(p, _)| *p == "src/FaberLink.h").unwrap().1;
+        for t in templates() {
+            for line in t.all_shapes().flat_map(|s| &s.setup) {
+                let method = line.split('.').nth(1).and_then(|m| m.split('(').next()).unwrap_or(line);
+                assert!(
+                    header.contains(&format!("{method}(")) || core_header().contains(&format!("{method}(")),
+                    "{}: {method}",
+                    t.id
+                );
+            }
+        }
         assert!(templates().iter().all(|t| t.pending_shapes.is_empty()), "no shape is still marked todo");
     }
 

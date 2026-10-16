@@ -38,7 +38,7 @@ pub enum Severity {
 }
 
 /// Something wrong with a plan, or worth knowing about it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, rename = "PlanProblem")]
 pub struct Problem {
@@ -600,7 +600,9 @@ pub fn suggest(
             used.insert(p.name.clone());
         }
     }
-    let mut order: Vec<&Role> = shape.roles.iter().filter(|r| !chosen.contains_key(&r.id)).collect();
+    // An optional pin is only placed when asked for (it is left unconnected otherwise).
+    let mut order: Vec<&Role> =
+        shape.roles.iter().filter(|r| !r.optional && !chosen.contains_key(&r.id)).collect();
     order.sort_by_key(|r| options(r, &used).len());
     for role in order {
         let near: Vec<usize> = chosen.values().filter_map(|p| index(p)).collect();
@@ -782,6 +784,9 @@ pub fn check(
         }
         for role in &shape.roles {
             let Some(text) = part.pins.get(&role.id) else {
+                if role.optional {
+                    continue;
+                }
                 out.push(
                     Problem::error(
                         "missing-pin",

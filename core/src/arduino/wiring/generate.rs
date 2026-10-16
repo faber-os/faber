@@ -65,7 +65,13 @@ pub fn wiring(plan: &Plan, map: &PinMap, catalog: &(impl Catalog + ?Sized)) -> V
             Some(Wiring {
                 part: name.clone(),
                 template: t.id.clone(),
-                lines: shape.wiring.iter().map(|l| fill(l, name, part, map)).collect(),
+                // A line about an optional pin that isn't used goes.
+                lines: shape
+                    .wiring
+                    .iter()
+                    .map(|l| fill(l, name, part, map))
+                    .filter(|l| !super::parts::placeholders(l).iter().any(|t| t.starts_with("pin:")))
+                    .collect(),
                 warnings: t.warnings.clone(),
             })
         })
@@ -150,18 +156,34 @@ pub fn sketch(plan: &Plan, map: &PinMap, catalog: &(impl Catalog + ?Sized)) -> R
         let pins: Vec<String> = shape
             .roles
             .iter()
+            .filter(|r| part.pins.contains_key(&r.id))
             .map(|r| {
                 format!("{} {}", r.name, map.resolve(&part.pins[&r.id]).map_or("?", |p| p.name.as_str()))
             })
             .collect();
         out.push_str(&format!("// {name}: {}, {}\n", t.name, pins.join(", ")));
-        let args: Vec<String> = shape.args.iter().map(|a| arg(t, a, name, part, map)).collect();
+        let args: Vec<String> = shape
+            .args
+            .iter()
+            .filter(|a| !matches!(a, Arg::Pin(r) if !part.pins.contains_key(r)))
+            .map(|a| arg(t, a, name, part, map))
+            .collect();
         out.push_str(&format!("{} {name}({});\n", t.class, args.join(", ")));
+    }
+    // What the parts need set before FaberLink starts (a motor's speed at full power, …).
+    let mut setup = String::new();
+    for (name, part) in &plan.parts {
+        let t = catalog.template(&part.template).expect("checked");
+        let shape = t.shape(part.shape.as_deref()).expect("checked");
+        for line in &shape.setup {
+            setup.push_str(&format!("  {}\n", fill(line, name, part, map)));
+        }
     }
     out.push_str(&format!(
         "\n#include \"{MY_CODE}\"\n\
          \n\
          void setup() {{\n\
+         {setup}\
          \x20 link.begin({BAUD}, \"{board}\", \"{VERSION}\");\n\
          \x20 userSetup();\n\
          }}\n\
