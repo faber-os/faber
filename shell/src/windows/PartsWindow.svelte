@@ -15,6 +15,8 @@
     removable,
   } from '../lib/state/bridges';
   import { partCodeText } from '../lib/state/arduino';
+  import { planOfBridge } from '../lib/state/guided';
+  import type { GuidedBoardSummary } from '../lib/state/types';
   import { isManualSensor } from '../lib/state/simulation';
   import { item, separator } from '../lib/desktop/contextMenu';
   import { menuTrigger, useMenu } from '../components/menuController.svelte';
@@ -27,6 +29,7 @@
   import type { WindowProps } from '../components/windowDefs';
   import { openDrive, openViewer as showViewer, viewable } from '../components/driveWindow';
   import AddPartForm from './AddPartForm.svelte';
+  import GuidedBoardForm from './guided/GuidedBoardForm.svelte';
   import ManualSimulation from './ManualSimulation.svelte';
 
   let { win }: WindowProps = $props();
@@ -38,6 +41,39 @@
   const menu = useMenu();
 
   let adding = $state(false);
+  /** Add part's two ways: on a port (a connector), or on a board's pins (guided mode). */
+  let addMode = $state<'port' | 'pins'>('port');
+  /** A guided board's plan being edited ("Edit plan"). */
+  let editPlan = $state<string | null>(null);
+  const GUIDED_SIZE = { w: 980, h: 680 };
+  /** The guided boards, to tell which FaberLink board runs one. */
+  let plans = $state.raw<GuidedBoardSummary[]>([]);
+
+  async function loadPlans() {
+    const r = await core.plans();
+    if (r.ok) plans = r.value;
+  }
+  $effect(() => {
+    untrack(() => void loadPlans());
+  });
+
+  // The pin picker draws the whole board: give it room (a 7" screen shows windows full size).
+  $effect(() => {
+    if (editPlan || (adding && addMode === 'pins'))
+      untrack(() => desktop.ensureSize(win.id, GUIDED_SIZE));
+  });
+
+  // Opened to edit a guided board's plan (from the Arduino editor's bar).
+  $effect(() => {
+    const plan = win.params.editPlan;
+    if (!plan) return;
+    untrack(() => {
+      editPlan = plan;
+      adding = false;
+      formKey++;
+      desktop.update(win.id, { params: {} });
+    });
+  });
   let addPort = $state<string | null>(null);
   let addSimulate = $state<Simulate | null>(null);
   let addConnector = $state<string | null>(null);
@@ -56,6 +92,7 @@
       addAddress: address,
     } = win.params;
     if (!port && !simulate && !connector) return;
+    addMode = 'port';
     addPort = port ?? null;
     addSimulate = simulate === 'world' || simulate === 'manual' ? simulate : null;
     addConnector = connector ?? null;
@@ -111,6 +148,8 @@
             : undefined;
     // A board's part has its board's port, which the board uses: no serial monitor for it.
     const sub = isSubPart(p);
+    const plan = planOfBridge(p, plans);
+    const editLock = core.auth.lock('operator');
     return {
       label: p.name,
       entries: [
@@ -135,6 +174,8 @@
         !sub &&
           paused &&
           item('resume', t('parts.menu.resume'), lock ? { disabledReason: lock } : {}),
+        plan !== null &&
+          item('edit-plan', t('parts.menu.editPlan'), editLock ? { disabledReason: editLock } : {}),
         removable(p) && separator(),
         removable(p) &&
           item('remove', t('parts.menu.remove'), {
@@ -148,6 +189,7 @@
         else if (id === 'drive') openDrive(desktop, p.name);
         else if (id === 'monitor' && p.port) openInMonitor(p.port);
         else if (id === 'remove') confirming = p.name;
+        else if (id === 'edit-plan' && plan) openPlan(plan);
       },
     };
   }
@@ -200,7 +242,20 @@
 
   function closeForm() {
     adding = false;
+    editPlan = null;
     addPort = addSimulate = addConnector = null;
+    void loadPlans();
+  }
+
+  function openPlan(name: string) {
+    editPlan = name;
+    formKey++;
+  }
+
+  /** The wizard is done: show the part it pointed at. */
+  function shown(part: string) {
+    closeForm();
+    justAdded = part;
   }
 
   function added(name: string) {
@@ -209,9 +264,18 @@
   }
 </script>
 
-{#if adding}
+{#if editPlan}
+  {#key formKey}
+    <GuidedBoardForm initialPlan={editPlan} oncancel={closeForm} onshow={shown} />
+  {/key}
+{:else if adding && addMode === 'pins'}
+  {#key formKey}
+    <GuidedBoardForm oncancel={closeForm} onshow={shown} onport={() => (addMode = 'port')} />
+  {/key}
+{:else if adding}
   {#key formKey}
     <AddPartForm
+      onpins={() => (addMode = 'pins')}
       initialPort={addPort}
       initialSimulate={addSimulate}
       initialConnector={addConnector}
@@ -374,6 +438,18 @@
                 </p>
                 {#if b.hardwareEstop}
                   <p class="hint estop-hint">{t('parts.board.hardwareEstop.hint')}</p>
+                {/if}
+                {@const plan = planOfBridge(p, plans)}
+                {#if plan}
+                  <p class="meta guided">
+                    <span>{t('parts.board.guided', { plan })}</span>
+                    <button
+                      class="inline-link"
+                      disabled={core.auth.lock('operator') !== null}
+                      title={core.auth.lock('operator') ?? undefined}
+                      onclick={() => openPlan(plan)}>{t('parts.board.editPlan')}</button
+                    >
+                  </p>
                 {/if}
               {/if}
               {#if paused}

@@ -26,10 +26,12 @@
   import Icon from '../components/Icon.svelte';
   import PortProblems from '../components/PortProblems.svelte';
   import RichText from '../components/RichText.svelte';
+  import AddPartMode from '../components/AddPartMode.svelte';
 
   let {
     onadded,
     oncancel,
+    onpins,
     initialPort = null,
     initialSimulate = null,
     initialConnector = null,
@@ -37,6 +39,8 @@
   }: {
     onadded: (name: string) => void;
     oncancel: () => void;
+    /** Switches to adding a part on a board's pins (guided mode). */
+    onpins?: () => void;
     initialPort?: string | null;
     /** Start with Simulated on and this source picked (e.g. from the World window). */
     initialSimulate?: Simulate | null;
@@ -235,6 +239,10 @@
       {t('addPart.back')}
     </button>
     <h3>{t('addPart.title')}</h3>
+    {#if onpins}
+      <span class="spacer"></span>
+      <AddPartMode mode="port" onchange={(m) => m === 'pins' && onpins?.()} />
+    {/if}
   </div>
 
   <div class="scroll">
@@ -617,6 +625,12 @@
   .toolbar h3 {
     font-size: var(--text-md);
     font-weight: 650;
+  }
+  .toolbar {
+    flex-wrap: wrap;
+  }
+  .spacer {
+    flex: 1;
   }
   .scroll {
     flex: 1;

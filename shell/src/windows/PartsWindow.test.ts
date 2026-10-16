@@ -977,3 +977,38 @@ describe('Port problems', () => {
     });
   });
 });
+
+describe('Guided boards in Parts', () => {
+  const PLANS = {
+    path: '/api/v0/arduino/plans',
+    body: [{ name: 'mega', board: 'mega2560', parts: 1, takenOver: false }],
+  };
+
+  it('offers a part on a board’s pins beside a part on a port', async () => {
+    const shell = setup([PLANS, { path: '/api/v0/arduino/parts', body: [] }]);
+    shell.pushParts([]);
+    await userEvent.click(await screen.findByRole('button', { name: 'Add the first part' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'On a board’s pins' }));
+    expect(await screen.findByText('Which board is the part on?')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('radio', { name: 'On a port' }));
+    expect(await screen.findByRole('form', { name: 'Add part' })).toBeInTheDocument();
+  });
+
+  it('marks a board that runs a guided plan, and opens its plan from the row and the menu', async () => {
+    const shell = setup([PLANS, { path: '/api/v0/arduino/parts', body: [] }]);
+    shell.pushParts([bridgePart('mega', { board: 'mega', firmware: 'guided' })]);
+    const row = (await screen.findByText('Connected')).closest('li')!;
+    expect(
+      await within(row).findByText('Guided board: Faber writes its sketch from the plan mega'),
+    ).toBeInTheDocument();
+    await userEvent.click(within(row).getByRole('button', { name: 'Edit plan' }));
+    expect(await screen.findByText('Plan of mega')).toBeInTheDocument();
+  });
+
+  it('does not offer a plan for a board in code mode', async () => {
+    const shell = setup([PLANS]);
+    shell.pushParts([bridgePart('rover', { board: 'rover', firmware: 'my-sketch' })]);
+    await screen.findByText('Connected');
+    expect(screen.queryByRole('button', { name: 'Edit plan' })).toBeNull();
+  });
+});

@@ -12,6 +12,7 @@
   import { codeView, identityCaveat, toolsStepText } from '../lib/state/arduino';
   import type { ToolsProgress } from '../lib/state/core.svelte';
   import type {
+    GuidedBoard,
     ArduinoInfo,
     BoardCodeInfo,
     CompileResult,
@@ -78,6 +79,9 @@
   let generation = $state(0);
   const editors: Record<string, ReturnType<typeof CodeEditor> | undefined> = $state({});
 
+  /** The sketch is a guided board's: Faber writes its `.ino` from the plan (docs/wiring.md §5). */
+  let guided = $state.raw<GuidedBoard | null>(null);
+  let takingOver = $state<{ error: ErrorBody | null; busy: boolean } | null>(null);
   let board = $state('');
   let boardTouched = $state(false);
   let port = $state('');
@@ -143,6 +147,14 @@
   // The board its USB ids name, unless the user picked one; else the first (the Uno).
   $effect(() => {
     if (boardTouched || boards.length === 0) return;
+    // A guided board's sketch compiles only for the board its plan is for.
+    const planned = guided?.plan?.board;
+    if (planned && boards.some((b) => b.id === planned)) {
+      const guess = guessedBoard(chosenPort, boards)?.id;
+      const family = (id: string | undefined) => (id === 'nano-old' ? 'nano' : id);
+      board = guess && family(guess) === family(planned) ? guess : planned;
+      return;
+    }
     board = guessedBoard(chosenPort, boards)?.id ?? (board || boards[0]!.id);
   });
 
@@ -208,6 +220,9 @@
       const text = decoder.decode(r.value);
       loaded.push({ name, path: file, text, saved: text });
     }
+    // A folder with a plan is a guided board: is its sketch still Faber's to write?
+    const plan = await core.plan(s.name);
+    guided = plan.ok && plan.value.plan && !plan.value.plan.takenOver ? plan.value : null;
     generation += 1;
     tabs = loaded;
     sketch = s;
@@ -422,6 +437,27 @@
     }
   }
 
+  /** "Edit the plan": the plan opens in Parts. */
+  function editPlan() {
+    if (!sketch) return;
+    const id = desktop.open('parts', { params: { editPlan: sketch.name } });
+    desktop.update(id, { params: { editPlan: sketch.name } });
+    desktop.focus(id);
+  }
+
+  /** "Take over the code": one way; the sketch is yours from then on (docs/wiring.md §8). */
+  async function takeOver() {
+    if (!sketch || !takingOver) return;
+    takingOver = { error: null, busy: true };
+    const r = await core.takeOverPlan(sketch.name);
+    if (!r.ok) {
+      takingOver = { error: r.error, busy: false };
+      return;
+    }
+    takingOver = null;
+    await openSketch(childPath(sketch.folder, active || `${sketch.name}.ino`));
+  }
+
   function startNew() {
     creating = { name: '', template: info?.templates[0]?.id ?? 'blank', error: null };
   }
@@ -611,9 +647,32 @@
       >
     </div>
 
+    {#if guided && active === `${sketch.name}.ino`}
+      <div class="guided-bar" role="note">
+        <Icon name="info" size={18} />
+        <p>
+          <b>{t('arduino.guided.title')}</b>
+          {t('arduino.guided.body')}
+        </p>
+        <button
+          class="btn"
+          onclick={editPlan}
+          disabled={editLock !== null}
+          title={editLock ?? undefined}>{t('arduino.guided.edit')}</button
+        >
+        <button
+          class="btn quiet"
+          onclick={() => (takingOver = { error: null, busy: false })}
+          disabled={editLock !== null || busy}
+          title={editLock ?? undefined}>{t('arduino.guided.takeOver')}</button
+        >
+      </div>
+    {/if}
+
     <div class="editors">
       {#each tabs as tab (`${generation}:${tab.name}`)}
         <CodeEditor
+          readOnly={guided !== null && tab.name === `${sketch.name}.ino`}
           bind:this={editors[tab.name]}
           value={tab.saved}
           label={t('arduino.editor.label', { name: tab.name })}
@@ -901,6 +960,26 @@
   </Dialog>
 {/if}
 
+{#if takingOver && sketch}
+  <Dialog
+    title={t('arduino.guided.confirm.title')}
+    oncancel={() => (takingOver = null)}
+    tone="danger"
+  >
+    <p><RichText text={t('arduino.guided.confirm.body', { sketch: sketch.name })} /></p>
+    <p class="help">{t('arduino.guided.confirm.after')}</p>
+    {#if takingOver.error}<ErrorNotice error={takingOver.error} />{/if}
+    {#snippet actions()}
+      <button class="btn" onclick={() => (takingOver = null)}
+        >{t('arduino.guided.confirm.cancel')}</button
+      >
+      <button class="btn danger solid" disabled={takingOver?.busy} onclick={takeOver}
+        >{t('arduino.guided.confirm.ok')}</button
+      >
+    {/snippet}
+  </Dialog>
+{/if}
+
 {#if closing && sketch}
   <Dialog
     title={t('arduino.close.title', { sketch: sketch.name })}
@@ -1029,6 +1108,24 @@
   .dot::after {
     content: ' •';
     color: var(--accent);
+  }
+  .guided-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--line);
+    background: var(--info-soft);
+    font-size: var(--text-sm);
+  }
+  .guided-bar p {
+    flex: 1 1 16rem;
+    margin: 0;
+  }
+  .guided-bar :global(svg) {
+    color: var(--info-text);
+    flex: none;
   }
   .editors {
     display: flex;

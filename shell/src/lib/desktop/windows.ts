@@ -211,6 +211,21 @@ export function setRect(state: DesktopState, id: string, rect: Rect): DesktopSta
   return replace(state, id, { rect, chosen: rect });
 }
 
+/**
+ * Grows a window to at least `want` (as far as the area allows) for a task that needs room, like
+ * the pin picker. Only for now: the size the user chose (`chosen`) stays what it was. A maximised
+ * window, or one that is big enough, is left alone.
+ */
+export function ensureSize(state: DesktopState, id: string, want: Size, area: Area): DesktopState {
+  const w = find(state, id);
+  if (!w || w.maximised || (w.rect.w >= want.w && w.rect.h >= want.h)) return state;
+  const grown = { ...w.rect, w: Math.max(w.rect.w, want.w), h: Math.max(w.rect.h, want.h) };
+  // Grow around the window's centre, then keep it on the screen.
+  grown.x -= (grown.w - w.rect.w) / 2;
+  grown.y -= (grown.h - w.rect.h) / 2;
+  return replace(state, id, { rect: clampRect(grown, { w: 0, h: 0 }, area) });
+}
+
 /** Keep every window inside the area after the screen changed size. */
 export function refit(
   state: DesktopState,
