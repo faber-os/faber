@@ -28,3 +28,15 @@ template = "motor"
 shape = "pwm-dir"
 pins = { pwm = 5, dir = 8 }
 settings = { max-velocity-rad-s = 0 }
+
+[parts.left_2]
+template = "motor"
+shape = "en-in1-in2"
+pins = { en = 6, in1 = 12, in2 = 9 }
+settings = { max-velocity-rad-s = 0 }
+
+[parts.left_3]
+template = "motor"
+shape = "two-pwm"
+pins = { in1 = 11, in2 = 10 }
+settings = { max-velocity-rad-s = 0 }

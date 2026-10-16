@@ -9,6 +9,8 @@
 //   front: VCC → 5V, GND → GND, Trig → D4, Echo → D7
 //   front_2: Vcc → 5V, GND → GND, Vo → A0
 //   left: Driver PWM → D5, Driver DIR → D8, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
+//   left_2: Driver EN (ENA, PWMA) → D6 (on an L298N, take the jumper off ENA), Driver IN1 → D12, Driver IN2 → D9, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
+//   left_3: Driver IN1 (IA, AIN1, RPWM) → D11, Driver IN2 (IB, AIN2, LPWM) → D10, Driver GND → GND, Driver power → the motor's own supply, Motor → the driver's motor terminals
 
 #include <FaberLink.h>
 
@@ -34,9 +36,17 @@ FaberDistance front_2("front_2", A0, 0.1, 0.8, faberlink::DISTANCE_INFRARED, fro
 // left: DC motor with a driver, PWM D5, DIR D8
 FaberMotor left("left", 5, 8, 0.0);
 
+// left_2: DC motor with a driver, EN D6, IN1 D12, IN2 D9
+FaberMotor left_2("left_2", faberlink::DRIVER_EN_IN1_IN2, 6, 12, 9);
+
+// left_3: DC motor with a driver, IN1 D11, IN2 D10
+FaberMotor left_3("left_3", faberlink::DRIVER_TWO_PWM, 11, 10);
+
 #include "my_code.h"
 
 void setup() {
+  left_2.setMaxVelocity(0);
+  left_3.setMaxVelocity(0);
   link.begin(115200, "nano", "guided");
   userSetup();
 }

@@ -1037,12 +1037,14 @@ pub(crate) mod tests {
         })
     }
 
-    fn core_header() -> &'static str {
+    /// Both library headers: constants such as `DISTANCE_*` live in FaberLinkCore.h, the motor's
+    /// `DRIVER_*` in FaberLink.h.
+    fn core_header() -> String {
         crate::arduino::library::FILES
             .iter()
-            .find(|(p, _)| *p == "src/FaberLinkCore.h")
+            .filter(|(p, _)| *p == "src/FaberLinkCore.h" || *p == "src/FaberLink.h")
             .map(|(_, t)| *t)
-            .unwrap()
+            .collect()
     }
 
     fn check_against_library(shapes: impl Fn(&Template) -> Vec<&Shape>) {
@@ -1064,14 +1066,19 @@ pub(crate) mod tests {
                     if let Arg::Code(c) = a
                         && let Some(name) = c.strip_prefix("faberlink::")
                     {
-                        assert!(core_header().contains(name), "{}: {c} isn't in FaberLinkCore.h", t.id);
+                        assert!(core_header().contains(name), "{}: {c} isn't in the library's headers", t.id);
                     }
                 }
             }
             for s in t.settings.iter().filter(|s| s.kind == SettingType::Choice) {
                 for o in &s.options {
                     let name = o.code.strip_prefix("faberlink::").unwrap_or(&o.code);
-                    assert!(core_header().contains(name), "{}: {} isn't in FaberLinkCore.h", t.id, o.code);
+                    assert!(
+                        core_header().contains(name),
+                        "{}: {} isn't in the library's headers",
+                        t.id,
+                        o.code
+                    );
                 }
             }
         }
@@ -1083,7 +1090,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[ignore = "waits for FaberMotor's EN + IN1 + IN2 and two-PWM constructors (branch pins-motor): fill in their args in parts/motor.toml, remove their `todo`, and delete this #[ignore]"]
     fn drift_pending_shapes_match_the_library_too() {
         check_against_library(|t| t.all_shapes().collect());
         // The methods `setup` lines call (`{var}.setMaxVelocity(...)`) exist too.

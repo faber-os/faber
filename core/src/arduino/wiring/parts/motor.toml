@@ -1,7 +1,7 @@
 # A DC motor on a motor driver (H-bridge): FaberMotor (firmware/faberlink/src/FaberLink.h).
-# Drivers take one of three pin shapes (docs/research/common-parts.md §2.6). FaberMotor takes the
-# PWM + DIR one on this branch; the other two follow its driver constructor and are marked `todo`
-# until it is merged (a test that is ignored until then checks them against FaberLink.h).
+# Drivers take one of three pin shapes (docs/research/common-parts.md §2.6), and FaberMotor
+# has all three: EN + IN1 + IN2, two PWM inputs, and PWM + DIR. A test checks them against
+# FaberLink.h.
 # Role ids are the PINS message's role names (FaberLinkCore.h ROLE_*): pwm, dir, en, in1, in2, stby.
 
 faber-part = 1
@@ -48,7 +48,6 @@ roles = [
 id = "en-in1-in2"
 name = "EN + IN1 + IN2 (L298N, L293D, TB6612)"
 description = "One PWM pin sets the speed, two pins the direction; a TB6612 may use STBY too."
-todo = "Waits for FaberMotor's EN + IN1 + IN2 constructor (branch pins-motor): once it is merged, remove this line and the #[ignore] on drift_pending_shapes_match_the_library_too."
 args = ["name", "code:faberlink::DRIVER_EN_IN1_IN2", "pin:en", "pin:in1", "pin:in2", "pin:stby"]
 setup = ["{var}.setMaxVelocity({setting:max-velocity-rad-s});"]
 wiring = ["Driver EN (ENA, PWMA) → {pin:en} (on an L298N, take the jumper off ENA)", "Driver IN1 → {pin:in1}", "Driver IN2 → {pin:in2}", "Driver STBY → {pin:stby}", "Driver GND → GND", "Driver power → the motor's own supply", "Motor → the driver's motor terminals"]
@@ -63,7 +62,6 @@ roles = [
 id = "two-pwm"
 name = "Two PWM inputs (L9110S, DRV8833, BTS7960)"
 description = "Two PWM pins: one drives forwards, the other backwards; a BTS7960 may use an enable pin too."
-todo = "Waits for FaberMotor's two-PWM constructor (branch pins-motor): once it is merged, remove this line and the #[ignore] on drift_pending_shapes_match_the_library_too."
 args = ["name", "code:faberlink::DRIVER_TWO_PWM", "pin:in1", "pin:in2", "pin:stby"]
 setup = ["{var}.setMaxVelocity({setting:max-velocity-rad-s});"]
 wiring = ["Driver IN1 (IA, AIN1, RPWM) → {pin:in1}", "Driver IN2 (IB, AIN2, LPWM) → {pin:in2}", "Driver enable (R_EN and L_EN, nSLEEP) → {pin:stby}", "Driver GND → GND", "Driver power → the motor's own supply", "Motor → the driver's motor terminals"]

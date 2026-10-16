@@ -133,7 +133,10 @@ pub struct RoleOptions {
     pub role: String,
     pub name: String,
     pub needs: Need,
-    /// Faber's pick (or the one asked for, when it can do the job). None: no pin can.
+    /// The part works without it (a driver's STBY). Faber only places it when asked for.
+    pub optional: bool,
+    /// Faber's pick (or the one asked for, when it can do the job). None: no pin can, or the role
+    /// is optional and wasn't asked for.
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested: Option<String>,
@@ -635,6 +638,7 @@ pub fn suggest(
                 role: role.id.clone(),
                 name: role.name.clone(),
                 needs: role.needs,
+                optional: role.optional,
                 suggested: suggested.clone(),
                 suitable: Vec::new(),
                 unsuitable: Vec::new(),

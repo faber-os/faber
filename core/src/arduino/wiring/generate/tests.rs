@@ -20,7 +20,8 @@ fn everything(board: &str) -> Plan {
         for shape in &t.shapes {
             let c = Candidate { template: t.id.clone(), shape: Some(shape.id.clone()), ..Default::default() };
             let s = suggest(&map, &p, &BuiltIn, &[], &c).unwrap();
-            assert!(s.roles.iter().all(|r| r.suggested.is_some()), "{board}: no room for {}", t.id);
+            let unplaced: Vec<_> = s.roles.iter().filter(|r| !r.optional && r.suggested.is_none()).collect();
+            assert!(unplaced.is_empty(), "{board}: no room for {} {}: {unplaced:#?}", t.id, shape.id);
             p.parts.insert(s.name, s.part);
         }
     }
