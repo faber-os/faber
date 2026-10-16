@@ -1,6 +1,6 @@
 # Design: parts on a board's pins (guided and code mode)
 
-Status: **design v1, proposed** (2026-10-16). Nothing here is built yet. Builds on the Arduino
+Status: **design v1, accepted** (D57, 2026-10-16; Mikkel took every recommendation in §10). Being built. Builds on the Arduino
 editor ([arduino-editor.md](arduino-editor.md)), FaberLink ([faberlink.md](faberlink.md)) and the
 same-code check (D54).
 
@@ -176,7 +176,7 @@ is an **admin** (D53, as for the editor).
 6. The `PINS` message (library, core, interop), and code-mode pin display.
 7. New part classes in the library (servo, encoder, button, LED, an I²C sensor), each with a template.
 
-## 10. Open questions for Mikkel
+## 10. Questions Mikkel answered (D57: all as recommended)
 
 1. **`my_code.h` in guided mode** (recommended), or should guided boards be generated with no
    code of yours at all?
