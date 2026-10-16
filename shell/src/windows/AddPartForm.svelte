@@ -11,8 +11,10 @@
     settingFields,
     type SettingValues,
   } from '../lib/state/connectorSettings';
+  import { hexAddress } from '../lib/desktop/buses';
   import type {
     BoardCheck,
+    ConnectorInfo,
     ErrorBody,
     NewPart,
     PortInfo,
@@ -31,6 +33,7 @@
     initialPort = null,
     initialSimulate = null,
     initialConnector = null,
+    initialAddress = null,
   }: {
     onadded: (name: string) => void;
     oncancel: () => void;
@@ -39,6 +42,8 @@
     initialSimulate?: Simulate | null;
     /** Start with this connector picked, once the connectors are in. */
     initialConnector?: string | null;
+    /** Start at this I²C address (from the I2C scanner). */
+    initialAddress?: number | null;
   } = $props();
 
   const core = useCore();
@@ -57,6 +62,8 @@
   // svelte-ignore state_referenced_locally
   let mode = $state<Simulate>(initialSimulate ?? 'manual');
   let values = $state<SettingValues>({});
+  // svelte-ignore state_referenced_locally
+  let address = $state<number | null>(initialAddress);
   let settingsProblem = $state<{ key: string; message: string } | null>(null);
 
   const desktop = useDesktop();
@@ -79,6 +86,15 @@
   /** A FaberLink board is real hardware with parts of its own: never simulated. */
   const isBoard = $derived(chosen?.id === BRIDGE_CONNECTOR);
   const simulated = $derived(!isBoard && (simulatedChoice || needsBridge));
+  /** The addresses an I²C connector can be at; empty for any other connector. */
+  const addresses = $derived(chosen?.port.kind === 'i2c' ? chosen.port.addresses : []);
+  const chosenAddress = $derived(
+    chosen?.port.kind === 'i2c'
+      ? address !== null && addresses.includes(address)
+        ? address
+        : chosen.port.default
+      : null,
+  );
   /** Ports checked for a FaberLink board in this form, by port id. */
   let checks = $state<Record<string, { result?: BoardCheck; error?: ErrorBody }>>({});
   let checking = $state<string | null>(null);
@@ -103,13 +119,29 @@
 
   function fieldFor(code: string | undefined): 'name' | 'port' | 'connector' | 'settings' | null {
     if (code === 'invalid-name' || code === 'name-taken') return 'name';
-    if (code === 'port-claimed' || code === 'unknown-port') return 'port';
+    if (code === 'port-claimed' || code === 'unknown-port' || code === 'wrong-port') return 'port';
+    if (code === 'unknown-address' || code === 'address-not-used') return 'port';
     // Where the values come from (step 1): a port, or simulated.
     if (code === 'needs-bridge' || code === 'port-and-simulate' || code === 'world-has-a-base')
       return 'port';
     if (code === 'unknown-connector') return 'connector';
     if (code === 'invalid-settings') return 'settings';
     return null;
+  }
+
+  function connectorPortWords(p: ConnectorInfo['port']): string {
+    switch (p.kind) {
+      case 'serial':
+        return t('addPart.connector.serial', { baud: p.baud });
+      case 'i2c':
+        return t('addPart.connector.i2c');
+      case 'spi':
+        return t('addPart.connector.spi');
+      case 'gpio':
+        return t('addPart.connector.gpio');
+      default:
+        return t('addPart.connector.onBoard');
+    }
   }
 
   function chooseConnector(id: string) {
@@ -174,6 +206,7 @@
     const part: NewPart = simulated
       ? { name, connector, simulate: mode }
       : { name, connector, port: port ?? undefined };
+    if (!simulated && chosenAddress !== null) part.address = chosenAddress;
     if (fields.length > 0) {
       const read = readSettings(fields, values);
       if (!read.ok) {
@@ -371,11 +404,7 @@
                 <span class="choice-meta">
                   <code>{c.id}</code>
                   <span>{t('addPart.connector.version', { version: c.version })}</span>
-                  <span
-                    >{c.port.kind === 'serial'
-                      ? t('addPart.connector.serial', { baud: c.port.baud })
-                      : t('addPart.connector.onBoard')}</span
-                  >
+                  <span>{connectorPortWords(c.port)}</span>
                 </span>
                 <span class="provides">
                   {c.id === BRIDGE_CONNECTOR
@@ -390,6 +419,27 @@
         </div>
       {/if}
     </fieldset>
+
+    {#if !simulated && addresses.length > 0}
+      <fieldset class="step">
+        <legend>{t('addPart.address.legend')}</legend>
+        <p class="help">{t('addPart.address.help')}</p>
+        <div class="choices modes">
+          {#each addresses as a (a)}
+            <label class="choice">
+              <input
+                type="radio"
+                name="address"
+                value={a}
+                checked={chosenAddress === a}
+                onchange={() => (address = a)}
+              />
+              <span class="choice-body"><span class="choice-title">{hexAddress(a)}</span></span>
+            </label>
+          {/each}
+        </div>
+      </fieldset>
+    {/if}
 
     {#snippet field(f: SettingInfo)}
       {@const id = `setting-${f.key}`}

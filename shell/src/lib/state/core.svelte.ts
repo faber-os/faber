@@ -16,6 +16,8 @@ import {
 } from '../i18n/languages';
 import type {
   BoardCheck,
+  HeaderPin,
+  I2cScan,
   ConnectionStatus,
   ConnectorInfo,
   ConnectorProblem,
@@ -461,6 +463,16 @@ export class CoreState {
   /** Asks a free port whether a FaberLink board is on it; a board found is suggested for it. */
   checkBoard(port: string): Promise<Result<BoardCheck>> {
     return this.call(() => this.http.checkBoard(port));
+  }
+
+  /** A safe I²C scan of one bus; only ever because the user pressed Scan. */
+  scanI2c(port: string): Promise<Result<I2cScan>> {
+    return this.call(() => this.http.scanI2c(port));
+  }
+
+  /** The Pi's 40-pin header, pin by pin. */
+  loadHeader(): Promise<Result<HeaderPin[]>> {
+    return this.call(() => this.http.getHeader());
   }
 
   flasherBoards(): Promise<Result<FlashBoard[]>> {

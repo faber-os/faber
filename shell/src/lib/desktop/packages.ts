@@ -1,4 +1,5 @@
 import { t } from '../i18n';
+import { hexAddress } from './buses';
 import { extension } from './filePaths';
 
 /**
@@ -35,11 +36,6 @@ export function touchWords(port: PortNeed): string {
     default:
       return t('install.touch.bridge');
   }
-}
-
-/** An I²C address as datasheets write it: `0x48`. */
-export function hexAddress(address: number): string {
-  return `0x${address.toString(16).padStart(2, '0')}`;
 }
 
 /** How it runs, in words: `wasm` or `declarative`. */
