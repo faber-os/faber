@@ -468,11 +468,11 @@
     font-family: var(--font-mono);
   }
   .done {
-    color: var(--ok, var(--text));
+    color: var(--ok-text);
     font-size: var(--text-sm);
   }
   .problem {
     font-size: var(--text-sm);
-    color: var(--danger);
+    color: var(--danger-text);
   }
 </style>

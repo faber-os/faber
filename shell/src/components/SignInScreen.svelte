@@ -173,7 +173,7 @@
   }
   .problem {
     font-size: var(--text-sm);
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .actions {
     display: flex;
@@ -204,7 +204,7 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    color: var(--danger);
+    color: var(--danger-text);
     font-weight: 700;
   }
 </style>

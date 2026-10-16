@@ -76,7 +76,8 @@ describe('colour tokens', () => {
 
   it('writes status-coloured text with the --*-text tokens', () => {
     const bad = all.filter((r) =>
-      /^var\(--(ok|warn|danger|info)\)$/.test(textColour(r.body) ?? ''),
+      // Also with a fallback, e.g. var(--ok, var(--text)).
+      /^var\(--(ok|warn|danger|info)\s*[,)]/.test(textColour(r.body) ?? ''),
     );
     expect(bad.map((r) => `${r.file}:${r.line} ${r.selector}: ${textColour(r.body)}`)).toEqual([]);
   });
