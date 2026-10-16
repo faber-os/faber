@@ -23,6 +23,9 @@ impl Writer<'_> {
     pub fn f32(&mut self, v: f32) {
         self.out.extend_from_slice(&v.to_le_bytes());
     }
+    pub fn u64(&mut self, v: u64) {
+        self.out.extend_from_slice(&v.to_le_bytes());
+    }
     /// A `str8`. Longer strings are an encoding error, not silently cut.
     pub fn str8(&mut self, s: &str, field: &'static str) -> Result<(), crate::EncodeError> {
         let len = u8::try_from(s.len()).map_err(|_| crate::EncodeError::TooLong { field })?;
@@ -69,6 +72,14 @@ impl<'a> Reader<'a> {
     pub fn f32(&mut self) -> Result<f32, DecodeError> {
         let b = self.take(4)?;
         Ok(f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+    pub fn u64(&mut self) -> Result<u64, DecodeError> {
+        let b = self.take(8)?;
+        Ok(u64::from_le_bytes(b.try_into().expect("took 8 bytes")))
+    }
+    /// How many bytes are left.
+    pub fn remaining(&self) -> usize {
+        self.bytes.len()
     }
     pub fn str8(&mut self, field: &'static str) -> Result<String, DecodeError> {
         let n = self.u8()? as usize;

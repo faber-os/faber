@@ -653,8 +653,59 @@ fn the_board_answers_hello_with_its_identity_and_range() {
             board: "sim-board".into(),
             firmware: "faberlink-harness".into(),
             firmware_version: "0.1.0".into(),
+            build_id: None,
         })]
     );
+}
+
+/// The HELLO_ACK the board sends after `hello`, decoded with the Rust messages.
+fn hello_ack(b: &mut FakeBoard, now_ms: u32) -> HelloAck {
+    let hello =
+        Message::Hello(faberlink::message::Hello { min_version: 1, max_version: 1, max_payload: 250 });
+    b.feed(&hello.to_wire(1, 0).unwrap(), now_ms);
+    let mut d = frame::Decoder::new();
+    let acks: Vec<HelloAck> = b
+        .take_output()
+        .iter()
+        .filter_map(|&x| {
+            d.push(x).and_then(Result::ok).map(|f| Message::decode(1, f.kind, f.payload).unwrap())
+        })
+        .filter_map(|m| match m {
+            Message::HelloAck(a) => Some(a),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(acks.len(), 1, "{acks:?}");
+    acks.into_iter().next().unwrap()
+}
+
+#[test]
+fn a_sketch_built_by_faber_says_its_build_id_in_hello_ack() {
+    let mut b = FakeBoard::new(250).with_build_id(0x8BAD_F00D_0123_4567);
+    let ack = hello_ack(&mut b, 1);
+    assert_eq!(ack.build_id, Some(0x8BAD_F00D_0123_4567));
+    assert_eq!(
+        (ack.board.as_str(), ack.firmware_version.as_str()),
+        ("sim-board", "0.1.0"),
+        "the rest is unchanged"
+    );
+
+    // And the session hands it on with the board's identity.
+    let mut l = Link::new(250);
+    l.board = FakeBoard::mega(250).with_build_id(42);
+    l.run(20);
+    assert_eq!(l.session.board().unwrap().build_id, Some(42));
+    assert_eq!(l.session.state(), State::Ready, "the board connects as before");
+}
+
+#[test]
+fn a_sketch_built_elsewhere_sends_no_build_id() {
+    let mut b = FakeBoard::new(250);
+    assert_eq!(hello_ack(&mut b, 1).build_id, None);
+    // Every new session says it again.
+    let mut b = FakeBoard::new(250).with_build_id(7);
+    assert_eq!(hello_ack(&mut b, 1).build_id, Some(7));
+    assert_eq!(hello_ack(&mut b, 2).build_id, Some(7));
 }
 
 #[test]

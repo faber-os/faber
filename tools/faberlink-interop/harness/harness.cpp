@@ -255,6 +255,8 @@ void flh_reset_hardware_estop(void* h) { static_cast<Harness*>(h)->board.resetHa
 
 uint16_t flh_heartbeat_timeout(void* h) { return static_cast<Harness*>(h)->board.heartbeatTimeout(); }
 
+void flh_set_build_id(void* h, uint64_t id) { static_cast<Harness*>(h)->board.setBuildId(id); }
+
 void flh_speak_versions(void* h, uint8_t lo, uint8_t hi) { static_cast<Harness*>(h)->board.speakVersions(lo, hi); }
 
 int flh_estop_engaged(void* h) { return static_cast<Harness*>(h)->board.estopEngaged() ? 1 : 0; }

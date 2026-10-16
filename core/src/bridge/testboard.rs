@@ -278,6 +278,7 @@ impl Board for ScriptedBoard {
                         board: self.name.clone(),
                         firmware: "scripted".into(),
                         firmware_version: "1.0.0".into(),
+                        build_id: None,
                     };
                     self.send(Message::HelloAck(ack));
                 }

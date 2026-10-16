@@ -342,7 +342,8 @@ Board::Board(Output& out)
       coreEstop_(false),
       hwLatched_(false),
       releasePending_(false),
-      started_(false) {}
+      started_(false),
+      hasBuildId_(false) {}
 
 void Board::setIdentity(const char* board, const char* firmware, const char* firmwareVersion) {
   board_ = board;
@@ -490,9 +491,16 @@ void Board::onHello(const uint8_t* p, size_t len, uint32_t nowMs) {
   putU16(o + 4, heartbeatTimeoutMs_);
   o[6] = count_;
   size_t n = 7;
-  n += putStr(o + n, board_, (maxPayload() - n) / 3);
-  n += putStr(o + n, firmware_, (maxPayload() - n) / 2);
-  n += putStr(o + n, firmwareVersion_, maxPayload() - n);
+  // The strings share what is left, after room for the optional build id at the end. (Both
+  // shares of the first one are constants: a division at run time costs an AVR ~100 bytes.)
+  const size_t room = FABERLINK_MAX_PAYLOAD - (hasBuildId_ ? 8 : 0);
+  n += putStr(o + n, board_, hasBuildId_ ? (FABERLINK_MAX_PAYLOAD - 15) / 3 : (FABERLINK_MAX_PAYLOAD - 7) / 3);
+  n += putStr(o + n, firmware_, (room - n) / 2);
+  n += putStr(o + n, firmwareVersion_, room - n);
+  if (hasBuildId_) {
+    memcpy(o + n, buildId_, 8);
+    n += 8;
+  }
   send(kind::HELLO_ACK, n);
   if (p[2] >= 32 && p[2] < txMaxPayload_) txMaxPayload_ = p[2];
   lastStatusMs_ = nowMs - STATUS_PERIOD_MS;  // a STATUS on the next tick
