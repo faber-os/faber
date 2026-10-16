@@ -228,9 +228,13 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   thresholds and hysteresis as `faber-capabilities` (Li-ion 3S: low below 10.5 V, critical below
   9.9 V). The library can't link Rust, so the numbers are copied; an interop test checks that both
   give the same level at every voltage, for every chemistry, from every previous level.
-- Examples: `examples/MotorAndDistance` and `examples/BatteryMonitor`. CI compiles every example
-  for an Uno and a Mega.
-- Not built yet: `FaberServo`, digital in/out, HC-SR04, VL53L0X, encoders, a planar-base part with
+- `FaberUltrasonic` reads a trigger/echo range finder such as the HC-SR04:
+  `FaberUltrasonic front("front", 7, 6);` (trigger, echo; 2 cm to 4 m by default, the HC-SR04
+  datasheet's range). One measurement per 60 ms, as the datasheet asks; each waits at most about
+  24 ms for the echo (for 4 m), and the speed of sound is taken at about 20 °C (343 m/s).
+- Examples: `examples/MotorAndDistance`, `examples/Ultrasonic` and `examples/BatteryMonitor`. CI
+  compiles every example for an Uno and a Mega.
+- Not built yet: `FaberServo`, digital in/out, VL53L0X, encoders, a planar-base part with
   on-board ramp-down (the interop harness has a plain test one, for SENNEP's fake Mega:
   `FakeBoard::sennep`), and negotiating 1 Mbaud.
 - **Where it lives:** inside the Faber repo for now. Moving it to its own repo

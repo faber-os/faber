@@ -52,6 +52,24 @@ class FaberDistance : public faberlink::Distance {
   uint8_t pin_;
 };
 
+// An ultrasonic range finder with a trigger pin and an echo pin, such as the HC-SR04
+// (2 cm to 4 m, 15 degree cone, at most one measurement per 60 ms: its datasheet's numbers).
+// A measurement waits for the echo, at most about 24 ms for maxM = 4 m, so loop() stays fast
+// enough for FaberLink. Echoes take the speed of sound at about 20 degrees C (343 m/s).
+class FaberUltrasonic : public faberlink::Distance {
+ public:
+  FaberUltrasonic(const char* name, uint8_t triggerPin, uint8_t echoPin, float minM = 0.02f,
+                  float maxM = 4.0f);
+  void begin() override;
+
+ protected:
+  float measure() override;
+
+ private:
+  unsigned long timeoutUs_;
+  uint8_t triggerPin_, echoPin_;
+};
+
 // A battery measured through a voltage divider on an analog pin: battery + -> R1 -> pin -> R2 -> GND.
 // dividerRatio is (R1 + R2) / R2, e.g. 3.0 for 20 kOhm over 10 kOhm, which brings a 3S pack's
 // 12.6 V down to 4.2 V, safely under a 5 V board's reference. Pick resistors that keep the pin
@@ -85,8 +103,8 @@ class FaberLink {
   // Call it in every loop(), and keep loop() fast: delay() stops the protocol too.
   void poll();
 
-  // Adds a custom part (your own faberlink::Part); call it before begin(). FaberMotor and
-  // FaberDistance and FaberBattery add themselves.
+  // Adds a custom part (your own faberlink::Part); call it before begin(). FaberMotor,
+  // FaberDistance, FaberUltrasonic and FaberBattery add themselves.
   bool add(faberlink::Part& part);
   // A hardware stop button: engageEstop() stops everything and latches; the motors may only run
   // again after resetEstop() here AND a release in Faber.

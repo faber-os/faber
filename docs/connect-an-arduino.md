@@ -6,7 +6,12 @@ is wired where; the library does the talking, and it stops the motors on its own
 quiet. The protocol and the safety rules are in [faberlink.md](faberlink.md).
 
 This guide uses the library's example, `MotorAndDistance`: one DC motor and one analog distance
-sensor.
+sensor. For an HC-SR04 ultrasonic sensor, use the example `Ultrasonic` instead (wiring in the
+sketch: Trig to pin 7, Echo to pin 6).
+
+**Tried on a real board** (2026-10-16): an Arduino Mega 2560 on COM6 with `MotorAndDistance` and
+nothing wired. "Check for a FaberLink board" found it, its parts appeared and ran, and after the
+board was reset it showed Failed for a moment and came back by itself.
 
 **Tested or not.** Every step marked *(tested)* is checked on every CI run against the library's
 real C++ code behind a fake serial port (`core/tests/bridge.rs`, `tools/faberlink-interop`) or by

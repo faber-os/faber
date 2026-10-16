@@ -43,6 +43,37 @@ float FaberDistance::measure() {
   return raw * maxM_ / 1023.0f;
 }
 
+// Metres per microsecond of echo: sound goes there and back at 343 m/s.
+static const float METERS_PER_ECHO_US = 343.0f / 2.0f / 1000000.0f;
+
+FaberUltrasonic::FaberUltrasonic(const char* name, uint8_t triggerPin, uint8_t echoPin, float minM, float maxM)
+    // 0.26 rad: the HC-SR04's 15 degree cone. 60 ms between measurements, as its datasheet asks.
+    : faberlink::Distance(name, faberlink::DISTANCE_ULTRASONIC, minM, maxM, 0.26f, 60),
+      // Wait 10 % longer than an echo from maxM takes, then call it "no target".
+      timeoutUs_(static_cast<unsigned long>(maxM / METERS_PER_ECHO_US * 1.1f)),
+      triggerPin_(triggerPin),
+      echoPin_(echoPin) {
+  enqueue(this);
+}
+
+void FaberUltrasonic::begin() {
+  pinMode(triggerPin_, OUTPUT);
+  digitalWrite(triggerPin_, LOW);
+  pinMode(echoPin_, INPUT);
+}
+
+float FaberUltrasonic::measure() {
+  // A 10 us pulse on the trigger starts one measurement.
+  digitalWrite(triggerPin_, LOW);
+  delayMicroseconds(2);
+  digitalWrite(triggerPin_, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(triggerPin_, LOW);
+  unsigned long echoUs = pulseIn(echoPin_, HIGH, timeoutUs_);
+  if (echoUs == 0) return -1;  // no echo in time: nothing in range
+  return echoUs * METERS_PER_ECHO_US;
+}
+
 FaberBattery::FaberBattery(const char* name, uint8_t analogPin, float dividerRatio, uint8_t cellsInSeries,
                            faberlink::BatteryChemistry chemistry, float referenceVolts, float capacityAh)
     : faberlink::Battery(name, chemistry, cellsInSeries, capacityAh),

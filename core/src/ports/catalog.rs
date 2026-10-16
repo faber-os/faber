@@ -70,7 +70,11 @@ pub fn catalog(discovered: &[Discovered], replays: &[String]) -> Vec<PortEntry> 
             };
             let name = d.usb.as_ref().and_then(|u| u.product.clone().or_else(|| u.manufacturer.clone()));
             let label = match name {
-                Some(name) => format!("{name} ({})", d.path),
+                // Windows' names often end in the port already: "Arduino Mega 2560 (COM6)".
+                Some(name) => match name.strip_suffix(&format!(" ({})", d.path)) {
+                    Some(bare) => format!("{bare} ({})", d.path),
+                    None => format!("{name} ({})", d.path),
+                },
                 None if d.bluetooth => format!("Bluetooth serial link ({})", d.path),
                 None => d.path.clone(),
             };
@@ -128,6 +132,14 @@ mod tests {
         let c = catalog(&[usb("COM3", 0x1a86, 0x7523, None), usb("COM4", 0x1a86, 0x7523, None)], &[]);
         let ids: Vec<_> = c.iter().map(|e| e.id.to_string()).collect();
         assert_eq!(ids, ["serial:COM3", "serial:COM4"]);
+    }
+
+    #[test]
+    fn a_name_that_already_ends_in_its_port_isnt_given_it_twice() {
+        // Windows' name for an Arduino is "Arduino Mega 2560 (COM6)" already.
+        let mut d = usb("COM6", 0x2341, 0x0042, None);
+        d.usb.as_mut().unwrap().product = Some("Arduino Mega 2560 (COM6)".into());
+        assert_eq!(catalog(&[d], &[])[0].label, "Arduino Mega 2560 (COM6)");
     }
 
     #[test]
