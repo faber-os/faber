@@ -77,7 +77,7 @@ describe('manual sensors', () => {
             capability: 'battery@1',
             info: { chemistry: 'li-ion', cellsInSeries: 3, capacityAh: 2.2 },
           },
-          battery: { empty: 9, full: 12.6, low: 10.5, critical: 9.9 },
+          battery: { empty: 9, full: 12.59999942779541, low: 10.5, critical: 9.899999618530273 },
         },
       ],
     } as PartInfo;

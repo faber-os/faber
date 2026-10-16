@@ -87,7 +87,9 @@ export function sensorRange(p: PartInfo): SensorRange {
     if (i?.capability === 'distance@1') return { min: 0, max: i.info.maxM, quantity: 'length' };
     if (i?.capability === 'laser-scan@1')
       return { min: 0, max: i.info.rangeMaxM, quantity: 'length' };
-    if (s.battery) return { min: s.battery.empty, max: s.battery.full, quantity: 'voltage' };
+    // Volts travel as 32-bit floats (12.6 arrives as 12.5999994…): a slider wants round ends.
+    if (s.battery)
+      return { min: round(s.battery.empty), max: round(s.battery.full), quantity: 'voltage' };
   }
   return { min: 0, max: 4, quantity: 'length' };
 }

@@ -4,7 +4,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 /**
  * No window may cut its content off. A window's body never scrolls itself, so anything taller
  * than it must sit in a scrolling area inside the window. This opens every program, and the
- * viewers of a simulated drive base and distance sensor, at the project's screen size and at a
+ * viewers of a simulated drive base, distance sensor and battery, at the project's screen size and at a
  * small browser window, and checks that no body overflows. An app's window (the wall follower's,
  * installed for it) is open too.
  */
@@ -14,6 +14,7 @@ const APP_PACKAGE = readFileSync(
 const SIM_PARTS = [
   { name: 'layout_base', connector: 'generic-planar-base' },
   { name: 'layout_front', connector: 'generic-distance' },
+  { name: 'layout_battery', connector: 'generic-battery' },
 ];
 
 async function removeSimParts(request: APIRequestContext) {
@@ -72,12 +73,17 @@ async function openEveryProgram(page: Page) {
 async function openSimViewers(page: Page) {
   const taskbar = page.getByRole('navigation', { name: 'Taskbar' });
   const parts = page.getByRole('dialog', { name: 'Parts' });
-  for (const address of ['layout_base/planar-base', 'layout_front/distance']) {
+  for (const address of [
+    'layout_base/planar-base',
+    'layout_front/distance',
+    'layout_battery/battery',
+  ]) {
     await taskbar.getByRole('button', { name: 'Parts', exact: true }).click();
     await parts.getByRole('button', { name: `Open the viewer for ${address}` }).click();
   }
   await expect(page.locator('[data-window-kind="planar-base"]')).toBeVisible();
   await expect(page.locator('[data-window-kind="distance"]')).toBeVisible();
+  await expect(page.locator('[data-window-kind="battery"]')).toBeVisible();
 }
 
 test('no window cuts its content off, also after the browser shrinks', async ({ page }) => {

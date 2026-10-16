@@ -102,6 +102,31 @@ test('install the wall follower, pick its parts, run it and watch it in its wind
     expect.objectContaining({ part: BASE, holder: 'app:wall-follower' }),
   );
 
+  // Its speed slider is the app's state, shared with its logic: sliding it saves it, and the
+  // logic drives at the new speed.
+  const speed = app.getByTestId('speed');
+  await expect(speed).toHaveValue('0.25');
+  await speed.fill('0.1');
+  await expect(app.locator('#speed-value')).toHaveText('0.10 m/s');
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/v0/apps/${ID}/state`)).json()).values)
+    .toEqual({ speed: '0.1' });
+  await expect
+    .poll(
+      async () => {
+        const s = await (await page.request.get(`/api/v0/signals/${BASE}/planar-base`)).json();
+        return s.reading.reading.commanded.vx;
+      },
+      { timeout: 10_000 },
+    )
+    .toBeCloseTo(0.1, 3);
+  // Set elsewhere (another window, a program): the slider follows.
+  const put = await page.request.put(`/api/v0/apps/${ID}/state`, {
+    data: { key: 'speed', value: '0.3' },
+  });
+  expect(put.status()).toBe(200);
+  await expect(speed).toHaveValue('0.3');
+
   // Off in Apps: the window hears it, and the lease ends.
   await taskbar.getByRole('button', { name: 'Start' }).click();
   await page.locator('[role="menuitem"][data-kind="apps"]').first().click();
