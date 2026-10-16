@@ -206,9 +206,12 @@ layout maps 1:1 onto the types in `sdk/rust/capabilities` (and `wit/capabilities
 | 3 | `planar-base@1` |
 | 4 | `estop@1` |
 | 5 | `battery@1` |
+| 6 | `digital-in@1` (added 2026-10-16) |
+| 7 | `obstacle@1` (added 2026-10-16) |
 
 Other capabilities have no FaberLink layout yet; one is added (with a new code) when a board needs
-it. A `twist` below is `vx f32 · vy f32 · omega f32`.
+it. A capability without info (`digital-in@1`) has an empty info layout, and the core's
+`PartInfo::Empty` stands for it. A `twist` below is `vx f32 · vy f32 · omega f32`.
 
 | Capability | Reading | Command | Info |
 |---|---|---|---|
@@ -217,6 +220,8 @@ it. A `twist` below is `vx f32 · vy f32 · omega f32`.
 | `planar-base@1` | `flags u8 · commanded twist · measured twist` (25 B). `flags` bit 0: `measured` is known; bit 1: bumped. | `kind u8 (0 = set-velocity) · twist` (13 B) | `holonomic u8 · max_velocity twist · max_acceleration twist · n u8 · n × str8` (the parts it is built from, by their names on the board) |
 | `estop@1` | `engaged u8 · source u8 · reason str8` | — | `hardware_latching u8` (1 B) |
 | `battery@1` | `present u8 · volts f32 · amps f32 · charge f32 · celsius f32 · level u8 · n u8 · n × cell_volts f32` (19 B + 4n). `present` bits 0/1/2/3: amps, charge, celsius, cell volts; the others are sent as 0, and `n` is 0 without bit 3. `level`: 0 ok, 1 low, 2 critical. `volts` is always finite. | — | `chemistry u8 · cells_in_series u8 · capacity_ah f32` (6 B). `chemistry`: 0 li-ion, 1 lipo, 2 lifepo4, 3 nimh, 4 lead-acid. `cells_in_series` is at least 1. A NaN capacity means "unknown". |
+| `digital-in@1` | `level u8` (1 B): the logical level, 1 = active (an active-low input reads 1 while its pin is low). | — | — (0 B) |
+| `obstacle@1` | `detected u8` (1 B) | — | `kind u8 · trigger_distance_m f32` (5 B). `kind`: 0 bumper, 1 infrared, 2 limit. A NaN trigger distance means "unknown". |
 
 ## 5. Rules a board follows (the library enforces them, not the sketch)
 

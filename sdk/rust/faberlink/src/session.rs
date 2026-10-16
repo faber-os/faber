@@ -528,6 +528,10 @@ fn set_t_us(r: &mut Reading, t: u64) {
         Reading::DigitalOut(x) => x.t_us = t,
         Reading::AnalogIn(x) => x.t_us = t,
         Reading::PwmOut(x) => x.t_us = t,
+        Reading::Obstacle(x) => x.t_us = t,
+        Reading::Servo(x) => x.t_us = t,
+        Reading::Encoder(x) => x.t_us = t,
+        Reading::Imu(x) => x.t_us = t,
     }
 }
 

@@ -1,12 +1,14 @@
 //! Fixed binary layouts for each capability's reading, command and info (docs/faberlink.md §4).
 //!
 //! They map 1:1 onto the types in `faber-capabilities`. Every number is little-endian, every
-//! float an IEEE-754 `f32`. A capability that has no layout yet can't travel over FaberLink.
+//! float an IEEE-754 `f32`. A capability that has no layout yet can't travel over FaberLink. A
+//! capability without info (`digital-in@1`) has an empty info layout.
 
 use crate::bytes::{Reader, Writer};
 use crate::{DecodeError, EncodeError};
 use faber_capabilities::{
-    Capability, Command, Info, Reading, Timestamp, Twist2d, battery, distance, estop, motor, planar_base,
+    Capability, Command, Info, Reading, Timestamp, Twist2d, battery, digital_in, distance, estop, motor,
+    obstacle, planar_base,
 };
 
 /// The one-byte code a capability has in `READING`, `COMMAND` and `APPLIED` (protocol v1).
@@ -17,15 +19,19 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::PlanarBase => 3,
         Capability::Estop => 4,
         Capability::Battery => 5,
+        Capability::DigitalIn => 6,
+        Capability::Obstacle => 7,
         // No layout yet: the board side (the Arduino library) has none either.
         Capability::LaserScan
         | Capability::Pose
         | Capability::Position
         | Capability::Temperature
-        | Capability::DigitalIn
         | Capability::DigitalOut
         | Capability::AnalogIn
-        | Capability::PwmOut => return None,
+        | Capability::PwmOut
+        | Capability::Servo
+        | Capability::Encoder
+        | Capability::Imu => return None,
     })
 }
 
@@ -71,6 +77,8 @@ const DISTANCE_STATUS: &[distance::Status] = &[
 ];
 const ESTOP_SOURCE: &[estop::Source] = &[estop::Source::Part, estop::Source::App, estop::Source::Shell];
 const BATTERY_LEVEL: &[battery::Level] = &[battery::Level::Ok, battery::Level::Low, battery::Level::Critical];
+const OBSTACLE_KIND: &[obstacle::Kind] =
+    &[obstacle::Kind::Bumper, obstacle::Kind::Infrared, obstacle::Kind::Limit];
 const CHEMISTRY: &[battery::Chemistry] = &[
     battery::Chemistry::LiIon,
     battery::Chemistry::Lipo,
@@ -124,6 +132,8 @@ pub fn encode_reading(reading: &Reading, out: &mut Vec<u8>) -> Result<(), Encode
                 w.f32(v);
             }
         }
+        Reading::DigitalIn(r) => w.bool(r.level),
+        Reading::Obstacle(r) => w.bool(r.detected),
         other => return Err(unsupported(other.capability())),
     }
     Ok(())
@@ -194,6 +204,8 @@ pub fn decode_reading(capability: Capability, t_us: Timestamp, bytes: &[u8]) -> 
                 level,
             })
         }
+        Capability::DigitalIn => Reading::DigitalIn(digital_in::Reading { t_us, level: r.bool("level")? }),
+        Capability::Obstacle => Reading::Obstacle(obstacle::Reading { t_us, detected: r.bool("detected")? }),
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
     r.end()?;
@@ -217,7 +229,9 @@ pub fn encode_command(command: &Command, out: &mut Vec<u8>) -> Result<(), Encode
             w.u8(0);
             twist(w, t);
         }
-        Command::DigitalOut(_) | Command::PwmOut(_) => return Err(unsupported(command.capability())),
+        Command::DigitalOut(_) | Command::PwmOut(_) | Command::Servo(_) => {
+            return Err(unsupported(command.capability()));
+        }
     }
     Ok(())
 }
@@ -284,29 +298,35 @@ pub fn encode_info(info: &Info, out: &mut Vec<u8>) -> Result<(), EncodeError> {
             w.u8(i.cells_in_series);
             w.f32(i.capacity_ah.unwrap_or(f32::NAN));
         }
+        Info::Obstacle(i) => {
+            w.u8(enum_index(OBSTACLE_KIND, i.kind));
+            w.f32(i.trigger_distance_m.unwrap_or(f32::NAN));
+        }
         other => return Err(unsupported(other.capability())),
     }
     Ok(())
 }
 
-pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Info, DecodeError> {
+/// Reads a part's info layout: `None` for a capability that has no info, whose layout is empty.
+pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Option<Info>, DecodeError> {
     let r = &mut Reader::new(bytes);
     let info = match capability {
-        Capability::Distance => Info::Distance(distance::Info {
+        Capability::DigitalIn => None,
+        Capability::Distance => Some(Info::Distance(distance::Info {
             min_m: r.f32()?,
             max_m: r.f32()?,
             field_of_view_rad: r.f32()?,
             kind: enum_at(DISTANCE_KIND, r.u8()?, "kind")?,
-        }),
+        })),
         Capability::Motor => {
             let kind = enum_at(MOTOR_KIND, r.u8()?, "kind")?;
             let m = flags(r, 0b111, "modes")?;
             let max = r.f32()?;
-            Info::Motor(motor::Info {
+            Some(Info::Motor(motor::Info {
                 kind,
                 modes: motor::Modes { velocity: m & 1 != 0, position: m & 2 != 0, duty: m & 4 != 0 },
                 max_velocity_rad_s: (!max.is_nan()).then_some(max),
-            })
+            }))
         }
         Capability::PlanarBase => {
             let holonomic = r.bool("holonomic")?;
@@ -314,9 +334,16 @@ pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Info, DecodeE
             let max_acceleration = read_twist(r)?;
             let n = r.u8()?;
             let built_from = (0..n).map(|_| r.str8("builtFrom")).collect::<Result<_, _>>()?;
-            Info::PlanarBase(planar_base::Info { holonomic, max_velocity, max_acceleration, built_from })
+            Some(Info::PlanarBase(planar_base::Info {
+                holonomic,
+                max_velocity,
+                max_acceleration,
+                built_from,
+            }))
         }
-        Capability::Estop => Info::Estop(estop::Info { hardware_latching: r.bool("hardwareLatching")? }),
+        Capability::Estop => {
+            Some(Info::Estop(estop::Info { hardware_latching: r.bool("hardwareLatching")? }))
+        }
         Capability::Battery => {
             let chemistry = enum_at(CHEMISTRY, r.u8()?, "chemistry")?;
             let cells_in_series = r.u8()?;
@@ -324,11 +351,19 @@ pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Info, DecodeE
                 return Err(DecodeError::BadValue { field: "cellsInSeries" });
             }
             let capacity = r.f32()?;
-            Info::Battery(battery::Info {
+            Some(Info::Battery(battery::Info {
                 chemistry,
                 cells_in_series,
                 capacity_ah: (!capacity.is_nan()).then_some(capacity),
-            })
+            }))
+        }
+        Capability::Obstacle => {
+            let kind = enum_at(OBSTACLE_KIND, r.u8()?, "kind")?;
+            let trigger = r.f32()?;
+            Some(Info::Obstacle(obstacle::Info {
+                kind,
+                trigger_distance_m: (!trigger.is_nan()).then_some(trigger),
+            }))
         }
         other => return Err(DecodeError::NoLayout { capability: other.id() }),
     };
@@ -380,6 +415,10 @@ pub(crate) mod tests {
             (t.clone(), any::<bool>(), 0..3u8, "[ -~]{0,60}").prop_map(|(t_us, engaged, s, reason)| {
                 Reading::Estop(estop::Reading { t_us, engaged, source: ESTOP_SOURCE[s as usize], reason })
             }),
+            (t.clone(), any::<bool>())
+                .prop_map(|(t_us, level)| Reading::DigitalIn(digital_in::Reading { t_us, level })),
+            (t.clone(), any::<bool>())
+                .prop_map(|(t_us, detected)| Reading::Obstacle(obstacle::Reading { t_us, detected })),
             (
                 (t, finite(), 0..3u8),
                 proptest::option::of(finite()),
@@ -445,6 +484,9 @@ pub(crate) mod tests {
                     capacity_ah,
                 })
             }),
+            (0..3u8, proptest::option::of(0.0f32..10.0)).prop_map(|(k, trigger_distance_m)| {
+                Info::Obstacle(obstacle::Info { kind: OBSTACLE_KIND[k as usize], trigger_distance_m })
+            }),
         ]
     }
 
@@ -507,6 +549,19 @@ pub(crate) mod tests {
         });
         encode_info(&i, &mut out).unwrap();
         assert_eq!(out, [2, 4, 0x00, 0x00, 0xC0, 0x7F]);
+
+        out.clear();
+        encode_reading(&Reading::DigitalIn(digital_in::Reading { t_us: 0, level: true }), &mut out).unwrap();
+        assert_eq!(out, [1], "digital-in: the level");
+
+        out.clear();
+        encode_reading(&Reading::Obstacle(obstacle::Reading { t_us: 0, detected: true }), &mut out).unwrap();
+        assert_eq!(out, [1], "obstacle: detected");
+
+        out.clear();
+        let i = Info::Obstacle(obstacle::Info { kind: obstacle::Kind::Infrared, trigger_distance_m: None });
+        encode_info(&i, &mut out).unwrap();
+        assert_eq!(out, [1, 0x00, 0x00, 0xC0, 0x7F], "obstacle: kind, then the trigger distance (NaN)");
     }
 
     #[test]
@@ -533,6 +588,16 @@ pub(crate) mod tests {
             Err(DecodeError::BadValue { field: "hardwareLatching" })
         );
         assert_eq!(decode_info(Capability::Estop, &[1, 0]), Err(DecodeError::TrailingBytes));
+        assert_eq!(
+            decode_reading(Capability::DigitalIn, 0, &[2]),
+            Err(DecodeError::BadValue { field: "level" })
+        );
+        assert_eq!(decode_info(Capability::DigitalIn, &[]), Ok(None), "digital-in has no info");
+        assert_eq!(decode_info(Capability::DigitalIn, &[0]), Err(DecodeError::TrailingBytes));
+        assert_eq!(
+            decode_info(Capability::Obstacle, &[3, 0, 0, 0, 0]),
+            Err(DecodeError::BadValue { field: "kind" })
+        );
         let mut battery = vec![0u8; 19];
         battery[17] = 3;
         assert_eq!(
@@ -586,11 +651,11 @@ pub(crate) mod tests {
         fn infos_round_trip(i in info()) {
             let mut out = vec![];
             encode_info(&i, &mut out).unwrap();
-            prop_assert_eq!(decode_info(i.capability(), &out).unwrap(), i);
+            prop_assert_eq!(decode_info(i.capability(), &out).unwrap(), Some(i));
         }
 
         #[test]
-        fn garbage_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..64), c in 0..8u8) {
+        fn garbage_never_panics(bytes in proptest::collection::vec(any::<u8>(), 0..64), c in 0..32u8) {
             if let Some(cap) = from_code(c) {
                 let _ = decode_reading(cap, 0, &bytes);
                 let _ = decode_command(cap, &bytes);

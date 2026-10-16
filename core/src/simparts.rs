@@ -6,7 +6,10 @@
 //!   machine has already lease-checked and clamped, and publishes `commanded`, `measured` and
 //!   `bumped`. The safe state is a zero command, so the machine ramps to a stop within its
 //!   acceleration limit;
-//! - world `laser-scan` and `distance` parts raycast from their mount at their rate;
+//! - world `laser-scan` and `distance` parts raycast from their mount at their rate; an `obstacle`
+//!   part (a bumper, an infrared module) casts the same way and is detected within its trigger
+//!   distance;
+//! - a world `imu` feels the machine turn and speed up, and gravity;
 //! - a world `battery` drains with the base's commanded speed: its idle current, plus its moving
 //!   current in proportion to how close to top speed the base is asked to go;
 //! - the machine's ground-truth pose is published as `world/pose` (`pose@1`).
@@ -25,7 +28,8 @@ use crate::sim::world::{
 use crate::sim::worlds;
 use crate::simulation::{Outlet, PartSpec, SimulatedPart};
 use faber_capabilities::{
-    Capability, Command, Info, Mount, Reading, Twist2d, battery, distance, planar_base, pose,
+    Capability, Command, Info, Mount, Reading, Twist2d, Vec3, battery, distance, imu, obstacle, planar_base,
+    pose,
 };
 use faber_connector::{Applied, CommandError, Health, Problem, Settings};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -191,6 +195,20 @@ impl WorldEngine for SimWorld {
                         let every = every_us(&part.settings, 10.0);
                         let id = e.next_id();
                         let kind = SensorKind::Distance(i.clone(), cone);
+                        e.sensors.push(Sensor::new(id, &part, p.name.clone(), kind, every));
+                        ids.push(id);
+                    }
+                    (Capability::Obstacle, Some(Info::Obstacle(i))) => {
+                        let every = every_us(&part.settings, 10.0);
+                        let id = e.next_id();
+                        let kind = SensorKind::Obstacle(obstacle_cone(i, &part.settings));
+                        e.sensors.push(Sensor::new(id, &part, p.name.clone(), kind, every));
+                        ids.push(id);
+                    }
+                    (Capability::Imu, _) => {
+                        let every = every_us(&part.settings, 20.0);
+                        let id = e.next_id();
+                        let kind = SensorKind::Imu(None);
                         e.sensors.push(Sensor::new(id, &part, p.name.clone(), kind, every));
                         ids.push(id);
                     }
@@ -389,6 +407,52 @@ enum SensorKind {
     Scan(ScanSpec),
     Distance(distance::Info, DistanceCone),
     Battery(WorldBattery),
+    /// Something within the cone's range is in the way.
+    Obstacle(DistanceCone),
+    /// The machine's velocity (and world time) at the IMU's last reading, to tell its acceleration.
+    Imu(Option<(Twist, f64)>),
+}
+
+/// How far a contact sensor (a bumper, a limit switch) reaches in the world beyond its trigger
+/// distance: the world stops a bumping machine a hair short of the wall, never on it.
+const CONTACT_SLACK_M: f64 = 0.005;
+
+/// An obstacle sensor's cone: it sees from 0 to its trigger distance, without noise (it says only
+/// yes or no), as wide as its `fov-rad` setting.
+fn obstacle_cone(info: &obstacle::Info, settings: &Settings) -> DistanceCone {
+    let fov = settings
+        .get("fov-rad")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .filter(|f| f.is_finite() && *f >= 0.0)
+        .unwrap_or(0.5);
+    let reach = f64::from(info.trigger_distance_m.unwrap_or(0.0)).max(0.0) + CONTACT_SLACK_M;
+    DistanceCone { noise_m: 0.0, ..DistanceCone::new(0.0, reach, fov) }
+}
+
+/// What an IMU at `mount` feels: the machine's turn about z, its acceleration in the IMU's frame
+/// (the change of velocity plus the turn's share, `a = dv/dt + ω × v`), and gravity straight up.
+/// The world is flat, so roll and pitch are zero; the IMU is taken to sit at the machine's
+/// turning centre (no lever arm), turned by its mount's yaw.
+fn imu_reading(
+    t_us: u64,
+    mount: &Mount,
+    before: Option<(Twist, f64)>,
+    now: Twist,
+    now_s: f64,
+) -> imu::Reading {
+    let (ax, ay) = match before {
+        Some((v0, t0)) if now_s > t0 => {
+            let dt = now_s - t0;
+            ((now.vx - v0.vx) / dt - now.omega * now.vy, (now.vy - v0.vy) / dt + now.omega * now.vx)
+        }
+        _ => (-now.omega * now.vy, now.omega * now.vx),
+    };
+    let (s, c) = f64::from(mount.yaw).sin_cos();
+    imu::Reading::raw(
+        t_us,
+        Vec3 { x: 0.0, y: 0.0, z: now.omega as f32 },
+        Vec3 { x: (ax * c + ay * s) as f32, y: (-ax * s + ay * c) as f32, z: imu::STANDARD_GRAVITY },
+    )
 }
 
 /// A battery in the world: it drains as the machine drives.
@@ -569,6 +633,17 @@ impl Engine {
                     Reading::Distance(distance_reading(now, info, sim.distance(&s.mount, cone)))
                 }
                 SensorKind::Battery(b) => Reading::Battery(b.reading(now)),
+                SensorKind::Obstacle(cone) => {
+                    let d = sim.distance(&s.mount, cone);
+                    let detected = matches!(d.status, DistanceStatus::Ok | DistanceStatus::TooClose);
+                    Reading::Obstacle(obstacle::Reading { t_us: now, detected })
+                }
+                SensorKind::Imu(before) => {
+                    let (v, t) = (sim.velocity(), sim.time_s());
+                    let r = imu_reading(now, &s.mount, *before, v, t);
+                    *before = Some((v, t));
+                    Reading::Imu(r)
+                }
             };
             readings.push((Arc::clone(&s.outlet), s.name.clone(), reading));
         }
@@ -942,6 +1017,72 @@ mod tests {
         let Some(Subscription::Latest(rx)) = router.subscribe(&pose_address()) else { panic!() };
         let Some(Reading::Pose(p)) = rx.borrow().as_deref().cloned() else { panic!("no world/pose") };
         assert_eq!((p.frame.as_str(), p.position.x, p.position.y), ("world", 3.0, 2.0));
+    }
+
+    #[test]
+    fn a_world_bumper_is_pressed_when_the_machine_drives_into_a_wall() {
+        let (w, _, clock) = paused(Pose::new(5.0, 2.0, 0.0));
+        let out = Arc::new(Recorder::default());
+        let mut base = w.start(spec(base_info(), Mount::default(), "", &out, clock.clone()));
+        let bumper = Arc::new(Recorder::default());
+        let info =
+            Info::Obstacle(obstacle::Info { kind: obstacle::Kind::Bumper, trigger_distance_m: Some(0.01) });
+        // At the front of the 0.5 m long default footprint, which reaches 0.25 m ahead.
+        let _b = w.start(spec(
+            info,
+            Mount { x: 0.25, ..Mount::default() },
+            "rate-hz = 50",
+            &bumper,
+            clock.clone(),
+        ));
+        let detected = |r: &Recorder| match r.readings().pop() {
+            Some(Reading::Obstacle(o)) => o.detected,
+            other => panic!("{other:?}"),
+        };
+        w.shared.tick(0);
+        run(&w, &clock, 0.2, |_| {});
+        assert!(!detected(&bumper), "0.75 m from the east wall");
+        base.command(set_velocity(0.5, 0.0, 0.0)).unwrap();
+        run(&w, &clock, 3.0, |_| {});
+        assert!(w.state().bumped);
+        assert!(detected(&bumper), "against the wall: {:?}", w.state().pose);
+        base.command(set_velocity(-0.5, 0.0, 0.0)).unwrap();
+        run(&w, &clock, 0.5, |_| {});
+        assert!(!detected(&bumper), "backed off");
+    }
+
+    #[test]
+    fn a_world_imu_feels_the_machine_turn_and_speed_up() {
+        let (w, _, clock) = paused(Pose::new(3.0, 2.0, 0.0));
+        let out = Arc::new(Recorder::default());
+        let mut base = w.start(spec(base_info(), Mount::default(), "", &out, clock.clone()));
+        let imu_out = Arc::new(Recorder::default());
+        let provide = faber_connector::Provide::default_for(Capability::Imu);
+        let _i = w.start(PartSpec {
+            provides: vec![provide],
+            ..spec(base_info(), Mount::default(), "rate-hz = 50", &imu_out, clock.clone())
+        });
+        let last = |r: &Recorder| match r.readings().pop() {
+            Some(Reading::Imu(i)) => i,
+            other => panic!("{other:?}"),
+        };
+        w.shared.tick(0);
+        run(&w, &clock, 0.1, |_| {});
+        let still = last(&imu_out);
+        assert_eq!(
+            still.linear_acceleration,
+            Vec3 { x: 0.0, y: 0.0, z: imu::STANDARD_GRAVITY },
+            "at rest: gravity"
+        );
+        base.command(set_velocity(1.0, 0.0, 0.0)).unwrap();
+        run(&w, &clock, 0.3, |_| {});
+        let speeding = last(&imu_out);
+        assert!((speeding.linear_acceleration.x - 1.0).abs() < 0.05, "1 m/s² forward: {speeding:?}");
+        base.command(set_velocity(0.0, 0.0, 1.0)).unwrap();
+        run(&w, &clock, 2.0, |_| {});
+        let turning = last(&imu_out);
+        assert!((turning.angular_velocity.z - 1.0).abs() < 1e-3, "{turning:?}");
+        assert_eq!(turning.orientation, None, "no fusion: no orientation");
     }
 
     #[test]

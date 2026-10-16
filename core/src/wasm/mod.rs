@@ -205,6 +205,8 @@ impl bindings::faber::capabilities::battery::Host for Host {}
 impl bindings::faber::capabilities::temperature::Host for Host {}
 impl bindings::faber::capabilities::digital_in::Host for Host {}
 impl bindings::faber::capabilities::analog_in::Host for Host {}
+impl bindings::faber::capabilities::obstacle::Host for Host {}
+impl bindings::faber::capabilities::imu::Host for Host {}
 
 // These interfaces also declare commands for apps. A connector never gets them: `definition`
 // refuses any component that imports a function outside `context`. Refused here too, in case.
@@ -236,6 +238,18 @@ impl bindings::faber::capabilities::digital_out::Host for Host {
 
 impl bindings::faber::capabilities::pwm_out::Host for Host {
     fn set_duty(&mut self, _: LeaseId, _: f32) -> Result<(), AppCommandError> {
+        Err(AppCommandError::BadCommand)
+    }
+}
+
+impl bindings::faber::capabilities::servo::Host for Host {
+    fn set_angle(&mut self, _: LeaseId, _: f32) -> Result<(), AppCommandError> {
+        Err(AppCommandError::BadCommand)
+    }
+}
+
+impl bindings::faber::capabilities::encoder::Host for Host {
+    fn reset_count(&mut self) -> Result<(), AppCommandError> {
         Err(AppCommandError::BadCommand)
     }
 }

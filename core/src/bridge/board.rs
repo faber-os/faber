@@ -109,6 +109,8 @@ pub fn sub_parts(bridge: &PartName, parts: &[PartDescription], pins: &[PartPins]
                     };
                     Some(Provide::with_info(info))
                 }
+                // A capability without info (digital-in@1): the board sends none.
+                (PartInfo::Empty, Some(capability)) => Some(Provide::default_for(capability)),
                 _ => None,
             };
             Some(SubPart {
@@ -246,6 +248,22 @@ mod tests {
         let p = subs[0].provide.as_ref().unwrap();
         assert_eq!((p.name.as_str(), p.capability), ("motor", Capability::Motor));
         assert_eq!(p.info, Some(motor_info()));
+        assert_eq!(sub_health(&subs[0]), Health::Running);
+    }
+
+    #[test]
+    fn a_capability_without_info_is_a_sub_part_too() {
+        let button = PartDescription {
+            id: 0,
+            count: 1,
+            lease_ms: 0,
+            capability: "digital-in@1".into(),
+            name: "start".into(),
+            info: PartInfo::Empty,
+        };
+        let subs = sub_parts(&mega(), &[button], &[]);
+        let p = subs[0].provide.as_ref().unwrap();
+        assert_eq!((p.name.as_str(), p.capability, &p.info), ("digital-in", Capability::DigitalIn, &None));
         assert_eq!(sub_health(&subs[0]), Health::Running);
     }
 

@@ -11,16 +11,20 @@ pub mod battery;
 pub mod digital_in;
 pub mod digital_out;
 pub mod distance;
+pub mod encoder;
 pub mod estop;
 mod geometry;
+pub mod imu;
 pub mod laser_scan;
 pub mod motor;
 mod mount;
 mod non_finite;
+pub mod obstacle;
 pub mod planar_base;
 pub mod pose;
 pub mod position;
 pub mod pwm_out;
+pub mod servo;
 pub mod temperature;
 
 pub use geometry::{Quaternion, Twist2d, Vec3};
@@ -79,6 +83,14 @@ pub enum Capability {
     AnalogIn,
     #[serde(rename = "pwm-out@1")]
     PwmOut,
+    #[serde(rename = "obstacle@1")]
+    Obstacle,
+    #[serde(rename = "servo@1")]
+    Servo,
+    #[serde(rename = "encoder@1")]
+    Encoder,
+    #[serde(rename = "imu@1")]
+    Imu,
 }
 
 impl Capability {
@@ -96,6 +108,10 @@ impl Capability {
         Capability::DigitalOut,
         Capability::AnalogIn,
         Capability::PwmOut,
+        Capability::Obstacle,
+        Capability::Servo,
+        Capability::Encoder,
+        Capability::Imu,
     ];
 
     /// The versioned id used in manifests, addresses and on the wire.
@@ -114,6 +130,10 @@ impl Capability {
             Capability::DigitalOut => "digital-out@1",
             Capability::AnalogIn => "analog-in@1",
             Capability::PwmOut => "pwm-out@1",
+            Capability::Obstacle => "obstacle@1",
+            Capability::Servo => "servo@1",
+            Capability::Encoder => "encoder@1",
+            Capability::Imu => "imu@1",
         }
     }
 
@@ -125,7 +145,7 @@ impl Capability {
 
     pub fn delivery(self) -> Delivery {
         match self {
-            Capability::Estop | Capability::DigitalIn => Delivery::EveryMessage,
+            Capability::Estop | Capability::DigitalIn | Capability::Obstacle => Delivery::EveryMessage,
             Capability::LaserScan
             | Capability::Distance
             | Capability::Motor
@@ -136,7 +156,10 @@ impl Capability {
             | Capability::Temperature
             | Capability::DigitalOut
             | Capability::AnalogIn
-            | Capability::PwmOut => Delivery::LatestValue,
+            | Capability::PwmOut
+            | Capability::Servo
+            | Capability::Encoder
+            | Capability::Imu => Delivery::LatestValue,
         }
     }
 
@@ -159,6 +182,11 @@ impl Capability {
                 duration_us: 1_000_000,
                 safe_state: Command::PwmOut(pwm_out::Command::OFF),
             }),
+            // 1 s, then the safe state the part is set up for: hold its angle (the default) or
+            // release it (D29).
+            Capability::Servo => {
+                Some(LeasePolicy { duration_us: 1_000_000, safe_state: Command::Servo(servo::Command::SAFE) })
+            }
             Capability::LaserScan
             | Capability::Distance
             | Capability::Estop
@@ -167,7 +195,10 @@ impl Capability {
             | Capability::Battery
             | Capability::Temperature
             | Capability::DigitalIn
-            | Capability::AnalogIn => None,
+            | Capability::AnalogIn
+            | Capability::Obstacle
+            | Capability::Encoder
+            | Capability::Imu => None,
         }
     }
 
@@ -207,6 +238,14 @@ pub enum Reading {
     AnalogIn(analog_in::Reading),
     #[serde(rename = "pwm-out@1")]
     PwmOut(pwm_out::Reading),
+    #[serde(rename = "obstacle@1")]
+    Obstacle(obstacle::Reading),
+    #[serde(rename = "servo@1")]
+    Servo(servo::Reading),
+    #[serde(rename = "encoder@1")]
+    Encoder(encoder::Reading),
+    #[serde(rename = "imu@1")]
+    Imu(imu::Reading),
 }
 
 impl Reading {
@@ -225,6 +264,10 @@ impl Reading {
             Reading::DigitalOut(_) => Capability::DigitalOut,
             Reading::AnalogIn(_) => Capability::AnalogIn,
             Reading::PwmOut(_) => Capability::PwmOut,
+            Reading::Obstacle(_) => Capability::Obstacle,
+            Reading::Servo(_) => Capability::Servo,
+            Reading::Encoder(_) => Capability::Encoder,
+            Reading::Imu(_) => Capability::Imu,
         }
     }
 
@@ -243,6 +286,10 @@ impl Reading {
             Reading::DigitalOut(r) => r.t_us,
             Reading::AnalogIn(r) => r.t_us,
             Reading::PwmOut(r) => r.t_us,
+            Reading::Obstacle(r) => r.t_us,
+            Reading::Servo(r) => r.t_us,
+            Reading::Encoder(r) => r.t_us,
+            Reading::Imu(r) => r.t_us,
         }
     }
 }
@@ -261,6 +308,8 @@ pub enum Command {
     DigitalOut(digital_out::Command),
     #[serde(rename = "pwm-out@1")]
     PwmOut(pwm_out::Command),
+    #[serde(rename = "servo@1")]
+    Servo(servo::Command),
 }
 
 impl Command {
@@ -270,6 +319,7 @@ impl Command {
             Command::PlanarBase(_) => Capability::PlanarBase,
             Command::DigitalOut(_) => Capability::DigitalOut,
             Command::PwmOut(_) => Capability::PwmOut,
+            Command::Servo(_) => Capability::Servo,
         }
     }
 
@@ -280,6 +330,7 @@ impl Command {
             Command::PlanarBase(c) => c.kind(),
             Command::DigitalOut(c) => c.kind(),
             Command::PwmOut(c) => c.kind(),
+            Command::Servo(c) => c.kind(),
         }
     }
 
@@ -289,15 +340,20 @@ impl Command {
         match (self, info) {
             (Command::Motor(c), Info::Motor(i)) => Ok(c.clamp(i)?.map(Command::Motor)),
             (Command::PlanarBase(c), Info::PlanarBase(i)) => Ok(c.clamp(i)?.map(Command::PlanarBase)),
+            (Command::Servo(c), Info::Servo(i)) => Ok(c.clamp(i)?.map(Command::Servo)),
             _ => Err(Refused::WrongCapability { command: self.capability(), part: info.capability() }),
         }
     }
 
     /// Clamps a command for a part that has no info to the limits every part of its capability
-    /// has (a PWM duty is always 0–1). Others pass unchanged.
+    /// has (a PWM duty is always 0–1, an angle is a number). Others pass unchanged.
     pub fn clamp_bare(self) -> Result<Clamped<Command>, Refused> {
         match self {
             Command::PwmOut(c) => Ok(c.clamp()?.map(Command::PwmOut)),
+            Command::Servo(servo::Command::SetAngle { angle_rad }) => {
+                Ok(Clamped::of(angle_rad, "angleRad", f32::NEG_INFINITY, f32::INFINITY)?
+                    .map(|a| Command::Servo(servo::Command::SetAngle { angle_rad: a })))
+            }
             other => Ok(Clamped { command: other, clamped: false }),
         }
     }
@@ -320,6 +376,12 @@ pub enum Info {
     Estop(estop::Info),
     #[serde(rename = "battery@1")]
     Battery(battery::Info),
+    #[serde(rename = "obstacle@1")]
+    Obstacle(obstacle::Info),
+    #[serde(rename = "servo@1")]
+    Servo(servo::Info),
+    #[serde(rename = "encoder@1")]
+    Encoder(encoder::Info),
 }
 
 impl Info {
@@ -331,6 +393,9 @@ impl Info {
             Info::PlanarBase(_) => Capability::PlanarBase,
             Info::Estop(_) => Capability::Estop,
             Info::Battery(_) => Capability::Battery,
+            Info::Obstacle(_) => Capability::Obstacle,
+            Info::Servo(_) => Capability::Servo,
+            Info::Encoder(_) => Capability::Encoder,
         }
     }
 
@@ -418,10 +483,21 @@ mod tests {
             Capability::Temperature,
             Capability::DigitalIn,
             Capability::AnalogIn,
+            Capability::Obstacle,
+            Capability::Encoder,
+            Capability::Imu,
         ] {
             assert!(c.lease().is_none(), "{c:?} is not leased");
         }
+        let servo = Capability::Servo.lease().unwrap();
+        assert_eq!(servo.duration_us, 1_000_000);
+        assert_eq!(
+            servo.safe_state,
+            Command::Servo(servo::Command::Safe),
+            "the part decides: hold or release"
+        );
         assert_eq!(Capability::DigitalIn.delivery(), Delivery::EveryMessage, "every edge counts");
+        assert_eq!(Capability::Obstacle.delivery(), Delivery::EveryMessage, "a bump is an event");
         let out = Capability::DigitalOut.lease().unwrap();
         assert_eq!(out.duration_us, 1_000_000);
         assert_eq!(out.safe_state, Command::DigitalOut(digital_out::Command::Set { level: false }));
@@ -473,6 +549,20 @@ mod tests {
             Reading::DigitalOut(digital_out::Reading { t_us: 10, level: false }),
             Reading::AnalogIn(analog_in::Reading { t_us: 11, fraction: 0.25, volts: Some(0.825) }),
             Reading::PwmOut(pwm_out::Reading { t_us: 12, duty: 0.5 }),
+            Reading::Obstacle(obstacle::Reading { t_us: 13, detected: true }),
+            Reading::Servo(servo::Reading { t_us: 14, angle_rad: Some(1.0) }),
+            Reading::Encoder(encoder::Reading {
+                t_us: 15,
+                count: 100,
+                delta: 2,
+                counts_per_s: 40.0,
+                velocity_rad_s: None,
+            }),
+            Reading::Imu(imu::Reading::raw(
+                16,
+                Vec3::default(),
+                Vec3 { x: 0.0, y: 0.0, z: imu::STANDARD_GRAVITY },
+            )),
         ]
     }
 
@@ -559,6 +649,10 @@ mod tests {
             Ok(Clamped { command: Command::PwmOut(pwm_out::Command::SetDuty { duty: 1.0 }), clamped: true })
         );
         assert_eq!(duty.capability(), Capability::PwmOut);
+        let angle = Command::Servo(servo::Command::SetAngle { angle_rad: f32::NAN });
+        assert_eq!(angle.clamp_bare(), Err(Refused::NotFinite { field: "angleRad" }));
+        let release = Command::Servo(servo::Command::Release);
+        assert_eq!(release.clamp_bare(), Ok(Clamped { command: release, clamped: false }));
     }
 
     #[test]

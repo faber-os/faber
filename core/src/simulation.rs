@@ -14,7 +14,8 @@
 use crate::clock::SharedClock;
 use crate::names::PartName;
 use faber_capabilities::{
-    Capability, Command, Info, Mount, Reading, Twist2d, battery, distance, laser_scan, motor, planar_base,
+    Capability, Command, Info, Mount, Reading, Twist2d, Vec3, battery, distance, encoder, imu, laser_scan,
+    motor, obstacle, planar_base, servo,
 };
 use faber_connector::{Applied, CommandError, Health, Problem, Provide, Settings};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -64,7 +65,8 @@ pub trait SimulatedPart: Send {
 // ---- patterns ---------------------------------------------------------------------------------
 
 /// How a manual sensor's value changes over time, in the capability's own unit (m for
-/// `distance` and `laser-scan`, V for `battery`).
+/// `distance` and `laser-scan`, V for `battery`, counts/s for `encoder`, rad/s about z for `imu`;
+/// for `obstacle`, 1 is detected and 0 clear).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Pattern {
     Steady {
@@ -196,6 +198,9 @@ enum Channel {
         since_us: u64,
         /// A battery's level reported last, for its hysteresis.
         level: Option<battery::Level>,
+        /// An encoder's count (the speed integrated) and the count it reported last.
+        count: f64,
+        reported: i64,
     },
     Motor {
         name: String,
@@ -208,6 +213,12 @@ enum Channel {
         info: planar_base::Info,
         commanded: Twist2d,
         measured: Twist2d,
+    },
+    /// A servo reports the angle it was told; `None` while released (as it starts).
+    Servo {
+        name: String,
+        safe_state: servo::SafeState,
+        angle: Option<f32>,
     },
     /// Can't be set by hand (e.g. `pose`): publishes nothing.
     Silent,
@@ -300,20 +311,42 @@ fn channel(p: &Provide, now_us: u64) -> Channel {
         (Capability::PlanarBase, Some(Info::PlanarBase(info))) => {
             Channel::Base { name, info: info.clone(), commanded: Twist2d::ZERO, measured: Twist2d::ZERO }
         }
-        (Capability::Distance | Capability::LaserScan | Capability::Battery, info) => Channel::Sensor {
+        (Capability::Servo, info) => Channel::Servo {
+            name,
+            safe_state: match info {
+                Some(Info::Servo(i)) => i.safe_state,
+                _ => servo::SafeState::Hold,
+            },
+            angle: None,
+        },
+        (
+            Capability::Distance
+            | Capability::LaserScan
+            | Capability::Battery
+            | Capability::Obstacle
+            | Capability::Encoder
+            | Capability::Imu,
+            info,
+        ) => Channel::Sensor {
             name,
             capability: p.capability,
             info: info.clone(),
-            pattern: Pattern::Steady { value: default_value(info.as_ref()) },
+            pattern: Pattern::Steady { value: default_value(p.capability, info.as_ref()) },
             since_us: now_us,
             level: None,
+            count: 0.0,
+            reported: 0,
         },
         _ => Channel::Silent,
     }
 }
 
-/// A value in the middle of what the sensor can see.
-fn default_value(info: Option<&Info>) -> f32 {
+/// A value in the middle of what the sensor can see; an obstacle sensor starts clear, an encoder
+/// and an IMU standing still.
+fn default_value(capability: Capability, info: Option<&Info>) -> f32 {
+    if matches!(capability, Capability::Obstacle | Capability::Encoder | Capability::Imu) {
+        return 0.0;
+    }
     match info {
         Some(Info::Distance(i)) => (i.min_m + i.max_m) / 2.0,
         Some(Info::LaserScan(i)) => 2.0f32.clamp(i.range_min_m, i.range_max_m),
@@ -331,7 +364,38 @@ impl Manual {
         let mut out = Vec::new();
         for c in &mut self.channels {
             match c {
-                Channel::Sensor { name, capability, info, pattern, since_us, level } => {
+                Channel::Sensor {
+                    name,
+                    capability: Capability::Encoder,
+                    info,
+                    pattern,
+                    since_us,
+                    count,
+                    reported,
+                    ..
+                } => {
+                    let t = now_us.saturating_sub(*since_us) as f64 / 1e6;
+                    let v = pattern.value_at(t, self.noise.next());
+                    *count += f64::from(v) * f64::from(dt);
+                    let now = count.round() as i64;
+                    let delta = (now - *reported).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+                    *reported = now;
+                    let rad_s = match info {
+                        Some(Info::Encoder(i)) => i.rad_s(v),
+                        _ => None,
+                    };
+                    out.push((
+                        name.clone(),
+                        Reading::Encoder(encoder::Reading {
+                            t_us: now_us,
+                            count: now,
+                            delta,
+                            counts_per_s: v,
+                            velocity_rad_s: rad_s,
+                        }),
+                    ));
+                }
+                Channel::Sensor { name, capability, info, pattern, since_us, level, .. } => {
                     let t = now_us.saturating_sub(*since_us) as f64 / 1e6;
                     let v = pattern.value_at(t, self.noise.next());
                     out.push((name.clone(), sensor_reading(*capability, info.as_ref(), level, now_us, v)));
@@ -343,6 +407,12 @@ impl Manual {
                 Channel::Base { name, info, commanded, measured } => {
                     *measured = ramp(*measured, *commanded, info.max_acceleration, dt);
                     out.push((name.clone(), base_reading(now_us, *commanded, *measured)));
+                }
+                Channel::Servo { name, angle, .. } => {
+                    out.push((
+                        name.clone(),
+                        Reading::Servo(servo::Reading { t_us: now_us, angle_rad: *angle }),
+                    ));
                 }
                 Channel::Silent => {}
             }
@@ -374,6 +444,19 @@ impl Manual {
                 ) => {
                     *commanded = t;
                     return Ok((name.clone(), base_reading(now_us, *commanded, *measured)));
+                }
+                (Channel::Servo { name, safe_state, angle }, Command::Servo(c)) => {
+                    match c {
+                        servo::Command::SetAngle { angle_rad } => *angle = Some(angle_rad),
+                        servo::Command::Release => *angle = None,
+                        // Holding keeps the angle; releasing lets go (D29).
+                        servo::Command::Safe if *safe_state == servo::SafeState::Release => *angle = None,
+                        servo::Command::Safe => {}
+                    }
+                    return Ok((
+                        name.clone(),
+                        Reading::Servo(servo::Reading { t_us: now_us, angle_rad: *angle }),
+                    ));
                 }
                 _ => {}
             }
@@ -428,6 +511,13 @@ fn sensor_reading(
             meters: value.max(0.0),
             status: distance::Status::Ok,
         }),
+        (Capability::Obstacle, _) => Reading::Obstacle(obstacle::Reading { t_us, detected: value >= 0.5 }),
+        // Turning at the value about z, lying flat and otherwise still: gravity points up.
+        (Capability::Imu, _) => Reading::Imu(imu::Reading::raw(
+            t_us,
+            Vec3 { x: 0.0, y: 0.0, z: value },
+            Vec3 { x: 0.0, y: 0.0, z: imu::STANDARD_GRAVITY },
+        )),
         _ => {
             let (min, max) = match info {
                 Some(Info::LaserScan(i)) => (i.range_min_m, i.range_max_m),
@@ -657,6 +747,70 @@ mod tests {
             panic!()
         };
         assert_eq!((r.velocity_rad_s, r.position_rad), (Some(0.0), Some(1.0)));
+    }
+
+    #[test]
+    fn a_manual_obstacle_is_detected_from_half_up() {
+        let mut m =
+            manual(Info::Obstacle(obstacle::Info { kind: obstacle::Kind::Bumper, trigger_distance_m: None }));
+        let Reading::Obstacle(r) = &m.tick(1).remove(0).1 else { panic!() };
+        assert!(!r.detected, "starts clear");
+        if let Channel::Sensor { pattern, .. } = &mut m.channels[0] {
+            *pattern = Pattern::Step { low: 0.0, high: 1.0, period_s: 2.0 };
+        }
+        let Reading::Obstacle(r) = &m.tick(1_500_000).remove(0).1 else { panic!() };
+        assert!(r.detected, "a step pattern bumps it every other second");
+    }
+
+    #[test]
+    fn a_manual_encoder_counts_its_speed_and_knows_rad_s_from_its_counts_per_turn() {
+        let mut m = manual(Info::Encoder(encoder::Info { counts_per_rev: Some(1000.0) }));
+        if let Channel::Sensor { pattern, .. } = &mut m.channels[0] {
+            *pattern = Pattern::Steady { value: -500.0 };
+        }
+        m.tick(0);
+        let Reading::Encoder(r) = &m.tick(2_000_000).remove(0).1 else { panic!() };
+        assert_eq!((r.count, r.delta, r.counts_per_s), (-1000, -1000, -500.0));
+        assert!(
+            (r.velocity_rad_s.unwrap() + std::f32::consts::PI).abs() < 1e-5,
+            "half a turn a second, backwards"
+        );
+        let Reading::Encoder(r) = &m.tick(2_100_000).remove(0).1 else { panic!() };
+        assert_eq!((r.count, r.delta), (-1050, -50));
+    }
+
+    #[test]
+    fn a_manual_imu_turns_at_its_value_and_feels_gravity() {
+        let mut m = Manual {
+            channels: vec![channel(&Provide::default_for(Capability::Imu), 0)],
+            last_tick_us: 0,
+            noise: Noise(1),
+        };
+        if let Channel::Sensor { pattern, .. } = &mut m.channels[0] {
+            *pattern = Pattern::Steady { value: 0.5 };
+        }
+        let Reading::Imu(r) = &m.tick(1).remove(0).1 else { panic!() };
+        assert_eq!(r.angular_velocity, Vec3 { x: 0.0, y: 0.0, z: 0.5 });
+        assert_eq!(r.linear_acceleration.z, imu::STANDARD_GRAVITY);
+        assert_eq!(r.orientation, None);
+    }
+
+    #[test]
+    fn a_manual_servo_reports_its_angle_and_its_safe_state_is_its_setting() {
+        let info = |safe_state| servo::Info { min_angle_rad: 0.0, max_angle_rad: 3.0, safe_state };
+        let mut m = manual(Info::Servo(info(servo::SafeState::Hold)));
+        let Reading::Servo(r) = &m.tick(1).remove(0).1 else { panic!() };
+        assert_eq!(r.angle_rad, None, "released until it is told an angle");
+        let angle = |m: &mut Manual, c| {
+            let (_, Reading::Servo(r)) = m.command(Command::Servo(c), 2).unwrap() else { panic!() };
+            r.angle_rad
+        };
+        assert_eq!(angle(&mut m, servo::Command::SetAngle { angle_rad: 1.5 }), Some(1.5));
+        assert_eq!(angle(&mut m, servo::Command::Safe), Some(1.5), "hold keeps the angle");
+        assert_eq!(angle(&mut m, servo::Command::Release), None);
+        let mut m = manual(Info::Servo(info(servo::SafeState::Release)));
+        angle(&mut m, servo::Command::SetAngle { angle_rad: 1.0 });
+        assert_eq!(angle(&mut m, servo::Command::Safe), None, "release lets go");
     }
 
     #[test]

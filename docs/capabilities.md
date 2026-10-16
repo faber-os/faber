@@ -1,6 +1,7 @@
 # Capabilities
 
-Status: **v1 draft** (2026-10-15). All 41 capabilities are specified here. Each one gets
+Status: **v1 draft** (2026-10-15). All 41 capabilities are specified here, and `obstacle`
+(2026-10-16, the 42nd). Each one gets
 implemented when its first connector is written. The WIT sketches are in
 [`wit/capabilities/`](../wit/capabilities/). The terms are defined in [glossary.md](glossary.md).
 
@@ -64,7 +65,7 @@ request ──► granted (lease id + deadline)        or  denied ("held by senn
 |---|---|
 | GPIO level | `digital-in`, `digital-out` 🔒, `analog-in`, `pwm-out` 🔒, `servo` 🔒 |
 | Environment | `temperature`, `humidity`, `pressure` |
-| Ranging & motion | `distance`, `imu`, `laser-scan`, `position`, `pose` |
+| Ranging & motion | `distance`, `obstacle`, `imu`, `laser-scan`, `position`, `pose` |
 | Actuation | `motor` 🔒, `planar-base` 🔒, `light` |
 | Power & control | `battery`, `rc-input`, `estop` |
 | Media | `camera` |
@@ -83,6 +84,14 @@ All are version `@1`.
 | `analog-in` | `fraction` 0–1, `volts?` (L) | — | rate-hz, reference-volts | — | plot |
 | `pwm-out` | `duty` 0–1 (L) | `set-duty` 🔒 | frequency-hz | duty 0 · 1 s | slider |
 | `servo` | `angle-rad` as commanded (L) | `set-angle` 🔒 | min/max angle, pulse min/max µs, max speed, safe-state (*hold* / release, default hold) | hold or release · 1 s | dial |
+
+**As built** (first wave of parts, 2026-10-16, `sdk/rust/capabilities/src/servo.rs`): the reading's
+`angle-rad` is optional, absent while the servo is **released** (no pulses, so nothing holds it;
+also before its first command). Commands: `set-angle` (clamped to the info's `min-angle-rad` ..
+`max-angle-rad`), `release`, and `safe`. The lease's safe state is `safe`: the part does what its
+info's `safe-state` says, holding its angle (the default, D29) or releasing, so the core needs no
+per-part safe state. Pulse widths and max speed are the part's own settings, not info.
+`generic-servo` for the simulator, the Servo viewer (a dial).
 
 ## Environment
 
@@ -108,6 +117,21 @@ Viewer for all three: the value plus a plot.
   (vec3) for each.
 - **Settings:** mount, rate-hz.
 - **Viewer:** a 3D orientation plus plots.
+- **As built** (2026-10-16): no info. `linear-acceleration` includes gravity, as in ROS: an IMU
+  lying still reads about +9.81 m/s² up (standard gravity 9.80665). `generic-imu` for the
+  simulator, and an IMU viewer with the six values and a plot of the
+  turn about z (no 3D orientation yet: the first IMU has none to show).
+
+**`obstacle`** (added 2026-10-16, [research/common-parts.md](research/common-parts.md) §4.1)
+- **Signal (E):** `detected` bool: something is in the way.
+- **Info:** `kind` (bumper / infrared / limit), `trigger-distance-m?` (how close something must
+  come; about 0 for a bumper, the potentiometer's setting on an infrared module).
+- **Settings:** mount, rate-hz.
+- **Why not `button` or `digital-in`:** an app looking for "a button to start" must not be
+  offered a bumper, and as `distance` a yes/no sensor has no metres. A plain button, switch or end
+  stop is `digital-in`; a bumper, a whisker or a digital infrared obstacle module (FC-51,
+  E18-D80NK) is `obstacle`.
+- **Viewer:** the on/off viewer (detected or clear, and its latest changes).
 
 **`laser-scan`** (ROS LaserScan + raw points)
 - **Signal (L):** `angle-min`, `angle-increment`, `angles?`, `time-increment?`, `scan-time` s,
@@ -200,7 +224,7 @@ Viewer for all three: the value plus a plot.
 | Capability | Signal | Commands (shared) | Settings / info | Typical parts |
 |---|---|---|---|---|
 | `button` | `event` (press / release / long-press / double-press), `pressed` (**E**) | — | long-press-ms, double-press-ms, debounce-ms | push buttons, TTP223, MPR121 |
-| `encoder` | `count`, `delta`, `velocity` (counts/s, or rad/s when counts-per-rev is known) (L) | `reset-count` | info: counts-per-rev | rotary knobs, wheel encoders |
+| `encoder` | `count`, `delta`, `counts-per-s`, `velocity-rad-s?` (when counts-per-rev is known) (L) | `reset-count` (not built: the core has no shared commands yet) | info: counts-per-rev (f32: gear ratios aren't whole) | rotary knobs, wheel encoders |
 | `keypad` | `key`, `pressed` (**E**) | — | info: layout | 4×4 matrix keypads |
 | `presence` | `detected`, `distance-m?` (**E** on change) | — | hold-time-ms | PIR, mmWave radar |
 | `illuminance` | `lux` (L) | — | rate-hz | LDR, BH1750, TSL2561 |

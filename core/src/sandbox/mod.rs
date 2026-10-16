@@ -44,6 +44,10 @@ pub mod app_bindings {
             "faber:capabilities/digital-out@0.1.0": super::bindings::faber::capabilities::digital_out,
             "faber:capabilities/analog-in@0.1.0": super::bindings::faber::capabilities::analog_in,
             "faber:capabilities/pwm-out@0.1.0": super::bindings::faber::capabilities::pwm_out,
+            "faber:capabilities/obstacle@0.1.0": super::bindings::faber::capabilities::obstacle,
+            "faber:capabilities/servo@0.1.0": super::bindings::faber::capabilities::servo,
+            "faber:capabilities/encoder@0.1.0": super::bindings::faber::capabilities::encoder,
+            "faber:capabilities/imu@0.1.0": super::bindings::faber::capabilities::imu,
             "faber:connector/types@0.1.0": super::bindings::faber::connector::types,
         },
     });

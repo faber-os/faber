@@ -262,7 +262,7 @@ its acceleration limit).
 | Method and path | Body / result |
 |---|---|
 | `GET /api/v0/parts/{name}/simulation` | `{"pattern": Pattern}` |
-| `PUT /api/v0/parts/{name}/simulation` | `{"pattern": Pattern}` → `200` with the same. `Pattern` is tagged by `kind`: `steady` (`value`), `sine` (`center`, `amplitude`, `periodS`), `noise` (`center`, `amplitude`), `step` (`low` for half of `periodS`, then `high`), `drain` (from `from` to `to` in a straight line over `periodS`, then `to`: a battery running down). Values are in the capability's unit (m for `distance` and `laser-scan`, V for `battery`). Errors: `404 unknown-part`, `409 not-manual` (not `simulate = "manual"`), `400 not-a-sensor` (an actuator), `400 bad-pattern` |
+| `PUT /api/v0/parts/{name}/simulation` | `{"pattern": Pattern}` → `200` with the same. `Pattern` is tagged by `kind`: `steady` (`value`), `sine` (`center`, `amplitude`, `periodS`), `noise` (`center`, `amplitude`), `step` (`low` for half of `periodS`, then `high`), `drain` (from `from` to `to` in a straight line over `periodS`, then `to`: a battery running down). Values are in the capability's unit (m for `distance` and `laser-scan`, V for `battery`, counts/s for `encoder`, rad/s about z for `imu`; for `obstacle` 0.5 and up is detected). Errors: `404 unknown-part`, `409 not-manual` (not `simulate = "manual"`), `400 not-a-sensor` (an actuator), `400 bad-pattern` |
 
 A distance reading outside the sensor's range is reported as `too-close` / `too-far` at the edge
 of the range; a manual `laser-scan` is a ring of points at the value. `simulate = "world"` parts

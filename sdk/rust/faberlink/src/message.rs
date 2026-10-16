@@ -65,6 +65,8 @@ pub struct HelloAck {
 #[derive(Clone, Debug, PartialEq)]
 pub enum PartInfo {
     Known(Info),
+    /// A capability this core knows that has no info (`digital-in@1`): its info layout is empty.
+    Empty,
     Unknown(Vec<u8>),
 }
 
@@ -405,6 +407,7 @@ impl Message {
                 w.str8(&p.name, "name")?;
                 match &p.info {
                     PartInfo::Known(i) => layout::encode_info(i, w.out)?,
+                    PartInfo::Empty => {}
                     PartInfo::Unknown(bytes) => w.out.extend_from_slice(bytes),
                 }
             }
@@ -503,7 +506,10 @@ impl Message {
                 let name = r.str8("name")?;
                 let rest = r.rest();
                 let info = match Capability::from_id(&capability) {
-                    Some(c) if layout::code(c).is_some() => PartInfo::Known(layout::decode_info(c, rest)?),
+                    Some(c) if layout::code(c).is_some() => match layout::decode_info(c, rest)? {
+                        Some(i) => PartInfo::Known(i),
+                        None => PartInfo::Empty,
+                    },
                     _ => PartInfo::Unknown(rest.to_vec()),
                 };
                 Message::Part(PartDescription { id, count, lease_ms, capability, name, info })

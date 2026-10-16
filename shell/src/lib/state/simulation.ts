@@ -12,9 +12,18 @@ export type PatternKind = Pattern['kind'];
 export const PATTERN_KINDS: readonly PatternKind[] = ['steady', 'sine', 'noise', 'step'];
 /** A battery holds a voltage, or runs down. */
 export const BATTERY_PATTERN_KINDS: readonly PatternKind[] = ['steady', 'drain'];
+/** An obstacle is there or not, or comes and goes. */
+export const OBSTACLE_PATTERN_KINDS: readonly PatternKind[] = ['steady', 'step'];
 
-/** What the slider sets: its range, and what it measures (a length in m, or a voltage in V). */
-export type SensorRange = { min: number; max: number; quantity: 'length' | 'voltage' };
+/**
+ * What the slider sets: its range, and what it measures: a length in m, a voltage in V, an
+ * obstacle (0 clear, 1 detected), an encoder's speed in counts/s, or an IMU's turn in rad/s.
+ */
+export type SensorRange = {
+  min: number;
+  max: number;
+  quantity: 'length' | 'voltage' | 'detected' | 'counts' | 'turn-rate';
+};
 
 /** How long one wave or one step takes (s). */
 const PERIOD_S = 4;
@@ -28,7 +37,8 @@ export const DRAIN_S = 120;
  */
 export function patternFor(kind: PatternKind, value: number, range: SensorRange): Pattern {
   const span = range.max - range.min;
-  const swing = span / 5;
+  // An obstacle has only two values: its step goes all the way.
+  const swing = range.quantity === 'detected' ? span : span / 5;
   switch (kind) {
     case 'steady':
       return { kind, value };
@@ -63,7 +73,14 @@ export function patternValue(p: Pattern): number {
   }
 }
 
-const MANUAL = new Set(['distance@1', 'laser-scan@1', 'battery@1']);
+const MANUAL = new Set([
+  'distance@1',
+  'laser-scan@1',
+  'battery@1',
+  'obstacle@1',
+  'encoder@1',
+  'imu@1',
+]);
 
 /** A manual simulated sensor: its value is set by hand (actuators report their commands). */
 export function isManualSensor(p: PartInfo): boolean {
@@ -72,9 +89,9 @@ export function isManualSensor(p: PartInfo): boolean {
 
 /** The patterns the menu offers for this sensor. */
 export function patternKinds(p: PartInfo): readonly PatternKind[] {
-  return p.signals.some((s) => s.capability === 'battery@1')
-    ? BATTERY_PATTERN_KINDS
-    : PATTERN_KINDS;
+  if (p.signals.some((s) => s.capability === 'battery@1')) return BATTERY_PATTERN_KINDS;
+  if (p.signals.some((s) => s.capability === 'obstacle@1')) return OBSTACLE_PATTERN_KINDS;
+  return PATTERN_KINDS;
 }
 
 /**
@@ -90,6 +107,14 @@ export function sensorRange(p: PartInfo): SensorRange {
     // Volts travel as 32-bit floats (12.6 arrives as 12.5999994…): a slider wants round ends.
     if (s.battery)
       return { min: round(s.battery.empty), max: round(s.battery.full), quantity: 'voltage' };
+    if (s.capability === 'obstacle@1') return { min: 0, max: 1, quantity: 'detected' };
+    if (s.capability === 'encoder@1') {
+      // Two turns a second either way when its counts per turn are known, else 1000 counts/s.
+      const cpr = i?.capability === 'encoder@1' ? i.info.countsPerRev : undefined;
+      const max = cpr ? round(2 * cpr) : 1000;
+      return { min: -max, max, quantity: 'counts' };
+    }
+    if (s.capability === 'imu@1') return { min: -3, max: 3, quantity: 'turn-rate' };
   }
   return { min: 0, max: 4, quantity: 'length' };
 }

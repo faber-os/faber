@@ -82,3 +82,18 @@ export function formatAmps(a: number): string {
 export function formatCelsius(c: number): string {
   return `${trim(c, 1)} °C`;
 }
+
+/** "1.57 rad (90°)": radians as the capabilities give them, degrees as people read servos. */
+export function formatAngle(rad: number): string {
+  return `${trim(rad, 2)} rad (${trim((rad * 180) / Math.PI, 1)}°)`;
+}
+
+/** "120 counts/s": an encoder's speed in its own counts. */
+export function formatCountRate(countsPerS: number): string {
+  return `${Math.round(countsPerS)} counts/s`;
+}
+
+/** "9.81 m/s²". Accelerations have no setting yet: they stay SI. */
+export function formatMetresPerS2(a: number): string {
+  return `${trim(a, 2)} m/s²`;
+}
