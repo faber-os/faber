@@ -1,0 +1,97 @@
+# A battery's voltage through a voltage divider on an analog pin: FaberBattery
+# (firmware/faberlink/src/FaberLink.h). The divider is battery + → R1 → pin → R2 → GND, its ratio
+# (R1 + R2) / R2.
+# Part facts: the library's comments and its BatteryMonitor example (20 kΩ over 10 kΩ for a 3S
+# Li-ion pack, 12.6 V → 4.2 V).
+
+faber-part = 1
+id = "battery"
+name = "Battery voltage (divider)"
+description = "Watches a battery's voltage and level through two resistors on an analog pin."
+covers = ["two resistors"]
+capability = "battery"
+class = "FaberBattery"
+include = "FaberLink.h"
+default-name = "battery"
+warnings = [
+  "Never connect the battery straight to the pin. Check the voltage at the pin with a multimeter before you connect it: it must stay below the board's reference voltage.",
+  "Join the battery's - to the board's GND, or the reading is wrong.",
+]
+
+[power]
+supply = "none"
+
+[[settings]]
+id = "r1-ohm"
+name = "R1 (battery + to the pin)"
+unit = "Ω"
+type = "number"
+default = 20000
+min = 100
+max = 10000000
+apply = "build"
+help = "Measure it with a multimeter if you can: resistors are only within 1-5 %."
+
+[[settings]]
+id = "r2-ohm"
+name = "R2 (the pin to GND)"
+unit = "Ω"
+type = "number"
+default = 10000
+min = 100
+max = 10000000
+apply = "build"
+
+[[settings]]
+id = "cells"
+name = "Cells in series"
+type = "integer"
+default = 3
+min = 1
+max = 24
+apply = "build"
+help = "3 for a 3S pack."
+
+[[settings]]
+id = "chemistry"
+name = "Chemistry"
+type = "choice"
+default = "li-ion"
+apply = "build"
+options = [
+  { id = "li-ion", name = "Li-ion", code = "faberlink::BATTERY_LI_ION" },
+  { id = "lipo", name = "LiPo", code = "faberlink::BATTERY_LIPO" },
+  { id = "lifepo4", name = "LiFePO4", code = "faberlink::BATTERY_LIFEPO4" },
+  { id = "nimh", name = "NiMH", code = "faberlink::BATTERY_NIMH" },
+  { id = "lead-acid", name = "Lead-acid", code = "faberlink::BATTERY_LEAD_ACID" },
+]
+
+[[settings]]
+id = "capacity-ah"
+name = "Capacity"
+unit = "Ah"
+type = "number"
+default = 0
+min = 0
+max = 1000
+apply = "build"
+help = "0 if you don't know it."
+
+# The pin must stay below the board's analog reference when the battery is full. The voltage of
+# a full cell is what a charger ends at (typical charge voltages, general knowledge: Li-ion and
+# LiPo 4.2 V, LiFePO4 3.65 V, NiMH about 1.5 V, lead-acid about 2.45 V while charging).
+[divider-check]
+r1 = "r1-ohm"
+r2 = "r2-ohm"
+cells = "cells"
+chemistry = "chemistry"
+full-cell-volts = { li-ion = 4.2, lipo = 4.2, lifepo4 = 3.65, nimh = 1.5, lead-acid = 2.45 }
+
+[[shapes]]
+id = "divider"
+name = "Divider on an analog pin"
+args = ["name", "pin:sense", "ratio:r1-ohm:r2-ohm", "setting:cells", "setting:chemistry", "board:analog-reference", "setting:capacity-ah"]
+wiring = ["Battery + → R1 ({setting:r1-ohm} Ω) → {pin:sense}", "{pin:sense} → R2 ({setting:r2-ohm} Ω) → GND", "Battery - → GND"]
+roles = [
+  { id = "sense", name = "Sense", needs = "analog-in", help = "The point between the two resistors." },
+]

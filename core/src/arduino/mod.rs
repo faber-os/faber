@@ -9,6 +9,8 @@
 //!   published SHA-256) through the [`Downloader`] trait, and unpacking it.
 //! - [`records`]: `<data>/arduino/boards.toml` and the exact copies of what was flashed.
 //! - [`library`]: the FaberLink library and the templates, built into the core.
+//! - [`wiring`]: guided mode's pin maps, part templates, allocator, plans and generated sketches
+//!   (docs/wiring.md).
 //!
 //! It knows nothing about ports, parts or Files: the machine hands it plain data.
 
@@ -20,6 +22,7 @@ pub mod library;
 pub mod records;
 pub mod sketch;
 pub mod toolchain;
+pub mod wiring;
 
 pub use boards::fqbn;
 pub use diagnostics::{Diagnostic, Severity};

@@ -1,0 +1,58 @@
+# The Arduino Uno's pins (docs/wiring.md §4): an ATmega328P at 5 V.
+#
+# Sources, for every value below unless a line says otherwise:
+# - the Arduino AVR core 1.8.8, variants/standard/pins_arduino.h: NUM_DIGITAL_PINS (20),
+#   digitalPinHasPWM, digital_pin_to_timer_PGM (which timer drives each PWM pin),
+#   digitalPinToInterrupt (D2 = INT0, D3 = INT1), digitalPinToPCICR (pin-change interrupts),
+#   PIN_SPI_* (D10-D13), PIN_WIRE_SDA/SCL (A4/A5), LED_BUILTIN (13), PIN_A0-A5 (14-19);
+# - the ATmega328P datasheet: PD0/PD1 are the USART's RXD/TXD, which the board wires to its USB
+#   chip, so D0/D1 are the USB link to Faber;
+# - the Servo library 1.3.0, src/avr/ServoTimers.h: everything that isn't a Mega, a 32U4, a 1284
+#   or a 128x uses Timer1 only, 12 servos per timer (Servo.h SERVOS_PER_TIMER);
+# - the core's Tone.cpp: tone() uses Timer2 on this chip (USE_TIMER2).
+#
+# The tests in pins.rs check this file against those headers (pins.rs, `uno_matches_the_variant`).
+
+faber-pins = 1
+id = "uno"
+name = "Arduino Uno"
+chip = "ATmega328P"
+kind = "arduino"
+logic-volts = 5.0
+# analogRead() measures against the 5 V supply by default (AREF unconnected).
+analog-reference-volts = 5.0
+servo-timers = ["timer1"]
+servos-per-timer = 12
+tone-timer = "timer2"
+
+pins = [
+  { name = "D0", number = 0, pin-change = true, buses = ["serial:rx"] },
+  { name = "D1", number = 1, pin-change = true, buses = ["serial:tx"] },
+  { name = "D2", number = 2, pin-change = true, interrupt = 0 },
+  { name = "D3", number = 3, pin-change = true, interrupt = 1, pwm = "timer2b" },
+  { name = "D4", number = 4, pin-change = true },
+  { name = "D5", number = 5, pin-change = true, pwm = "timer0b" },
+  { name = "D6", number = 6, pin-change = true, pwm = "timer0a" },
+  { name = "D7", number = 7, pin-change = true },
+  { name = "D8", number = 8, pin-change = true },
+  { name = "D9", number = 9, pin-change = true, pwm = "timer1a" },
+  { name = "D10", number = 10, pin-change = true, pwm = "timer1b", buses = ["spi:ss"] },
+  { name = "D11", number = 11, pin-change = true, pwm = "timer2a", buses = ["spi:mosi"] },
+  { name = "D12", number = 12, pin-change = true, buses = ["spi:miso"] },
+  { name = "D13", number = 13, pin-change = true, buses = ["spi:sck"], led = true },
+  { name = "A0", number = 14, pin-change = true, analog = 0 },
+  { name = "A1", number = 15, pin-change = true, analog = 1 },
+  { name = "A2", number = 16, pin-change = true, analog = 2 },
+  { name = "A3", number = 17, pin-change = true, analog = 3 },
+  { name = "A4", number = 18, pin-change = true, analog = 4, buses = ["i2c:sda"] },
+  { name = "A5", number = 19, pin-change = true, analog = 5, buses = ["i2c:scl"] },
+]
+
+[[reserved]]
+pins = ["D0", "D1"]
+reason = "D0 and D1 carry the USB link to Faber (Serial)."
+
+[[notes]]
+pins = ["D13"]
+note = "D13 also drives the on-board LED: fine for an output, weak as an input with a pull-up."
+avoid = ["digital-in"]
