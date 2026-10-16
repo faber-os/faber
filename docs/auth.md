@@ -3,8 +3,8 @@
 Faber has users, roles and a login from the start (D16: retrofitting auth is how insecure products
 happen). This page is the design; [api.md](api.md#users-and-signing-in) lists the endpoints.
 
-**Status:** accepted (D53, 2026-10-16; Phase 6a). Built as described here; the points marked **confirm** wait for
-Mikkel.
+**Status:** accepted (D53, 2026-10-16; Phase 6a). Built as described here; Mikkel accepted every point marked
+**confirm**.
 
 ## Roles
 
