@@ -50,19 +50,19 @@
     background: currentColor;
   }
   .ok {
-    color: var(--ok);
+    color: var(--ok-text);
     background: var(--ok-soft);
   }
   .warn {
-    color: var(--warn);
+    color: var(--warn-text);
     background: var(--warn-soft);
   }
   .danger {
-    color: var(--danger);
+    color: var(--danger-text);
     background: var(--danger-soft);
   }
   .info {
-    color: var(--info);
+    color: var(--info-text);
     background: var(--info-soft);
   }
   .info .dot {

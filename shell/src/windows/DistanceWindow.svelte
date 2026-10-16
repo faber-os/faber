@@ -186,7 +186,7 @@
     font-size: var(--text-sm);
   }
   .off {
-    color: var(--warn);
+    color: var(--warn-text);
   }
   .bar {
     position: relative;

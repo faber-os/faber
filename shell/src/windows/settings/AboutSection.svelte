@@ -204,7 +204,7 @@
   .done {
     margin-top: var(--space-1);
     font-size: var(--text-sm);
-    color: var(--ok);
+    color: var(--ok-text);
   }
   .manual {
     width: 100%;

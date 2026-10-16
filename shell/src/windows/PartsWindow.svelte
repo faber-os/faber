@@ -489,17 +489,17 @@
   }
   .badge.danger {
     background: var(--danger-soft);
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .link-state {
     font-weight: 600;
   }
   .link-state[data-link='ready'] {
-    color: var(--ok);
+    color: var(--ok-text);
   }
   .estop-hint {
     font-size: var(--text-sm);
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .part.fresh {
     animation: arrive 1.6s var(--ease-out);
@@ -550,7 +550,7 @@
     padding: 1px 8px;
     border-radius: var(--radius-sm);
     background: var(--info-soft);
-    color: var(--info);
+    color: var(--info-text);
     font-size: var(--text-xs);
     font-weight: 700;
   }

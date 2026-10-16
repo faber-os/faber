@@ -43,7 +43,7 @@
   .ico {
     display: inline-flex;
     margin-top: 2px;
-    color: var(--warn);
+    color: var(--warn-text);
   }
   .text {
     display: grid;
@@ -65,7 +65,7 @@
     width: fit-content;
     font-size: var(--text-sm);
     font-weight: 600;
-    color: var(--accent-text, var(--accent));
+    color: var(--warn-text);
     cursor: pointer;
   }
   details[open] summary {

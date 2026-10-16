@@ -88,7 +88,7 @@
     padding: 0 var(--space-3);
     border-radius: var(--radius-md);
     background: var(--danger-soft);
-    color: var(--danger);
+    color: var(--danger-text);
     font-weight: 750;
     white-space: nowrap;
   }

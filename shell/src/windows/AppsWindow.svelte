@@ -310,7 +310,7 @@
     font-size: var(--text-sm);
   }
   .state.problem {
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .controls {
     display: flex;

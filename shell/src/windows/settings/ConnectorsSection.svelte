@@ -144,7 +144,7 @@
     font-size: var(--text-sm);
   }
   .warn {
-    color: var(--warn);
+    color: var(--warn-text);
   }
   .sub {
     font-size: var(--text-md);

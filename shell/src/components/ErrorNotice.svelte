@@ -45,7 +45,7 @@
     font-size: var(--text-md);
   }
   .danger .message {
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .hint {
     font-size: var(--text-sm);

@@ -470,7 +470,7 @@
     color: var(--text-muted);
   }
   .record .help.bad {
-    color: var(--danger);
+    color: var(--danger-text);
     font-weight: 600;
   }
   .live-rec,

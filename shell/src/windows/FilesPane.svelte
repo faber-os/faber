@@ -1173,7 +1173,7 @@
   }
   .banner.danger {
     background: var(--danger-soft);
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .actions {
     display: flex;

@@ -660,7 +660,7 @@
     background: var(--danger-soft);
   }
   .danger-card .name {
-    color: var(--danger);
+    color: var(--danger-text);
   }
   .risks {
     margin: 0;

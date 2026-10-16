@@ -349,7 +349,7 @@
   }
   .done {
     font-size: var(--text-sm);
-    color: var(--ok);
+    color: var(--ok-text);
   }
   .list-head {
     display: flex;
