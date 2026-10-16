@@ -7,7 +7,7 @@ use super::manifest::{PublishSpec, RoleSpec};
 use super::state::SharedState;
 use crate::names::{PartName, SignalAddress};
 use crate::router::{PublishError, Router};
-use faber_capabilities::{Command, Reading};
+use faber_capabilities::{Command, Mount, Reading};
 use faber_connector::Problem;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -39,14 +39,16 @@ pub trait Driver: Send + Sync {
 }
 
 /// One part filling a role, and the signal of it the app reads.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BoundPart {
     pub part: PartName,
     pub signal: SignalAddress,
+    /// Where the part sits on the machine, from parts.toml.
+    pub mount: Mount,
 }
 
 /// A role from the manifest and the parts the user picked for it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BoundRole {
     pub spec: RoleSpec,
     pub parts: Vec<BoundPart>,
@@ -136,6 +138,11 @@ impl Session {
     fn newest(&self, role: &str, index: u32) -> Option<Arc<Reading>> {
         let (_, p) = self.bound(role, index)?;
         self.router.latest(&p.signal).flatten()
+    }
+
+    /// Where the part at `index` in `role` sits on the machine.
+    pub fn mount(&self, role: &str, index: u32) -> Option<Mount> {
+        self.bound(role, index).map(|(_, p)| p.mount)
     }
 
     pub fn latest(&self, role: &str, index: u32) -> Option<Reading> {
@@ -286,7 +293,11 @@ pub(crate) mod tests {
             spec: RoleSpec { role: name.into(), capability, command, count: Count::One },
             parts: parts
                 .iter()
-                .map(|n| BoundPart { part: p(n), signal: SignalAddress::new(p(n), capability.name()) })
+                .map(|n| BoundPart {
+                    part: p(n),
+                    signal: SignalAddress::new(p(n), capability.name()),
+                    mount: Mount { x: 0.1, yaw: 0.5, ..Mount::default() },
+                })
                 .collect(),
         }
     }
@@ -323,6 +334,14 @@ pub(crate) mod tests {
             RoleView { name: "front".into(), capability: "distance@1".into(), command: false, parts: 1 }
         );
         assert!(views[1].command);
+    }
+
+    #[test]
+    fn an_app_sees_where_its_parts_sit_but_not_their_names() {
+        let (s, _, _) = session();
+        assert_eq!(s.mount("front", 0), Some(Mount { x: 0.1, yaw: 0.5, ..Mount::default() }));
+        assert_eq!(s.mount("front", 1), None);
+        assert_eq!(s.mount("nope", 0), None);
     }
 
     #[test]

@@ -5,10 +5,15 @@
 use super::bindings::faber::capabilities as cap;
 use super::bindings::faber::connector::types as wit;
 use faber_capabilities::{
-    Command, Quaternion, Reading, Twist2d, Vec3, battery, distance, estop, laser_scan, motor, planar_base,
-    pose, position,
+    Command, Mount, Quaternion, Reading, Twist2d, Vec3, battery, distance, estop, laser_scan, motor,
+    planar_base, pose, position,
 };
 use faber_connector::{CommandError, Health, Problem, Settings};
+
+/// Where a part sits on the machine, as an app's `roles.mount` answers it.
+pub fn mount_to_wit(m: Mount) -> cap::types::Mount {
+    cap::types::Mount { x: m.x, y: m.y, z: m.z, roll: m.roll, pitch: m.pitch, yaw: m.yaw }
+}
 
 fn twist(t: Twist2d) -> cap::types::Twist2d {
     cap::types::Twist2d { vx: t.vx, vy: t.vy, omega: t.omega }

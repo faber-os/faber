@@ -70,6 +70,10 @@ pub enum Count {
     One,
     /// One or more (`count = "1.."`): the role is a list of parts.
     OneOrMore,
+    /// None or one (`count = "0..1"`): the app runs without it.
+    Optional,
+    /// Any number, none too (`count = "0.."`): a list of parts the app runs without.
+    Any,
 }
 
 impl Count {
@@ -77,7 +81,19 @@ impl Count {
         match self {
             Count::One => "1",
             Count::OneOrMore => "1..",
+            Count::Optional => "0..1",
+            Count::Any => "0..",
         }
+    }
+
+    /// The role is a list of parts (`1..` or `0..`).
+    pub fn many(self) -> bool {
+        matches!(self, Count::OneOrMore | Count::Any)
+    }
+
+    /// The app can't run until a part fills the role (`1` or `1..`).
+    pub fn required(self) -> bool {
+        matches!(self, Count::One | Count::OneOrMore)
     }
 }
 
@@ -492,11 +508,13 @@ impl Builder<'_> {
             Some(c) => match c.get_ref().as_str() {
                 "1" => Count::One,
                 "1.." => Count::OneOrMore,
+                "0..1" => Count::Optional,
+                "0.." => Count::Any,
                 other => {
                     return Err(self.err(
                         c.span(),
                         format!("count = \"{other}\" is not a number of parts Faber understands."),
-                        "Write count = \"1\" (one part, the default) or count = \"1..\" (one or more).",
+                        "Write count = \"1\" (one part, the default), \"1..\" (one or more), \"0..1\" (one, or none) or \"0..\" (any number, or none).",
                     ));
                 }
             },
@@ -639,6 +657,42 @@ capability = "pose@1"
         );
         assert_eq!(m.suggests, [Suggestion { connector: "ldrobot-ld19".into(), for_role: "lidar".into() }]);
         assert_eq!(m.publishes, [PublishSpec { name: "pose".into(), capability: Capability::Pose }]);
+    }
+
+    #[test]
+    fn a_role_can_be_optional() {
+        let text = SENNEP.replace("count = \"1..\"", "count = \"0..\"").replace(
+            "capability = \"planar-base@1\"
+command = true
+",
+            "capability = \"planar-base@1\"
+command = true
+
+[[requires]]
+role = \"battery\"
+capability = \"battery@1\"
+count = \"0..1\"
+",
+        );
+        let m = parse(&text).unwrap();
+        let counts: Vec<(&str, Count)> = m.requires.iter().map(|r| (r.role.as_str(), r.count)).collect();
+        assert_eq!(
+            counts,
+            [
+                ("lidar", Count::One),
+                ("base", Count::One),
+                ("battery", Count::Optional),
+                ("proximity", Count::Any)
+            ]
+        );
+        let ids: Vec<&str> =
+            [Count::One, Count::OneOrMore, Count::Optional, Count::Any].map(Count::id).to_vec();
+        assert_eq!(ids, ["1", "1..", "0..1", "0.."]);
+        assert!(
+            !Count::Optional.many() && Count::Any.many() && Count::OneOrMore.many() && !Count::One.many()
+        );
+        assert!(Count::One.required() && Count::OneOrMore.required());
+        assert!(!Count::Optional.required() && !Count::Any.required());
     }
 
     #[test]

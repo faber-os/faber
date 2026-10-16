@@ -33,7 +33,7 @@ export interface ErrorBody {
 
 /** Where a reading comes from: one of the app's roles, or one of its own derived signals. */
 export type Source =
-  /** A role, by name. `index` picks one part of a `count = "1.."` role (default 0). */
+  /** A role, by name. `index` picks one part of a `count = "1.."` or `"0.."` role (default 0). */
   | { role: string; index?: number }
   /** One of the app's `[[publishes]]` signals, by name (`app:<id>/<name>`). */
   | { published: string };
@@ -44,10 +44,25 @@ export interface RoleInfo {
   capability: string;
   /** The app may drive it. */
   command: boolean;
-  /** `1` or `1..`. */
+  /** `1`, `1..`, or for a role the app runs without, `0..1` or `0..`. */
   count: string;
   /** How many parts fill it now (0: none picked yet). */
   parts: number;
+  /**
+   * Where each of those parts sits on the machine, by index: readings are in the part's own
+   * frame, and an app applies its mount to put them in the machine's (x forward, y left; m, rad).
+   */
+  mounts: Mount[];
+}
+
+/** Where a part sits on the machine (m, rad), as in parts.toml. */
+export interface Mount {
+  x: number;
+  y: number;
+  z: number;
+  roll: number;
+  pitch: number;
+  yaw: number;
 }
 
 /** A derived signal the app publishes. */

@@ -631,9 +631,12 @@ export const en = {
   'roles.title': 'Roles',
   'roles.count.one': 'one part',
   'roles.count.many': 'one or more parts',
+  'roles.count.optional': 'one part, optional',
+  'roles.count.any': 'any number of parts, optional',
   'roles.noPart':
     'No part provides <code>{capability}</code> yet. Add one in Parts, then pick it in Apps.',
   'roles.pickLater': 'Pick later',
+  'roles.none': 'None',
   'roles.willDrive':
     '<b>{app} will be able to drive {parts}.</b> It moves it whenever the app is on.',
   'roles.willDrivePicked': '<b>{app} will be able to drive the part you pick here.</b>',

@@ -1,10 +1,10 @@
 # Phase 5 design: apps
 
-Status: **design v1; Phase 5a (apps in the core), 5b (apps in the shell) and 5c (shared state,
-the start menu, the template's window, Share setup) built** (2026-10-16).
+Status: **design v1; Phase 5a (apps in the core), 5b (apps in the shell), 5c (shared state,
+the start menu, the template's window, Share setup) and 5d (the SENNEP app v0) built** (2026-10-16).
 Builds on D03, D04, D24, D29 and architecture.md §7. §8 says what 5a built and how it differs, §9
 what 5b built: app windows, the message protocol, `@faber-os/shell`, the role picker and Apps; §10
-what 5c built. The open questions in
+what 5c built; §11 the SENNEP app and what it added to apps. The open questions in
 §7 were answered with their recommendations while Mikkel was away: both wasm logic and UI-only
 apps; SENNEP's app in the SENNEP V2 repo, with a small example app here.
 
@@ -67,7 +67,7 @@ As in architecture.md §7, with `faber-manifest = 1`, `type = "app"`, `[[require
 
 LiDAR view, manual drive (on-screen joystick), battery, proximity ring, and `sennep:pose`
 published as a derived signal. It runs first in the apartment world (Phase 2), then on the real
-SENNEP through FaberLink (Phase 4).
+SENNEP through FaberLink (Phase 4). Built in 5d (§11), as `app:sennep/pose`.
 
 ## 7. Open questions for Mikkel
 
@@ -105,7 +105,8 @@ its line. `[package]` has `type = "app"`, `module` (a `.wasm` next to `faber.tom
 (`"ui/"`), `tick-hz` (1–100, default 10, only with a module); at least one of `module` and `ui`.
 `[window]` (`title`, `icon`, `width`, `height` 100–4000 px, `pinned`) only with a UI.
 `[[requires]]`: `role`, `capability`, `command` (only for a capability that takes commands),
-`count` (`"1"` or `"1.."`). `[[suggests]]`: `connector`, `for-role` (a role above).
+`count` (`"1"` or `"1.."`; since 5d also `"0..1"` and `"0.."` for a role the app runs without).
+`[[suggests]]`: `connector`, `for-role` (a role above).
 `[[publishes]]`: `name`, `capability` (not one that takes commands: derived signals are
 read-only). `accept = ["part", "derived"]` (a role filled by another app's derived signal) is
 **not built**: roles take parts only.
@@ -319,3 +320,52 @@ drive at it, the topic announce it and the file saved; `core/tests/packages.rs` 
 first install, a backup holding a change made a moment before, and a setup moved to a second
 machine; `appHost.test.ts` sends the host bad keys, oversized values and changes made elsewhere;
 `shell/e2e/apps.spec.ts` moves the slider and watches the base's commanded speed follow.
+
+## 11. As built (Phase 5d: the SENNEP app v0)
+
+**The app** is `examples/apps/sennep` (its README has the details). It lives in Faber's examples
+for now so CI tests it; §7's recommendation (the SENNEP V2 repo) waits for Mikkel's OK. Roles:
+`lidar` (`laser-scan@1`), `base` (`planar-base@1`, `command = true`), `proximity` (`distance@1`,
+`count = "0.."`) and `battery` (`battery@1`, `count = "0..1"`). It publishes `app:sennep/pose`
+(`pose@1`, dead reckoning from the base's measured velocity: it drifts, and `world/pose` is the
+truth to compare it with in simulation) and `app:sennep/nearest-obstacle` (`distance@1`, from the
+leading edge in the direction of travel).
+
+**The window drives through the logic.** Its safety layer (stop the leading edge `stop-distance`
+short of anything seen, slowing on the way, per direction; no turning with something by a corner;
+30 % of top speed on a critical battery; no driving without a scan in the last second) must limit
+every command, and must keep working whatever the page does, so it lives in the wasm logic (§7,
+Q1). Leases are exclusive, so the window can't hold the base's lease as well: it writes the
+driver's request into the app's state (`drive`, every 100 ms while a control is held), and the
+logic takes the lease, limits the request and sends it. A request that stops changing for 300 ms
+(the page closed or hung) lets go of the lease: the window's dead man's switch. The cost: no shell
+"is driving" bar and no D46 confirm for this window, which belong to `faber.drive()`; turning the
+app on is the go-ahead, as for any app with logic, and the window has its own Stop. The state is
+saved at most once a second, so driving writes `state.toml` about once a second; the logic removes
+`drive` when it stops. The window's text is plain English: apps aren't translated by Faber's
+catalogue.
+
+**What apps gained.**
+
+- **Optional roles:** `count = "0..1"` (one part or none) and `"0.."` (any number, none too). The
+  app runs with them empty; the Install window offers "None" and says "optional", and "Turn it on
+  now" waits only for the roles that need a part.
+- **Mounts:** a part's readings are in its own frame (capabilities.md, rule 3), so an app needs
+  to know where its parts sit. The app world's `roles` interface has `mount-of(role, index)`
+  (`Host::mount` in the Rust SDK), and the window protocol's `roles` answer has `mounts` (one per
+  part). Still never which part.
+
+**The fake SENNEP Mega.** `FakeBoard::sennep` (tools/faberlink-interop) is the FaberLink library's
+C++ with a planar base, two distance sensors and a battery. The library has no planar-base part
+type yet, so the harness's test part writes the capability's layouts itself; the real one (with
+on-board ramp-down) is still to build (faberlink.md).
+
+**Tests.** `examples/apps/sennep` unit-tests the geometry, the safety layer, odometry and the app
+against `TestHost`; `sdk/js/shell/src/sennep-view.test.js` tests the window's pure parts;
+`core/tests/sennep.rs` proves it in the apartment; `core/tests/bridge.rs` drives the fake Mega's
+base through it; `shell/e2e/sennep.spec.ts` installs, binds, drives and stops it from the browser,
+and the layout test opens its window on the 7" screen.
+
+**Needs the real robot:** the LD19 and the corner sensors on SENNEP with their mounts measured,
+the Mega's FaberLink firmware with a planar base, and the stop distance, the slow-down rate and the
+pose's drift checked on the floor.

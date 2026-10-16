@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { AppRole, PartInfo } from '../lib/state/types';
-  import { candidates, takesMany, type RolePicks } from '../lib/state/appRoles';
+  import { candidates, isOptional, takesMany, type RolePicks } from '../lib/state/appRoles';
   import { partList } from '../lib/desktop/packages';
   import Icon from './Icon.svelte';
   import RichText from './RichText.svelte';
@@ -8,7 +8,8 @@
 
   /**
    * Picks the parts for an app's roles (docs/apps.md §1): per role, only the parts that provide its
-   * capability; one part, or several for a `count = "1.."` role. A role the app may drive says so
+   * capability; one part, or several for a `count = "1.."` or `"0.."` role, and none for an
+   * optional one (`"0..1"`, `"0.."`). A role the app may drive says so
    * in words before anything is installed or saved.
    */
   let {
@@ -26,6 +27,11 @@
     /** Unique per window, for the labels' ids. */
     idPrefix: string;
   } = $props();
+
+  function countText(role: AppRole): string {
+    if (isOptional(role)) return takesMany(role) ? t('roles.count.any') : t('roles.count.optional');
+    return takesMany(role) ? t('roles.count.many') : t('roles.count.one');
+  }
 
   function pickOne(role: string, part: string) {
     picks = { ...picks, [role]: part ? [part] : [] };
@@ -53,7 +59,7 @@
           <label class="name" for={id}>{role.role}</label>
         {/if}
         <span class="cap"><code>{role.capability}</code></span>
-        <span class="count">{takesMany(role) ? t('roles.count.many') : t('roles.count.one')}</span>
+        <span class="count">{countText(role)}</span>
       </div>
       {#if fit.length === 0}
         <p class="none">
@@ -79,7 +85,7 @@
           value={picked[0] ?? ''}
           onchange={(e) => pickOne(role.role, e.currentTarget.value)}
         >
-          <option value="">{t('roles.pickLater')}</option>
+          <option value="">{isOptional(role) ? t('roles.none') : t('roles.pickLater')}</option>
           {#each fit as part (part)}
             <option value={part}>{part}</option>
           {/each}

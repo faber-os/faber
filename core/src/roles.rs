@@ -8,7 +8,7 @@
 //! [apps.wall-follower.roles]
 //! lidar = "lidar"
 //! base = "base"
-//! proximity = ["front", "rear"]   # a role with count = "1.."
+//! proximity = ["front", "rear"]   # a role with count = "1.." (or "0..")
 //! ```
 //!
 //! Pure text in, text out, like `config`: reading validates and points errors at the exact line;
@@ -29,7 +29,7 @@ pub const NEW_FILE_HEADER: &str = "# The apps on this Faber machine: which are o
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AppEntry {
     pub enabled: bool,
-    /// Role → the parts that fill it, in order (one, or more for a `count = "1.."` role).
+    /// Role → the parts that fill it, in order (one, or more for a `count = "1.."` or `"0.."` role).
     pub roles: BTreeMap<String, Vec<PartName>>,
 }
 
@@ -194,7 +194,7 @@ pub fn set_enabled(text: &str, id: &str, enabled: bool) -> Result<String, RolesE
 }
 
 /// Sets which parts fill an app's roles: exactly these roles, each a part name, or a list for
-/// the roles in `lists` (`count = "1.."`). Roles left out are removed.
+/// the roles in `lists` (`count = "1.."` or `"0.."`). Roles left out are removed.
 pub fn set_roles(
     text: &str,
     id: &str,

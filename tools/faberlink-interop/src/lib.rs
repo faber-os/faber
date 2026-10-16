@@ -2,7 +2,8 @@
 //! (`firmware/faberlink/src/FaberLinkCore.cpp`), compiled by `build.rs`, hosting a simulated motor
 //! (part 0, `left`, max 10 rad/s) and a simulated distance sensor (part 1, `front`, 0.1–0.8 m).
 //! [`FakeBoard::mega`] hosts two of each: motors `left` and `right` (parts 0 and 1), distance
-//! sensors `front` and `rear` (parts 2 and 3), the way a robot's Mega would.
+//! sensors `front` and `rear` (parts 2 and 3), the way a robot's Mega would. [`FakeBoard::sennep`]
+//! is SENNEP V2's Mega: a planar base, two distance sensors and a battery.
 //!
 //! The tests in `tests/` drive it from the Rust session in `faberlink`; the core's own tests use
 //! it as the board behind a fake serial port.
@@ -15,6 +16,8 @@ mod ffi {
     unsafe extern "C" {
         pub fn flh_new(heartbeat_timeout_ms: u16) -> *mut c_void;
         pub fn flh_new_mega(heartbeat_timeout_ms: u16, motor_lease_ms: u16) -> *mut c_void;
+        pub fn flh_new_sennep(heartbeat_timeout_ms: u16, base_lease_ms: u16) -> *mut c_void;
+        pub fn flh_base_velocity(h: *mut c_void, out: *mut f32);
         pub fn flh_new_with_battery(
             heartbeat_timeout_ms: u16,
             chemistry: u8,
@@ -58,6 +61,18 @@ mod ffi {
         pub fn new_mega(heartbeat_timeout_ms: u16, motor_lease_ms: u16) -> Handle {
             // SAFETY: flh_new_mega allocates a harness and returns a valid pointer to it.
             Handle(unsafe { flh_new_mega(heartbeat_timeout_ms, motor_lease_ms) })
+        }
+
+        pub fn new_sennep(heartbeat_timeout_ms: u16, base_lease_ms: u16) -> Handle {
+            // SAFETY: flh_new_sennep allocates a harness and returns a valid pointer to it.
+            Handle(unsafe { flh_new_sennep(heartbeat_timeout_ms, base_lease_ms) })
+        }
+
+        pub fn base_velocity(&self) -> [f32; 3] {
+            let mut out = [0.0f32; 3];
+            // SAFETY: self.0 is a live harness, and `out` has room for the three floats it writes.
+            unsafe { flh_base_velocity(self.0, out.as_mut_ptr()) };
+            out
         }
 
         pub fn new_with_battery(
@@ -204,6 +219,19 @@ impl FakeBoard {
     /// SAFE from the board's own lease running out.
     pub fn mega_with_motor_lease(heartbeat_timeout_ms: u16, motor_lease_ms: u16) -> FakeBoard {
         FakeBoard { handle: ffi::Handle::new_mega(heartbeat_timeout_ms, motor_lease_ms) }
+    }
+
+    /// SENNEP V2's Mega as it will be (`sim-sennep-mega`): a holonomic planar base `base` (part 0,
+    /// at most 0.6 m/s and 1.5 rad/s), distance sensors `front` and `rear` (parts 1 and 2) and a 3S
+    /// Li-ion `battery` (part 3). Its base stops by itself after `base_lease_ms` without a command.
+    /// The library has no planar-base part type yet: the harness writes the layouts itself.
+    pub fn sennep(heartbeat_timeout_ms: u16, base_lease_ms: u16) -> FakeBoard {
+        FakeBoard { handle: ffi::Handle::new_sennep(heartbeat_timeout_ms, base_lease_ms) }
+    }
+
+    /// The velocity a [`FakeBoard::sennep`]'s base is driven at now: `[vx, vy, omega]`.
+    pub fn base_velocity(&self) -> [f32; 3] {
+        self.handle.base_velocity()
     }
 
     /// The small board plus a battery, `battery` (part 2), reporting every 100 ms. `chemistry` is

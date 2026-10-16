@@ -1,0 +1,55 @@
+faber-manifest = 1
+
+[package]
+id = "sennep"
+type = "app"
+version = "0.1.0"
+name = "SENNEP"
+publisher = "Mikkel Ryborg Blom"
+module = "app.wasm"             # its logic: the safety layer, the pose and the nearest obstacle
+ui = "ui/"                      # the driving window
+tick-hz = 20                    # twice per LiDAR scan, and often enough to stop in time
+
+[window]
+title = "SENNEP"
+width = 980
+height = 540
+
+# The LiDAR: the top view, and what the safety layer looks out for.
+[[requires]]
+role = "lidar"
+capability = "laser-scan@1"
+
+# The mecanum base. command = true: the app takes its lease while you drive.
+[[requires]]
+role = "base"
+capability = "planar-base@1"
+command = true
+
+# Distance sensors around the body (SENNEP has one at each corner). Optional: the app runs
+# without them, and the safety layer uses those it has.
+[[requires]]
+role = "proximity"
+capability = "distance@1"
+count = "0.."
+
+# The battery. Optional: when it is critical, the app drives at 30 % of its top speed.
+[[requires]]
+role = "battery"
+capability = "battery@1"
+count = "0..1"
+
+[[suggests]]
+connector = "ldrobot-ld19"
+for-role = "lidar"
+
+# Dead reckoning: app:sennep/pose. It drifts (see the README).
+[[publishes]]
+name = "pose"
+capability = "pose@1"
+
+# The gap between SENNEP's leading edge and the nearest thing in the direction it drives:
+# app:sennep/nearest-obstacle.
+[[publishes]]
+name = "nearest-obstacle"
+capability = "distance@1"

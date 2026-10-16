@@ -214,6 +214,9 @@ function fail(
 
 const utf8 = new TextEncoder();
 
+/** A part with no mount in parts.toml sits at the machine's origin. */
+const ORIGIN = { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0 };
+
 function bytes(s: string): number {
   return utf8.encode(s).length;
 }
@@ -630,12 +633,15 @@ export class AppHost {
   }
 
   private roles(): RoleInfo[] {
+    const parts = this.deps.parts();
     return this.app().roles.map((r) => ({
       role: r.role,
       capability: r.capability,
       command: r.command,
       count: r.count,
       parts: r.parts.length,
+      // Where each part sits (an app applies it to the part's readings), never which part it is.
+      mounts: r.parts.map((name) => ({ ...ORIGIN, ...parts.find((p) => p.name === name)?.mount })),
     }));
   }
 
