@@ -317,3 +317,94 @@ describe('Selecting several icons', () => {
     );
   });
 });
+
+describe('Dropping files on the desktop', () => {
+  const put = (path: string, mode?: 'create') =>
+    `/api/v0/files/content?path=${encodeURIComponent(`home:/Desktop/${path}`)}${mode ? '&mode=create' : ''}`;
+  const EXISTS = {
+    status: 409,
+    body: { error: { code: 'already-exists', message: 'It is already there.', hint: 'Pick.' } },
+  };
+  const file = (name: string, text = 'hi') => new File([text], name, { type: 'text/plain' });
+  const drop = (dataTransfer: unknown) =>
+    fireEvent.drop(desktopList(), {
+      dataTransfer: { types: ['Files'], ...(dataTransfer as object) },
+    });
+  const puts = (shell: ReturnType<typeof fakeShell>) =>
+    shell.fetch.calls
+      .filter((c) => c.method === 'PUT' && c.path.includes('/files/'))
+      .map((c) => c.path);
+
+  it('uploads every dropped file to the desktop, asking about a name that is taken', async () => {
+    const shell = setup([
+      { method: 'PUT', path: put('new.txt', 'create'), status: 204 },
+      { method: 'PUT', path: put('todo.txt', 'create'), ...EXISTS },
+      { method: 'PUT', path: put('todo 2.txt', 'create'), status: 204 },
+    ]);
+    await within(desktopList()).findByRole('option', { name: 'todo.txt' });
+    await drop({ files: [file('new.txt'), file('todo.txt')] });
+    const dialog = await screen.findByRole('alertdialog', {
+      name: '“todo.txt” is already in Desktop',
+    });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Keep both' }));
+    await waitFor(() =>
+      expect(puts(shell)).toEqual([
+        put('new.txt', 'create'),
+        put('todo.txt', 'create'),
+        put('todo 2.txt', 'create'),
+      ]),
+    );
+    expect(await screen.findByText(/todo\.txt → todo 2\.txt/)).toBeInTheDocument();
+  });
+
+  it('opens a dropped connector package in Install, and uploads nothing for it', async () => {
+    const shell = setup();
+    await drop({ files: [new File([new Uint8Array([1])], 'acme-0.1.0.faberpkg')] });
+    await waitFor(() =>
+      expect(shell.desktop.state.windows.map((w) => w.kind)).toContain('install-package'),
+    );
+    expect(puts(shell)).toEqual([]);
+  });
+
+  it('uploads a dropped folder with what is in it', async () => {
+    const shell = setup([
+      { method: 'POST', path: '/api/v0/files/folder', status: 204 },
+      { method: 'PUT', path: put('photos/a.txt', 'create'), status: 204 },
+    ]);
+    const a = file('a.txt');
+    const fileEntry = {
+      isFile: true,
+      isDirectory: false,
+      name: 'a.txt',
+      file: (ok: (f: File) => void) => ok(a),
+    };
+    let read = false;
+    const dir = {
+      isFile: false,
+      isDirectory: true,
+      name: 'photos',
+      createReader: () => ({
+        readEntries: (ok: (e: unknown[]) => void) => {
+          ok(read ? [] : [fileEntry]);
+          read = true;
+        },
+      }),
+    };
+    await drop({ files: [], items: [{ kind: 'file', webkitGetAsEntry: () => dir }] });
+    await waitFor(() => expect(puts(shell)).toEqual([put('photos/a.txt', 'create')]));
+    const folder = shell.fetch.calls.find((c) => c.path === '/api/v0/files/folder');
+    expect(folder?.body).toEqual({ path: 'home:/Desktop/photos' });
+  });
+
+  it('says so when the browser gives a folder it can not read', async () => {
+    const shell = setup();
+    const folder = new File([], 'photos');
+    // A browser without folder entries hands over a folder as a File that can't be read.
+    Object.defineProperty(folder, 'slice', {
+      value: () => ({ arrayBuffer: () => Promise.reject(new Error('NotFoundError')) }),
+    });
+    await drop({ files: [folder] });
+    expect(await screen.findByText(/Folders can't be dropped here/)).toBeInTheDocument();
+    expect(puts(shell)).toEqual([]);
+  });
+});

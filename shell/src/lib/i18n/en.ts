@@ -77,6 +77,9 @@ export const en = {
   'menu.open': 'Open',
   'programs.menu.pin': 'Pin to taskbar',
   'programs.menu.removeFromDesktop': 'Remove from desktop',
+  // A folder dropped on the desktop in a browser that hands over folders as unreadable files
+  'desktop.drop.noFolders':
+    "Folders can't be dropped here in this browser, so {names} wasn't uploaded. Drop the files inside it instead, or use Upload in Files.",
   'programs.menu.addToDesktop': 'Add to desktop',
   'programs.menu.unpin': 'Unpin from taskbar',
 

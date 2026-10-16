@@ -32,6 +32,11 @@
   import FileIcon from './FileIcon.svelte';
   import { isPackageFile } from '../lib/desktop/packages';
   import { openDroppedPackage } from './installWindow';
+  import { readDrop } from './droppedFiles';
+  import { uploadFiles } from './uploadFiles';
+  import { uploadSummary, type ConflictAnswer } from '../lib/desktop/uploads';
+  import ErrorNotice from './ErrorNotice.svelte';
+  import UploadConflict from './UploadConflict.svelte';
   import { fileLook } from './fileLook';
   import { menuTrigger, useMenu } from './menuController.svelte';
   import { desktopItem, pinItem, runDesktopItem, runPinItem } from './programs';
@@ -65,6 +70,15 @@
   let drag = $state<{ keys: string[]; dx: number; dy: number } | null>(null);
   let root: HTMLElement | undefined = $state();
   let lastClick = { key: '', at: 0 };
+  /** A dropped file whose name is taken on the desktop: Replace, Keep both or Skip. */
+  let conflict = $state<{
+    name: string;
+    folder: string;
+    remaining: number;
+    answer: (a: ConflictAnswer) => void;
+  } | null>(null);
+  /** What the last drop did (files renamed, replaced, skipped), or why folders were left out. */
+  let dropNotice = $state<string | null>(null);
   let justDragged = false;
 
   async function load() {
@@ -458,7 +472,10 @@
     };
   }
 
-  /** Files dragged in from this computer: connector packages dropped here open Install. */
+  /**
+   * Files dragged in from this computer go to the Desktop folder, folders too (with what is in
+   * them); a connector package opens Install instead.
+   */
   function dragOver(e: DragEvent) {
     if (!e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
@@ -466,11 +483,49 @@
   }
 
   function drop(e: DragEvent) {
-    if (!e.dataTransfer?.types.includes('Files')) return;
+    const dt = e.dataTransfer;
+    if (!dt?.types.includes('Files')) return;
     e.preventDefault();
-    for (const f of Array.from(e.dataTransfer.files)) {
-      if (isPackageFile(f.name)) openDroppedPackage(desktop, f);
+    void uploadDrop(dt);
+  }
+
+  function askConflict(name: string, remaining: number): Promise<ConflictAnswer> {
+    return new Promise((resolve) => {
+      conflict = {
+        name,
+        folder: DESKTOP.slice(DESKTOP.lastIndexOf('/') + 1),
+        remaining,
+        answer: (a) => {
+          conflict = null;
+          resolve(a);
+        },
+      };
+    });
+  }
+
+  async function uploadDrop(dt: DataTransfer) {
+    // Read everything first: the browser empties the DataTransfer once the drop event is over.
+    const dropped = await readDrop(dt);
+    const top = dropped.files.filter((f) => !f.path.includes('/'));
+    for (const f of top.filter((f) => isPackageFile(f.path))) {
+      openDroppedPackage(desktop, f.file as File);
     }
+    const items = dropped.files.filter((f) => f.path.includes('/') || !isPackageFile(f.path));
+    dropNotice = dropped.unreadable.length
+      ? t('desktop.drop.noFolders', { names: dropped.unreadable.join(', ') })
+      : null;
+    if (items.length === 0 && dropped.folders.length === 0) return;
+    const r = await uploadFiles(
+      core,
+      DESKTOP,
+      items,
+      files.map((f) => f.name),
+      askConflict,
+      dropped.folders,
+    );
+    if (r.error) core.lastError = r.error;
+    dropNotice = [dropNotice, uploadSummary(r)].filter(Boolean).join(' ') || null;
+    await load();
   }
 </script>
 
@@ -551,6 +606,19 @@
   {/if}
 </ul>
 
+{#if conflict}
+  <UploadConflict {...conflict} />
+{/if}
+{#if dropNotice}
+  <div class="drop-notice">
+    <ErrorNotice
+      tone="ok"
+      error={{ message: dropNotice, hint: '' }}
+      ondismiss={() => (dropNotice = null)}
+    />
+  </div>
+{/if}
+
 <style>
   .icons {
     position: absolute;
@@ -614,6 +682,12 @@
   .icon:focus-visible .plate {
     outline: 2px solid var(--focus-ring);
     outline-offset: 3px;
+  }
+  .drop-notice {
+    position: absolute;
+    right: var(--space-4);
+    bottom: var(--space-4);
+    max-width: min(440px, calc(100% - 2 * var(--space-4)));
   }
   .band {
     position: absolute;

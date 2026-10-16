@@ -27,7 +27,9 @@
   import { fileTypeLabel } from '../lib/desktop/fileTypes';
   import { isPackageFile } from '../lib/desktop/packages';
   import { openDroppedPackage } from '../components/installWindow';
-  import { afterConflict, uploadSummary, type ConflictAnswer } from '../lib/desktop/uploads';
+  import { uploadSummary, type ConflictAnswer } from '../lib/desktop/uploads';
+  import { uploadFiles } from '../components/uploadFiles';
+  import UploadConflict from '../components/UploadConflict.svelte';
   import Dialog from '../components/Dialog.svelte';
   import { useDesktop } from '../components/desktopController.svelte';
   import ErrorNotice from '../components/ErrorNotice.svelte';
@@ -90,7 +92,6 @@
     remaining: number;
     answer: (a: ConflictAnswer) => void;
   } | null>(null);
-  let conflictForAll = $state(false);
   let dropping = $state(false);
   let busy = $state(false);
   let roots = $state.raw<FileRoot[]>([]);
@@ -240,7 +241,6 @@
   }
 
   function askConflict(name: string, remaining: number): Promise<ConflictAnswer> {
-    conflictForAll = false;
     return new Promise((resolve) => {
       conflict = {
         name,
@@ -257,53 +257,22 @@
   /** Upload into this folder. A name that is taken asks first: Replace, Keep both or Skip. */
   async function upload(files: FileList | File[] | null | undefined) {
     if (!files || files.length === 0) return;
-    const list = Array.from(files);
-    const folder = view.path;
-    const names = entries.map((e) => e.name);
-    const renamed: { from: string; to: string }[] = [];
-    const replaced: string[] = [];
-    const skipped: string[] = [];
-    let rule: ConflictAnswer | null = null;
-    let lastPath: string | null = null;
+    const items = Array.from(files).map((f) => ({ path: f.name, file: f }));
     busy = true;
     actionError = null;
     notice = null;
-    const taken = (r: { ok: boolean; error?: ErrorBody }) =>
-      !r.ok && r.error?.code === 'already-exists';
-    for (const [i, f] of list.entries()) {
-      let name = f.name;
-      let r = await core.writeFile(childPath(folder, name), f, 'create');
-      if (taken(r)) {
-        const answer: ConflictAnswer = rule ?? (await askConflict(name, list.length - i - 1));
-        if (answer.forAll) rule = answer;
-        if (!names.includes(name)) names.push(name);
-        const next = afterConflict(answer.choice, name, names);
-        if (!next) {
-          skipped.push(f.name);
-          continue;
-        }
-        name = next.name;
-        r = await core.writeFile(childPath(folder, name), f, next.mode);
-        // Keep both: another upload may take the free name meanwhile; try the next one.
-        for (let tries = 0; next.mode === 'create' && taken(r) && tries < 20; tries++) {
-          names.push(name);
-          name = uniqueName(names, f.name);
-          r = await core.writeFile(childPath(folder, name), f, 'create');
-        }
-        if (r.ok && next.mode === 'replace') replaced.push(name);
-        else if (r.ok) renamed.push({ from: f.name, to: name });
-      }
-      if (!r.ok) {
-        actionError = r.error;
-        break;
-      }
-      names.push(name);
-      lastPath = childPath(folder, name);
-    }
+    const r = await uploadFiles(
+      core,
+      view.path,
+      items,
+      entries.map((e) => e.name),
+      askConflict,
+    );
     busy = false;
-    notice = uploadSummary({ renamed, replaced, skipped });
+    actionError = r.error;
+    notice = uploadSummary(r);
     await view.refresh(true);
-    if (lastPath) selected = lastPath;
+    if (r.lastPath) selected = r.lastPath;
   }
 
   async function addSamples() {
@@ -900,34 +869,7 @@
   </div>
 
   {#if conflict}
-    {@const c = conflict}
-    <Dialog
-      title={t('files.dialog.conflict.title', { name: c.name, folder: c.folder })}
-      oncancel={() => c.answer({ choice: 'skip', forAll: false })}
-    >
-      <p>{t('files.dialog.conflict.body')}</p>
-      {#if c.remaining > 0}
-        <label class="ack">
-          <input type="checkbox" class="check" bind:checked={conflictForAll} />
-          {t('files.dialog.conflict.forAll')}
-        </label>
-      {/if}
-      {#snippet actions()}
-        <button class="btn" onclick={() => c.answer({ choice: 'skip', forAll: conflictForAll })}
-          >{t('files.dialog.conflict.skip')}</button
-        >
-        <button
-          class="btn danger"
-          onclick={() => c.answer({ choice: 'replace', forAll: conflictForAll })}
-          >{t('files.dialog.conflict.replace')}</button
-        >
-        <button
-          class="btn primary"
-          onclick={() => c.answer({ choice: 'keep-both', forAll: conflictForAll })}
-          >{t('files.dialog.conflict.keepBoth')}</button
-        >
-      {/snippet}
-    </Dialog>
+    <UploadConflict {...conflict} />
   {:else if confirm?.kind === 'delete'}
     {@const e = confirm.entry}
     <Dialog
