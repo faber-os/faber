@@ -113,6 +113,24 @@ export function diagnosticPlace(d: DiagnosticLike): string {
   return d.column === undefined ? `${d.file}:${d.line}` : `${d.file}:${d.line}:${d.column}`;
 }
 
+/**
+ * The compiler's messages that point into one of the sketch's tabs, by tab name, for the editor
+ * to underline. A message in a library's file, or with no line, stays in the list only.
+ */
+export function diagnosticsByTab<D extends DiagnosticLike & { inSketch: boolean }>(
+  diagnostics: readonly D[],
+  tabs: readonly string[],
+): Map<string, D[]> {
+  const out = new Map<string, D[]>();
+  for (const d of diagnostics) {
+    if (!d.inSketch || !d.file || d.line === undefined || !tabs.includes(d.file)) continue;
+    const list = out.get(d.file);
+    if (list) list.push(d);
+    else out.set(d.file, [d]);
+  }
+  return out;
+}
+
 /** The character offset of a 1-based line and column in `text`, for jumping to an error. */
 export function offsetOf(text: string, line: number, column = 1): number {
   let at = 0;

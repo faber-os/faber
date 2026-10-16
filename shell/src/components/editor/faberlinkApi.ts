@@ -1,0 +1,154 @@
+/**
+ * The FaberLink library's public API (firmware/faberlink/src/FaberLink.h), for completion, hover
+ * docs and signature help. faberlinkApi.test.ts reads the header and fails when a public class or
+ * method appears or disappears there without changing here, so the two can't drift apart.
+ */
+import { fn, parseSignature, type ApiClass, type ApiConstant, type ApiFunction } from './catalogue';
+
+const f = (signatures: string | string[], doc: string): ApiFunction =>
+  fn(signatures, doc, 'faberlink');
+
+/** Members every FaberLink part has (from `faberlink::Part` in FaberLinkCore.h). */
+const PART_MEMBERS: ApiFunction[] = [
+  f('const char* name() const', 'The part’s name, as Faber shows it after the board’s name.'),
+];
+
+const inherited = (list: ApiFunction[]) => list.map((m) => ({ ...m, inherited: true }));
+
+export interface FaberLinkClass extends ApiClass {
+  members: (ApiFunction & { inherited?: boolean })[];
+}
+
+export const FABERLINK_CLASSES: FaberLinkClass[] = [
+  {
+    name: 'FaberLink',
+    doc: 'The connection to Faber over a serial port. Make one, call begin() in setup() and poll() in every loop(); the parts you declare add themselves.',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature('FaberLink(HardwareSerial& port)').overload,
+      parseSignature('FaberLink(Stream& port)').overload,
+    ],
+    members: [
+      f(
+        'void begin(unsigned long baud, const char* board, const char* firmwareVersion, uint16_t heartbeatTimeoutMs = faberlink::DEFAULT_HEARTBEAT_TIMEOUT_MS)',
+        'Starts FaberLink: opens a hardware serial port at baud (115200 is usual) and tells Faber the board’s name and the sketch’s version. Without a heartbeat from Faber for heartbeatTimeoutMs (100 to 1000 ms), every motor stops.',
+      ),
+      f(
+        'void poll()',
+        'Does FaberLink’s work: reads Faber’s commands, sends readings, stops motors when Faber goes quiet. Call it in every loop() and keep loop() fast.',
+      ),
+      f(
+        'bool add(faberlink::Part& part)',
+        'Adds a part of your own (a faberlink::Part subclass). Call it before begin(); the Faber parts add themselves.',
+      ),
+      f(
+        'void engageEstop()',
+        'For a stop button on the board: stops every motor and stays stopped until resetEstop() here and a release in Faber.',
+      ),
+      f(
+        'void resetEstop()',
+        'Releases the board’s own stop; motors run again only after Faber releases too.',
+      ),
+      f('void log(const char* text)', 'Sends a line to Faber’s log.'),
+      f('bool connected() const', 'True while Faber is connected.'),
+    ],
+  },
+  {
+    name: 'FaberMotor',
+    doc: 'A DC motor on an H-bridge: a PWM pin sets the speed and a pin the direction. Give maxVelocityRadS (its speed at full power, in rad/s) to drive it by speed as well as by power.',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberMotor(const char* name, uint8_t pwmPin, uint8_t directionPin, float maxVelocityRadS = 0)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pins; FaberLink calls it from begin().'),
+      ...inherited([
+        ...PART_MEMBERS,
+        f(
+          'bool active() const',
+          'True while it runs on a command from Faber, false while it is stopped (its safe state).',
+        ),
+        f(
+          'float duty() const',
+          'The power it runs at now, from -1 (full reverse) to 1 (full forward).',
+        ),
+      ]),
+    ],
+  },
+  {
+    name: 'FaberDistance',
+    doc: 'An analog distance sensor on an analog pin. By default 0 V is 0 m and the reference voltage is maxM; for a sensor with a curve (a Sharp IR), pass a function from the analogRead() value to metres that returns a negative number for no target.',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberDistance(const char* name, uint8_t analogPin, float minM = 0.1f, float maxM = 0.8f, faberlink::DistanceKind kind = faberlink::DISTANCE_INFRARED, ToMeters toMeters = 0)',
+      ).overload,
+    ],
+    members: inherited(PART_MEMBERS),
+  },
+  {
+    name: 'FaberUltrasonic',
+    doc: 'An ultrasonic range finder with a trigger pin and an echo pin, such as the HC-SR04 (2 cm to 4 m). A measurement waits at most about 24 ms for its echo.',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberUltrasonic(const char* name, uint8_t triggerPin, uint8_t echoPin, float minM = 0.02f, float maxM = 4.0f)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Sets up its pins; FaberLink calls it from begin().'),
+      ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
+    name: 'FaberBattery',
+    doc: 'A battery measured through a voltage divider (battery + to R1 to the pin to R2 to GND). dividerRatio is (R1 + R2) / R2; keep the pin below referenceVolts when the battery is full.',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberBattery(const char* name, uint8_t analogPin, float dividerRatio, uint8_t cellsInSeries, faberlink::BatteryChemistry chemistry = faberlink::BATTERY_LI_ION, float referenceVolts = 5.0f, float capacityAh = 0)',
+      ).overload,
+    ],
+    members: inherited([
+      ...PART_MEMBERS,
+      f(
+        'faberlink::BatteryLevel level() const',
+        'The level reported last: faberlink::BATTERY_OK, BATTERY_LOW or BATTERY_CRITICAL.',
+      ),
+    ]),
+  },
+];
+
+const k = (name: string, doc: string): ApiConstant => ({
+  name,
+  doc,
+  library: 'faberlink',
+  namespace: 'faberlink',
+});
+
+/** The `faberlink::` constants a sketch passes to the classes above. */
+export const FABERLINK_CONSTANTS: ApiConstant[] = [
+  k('DISTANCE_ULTRASONIC', 'FaberDistance: an ultrasonic sensor.'),
+  k('DISTANCE_LASER_TOF', 'FaberDistance: a laser time-of-flight sensor.'),
+  k('DISTANCE_INFRARED', 'FaberDistance: an infrared sensor (the default).'),
+  k('DISTANCE_RADAR', 'FaberDistance: a radar sensor.'),
+  k('BATTERY_LI_ION', 'FaberBattery: lithium-ion cells, such as 18650s (the default).'),
+  k('BATTERY_LIPO', 'FaberBattery: lithium-polymer cells.'),
+  k('BATTERY_LIFEPO4', 'FaberBattery: lithium iron phosphate cells.'),
+  k('BATTERY_NIMH', 'FaberBattery: nickel-metal hydride cells.'),
+  k('BATTERY_LEAD_ACID', 'FaberBattery: a lead-acid battery.'),
+  k('BATTERY_OK', 'FaberBattery level: charged enough.'),
+  k('BATTERY_LOW', 'FaberBattery level: low, charge it soon.'),
+  k('BATTERY_CRITICAL', 'FaberBattery level: very low; stop and charge it.'),
+  k(
+    'DEFAULT_HEARTBEAT_TIMEOUT_MS',
+    'FaberLink.begin(): how long the board waits for Faber’s heartbeat before it stops the motors (250 ms).',
+  ),
+];

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { fakeShell, listing } from '../test/fakeShell';
@@ -125,6 +125,12 @@ const calls = (shell: ReturnType<typeof fakeShell>, method: string, path: string
   shell.fetch.calls.filter((c) => c.method === method && c.path === path);
 
 describe('Arduino editor', () => {
+  // The editor (CodeMirror, the catalogue) is loaded the first time one opens: load it once up
+  // front, so the first test doesn't spend its waiting time on that.
+  beforeAll(async () => {
+    await import('../components/codemirror');
+  });
+
   it('lets an operator verify but not upload, and a viewer only read', async () => {
     const shell = await setup();
     shell.signInAs('operator');
@@ -204,6 +210,51 @@ describe('Arduino editor', () => {
     expect(within(list).queryByRole('button', { name: /FaberLink/ })).toBeNull();
     await userEvent.click(within(list).getByRole('button', { name: 'Go to motor.h:3:2' }));
     expect(screen.getByRole('tab', { name: 'motor.h' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('underlines the compiler’s messages in the code of their tab, and clears them on Verify', async () => {
+    const failed: CompileResult = {
+      ...COMPILED,
+      ok: false,
+      size: undefined,
+      diagnostics: [
+        {
+          severity: 'warning',
+          file: 'Rover.ino',
+          inSketch: true,
+          line: 1,
+          column: 6,
+          message: 'unused',
+        },
+        {
+          severity: 'error',
+          file: 'motor.h',
+          inSketch: true,
+          line: 3,
+          column: 2,
+          message: '#error not wired',
+        },
+        { severity: 'error', file: 'FaberLink.h', inSketch: false, line: 9, message: 'oops' },
+      ],
+    };
+    const shell = await setup([{ method: 'POST', path: '/api/v0/arduino/compile', body: failed }]);
+    const rover = await screen.findByRole('textbox', { name: 'Code of Rover.ino' });
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    await waitFor(() =>
+      expect(rover.querySelector('.cm-lintRange-warning')).toHaveTextContent('setup'),
+    );
+    expect(rover.querySelector('.cm-lintRange-error')).toBeNull();
+    // The other tab has its own; a library's message has no tab to go in.
+    const motor = screen.getByRole('textbox', { name: 'Code of motor.h', hidden: true });
+    expect(motor.querySelector('.cm-lintRange-error')).toHaveTextContent('error');
+    expect(motor.closest('.cm-editor')!.querySelector('.cm-lint-marker-error')).not.toBeNull();
+
+    // The next Verify starts clean.
+    shell.fetch.route({ method: 'POST', path: '/api/v0/arduino/compile', body: COMPILED });
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
+    expect(await screen.findByText('Compiled for the Arduino Uno.')).toBeInTheDocument();
+    await waitFor(() => expect(rover.querySelector('.cm-lintRange-warning')).toBeNull());
+    expect(motor.querySelector('.cm-lintRange-error')).toBeNull();
   });
 
   it('uploads only after the confirm, and offers to stop a FaberLink board in the way', async () => {

@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { contrast } from './contrast';
 import {
   APP_COLOURS,
+  CODE_COLOURS,
   DEFAULT_STYLE,
   PLATE,
   STYLES,
@@ -226,6 +227,44 @@ describe('status colours (ok, warn, danger, info) on their soft backgrounds', ()
         );
       }
       expect(contrast(t('--surface'), t('--danger'))).toBeGreaterThanOrEqual(4.5);
+    });
+  });
+});
+
+describe('code colours in the editor', () => {
+  const LEVELS: ContrastLevel[] = ['normal', 'more'];
+  const NAMES = Object.keys(CODE_COLOURS).map((n) => `--code-${n}`);
+
+  describe.each(
+    STYLES.flatMap((s) => THEMES.flatMap((t) => LEVELS.map((l) => [s.id, t, l] as const))),
+  )('%s, %s, %s contrast', (id, theme, level) => {
+    const k = styleTokens(resolveStyle(id), theme, level);
+    const t = (name: string) => {
+      const v = k[name];
+      if (!v) throw new Error(`${id} ${theme} has no ${name}`);
+      return v;
+    };
+    // The editor is drawn on --surface, the cursor's line with --hover over it: 4.5:1, and 7:1
+    // with higher contrast. A selection (--selected) tints more, so it is held to 4.5:1 always.
+    // Comments and operators are --text-muted, which the style checks above cover.
+    const bar = level === 'more' ? 7 : 4.5;
+
+    it.each(NAMES)(`%s reads on the editor and its active line, and in a selection`, (n) => {
+      expect(contrast(t(n), t('--surface')), `${n} on the editor`).toBeGreaterThanOrEqual(bar);
+      expect(
+        contrast(t(n), [t('--surface'), t('--hover')]),
+        `${n} on the active line`,
+      ).toBeGreaterThanOrEqual(bar);
+      expect(
+        contrast(t(n), [t('--surface'), t('--selected')]),
+        `${n} in a selection`,
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it('the accent colour (FaberLink in the completion list) reads on the active line', () => {
+      expect(contrast(t('--accent-ink'), [t('--surface'), t('--hover')])).toBeGreaterThanOrEqual(
+        4.5,
+      );
     });
   });
 });

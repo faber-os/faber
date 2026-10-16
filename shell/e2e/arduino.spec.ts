@@ -2,8 +2,9 @@ import { expect, test } from '@playwright/test';
 
 /**
  * The Arduino editor end to end (docs/arduino-editor.md): a new sketch from the start menu,
- * typing in the editor, Verify with an error that points at its line, Verify again with the size
- * report, and the sketch opened again from Files. The core runs a stand-in for arduino-cli
+ * typing in the editor, Verify with an error that points at its line and is underlined there,
+ * Verify again with the size report, and the sketch opened again from Files; and completion,
+ * signature help and hover docs while typing. The core runs a stand-in for arduino-cli
  * (`--fake-arduino-cli`, see playwright.config.ts): a line with `#error` fails like avr-gcc does.
  * No board: uploading and the same-code check are tested through the API with simulated
  * bootloaders (core/tests/arduino.rs).
@@ -40,6 +41,9 @@ test('write a sketch, see its error at the line, fix it and verify', async ({ pa
   await expect(editor.getByRole('tab', { name: `${name}.ino, not saved` })).toBeVisible();
   await editor.getByRole('button', { name: 'Verify' }).click();
   await expect(editor.getByText('The sketch didn’t compile: one error.')).toBeVisible();
+  // The error is underlined in the code too, with a marker in the gutter.
+  await expect(editor.locator('.cm-lintRange-error')).toHaveText('error');
+  await expect(editor.locator('.cm-lint-marker-error')).toHaveCount(1);
   await expect(editor.getByRole('tab', { name: `${name}.ino` })).toBeVisible();
   const saved = await request.get(`/api/v0/files/content?path=home:/Arduino/${name}/${name}.ino`);
   expect(await saved.text()).toContain('#error the motor is not wired yet');
@@ -49,8 +53,9 @@ test('write a sketch, see its error at the line, fix it and verify', async ({ pa
   await editor.getByRole('button', { name: `Go to ${name}.ino:${line}:2` }).click();
   await expect(editor.locator('.cm-activeLine')).toContainText('#error the motor is not wired yet');
 
-  // Undo the broken line (the editor keeps its history), and verify again.
+  // Undo the broken line (the editor keeps its history): its underline goes with it.
   await page.keyboard.press('Control+z');
+  await expect(editor.locator('.cm-lintRange-error')).toHaveCount(0);
   await editor.getByRole('button', { name: 'Verify' }).click();
   await expect(editor.getByText('Compiled for the Arduino Uno.')).toBeVisible();
   await expect(editor.getByText(/^Program: [\d  ]+ bytes of 32[  ]256/)).toBeVisible();
@@ -64,4 +69,58 @@ test('write a sketch, see its error at the line, fix it and verify', async ({ pa
   await files.getByRole('option', { name: new RegExp(`^${name}`) }).dblclick();
   await files.getByRole('option', { name: new RegExp(`^${name}\\.ino`) }).dblclick();
   await expect(page.locator('[data-window-kind="arduino"]')).toHaveCount(1);
+});
+
+/** A little over CodeMirror's `interactionDelay` (75 ms). */
+const INTERACTION_DELAY = 150;
+
+test('completion, signature help and hover docs while typing', async ({ page }) => {
+  const name = `Blinker${Date.now()}`;
+  await page.goto('/');
+  const taskbar = page.getByRole('navigation', { name: 'Taskbar' });
+  await expect(taskbar.getByText('Connected')).toBeVisible();
+
+  await taskbar.getByRole('button', { name: 'Start' }).click();
+  await page.locator('[role="menuitem"][data-kind="arduino"]').first().click();
+  const editor = page.locator('[data-window-kind="arduino"]');
+  await editor.getByRole('button', { name: 'New sketch' }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'New sketch' });
+  await dialog.getByLabel('Name').fill(name);
+  await dialog.getByRole('radio', { name: /Empty sketch/ }).check();
+  await dialog.getByRole('button', { name: 'Create' }).click();
+  const code = editor.getByRole('textbox', { name: `Code of ${name}.ino` });
+  await expect(code).toContainText('void setup()');
+
+  // Two letters open the list; pinMode is offered with its parameters, and Tab takes it.
+  await code.click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type('\nvoid blink() {\n  pinM');
+  const list = page.locator('.cm-tooltip-autocomplete');
+  const pinMode = list.getByRole('option', { name: /^pinMode/ });
+  await expect(pinMode).toBeVisible();
+  await expect(pinMode).toContainText('(uint8_t pin, uint8_t mode)');
+  // CodeMirror ignores Enter and Tab for 75 ms after the list opens, so a key meant for the code
+  // isn't taken as a choice; a person is never that quick, a test is.
+  await page.waitForTimeout(INTERACTION_DELAY);
+  await page.keyboard.press('Tab');
+  await expect(list).toHaveCount(0);
+  await expect(editor.locator('.cm-activeLine')).toHaveText('  pinMode(pin, mode)');
+
+  // The parameter being typed is in bold above the call. Typing over the first one offers
+  // LED_BUILTIN: Tab takes it, the next Tab goes on to the second parameter.
+  await page.keyboard.type('LED_BUI');
+  await expect(page.locator('.cm-signature-active')).toHaveText('uint8_t pin');
+  await expect(list.getByRole('option', { name: /^LED_BUILTIN/ })).toBeVisible();
+  await page.waitForTimeout(INTERACTION_DELAY);
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('OUTPUT');
+  await expect(page.locator('.cm-signature-active')).toHaveText('uint8_t mode');
+  await expect(editor.locator('.cm-activeLine')).toHaveText('  pinMode(LED_BUILTIN, OUTPUT)');
+
+  // Hovering a name of the Arduino API shows what it does.
+  await editor.locator('.cm-code-api', { hasText: 'pinMode' }).hover();
+  await expect(page.locator('.cm-tooltip-hover')).toContainText(
+    'void pinMode(uint8_t pin, uint8_t mode)',
+  );
 });
