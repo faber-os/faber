@@ -404,6 +404,9 @@ export const en = {
   // Port problems (USB devices that never became a port); the count shows only above 1
   'portProblems.count': { one: '({count} times)', other: '({count} times)' },
   'portProblems.whatToTry': 'What to try',
+  // The × on a notice about a lasting problem; it comes back when something new goes wrong
+  'notice.dismiss': 'Dismiss',
+  'notice.dismiss.tooltip': 'Hide this until something new happens',
 
   // Part state badge
   'partState.running': 'Running',

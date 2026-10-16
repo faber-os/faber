@@ -340,6 +340,30 @@ describe('Add part flow', () => {
     expect(settings?.params).toEqual({ section: 'connectors' });
   });
 
+  it('lets the connector problems be dismissed until another connector breaks', async () => {
+    const shell = setup();
+    const broken = { folder: 'broken', message: 'It broke.', hint: 'Fix it.' };
+    shell.fetch.route({ path: '/api/v0/connectors/problems', body: [broken] });
+    shell.pushPorts([SAMPLE_PORT]);
+    shell.pushParts([]);
+    await userEvent.click(await screen.findByRole('button', { name: /^Add the first part$/ }));
+    await screen.findByText(/One installed connector could not be loaded/);
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
+
+    // Loaded again (the form reopened): the same problem stays hidden, a new one shows.
+    await shell.core.loadConnectors();
+    expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
+    shell.fetch.route({
+      path: '/api/v0/connectors/problems',
+      body: [broken, { folder: 'also-broken', message: 'Also.', hint: 'Fix it too.' }],
+    });
+    await shell.core.loadConnectors();
+    expect(
+      await screen.findByText(/2 installed connectors could not be loaded/),
+    ).toBeInTheDocument();
+  });
+
   it('offers a connector installed since the form was last opened', async () => {
     const shell = setup();
     shell.pushPorts([SAMPLE_PORT]);
@@ -714,5 +738,48 @@ describe('Port problems', () => {
     // Gone when the core stops reporting it (the field is left out when there are none).
     shell.pushPorts([]);
     await waitFor(() => expect(screen.queryByText(problem.label)).not.toBeInTheDocument());
+  });
+
+  it('can be dismissed until a new problem comes along, everywhere it shows', async () => {
+    const shell = setup();
+    const problem = {
+      code: 'usb-no-answer',
+      label: "Plugged in, but the computer can't talk to it",
+      detail: "Something is plugged in over USB, but it didn't answer.",
+      hint: 'Try another USB cable; some only carry power.',
+    };
+    const other = {
+      code: 'usb-no-driver',
+      label: 'Plugged in, but it needs a driver',
+      detail: 'Windows found no driver for it.',
+      hint: 'Install the driver from the maker.',
+    };
+    const push = (problems: unknown[]) =>
+      shell.receive({ type: 'ports', id: shell.subscriptionId('ports'), ports: [], problems });
+    push([problem, problem]);
+    shell.pushParts([]);
+    await screen.findByText(problem.label);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText(problem.label)).not.toBeInTheDocument();
+    // The add form shares the dismissal.
+    await userEvent.click(screen.getByRole('button', { name: /^Add the first part$/ }));
+    const form = screen.getByRole('form', { name: 'Add part' });
+    expect(within(form).queryByText(problem.label)).not.toBeInTheDocument();
+
+    // The same problems again (or fewer of them) stay hidden; a new one brings the notice back.
+    push([problem]);
+    push([problem, problem]);
+    expect(within(form).queryByText(problem.label)).not.toBeInTheDocument();
+    // Each kind of problem is its own notice: another kind shows on its own…
+    push([problem, problem, other]);
+    expect(await within(form).findByText(other.label)).toBeInTheDocument();
+    expect(within(form).queryByText(problem.label)).not.toBeInTheDocument();
+    // …and one more of the dismissed kind brings that one back.
+    push([problem, problem, problem, other]);
+    expect(await within(form).findByText(problem.label)).toBeInTheDocument();
+    expect(shell.desktop.dismissals).toEqual({
+      'portProblems:usb-no-answer': ['usb-no-answer', 'usb-no-answer'],
+    });
   });
 });

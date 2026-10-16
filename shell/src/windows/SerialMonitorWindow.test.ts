@@ -193,4 +193,24 @@ describe('Serial monitor', () => {
       await screen.findByRole('option', { name: /^Bluetooth: Standard Serial/ }),
     ).toBeInTheDocument();
   });
+
+  it('lets a port problem be dismissed, as in Parts', async () => {
+    const shell = await setup();
+    const problem = {
+      code: 'usb-no-answer',
+      label: "Plugged in, but the computer can't talk to it",
+      detail: "It didn't answer.",
+      hint: 'Try another cable.',
+    };
+    shell.receive({
+      type: 'ports',
+      id: shell.subscriptionId('ports'),
+      ports: [USB_PORT, SAMPLE_PORT],
+      problems: [problem],
+    });
+    await screen.findByText(problem.label);
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText(problem.label)).not.toBeInTheDocument();
+    expect(shell.desktop.isDismissed('portProblems:usb-no-answer', ['usb-no-answer'])).toBe(true);
+  });
 });
