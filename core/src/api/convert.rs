@@ -2,7 +2,7 @@
 
 use super::dto;
 use crate::apps::AppStatus;
-use crate::bridge::{BoardView, LinkState};
+use crate::bridge::{BoardPin, BoardView, LinkState, PinRole};
 use crate::config::Simulate;
 use crate::connectors::LoadProblem;
 use crate::files::{Entry, Kind, Special, VPath};
@@ -69,8 +69,27 @@ pub fn part(p: &PartView) -> dto::PartInfo {
             .collect(),
         mount: p.mount,
         bridge: p.bridge.as_ref().map(ToString::to_string),
+        pins: p.pins.as_ref().map(|pins| pins.iter().map(board_pin).collect()),
         board: p.board.as_ref().map(|b| board_link(b, p.code.as_ref())),
     }
+}
+
+fn board_pin(p: &BoardPin) -> dto::BoardPinInfo {
+    use dto::PinRole as R;
+    let role = match p.role {
+        PinRole::Pwm => R::Pwm,
+        PinRole::Dir => R::Dir,
+        PinRole::En => R::En,
+        PinRole::In1 => R::In1,
+        PinRole::In2 => R::In2,
+        PinRole::Stby => R::Stby,
+        PinRole::Trig => R::Trig,
+        PinRole::Echo => R::Echo,
+        PinRole::Signal => R::Signal,
+        PinRole::Sense => R::Sense,
+        PinRole::Other(_) => R::Other,
+    };
+    dto::BoardPinInfo { role, pin: p.pin, label: p.label.clone() }
 }
 
 pub fn board_link(b: &BoardView, code: Option<&crate::machine::FlashedCode>) -> dto::BoardLink {

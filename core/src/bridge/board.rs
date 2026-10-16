@@ -5,7 +5,7 @@ use super::Link;
 use crate::names::{PartName, board_part_name};
 use faber_capabilities::{Info, planar_base};
 use faber_connector::{Health, Problem, Provide};
-use faberlink::message::{Cause, Fault, PartDescription, PartInfo};
+use faberlink::message::{Cause, Fault, PartDescription, PartInfo, PartPins, PinRole};
 
 /// Where the link to a board stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +37,17 @@ impl LinkState {
     }
 }
 
+/// One pin a sub-part uses, as its board says (`PINS`, docs/faberlink.md §3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BoardPin {
+    pub role: PinRole,
+    /// The Arduino pin number.
+    pub pin: u8,
+    /// As printed on the board: `D7`, `A0` (or `7` when the board doesn't say where its analog
+    /// pins start).
+    pub label: String,
+}
+
 /// One part on the board, as a part of its own.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SubPart {
@@ -53,12 +64,16 @@ pub struct SubPart {
     pub provide: Option<Provide>,
     /// For actuators: the board stops it by itself after this long without a command.
     pub lease_ms: u16,
+    /// The pins it uses, when its board says (a FaberLink library from 2026-10-16 on, for the
+    /// library's own part classes). `None`: the board didn't say.
+    pub pins: Option<Vec<BoardPin>>,
 }
 
-/// The board's parts as sub-parts of `bridge`. A name the board gives that can't be a part name
-/// (or that two parts share) becomes `part<id>`. A drive base's built-from list names the board's
-/// parts; it is turned into their sub-part names, so a lease on the base locks them.
-pub fn sub_parts(bridge: &PartName, parts: &[PartDescription]) -> Vec<SubPart> {
+/// The board's parts as sub-parts of `bridge`, with the pins the board said for them. A name the
+/// board gives that can't be a part name (or that two parts share) becomes `part<id>`. A drive
+/// base's built-from list names the board's parts; it is turned into their sub-part names, so a
+/// lease on the base locks them.
+pub fn sub_parts(bridge: &PartName, parts: &[PartDescription], pins: &[PartPins]) -> Vec<SubPart> {
     let mut used: Vec<String> = Vec::new();
     let local: Vec<String> = parts
         .iter()
@@ -103,9 +118,14 @@ pub fn sub_parts(bridge: &PartName, parts: &[PartDescription]) -> Vec<SubPart> {
                 capability: p.capability.clone(),
                 provide,
                 lease_ms: p.lease_ms,
+                pins: pins.iter().find(|x| x.part == p.id).map(board_pins),
             })
         })
         .collect()
+}
+
+fn board_pins(p: &PartPins) -> Vec<BoardPin> {
+    p.pins.iter().map(|u| BoardPin { role: u.role, pin: u.pin, label: p.label(u.pin) }).collect()
 }
 
 /// A connected sub-part runs, unless this core doesn't know what it is.
@@ -219,7 +239,7 @@ mod tests {
             field_of_view_rad: 0.1,
             kind: distance::Kind::Infrared,
         });
-        let subs = sub_parts(&mega(), &[part(0, "left", motor_info()), part(1, "Front IR", d)]);
+        let subs = sub_parts(&mega(), &[part(0, "left", motor_info()), part(1, "Front IR", d)], &[]);
         let names: Vec<_> = subs.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["mega.left", "mega.front_ir"]);
         assert_eq!(subs[1].board_name, "Front IR");
@@ -234,6 +254,7 @@ mod tests {
         let subs = sub_parts(
             &mega(),
             &[part(0, "left", motor_info()), part(1, "left", motor_info()), part(2, "#", motor_info())],
+            &[],
         );
         let names: Vec<_> = subs.iter().map(|s| s.name.local().to_string()).collect();
         assert_eq!(names, ["left", "part1", "part2"]);
@@ -249,10 +270,31 @@ mod tests {
             name: "eye".into(),
             info: PartInfo::Unknown(vec![1, 2]),
         };
-        let subs = sub_parts(&mega(), &[unknown]);
+        let subs = sub_parts(&mega(), &[unknown], &[]);
         assert_eq!(subs[0].provide, None);
         let Health::Degraded(p) = sub_health(&subs[0]) else { panic!() };
         assert!(p.message.contains("thermal-camera@1"), "{p:?}");
+    }
+
+    #[test]
+    fn a_sub_part_gets_the_pins_its_board_said_named_as_on_the_board() {
+        use faberlink::message::PinUse;
+        let sonar = Info::Distance(distance::Info {
+            min_m: 0.02,
+            max_m: 4.0,
+            field_of_view_rad: 0.26,
+            kind: distance::Kind::Ultrasonic,
+        });
+        let pins = [PartPins {
+            part: 1,
+            analog_base: Some(54),
+            pins: vec![PinUse { role: PinRole::Trig, pin: 7 }, PinUse { role: PinRole::Echo, pin: 54 }],
+        }];
+        let subs = sub_parts(&mega(), &[part(0, "left", motor_info()), part(1, "sonar", sonar)], &pins);
+        assert_eq!(subs[0].pins, None, "the board said nothing about the motor's pins");
+        let labels: Vec<_> =
+            subs[1].pins.as_ref().unwrap().iter().map(|p| (p.role, p.pin, p.label.as_str())).collect();
+        assert_eq!(labels, [(PinRole::Trig, 7, "D7"), (PinRole::Echo, 54, "A0")]);
     }
 
     #[test]
@@ -266,6 +308,7 @@ mod tests {
         let subs = sub_parts(
             &mega(),
             &[part(0, "Left", motor_info()), part(1, "right", motor_info()), part(2, "base", base)],
+            &[],
         );
         let info = subs[2].provide.as_ref().unwrap().info.as_ref().unwrap();
         assert_eq!(info.built_from(), ["mega.left", "mega.right", "nothing"]);

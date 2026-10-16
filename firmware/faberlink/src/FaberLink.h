@@ -3,7 +3,7 @@
 //   #include <FaberLink.h>
 //
 //   FaberLink link(Serial);
-//   FaberMotor left("left", 9, 8);        // PWM pin, direction pin
+//   FaberMotor left("left", 9, 8);        // PWM pin, direction pin (other drivers: see FaberMotor)
 //   FaberDistance front("front", A0);     // an analog distance sensor
 //
 //   void setup() { link.begin(115200, "my-robot", "0.1.0"); }
@@ -19,19 +19,59 @@
 
 #include "FaberLinkCore.h"
 
-// A DC motor on an H-bridge: a PWM pin for the speed and a pin for the direction. Give
-// maxVelocityRadS (its speed at full duty, in rad/s) to accept set-velocity too; without it the
-// motor takes set-duty only.
+namespace faberlink {
+
+// How a DC motor's driver (H-bridge) takes its speed and direction: FaberMotor's driver shapes.
+enum MotorDriver : uint8_t {
+  // A PWM input for the speed and a direction input: Cytron MD10C, MDD10A.
+  DRIVER_PWM_DIR = 0,
+  // EN (PWM, the speed) plus IN1 and IN2 (the direction): L298N (jumper off ENA), L293D, TB6612FNG.
+  DRIVER_EN_IN1_IN2 = 1,
+  // Two PWM inputs, one per direction: L9110S / HG7881, DRV8833, BTS7960 (IBT-2: RPWM, LPWM).
+  DRIVER_TWO_PWM = 2,
+};
+
+}  // namespace faberlink
+
+// A DC motor on a motor driver (H-bridge). The pins depend on the driver:
+//
+//   FaberMotor left("left", 9, 8);                                       // PWM 9, DIR 8
+//   FaberMotor left("left", faberlink::DRIVER_EN_IN1_IN2, 10, 8, 7);     // EN 10, IN1 8, IN2 7
+//   FaberMotor left("left", faberlink::DRIVER_EN_IN1_IN2, 10, 8, 7, 4);  // ... and STBY 4 (TB6612)
+//   FaberMotor left("left", faberlink::DRIVER_TWO_PWM, 5, 6);            // IN1 5, IN2 6, both PWM
+//   FaberMotor left("left", faberlink::DRIVER_TWO_PWM, 5, 6, 4);         // ... and an enable on 4
+//   FaberMotor left("left", faberlink::DRIVER_PWM_DIR, 9, 8);            // the same as the first
+//
+// The speed pins (PWM, EN, and both inputs of DRIVER_TWO_PWM) must be PWM pins (marked ~ on the
+// board). A standby or enable pin (TB6612 STBY, DRV8833 nSLEEP, a BTS7960's R_EN and L_EN joined)
+// is set HIGH at begin() and stays HIGH: two motors often share it, so one motor stopping must
+// not stop the other. A motor missing a pin its driver needs refuses every command.
+//
+// Stopped (the safe state, and duty 0) means every speed and direction pin LOW. On an L298N
+// (EN low) and a DRV8833 or L9110 (both inputs low) the motor coasts: it is let go and rolls to a
+// stop. On a TB6612, IN1 = IN2 = LOW is its stop mode (outputs off). A BTS7960 with its enables
+// HIGH brakes instead (both half-bridges pull the motor's wires to ground), and a Cytron MD10C
+// brakes with PWM LOW: those drivers decide it themselves.
+//
+// Give maxVelocityRadS, or call setMaxVelocity() (its speed at full duty, in rad/s), to accept
+// set-velocity too; without it the motor takes set-duty only.
 class FaberMotor : public faberlink::Motor {
  public:
   FaberMotor(const char* name, uint8_t pwmPin, uint8_t directionPin, float maxVelocityRadS = 0);
+  FaberMotor(const char* name, faberlink::MotorDriver driver, uint8_t pin1, uint8_t pin2,
+             uint8_t pin3 = faberlink::NO_PIN, uint8_t pin4 = faberlink::NO_PIN);
   void begin() override;
 
  protected:
+  uint8_t writePins(uint8_t* out) const override;
+  uint8_t apply(const uint8_t* command, uint8_t len, uint8_t* out, bool* clamped) override;
   void drive(float duty) override;
 
  private:
-  uint8_t pwmPin_, directionPin_;
+  bool wired() const;
+  // PWM_DIR: pwm, dir. EN_IN1_IN2: en, in1, in2. TWO_PWM: in1, in2 (c_ unused).
+  uint8_t a_, b_, c_, standby_;
+  faberlink::MotorDriver driver_;
 };
 
 // An analog distance sensor. By default the reading is linear: 0 V is 0 m and the reference
@@ -44,6 +84,7 @@ class FaberDistance : public faberlink::Distance {
                 faberlink::DistanceKind kind = faberlink::DISTANCE_INFRARED, ToMeters toMeters = 0);
 
  protected:
+  uint8_t writePins(uint8_t* out) const override;
   float measure() override;
 
  private:
@@ -63,6 +104,7 @@ class FaberUltrasonic : public faberlink::Distance {
   void begin() override;
 
  protected:
+  uint8_t writePins(uint8_t* out) const override;
   float measure() override;
 
  private:
@@ -83,6 +125,7 @@ class FaberBattery : public faberlink::Battery {
                float referenceVolts = 5.0f, float capacityAh = 0);
 
  protected:
+  uint8_t writePins(uint8_t* out) const override;
   float measureVolts() override;
 
  private:

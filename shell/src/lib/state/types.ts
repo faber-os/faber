@@ -48,6 +48,8 @@ export type { DigitalOutReading } from '../api/generated/DigitalOutReading';
 export type { AnalogInReading } from '../api/generated/AnalogInReading';
 export type { PwmOutReading } from '../api/generated/PwmOutReading';
 export type { BoardLink } from '../api/generated/BoardLink';
+export type { BoardPinInfo } from '../api/generated/BoardPinInfo';
+export type { PinRole } from '../api/generated/PinRole';
 export type { LinkState } from '../api/generated/LinkState';
 export type { PortProblem } from '../api/generated/PortProblem';
 export type { DeveloperChange } from '../api/generated/DeveloperChange';

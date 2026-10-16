@@ -55,7 +55,11 @@ on the wire:  COBS( type · seq · payload · crc_lo · crc_hi ) · 0x00
   length byte, then that many bytes of UTF-8 (no terminator). Booleans are one byte, `0` or `1`.
 - A receiver refuses a payload that is shorter or longer than its layout, or that has a value the
   version doesn't define (an unknown enum value, a flag bit that isn't listed, a boolean that isn't
-  0 or 1). Within one protocol version every layout is exact.
+  0 or 1). Within one protocol version every layout is exact. The one exception is a pin's role in
+  `PINS` (§3): a role this side doesn't know is kept as "a pin", so a newer library's part still
+  shows its pins.
+- A receiver skips a whole message whose **type** it doesn't know (and counts it). Every core
+  since the first one does, so a newer library may send a message an older core doesn't know.
 - **Speed:** 115 200 baud by default (works on every Arduino), 8N1.
 
 ## 3. Messages
@@ -72,6 +76,7 @@ version is agreed.
 | `0x02` | `HELLO_ACK` | board → core | the answer to every `HELLO` |
 | `0x03` | `DESCRIBE` | core → board | after `HELLO_ACK`, again every 500 ms until every `PART` arrived |
 | `0x04` | `PART` | board → core | one per hosted part, in answer to `DESCRIBE` |
+| `0x05` | `PINS` | board → core | just before a part's `PART`, when the library knows the part's pins (added 2026-10-16) |
 | `0x10` | `HEARTBEAT` | core → board | every 50 ms once the board has answered |
 | `0x11` | `STATUS` | board → core | every 100 ms once connected |
 | `0x20` | `READING` | board → core | per part, at the part's own rate |
@@ -120,6 +125,44 @@ then the optional `build_id u64`
 - `capability`: the versioned capability id, e.g. `motor@1`. A core that doesn't know it keeps the
   info bytes raw and can say which capability it was.
 - `info`: the rest of the payload, the capability's info layout (§4).
+
+**`PINS`** (added 2026-10-16): `part u8 · analog_base u8 · n × (role u8 · pin u8)` — the board's
+pins one part uses, so Faber can show them for a board whose sketch was written by hand
+([wiring.md](wiring.md) §6) and, later, keep the pin allocator off them.
+- Sent in answer to `DESCRIBE`, **just before** the part's `PART` (wiring.md said after; before
+  means the list is complete when the last `PART` arrives, and nothing about a part changes once
+  the core has it). A part the library doesn't know the pins of (a part class of the sketch's own
+  that doesn't say) gets no `PINS`. A `PINS` lost on the wire leaves that part without pins until
+  the board is described again (on the next connect).
+- `pin`: the Arduino pin number as the sketch wrote it. Analog pins have their digital numbers:
+  `A0` is **14 on an Uno or Nano, 54 on a Mega 2560, 18 on a Leonardo or Micro** (`PIN_A0` in the
+  Arduino AVR core 1.8.8's `variants/standard`, `mega` and `leonardo/pins_arduino.h`); `A6`/`A7`
+  on a Nano are 20 and 21.
+- `analog_base`: the number of `A0` on this board, so the core names pin 14 `A0` on an Uno and
+  pin 54 `A0` on a Mega, and pins below it `D7`; `0xFF` when the board doesn't know, and the core
+  then shows plain numbers. The library sends `PIN_A0` on every AVR board (where the analog pins
+  are numbered on from A0) and `0xFF` elsewhere (an ESP32's `A4` is below its `A0`).
+- `role`: one table for every part class, so the core can name a pin without knowing the class.
+  A code the core doesn't know is shown as "Pin", never a reason to drop the message.
+
+| Code | Role | Shown as | Used by |
+|---|---|---|---|
+| 1 | `pwm` | PWM | `FaberMotor`, PWM + DIR driver: the speed |
+| 2 | `dir` | DIR | `FaberMotor`, PWM + DIR driver: the direction |
+| 3 | `en` | EN | `FaberMotor`, EN + IN1 + IN2 driver: the speed (L298N ENA) |
+| 4 | `in1` | IN1 | `FaberMotor`: IN1 beside EN, or the first of two PWM inputs |
+| 5 | `in2` | IN2 | `FaberMotor`: IN2 beside EN, or the second of two PWM inputs |
+| 6 | `stby` | STBY | `FaberMotor`: a standby or enable pin held high (TB6612 STBY, DRV8833 nSLEEP) |
+| 7 | `trig` | Trig | `FaberUltrasonic` |
+| 8 | `echo` | Echo | `FaberUltrasonic` |
+| 9 | `signal` | Signal | `FaberDistance`: the sensor's output |
+| 10 | `sense` | Sense | `FaberBattery`: the divider's middle |
+
+- **Compatibility, both ways.** An older library never sends `PINS`; Faber then shows no pins
+  (not "none"). An older core skips `PINS` as a message type it doesn't know (§2) and carries on:
+  every core since the first one does that, also while it collects the parts
+  (`a_message_type_this_core_doesnt_know_is_skipped_even_while_describing` in
+  `sdk/rust/faberlink/src/session.rs` shows it). So nothing needs to be asked for first.
 
 **`HEARTBEAT`** (1 B): `flags u8` — bit 0: the e-stop is engaged in Faber. The e-stop travels as a
 level in every heartbeat, so a lost `ESTOP` frame is corrected within 50 ms.
@@ -205,7 +248,8 @@ actuator stops (without an `APPLIED`) and the heartbeat must start again.
   into the capability types and back; `session` is the connection itself.
 - `Session` is a pure state machine with the clock passed in: `receive(bytes, now)`, `tick(now)`,
   `take_output()`, `take_events()`. It sends `HELLO` until the board answers, `DESCRIBE` until every
-  `PART` has arrived, heartbeats every 50 ms carrying the e-stop; it routes readings to their part
+  `PART` has arrived (with the `PINS` before them: `Event::Described { parts, pins }`, and
+  `Session::pins()`), heartbeats every 50 ms carrying the e-stop; it routes readings to their part
   (and drops a reading that doesn't fit its part's capability), sends `COMMAND` only when told the
   core holds a lease, and counts bad, undecodable and missed frames. A board silent for 500 ms is
   lost and the session starts over. A version mismatch ends in `Failed` with an error that says what
@@ -220,7 +264,7 @@ actuator stops (without an `APPLIED`) and the heartbeat must start again.
 #include <FaberLink.h>
 
 FaberLink link(Serial);
-FaberMotor left("left", 9, 8);           // PWM pin, direction pin
+FaberMotor left("left", 9, 8);           // PWM pin, direction pin (other drivers below)
 FaberDistance front("front", A0);        // an analog distance sensor
 
 void setup() { link.begin(115200, "sennep-mega", "0.1.0"); }
@@ -231,10 +275,42 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   Arduino headers, no dynamic allocation, no exceptions, no RTTI (a test reads the source to keep it
   that way). It is what the interop tests compile.
 - `src/FaberLink.h/.cpp` is the Arduino glue: a `Stream` adapter, `millis()`, and the built-in part
-  types `FaberMotor` (an H-bridge with a PWM and a direction pin; set-duty, and set-velocity open
-  loop when the motor's full-duty speed is given) and `FaberDistance` (analog; linear, or a curve
-  function). A custom part derives from `faberlink::Part` (or `Motor`/`Distance`) and is added with
-  `link.add(part)`. Globally declared parts register themselves.
+  types `FaberMotor` (a DC motor on a motor driver; set-duty, and set-velocity open loop when the
+  motor's full-duty speed is given) and `FaberDistance` (analog; linear, or a curve function). A
+  custom part derives from `faberlink::Part` (or `Motor`/`Distance`) and is added with
+  `link.add(part)`; it reports its pins by overriding `writePins()`. Globally declared parts
+  register themselves.
+- **Every built-in part says its pins** (`PINS`, §3), and on an AVR board the library says where
+  the analog pins start, so Faber shows "Trig D7 · Echo D6" under the part in Parts.
+- **`FaberMotor` and motor drivers.** Hobby drivers take speed and direction in three shapes
+  ([research/common-parts.md](research/common-parts.md) §2.6); the driver comes first, then its
+  pins in the order of its name:
+
+  | Driver shape | Drivers | Declaration |
+  |---|---|---|
+  | PWM + DIR | Cytron MD10C, MDD10A | `FaberMotor left("left", 9, 8);` (as always), or `FaberMotor left("left", faberlink::DRIVER_PWM_DIR, 9, 8);` |
+  | EN + IN1 + IN2 (+ STBY) | L298N (ENA jumper off), L293D, TB6612FNG | `FaberMotor left("left", faberlink::DRIVER_EN_IN1_IN2, 10, 8, 7);`, with a TB6612's STBY: `…, 10, 8, 7, 4);` |
+  | Two PWM inputs (+ enable) | L9110S/HG7881, DRV8833, BTS7960 (IBT-2) | `FaberMotor left("left", faberlink::DRIVER_TWO_PWM, 5, 6);`, with an enable: `…, 5, 6, 4);` |
+
+  - Forward is IN1 high (EN + IN1 + IN2) or the PWM on the first pin (two PWM); the speed is
+    `|duty| × 255` on the speed pin. A change writes the input that goes low before the one that
+    goes high, so the driver never sees both high (a brake) between the two directions.
+  - **Stopped** (the safe state, and duty 0) is every speed and direction pin low. That makes the
+    motor **coast** where the driver allows it, which is the safe default: on an L298N, EN low is
+    "free running motor stop" (its datasheet; EN high with IN1 = IN2 would be "fast motor stop",
+    which also must stay under the 2 A rating); on a DRV8833 or L9110 both inputs low let go. On a
+    TB6612, IN1 = IN2 = low is its stop mode (outputs off; its datasheet lists that row with PWM
+    high, the library keeps PWM low too: *unverified on a real TB6612*). A BTS7960 with its enables
+    high **brakes** instead (its truth table: inhibit high and input low turns the low-side switch
+    on, so both motor wires go to ground), and a Cytron MD10C brakes with PWM low: those drivers
+    decide.
+  - A standby or enable pin (TB6612 STBY, DRV8833 nSLEEP, a BTS7960's R_EN and L_EN joined) is set
+    high at `begin()` and stays high. Two motors often share it, so one motor stopping must not
+    stop the other; the motor stops through its other pins.
+  - A motor missing a pin its driver needs (`faberlink::NO_PIN`, or left out) refuses every command
+    (`APPLIED` cause 1), and its pins are never written.
+  - `setMaxVelocity(radS)` gives the full-duty speed for any shape (the two-pin constructor still
+    takes it as its last argument).
 - `FaberBattery` measures a battery through a voltage divider on an analog pin:
   `FaberBattery battery("battery", A1, 3.0, 3);` is a 3S Li-ion pack behind a 20 kΩ / 10 kΩ
   divider (ratio `(R1 + R2) / R2` = 3.0). Further arguments: the chemistry, the analog reference
@@ -247,8 +323,9 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   `FaberUltrasonic front("front", 7, 6);` (trigger, echo; 2 cm to 4 m by default, the HC-SR04
   datasheet's range). One measurement per 60 ms, as the datasheet asks; each waits at most about
   24 ms for the echo (for 4 m), and the speed of sound is taken at about 20 °C (343 m/s).
-- Examples: `examples/MotorAndDistance`, `examples/Ultrasonic` and `examples/BatteryMonitor`. CI
-  compiles every example for an Uno and a Mega.
+- Examples: `examples/MotorAndDistance`, `examples/MotorL298N` (two motors on an L298N),
+  `examples/Ultrasonic` and `examples/BatteryMonitor`. CI compiles every example for an Uno and a
+  Mega.
 - **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
   does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
   sends it at the end of every `HELLO_ACK` (§3). Faber then shows which sketch the board runs.
@@ -267,9 +344,9 @@ change it through build flags so every file agrees). Every message a few parts n
 
 | What | RAM |
 |---|---|
-| The board object (two 68-byte frame buffers and its state) and the `FaberLink` glue | 189 B |
+| The board object (two 68-byte frame buffers and its state) and the `FaberLink` glue | 190 B |
 | The table that collects globally declared parts | 33 B |
-| Each `FaberMotor` / `FaberDistance` / `FaberBattery` | 33 B / 42 B / about 34 B |
+| Each `FaberMotor` / `FaberDistance` / `FaberBattery` | 36 B (33 B before the driver shapes) / 42 B / about 34 B |
 | Virtual tables, part names and other strings | ~100 B, depending on the sketch |
 | Stack at its deepest (receive → command → apply → stop → send), from `-fstack-usage` | ~150 B |
 
@@ -294,6 +371,23 @@ These numbers were measured on a PC without `arduino-cli`, compiling sketch, lib
 that build gives `MotorAndDistance` 20 B more flash and 2 B more globals than the figures above,
 which came from `arduino-cli`.
 
+`PINS` and the motor driver shapes (2026-10-16), measured the same way (that build now gives
+exactly the `arduino-cli` figures above for the sketches before this change):
+
+| Example | Uno flash | Uno globals | Mega flash | Mega globals |
+|---|---|---|---|---|
+| `MotorAndDistance` | 10 064 B (+682) | 670 B (+8) | 11 186 B (+686) | 1 042 B (+8) |
+| `MotorL298N` (new, two motors) | 8 482 B | 638 B | 9 556 B | 1 010 B |
+| `BatteryMonitor` | 7 082 B (+134) | 602 B (+3) | 7 486 B (+138) | 974 B (+3) |
+| `Ultrasonic` | 7 034 B (+160) | 601 B (+3) | 7 818 B (+164) | 973 B (+3) |
+
+`PINS` alone costs about 135–165 B of flash and 3 B of RAM (the analog base, and one more virtual
+table entry per part class): `BatteryMonitor` and `Ultrasonic`. A `FaberMotor` costs about 520 B
+more on top: the three driver shapes are chosen at run time, so a sketch carries the code for all
+three, plus its pin report. Each `FaberMotor` is 3 B larger (four pins and its driver instead of
+two pins). The stack doesn't grow: `PINS` is built in a 16-byte buffer, beside (not under) the
+32-byte one `PART` already uses.
+
 ## 8. Interop tests (`tools/faberlink-interop`)
 
 The C++ core is compiled for the PC with the `cc` crate (MSVC on Windows, g++/clang elsewhere,
@@ -316,7 +410,18 @@ The tests drive it from the Rust session over an in-memory pipe and prove, on ev
 - every single flipped bit of a command is dropped; bit flips, truncation, inserted garbage and
   lost bytes in both directions are dropped and the link recovers; random bytes never break the
   board;
-- a version mismatch gives a clear error and the board stays unconnected.
+- a version mismatch gives a clear error and the board stays unconnected;
+- each part's `PINS` comes just before its `PART`, and the session hands them on with the parts;
+  a part that doesn't know its pins sends none.
+
+`harness/glue.cpp` compiles the library's **Arduino glue** (`FaberLink.cpp`) as well, on a
+stand-in Arduino core (`harness/arduino/Arduino.h`: `digitalWrite()`, `analogWrite()`,
+`pulseIn()` and friends record what a sketch does, pin by pin; pins numbered as on an Uno). Its
+`Sketch` declares parts the way a sketch does and `tests/sketch.rs` drives it from the session:
+each `FaberMotor` driver shape writes the right pins for a duty (EN 128, IN1 high, IN2 low for
++0.5), never drives both inputs high while turning around, ends with its pins low for every way a
+motor is stopped, holds STBY high, and refuses commands with a pin missing; every part class
+reports its pins with the analog base.
 
 ## 9. In the core: the `faber-bridge` connector
 
@@ -326,7 +431,9 @@ on its serial port, `connector = "faber-bridge"`; its motors and sensors appear 
 ### Sub-parts and their names
 
 Each part the board describes becomes a **sub-part** named `<bridge>.<name>`: the board `mega`
-with the sketch's `FaberMotor left(…)` gives `mega.left`. Its one signal is named after its
+with the sketch's `FaberMotor left(…)` gives `mega.left`. When the board says the part's pins
+(`PINS`), its `PartInfo` has them (`pins`: role, pin and label, [api.md](api.md)) and Parts shows
+them on the sub-part's row: "PWM D9 · DIR D8". Its one signal is named after its
 capability: `mega.left/motor`, `mega.front/distance`. The bridge's own signal is `mega/estop`, the
 board's stop button (`estop@1`).
 

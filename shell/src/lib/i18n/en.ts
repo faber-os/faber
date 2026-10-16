@@ -360,6 +360,22 @@ export const en = {
   'parts.board.protocol': 'FaberLink {version}',
   'parts.board.hardwareEstop': 'Stop button pressed',
   'parts.board.hardwareEstop.hint': 'Reset it on the board, then release the e-stop.',
+  // The board's pins a part on it uses, as the board reports them: "Trig D7 · Echo D6". `{role}`
+  // is one of the roles below, `{pin}` the pin as printed on the board (D7, A0).
+  'parts.pins.title': 'The board’s pins this part uses',
+  'parts.pins.pin': '{role} {pin}',
+  // Pin roles, as printed on the modules (a motor driver's inputs, an HC-SR04's pins).
+  'parts.pins.role.pwm': 'PWM',
+  'parts.pins.role.dir': 'DIR',
+  'parts.pins.role.en': 'EN',
+  'parts.pins.role.in1': 'IN1',
+  'parts.pins.role.in2': 'IN2',
+  'parts.pins.role.stby': 'STBY',
+  'parts.pins.role.trig': 'Trig',
+  'parts.pins.role.echo': 'Echo',
+  'parts.pins.role.signal': 'Signal',
+  'parts.pins.role.sense': 'Sense',
+  'parts.pins.role.other': 'Pin',
 
   // Add part form
   'addPart.form.label': 'Add part',

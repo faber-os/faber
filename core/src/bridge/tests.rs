@@ -128,6 +128,41 @@ fn the_boards_parts_become_sub_parts_whose_readings_reach_their_signals() {
 }
 
 #[test]
+fn each_sub_part_has_the_pins_its_board_says() {
+    let r = rig(FakeBoard::mega(250));
+    running(&r, "mega.left");
+    let pins: Vec<(String, Vec<String>)> = r
+        .handle
+        .sub_parts()
+        .into_iter()
+        .map(|s| {
+            let pins = s.pins.unwrap_or_default();
+            (s.name.to_string(), pins.into_iter().map(|p| format!("{:?} {}", p.role, p.label)).collect())
+        })
+        .collect();
+    let want = |n: &str, p: &[&str]| (n.to_string(), p.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    assert_eq!(
+        pins,
+        [
+            want("mega.left", &["Pwm D9", "Dir D8"]),
+            want("mega.right", &["Pwm D10", "Dir D7"]),
+            want("mega.front", &["Signal A0"]),
+            want("mega.rear", &["Signal A1"]),
+        ]
+    );
+}
+
+#[test]
+fn a_part_whose_board_doesnt_say_its_pins_has_none() {
+    // SENNEP's planar base is a part class of the sketch's own, as an older library's are.
+    let r = rig(FakeBoard::sennep(250, 250));
+    running(&r, "mega.base");
+    let base = r.handle.sub_part(&name("mega.base")).unwrap();
+    assert_eq!(base.pins, None);
+    assert!(r.handle.sub_part(&name("mega.battery")).unwrap().pins.is_some());
+}
+
+#[test]
 fn a_boards_battery_becomes_a_sub_part_with_its_voltage_and_level() {
     let r = rig(FakeBoard::with_battery(250, 0, 3, 15.0));
     running(&r, "mega.battery");

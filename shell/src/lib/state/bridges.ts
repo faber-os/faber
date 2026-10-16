@@ -1,5 +1,5 @@
 import { t } from '../i18n';
-import type { BoardCheck, LinkState, PartInfo } from './types';
+import type { BoardCheck, LinkState, PartInfo, PinRole } from './types';
 
 /** The connector of a FaberLink board (docs/faberlink.md). Its parts appear by themselves. */
 export const BRIDGE_CONNECTOR = 'faber-bridge';
@@ -25,6 +25,43 @@ export function localName(p: PartInfo): string {
  */
 export function removable(p: PartInfo): boolean {
   return !isSubPart(p) || p.signals.length === 0;
+}
+
+/**
+ * The board's pins a part on it uses, as its board says: "Trig D7 · Echo D6". Empty when the
+ * board doesn't say (an older FaberLink library, or a part class of the sketch's own).
+ */
+export function pinsText(p: PartInfo): string {
+  return (p.pins ?? [])
+    .map((pin) => t('parts.pins.pin', { role: pinRoleText(pin.role), pin: pin.label }))
+    .join(' · ');
+}
+
+function pinRoleText(role: PinRole): string {
+  switch (role) {
+    case 'pwm':
+      return t('parts.pins.role.pwm');
+    case 'dir':
+      return t('parts.pins.role.dir');
+    case 'en':
+      return t('parts.pins.role.en');
+    case 'in1':
+      return t('parts.pins.role.in1');
+    case 'in2':
+      return t('parts.pins.role.in2');
+    case 'stby':
+      return t('parts.pins.role.stby');
+    case 'trig':
+      return t('parts.pins.role.trig');
+    case 'echo':
+      return t('parts.pins.role.echo');
+    case 'signal':
+      return t('parts.pins.role.signal');
+    case 'sense':
+      return t('parts.pins.role.sense');
+    case 'other':
+      return t('parts.pins.role.other');
+  }
 }
 
 /**

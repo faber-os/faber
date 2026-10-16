@@ -17,6 +17,7 @@ pub mod kind {
     pub const HELLO_ACK: u8 = 0x02;
     pub const DESCRIBE: u8 = 0x03;
     pub const PART: u8 = 0x04;
+    pub const PINS: u8 = 0x05;
     pub const HEARTBEAT: u8 = 0x10;
     pub const STATUS: u8 = 0x11;
     pub const READING: u8 = 0x20;
@@ -85,6 +86,91 @@ pub struct PartDescription {
 impl PartDescription {
     pub fn known_capability(&self) -> Option<Capability> {
         Capability::from_id(&self.capability)
+    }
+}
+
+/// What a pin does for its part, in `PINS`. One table for every part class, so the core can name
+/// a pin without knowing the class; a code this side doesn't know is kept as `Other`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PinRole {
+    /// A motor driver's speed input (PWM), on a driver with a direction pin.
+    Pwm,
+    /// A motor driver's direction input.
+    Dir,
+    /// A motor driver's enable input (PWM), on a driver with IN1 and IN2 (L298N ENA, TB6612 PWMA).
+    En,
+    /// A motor driver's first input: a level beside EN, or one of the two PWM inputs.
+    In1,
+    /// A motor driver's second input.
+    In2,
+    /// A motor driver's standby input (TB6612 STBY), held high while the board runs.
+    Stby,
+    /// A range finder's trigger output (HC-SR04 Trig).
+    Trig,
+    /// A range finder's echo input (HC-SR04 Echo).
+    Echo,
+    /// A sensor's output, read by the board (a Sharp IR's Vo).
+    Signal,
+    /// A battery's voltage, through a divider.
+    Sense,
+    /// A role a later library added.
+    Other(u8),
+}
+
+const PIN_ROLES: &[PinRole] = &[
+    PinRole::Pwm,
+    PinRole::Dir,
+    PinRole::En,
+    PinRole::In1,
+    PinRole::In2,
+    PinRole::Stby,
+    PinRole::Trig,
+    PinRole::Echo,
+    PinRole::Signal,
+    PinRole::Sense,
+];
+
+impl PinRole {
+    /// Its code on the wire: 1, 2, 3, … in the order of [`PinRole`].
+    pub fn code(self) -> u8 {
+        match self {
+            PinRole::Other(c) => c,
+            known => index(PIN_ROLES, &known) + 1,
+        }
+    }
+
+    pub fn from_code(c: u8) -> PinRole {
+        c.checked_sub(1).and_then(|i| PIN_ROLES.get(i as usize).copied()).unwrap_or(PinRole::Other(c))
+    }
+}
+
+/// One pin a part uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PinUse {
+    pub role: PinRole,
+    /// The Arduino pin number, as the sketch wrote it (`A0` is 14 on an Uno, 54 on a Mega).
+    pub pin: u8,
+}
+
+/// board → core: the pins one part uses, sent just before its `PART` (docs/faberlink.md §3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartPins {
+    pub part: u8,
+    /// The pin number of `A0` on this board, so pins from it on can be named `A0`, `A1`, …;
+    /// `None` when the library doesn't know (0xFF on the wire): pins are then plain numbers.
+    pub analog_base: Option<u8>,
+    pub pins: Vec<PinUse>,
+}
+
+impl PartPins {
+    /// A pin as it is printed on the board: `D7`, `A0`, or just `7` when the board didn't say
+    /// where its analog pins start.
+    pub fn label(&self, pin: u8) -> String {
+        match self.analog_base {
+            Some(a) if pin >= a => format!("A{}", pin - a),
+            Some(_) => format!("D{pin}"),
+            None => pin.to_string(),
+        }
     }
 }
 
@@ -214,6 +300,7 @@ pub enum Message {
     HelloAck(HelloAck),
     Describe,
     Part(PartDescription),
+    Pins(PartPins),
     Heartbeat(Heartbeat),
     Status(Status),
     Reading(PartReading),
@@ -270,6 +357,7 @@ impl Message {
             Message::HelloAck(_) => kind::HELLO_ACK,
             Message::Describe => kind::DESCRIBE,
             Message::Part(_) => kind::PART,
+            Message::Pins(_) => kind::PINS,
             Message::Heartbeat(_) => kind::HEARTBEAT,
             Message::Status(_) => kind::STATUS,
             Message::Reading(_) => kind::READING,
@@ -318,6 +406,14 @@ impl Message {
                 match &p.info {
                     PartInfo::Known(i) => layout::encode_info(i, w.out)?,
                     PartInfo::Unknown(bytes) => w.out.extend_from_slice(bytes),
+                }
+            }
+            Message::Pins(p) => {
+                w.u8(p.part);
+                w.u8(p.analog_base.unwrap_or(0xFF));
+                for u in &p.pins {
+                    w.u8(u.role.code());
+                    w.u8(u.pin);
                 }
             }
             Message::Heartbeat(h) => w.u8(h.estop as u8),
@@ -411,6 +507,17 @@ impl Message {
                     _ => PartInfo::Unknown(rest.to_vec()),
                 };
                 Message::Part(PartDescription { id, count, lease_ms, capability, name, info })
+            }
+            kind::PINS => {
+                let part = r.u8()?;
+                let base = r.u8()?;
+                let rest = r.rest();
+                if !rest.len().is_multiple_of(2) {
+                    return Err(DecodeError::Truncated);
+                }
+                let pins =
+                    rest.chunks(2).map(|c| PinUse { role: PinRole::from_code(c[0]), pin: c[1] }).collect();
+                Message::Pins(PartPins { part, analog_base: (base != 0xFF).then_some(base), pins })
             }
             kind::HEARTBEAT => {
                 let f = r.u8()?;
@@ -532,6 +639,8 @@ mod tests {
                     info: PartInfo::Unknown(raw),
                 })
             ),
+            (any::<u8>(), proptest::option::of(0..0xFFu8), proptest::collection::vec(pin_use(), 0..20))
+                .prop_map(|(part, analog_base, pins)| Message::Pins(PartPins { part, analog_base, pins })),
             any::<bool>().prop_map(|estop| Message::Heartbeat(Heartbeat { estop })),
             (0..3u8, any::<(bool, bool, bool, u32)>(), 0..6u8, any::<(u16, u16)>()).prop_map(
                 |(h, f, fault, (rx_bad, rx_gaps))| Message::Status(Status {
@@ -560,6 +669,72 @@ mod tests {
             })),
             (0..3u8, text(200)).prop_map(|(l, text)| Message::Log(Log { level: LEVEL[l as usize], text })),
         ]
+    }
+
+    fn pin_use() -> impl Strategy<Value = PinUse> {
+        let role = prop_oneof![
+            (0..PIN_ROLES.len()).prop_map(|i| PIN_ROLES[i]),
+            (PIN_ROLES.len() as u8 + 1..=255).prop_map(PinRole::Other),
+            Just(PinRole::Other(0)),
+        ];
+        (role, any::<u8>()).prop_map(|(role, pin)| PinUse { role, pin })
+    }
+
+    #[test]
+    fn pins_on_the_wire() {
+        let m = Message::Pins(PartPins {
+            part: 2,
+            analog_base: Some(14),
+            pins: vec![PinUse { role: PinRole::Trig, pin: 7 }, PinUse { role: PinRole::Echo, pin: 6 }],
+        });
+        let p = m.encode(1).unwrap();
+        assert_eq!(p, [2, 14, 7, 7, 8, 6]);
+        assert_eq!(Message::decode(1, kind::PINS, &p).unwrap(), m);
+        assert_eq!(Message::decode(1, kind::PINS, &[2, 0xFF]).unwrap(), {
+            Message::Pins(PartPins { part: 2, analog_base: None, pins: vec![] })
+        });
+    }
+
+    #[test]
+    fn every_pin_role_has_its_own_code_and_unknown_codes_are_kept() {
+        let codes: Vec<u8> = PIN_ROLES.iter().map(|r| r.code()).collect();
+        assert_eq!(codes, (1..=10).collect::<Vec<u8>>(), "the table in docs/faberlink.md §3");
+        for r in PIN_ROLES {
+            assert_eq!(PinRole::from_code(r.code()), *r);
+        }
+        // A later library's role still shows its pin; it isn't a reason to drop the message.
+        assert_eq!(PinRole::from_code(0), PinRole::Other(0));
+        assert_eq!(PinRole::from_code(42), PinRole::Other(42));
+        let p = Message::decode(1, kind::PINS, &[0, 0xFF, 42, 3]).unwrap();
+        assert_eq!(
+            p,
+            Message::Pins(PartPins {
+                part: 0,
+                analog_base: None,
+                pins: vec![PinUse { role: PinRole::Other(42), pin: 3 }]
+            })
+        );
+    }
+
+    #[test]
+    fn a_pin_list_cut_in_the_middle_of_a_pair_is_refused() {
+        assert_eq!(Message::decode(1, kind::PINS, &[0, 14, 1]), Err(DecodeError::Truncated));
+        assert_eq!(Message::decode(1, kind::PINS, &[0]), Err(DecodeError::Truncated));
+    }
+
+    #[test]
+    fn pins_are_named_as_printed_on_the_board() {
+        let uno = PartPins { part: 0, analog_base: Some(14), pins: vec![] };
+        assert_eq!((uno.label(7), uno.label(13), uno.label(14), uno.label(19)), {
+            ("D7".into(), "D13".into(), "A0".into(), "A5".into())
+        });
+        let mega = PartPins { analog_base: Some(54), ..uno.clone() };
+        assert_eq!(
+            (mega.label(53), mega.label(54), mega.label(69)),
+            ("D53".into(), "A0".into(), "A15".into())
+        );
+        let unknown = PartPins { analog_base: None, ..uno };
+        assert_eq!(unknown.label(36), "36");
     }
 
     #[test]

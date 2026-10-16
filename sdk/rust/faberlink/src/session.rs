@@ -136,8 +136,12 @@ impl std::error::Error for CommandError {}
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     Connected(BoardInfo),
-    /// Every part the board hosts, by local id.
-    Described(Vec<PartDescription>),
+    /// Every part the board hosts, by local id, and the pins of those whose board said
+    /// (`PINS`, sent by libraries from 2026-10-16 on; none from an older one).
+    Described {
+        parts: Vec<PartDescription>,
+        pins: Vec<PartPins>,
+    },
     /// A reading, stamped with the core's clock when it arrived.
     Reading {
         part: u8,
@@ -176,7 +180,10 @@ pub struct Session {
     rx_seq: Option<u8>,
     board: Option<BoardInfo>,
     collected: Vec<Option<PartDescription>>,
+    /// `PINS` arrive just before their `PART`, so they are collected the same way.
+    collected_pins: Vec<Option<PartPins>>,
     parts: Vec<PartDescription>,
+    pins: Vec<PartPins>,
     estop: bool,
     last_rx_us: u64,
     last_request_us: u64,
@@ -197,7 +204,9 @@ impl Session {
             rx_seq: None,
             board: None,
             collected: Vec::new(),
+            collected_pins: Vec::new(),
             parts: Vec::new(),
+            pins: Vec::new(),
             estop: false,
             last_rx_us: now_us,
             last_request_us: now_us,
@@ -219,6 +228,11 @@ impl Session {
     /// The board's parts, once [`State::Ready`].
     pub fn parts(&self) -> &[PartDescription] {
         &self.parts
+    }
+
+    /// The pins of the board's parts, for those it said (an older library says none).
+    pub fn pins(&self) -> &[PartPins] {
+        &self.pins
     }
 
     pub fn stats(&self) -> Stats {
@@ -243,7 +257,9 @@ impl Session {
         self.state = State::Connecting;
         self.board = None;
         self.parts.clear();
+        self.pins.clear();
         self.collected.clear();
+        self.collected_pins.clear();
         self.rx_seq = None;
         self.last_rx_us = now_us;
         // A lone 0x00 first ends whatever half frame the board may be holding.
@@ -309,6 +325,7 @@ impl Session {
         self.last_request_us = now_us;
         let n = self.board.as_ref().map_or(0, |b| b.part_count) as usize;
         self.collected = vec![None; n];
+        self.collected_pins = vec![None; n];
         if n == 0 {
             self.ready();
             return;
@@ -318,8 +335,9 @@ impl Session {
 
     fn ready(&mut self) {
         self.parts = self.collected.drain(..).flatten().collect();
+        self.pins = self.collected_pins.drain(..).flatten().collect();
         self.state = State::Ready;
-        self.events.push(Event::Described(self.parts.clone()));
+        self.events.push(Event::Described { parts: self.parts.clone(), pins: self.pins.clone() });
     }
 
     /// Feeds bytes read from the port.
@@ -356,6 +374,12 @@ impl Session {
         };
         match message {
             Message::HelloAck(ack) => self.on_hello_ack(ack, now_us),
+            // A part's pins come just before it: a PINS after the last PART would be too late.
+            Message::Pins(p) if self.state == State::Describing => {
+                if let Some(slot) = self.collected_pins.get_mut(p.part as usize) {
+                    *slot = Some(p);
+                }
+            }
             Message::Part(p) if self.state == State::Describing => {
                 if let Some(slot) = self.collected.get_mut(p.id as usize) {
                     *slot = Some(p);
@@ -636,7 +660,90 @@ mod tests {
         assert_eq!(names, [(0, "left", "motor@1"), (1, "front", "distance@1")]);
         let events = s.take_events();
         assert!(matches!(&events[0], Event::Connected(b) if b.board == "mega"));
-        assert!(matches!(&events[1], Event::Described(p) if p.len() == 2));
+        assert!(
+            matches!(&events[1], Event::Described { parts, pins } if parts.len() == 2 && pins.is_empty())
+        );
+    }
+
+    fn pins(part: u8, list: &[(PinRole, u8)]) -> PartPins {
+        PartPins {
+            part,
+            analog_base: Some(14),
+            pins: list.iter().map(|&(role, pin)| PinUse { role, pin }).collect(),
+        }
+    }
+
+    #[test]
+    fn each_parts_pins_arrive_before_it_and_come_with_the_parts() {
+        let mut s = Session::new(SessionConfig::default(), 0);
+        let mut b = Board { seq: 0 };
+        s.receive(&b.ack(1, 2), 1_000);
+        let motor = pins(0, &[(PinRole::Pwm, 9), (PinRole::Dir, 8)]);
+        let sensor = pins(1, &[(PinRole::Signal, 14)]);
+        let parts = sent(&b.parts());
+        let mut wire = b.wire(Message::Pins(motor.clone()));
+        wire.extend(b.wire(parts[0].clone()));
+        wire.extend(b.wire(Message::Pins(sensor.clone())));
+        wire.extend(b.wire(parts[1].clone()));
+        s.take_events();
+        s.receive(&wire, 2_000);
+        assert_eq!(s.state(), State::Ready);
+        assert_eq!(s.pins(), [motor.clone(), sensor.clone()]);
+        let events = s.take_events();
+        assert!(
+            matches!(&events[..], [Event::Described { parts, pins }] if parts.len() == 2 && *pins == [motor, sensor]),
+            "{events:?}"
+        );
+        assert_eq!(s.stats().rx_undecodable, 0);
+    }
+
+    /// What every core since the first one (Phase 4a) does with a message type it doesn't know,
+    /// and so what an older core does with `PINS`: count it and carry on. A new library is safe
+    /// with an old core (docs/faberlink.md §3).
+    #[test]
+    fn a_message_type_this_core_doesnt_know_is_skipped_even_while_describing() {
+        let mut s = Session::new(SessionConfig::default(), 0);
+        let mut b = Board { seq: 0 };
+        s.receive(&b.ack(1, 2), 1_000);
+        let parts = sent(&Board { seq: 0 }.parts());
+        let mut wire = Vec::new();
+        for p in parts {
+            let mut unknown = vec![0; frame::MAX_WIRE];
+            let n = frame::encode(0x7E, b.seq, &[0, 14, 1, 9], &mut unknown).unwrap();
+            b.seq = b.seq.wrapping_add(1);
+            wire.extend_from_slice(&unknown[..n]);
+            wire.extend(b.wire(p));
+        }
+        s.receive(&wire, 2_000);
+        assert_eq!(s.state(), State::Ready);
+        assert_eq!(s.parts().len(), 2);
+        assert_eq!((s.stats().rx_undecodable, s.stats().rx_missed), (2, 0));
+    }
+
+    #[test]
+    fn pins_for_a_part_the_board_doesnt_have_or_after_describing_are_ignored() {
+        let mut s = Session::new(SessionConfig::default(), 0);
+        let mut b = Board { seq: 0 };
+        s.receive(&b.ack(1, 2), 1_000);
+        s.receive(&b.wire(Message::Pins(pins(5, &[(PinRole::Trig, 7)]))), 1_500);
+        s.receive(&b.parts(), 2_000);
+        s.receive(&b.wire(Message::Pins(pins(0, &[(PinRole::Pwm, 9)]))), 3_000);
+        assert_eq!(s.state(), State::Ready);
+        assert!(s.pins().is_empty());
+    }
+
+    #[test]
+    fn asking_again_forgets_the_pins_heard_so_far() {
+        let mut s = Session::new(SessionConfig::default(), 0);
+        let mut b = Board { seq: 0 };
+        s.receive(&b.ack(1, 2), 0);
+        s.receive(&b.wire(Message::Pins(pins(0, &[(PinRole::Pwm, 9)]))), 10_000);
+        s.tick(400_000);
+        s.receive(&b.distance(1, 0.5), 450_000); // keeps the board alive
+        s.tick(500_000); // DESCRIBE again: the new firmware may use other pins
+        s.receive(&b.parts(), 510_000);
+        assert_eq!(s.state(), State::Ready);
+        assert!(s.pins().is_empty());
     }
 
     #[test]

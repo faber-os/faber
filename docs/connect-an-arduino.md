@@ -22,8 +22,11 @@ tested against simulated bootloaders only: it still needs a run on a real Uno an
 ## What you need
 
 - An Arduino: Uno, Nano, Mega or similar, and its USB cable.
-- A DC motor on an H-bridge (motor driver) with a PWM input for speed and an input for direction,
-  e.g. an L298N or a TB6612, with its own motor power supply.
+- A DC motor on an H-bridge (motor driver) with a PWM input for speed and an input for direction
+  (a Cytron MD10C, say), with its own motor power supply. Most hobby drivers take other pins: an
+  L298N, L293D or TB6612 takes EN + IN1 + IN2, and an L9110, DRV8833 or BTS7960 two PWM inputs.
+  `FaberMotor` takes all three (see [Other motor drivers](#other-motor-drivers)), and the example
+  `MotorL298N` is this guide for two motors on an L298N.
 - An analog distance sensor, here a Sharp GP2Y0A21 infrared sensor (10–80 cm).
 - Faber's own [Arduino editor](arduino-editor.md) (Start → Arduino), which compiles the sketch on
   the machine and uploads it, with the FaberLink library built in. Or the Arduino IDE, once, to
@@ -80,7 +83,8 @@ bootloaders; needs hardware)* With the Arduino IDE:
 ## What you should see
 
 - In Parts: `arduino` with "Connected" and the board's name and firmware, and below it
-  `arduino.left` and `arduino.front`, each Running. A sketch uploaded from Faber's Arduino editor
+  `arduino.left` and `arduino.front`, each Running, with the pins each uses: "PWM D9 · DIR D8"
+  and "Signal A0". A sketch uploaded from Faber's Arduino editor
   also shows "Code from Faber: <sketch>" (its build id says so); one from the Arduino IDE shows
   "Code not flashed from Faber (unknown)".
 - Opening `arduino.front` shows the distance as a bar and a plot, about 20 times a second.
@@ -194,3 +198,23 @@ port = "usb:2341:0043"
 [parts.arduino.parts.front]
 mount = { x = 0.35, z = 0.1 }   # metres from the robot's centre: forward, left, up
 ```
+
+### Other motor drivers
+
+`FaberMotor left("left", 9, 8)` is for a driver with a PWM (speed) input and a direction input.
+For the others, name the driver first, then its pins in that order:
+
+```cpp
+// L298N, L293D, TB6612: EN (speed, a PWM pin ~), IN1, IN2. On an L298N pull the ENA jumper off.
+FaberMotor left("left", faberlink::DRIVER_EN_IN1_IN2, 10, 8, 7);
+// TB6612 with its STBY pin on 4 (the library holds it high):
+FaberMotor left("left", faberlink::DRIVER_EN_IN1_IN2, 10, 8, 7, 4);
+// L9110, DRV8833, BTS7960: two PWM pins (~), one per direction.
+FaberMotor left("left", faberlink::DRIVER_TWO_PWM, 5, 6);
+```
+
+Its speed at full power then goes in `setup()`: `left.setMaxVelocity(15.0);`. File → Examples →
+FaberLink → **MotorL298N** wires two motors to an L298N. Stopped, the library sets every speed and
+direction pin low: an L298N, DRV8833 or L9110 lets the motor coast to a stop; a BTS7960 brakes.
+*(tested on the PC with a stand-in Arduino core, pin by pin; compiles for an Uno and a Mega; not
+yet run on a real driver)*

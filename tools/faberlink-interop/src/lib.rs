@@ -7,8 +7,13 @@
 //!
 //! The tests in `tests/` drive it from the Rust session in `faberlink`; the core's own tests use
 //! it as the board behind a fake serial port.
+//!
+//! [`Sketch`] is a whole sketch instead: the library's Arduino glue (`FaberLink.cpp`: `FaberMotor`,
+//! `FaberDistance`, …) on a stand-in Arduino core (`harness/arduino/`), so a test can see what the
+//! sketch set each pin to.
 
-/// The C ABI of `harness/harness.cpp`. This module is the only `unsafe` code in the crate.
+/// The C ABI of `harness/harness.cpp` and `harness/glue.cpp`. This module is the only `unsafe`
+/// code in the crate.
 #[allow(unsafe_code)]
 mod ffi {
     use std::ffi::c_void;
@@ -43,6 +48,111 @@ mod ffi {
         pub fn flh_set_build_id(h: *mut c_void, id: u64);
         pub fn flh_sizeof_board() -> usize;
         pub fn flh_max_payload() -> usize;
+
+        pub fn fla_new(parts: *const PartSpec, n: usize) -> *mut c_void;
+        pub fn fla_free(h: *mut c_void);
+        pub fn fla_feed(h: *mut c_void, data: *const u8, len: usize, now_ms: u32);
+        pub fn fla_tick(h: *mut c_void, now_ms: u32);
+        pub fn fla_take(h: *mut c_void, buf: *mut u8, cap: usize) -> i64;
+        pub fn fla_baud(h: *mut c_void) -> u32;
+        pub fn fla_pin(h: *mut c_void, pin: u8, mode: *mut u8, kind: *mut u8, value: *mut i32);
+        pub fn fla_log_len(h: *mut c_void) -> usize;
+        pub fn fla_log_at(h: *mut c_void, i: usize, pin: *mut u8, kind: *mut u8, value: *mut i32);
+        pub fn fla_clear_log(h: *mut c_void);
+        pub fn fla_set_analog(h: *mut c_void, pin: u8, value: i32);
+        pub fn fla_set_echo_us(h: *mut c_void, us: u32);
+    }
+
+    /// `PartSpec` in glue.cpp.
+    #[repr(C)]
+    pub struct PartSpec {
+        pub kind: u8,
+        pub name: *const std::ffi::c_char,
+        pub driver: u8,
+        pub pins: [u8; 4],
+        pub max_velocity: f32,
+    }
+
+    /// Owns one sketch from `fla_new`, valid until `Drop`. The sketch copies the names it is
+    /// given and keeps no pointer into Rust memory.
+    pub struct SketchHandle(*mut c_void);
+
+    // SAFETY: the sketch is plain C++ data; `&mut self` makes every call exclusive, and each call
+    // first points the stand-in Arduino core at this sketch.
+    unsafe impl Send for SketchHandle {}
+
+    impl SketchHandle {
+        pub fn new(parts: &[PartSpec]) -> SketchHandle {
+            // SAFETY: the pointer and length describe `parts`, whose names are NUL-terminated
+            // strings that outlive the call; fla_new copies them.
+            SketchHandle(unsafe { fla_new(parts.as_ptr(), parts.len()) })
+        }
+
+        pub fn feed(&mut self, bytes: &[u8], now_ms: u32) {
+            // SAFETY: the pointer and length describe `bytes`, which outlives the call.
+            unsafe { fla_feed(self.0, bytes.as_ptr(), bytes.len(), now_ms) }
+        }
+
+        pub fn tick(&mut self, now_ms: u32) {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_tick(self.0, now_ms) }
+        }
+
+        pub fn take(&mut self) -> Vec<u8> {
+            let mut buf = vec![0u8; 16384];
+            // SAFETY: buf is writable for buf.len() bytes during the call.
+            let n = unsafe { fla_take(self.0, buf.as_mut_ptr(), buf.len()) };
+            assert!(n >= 0, "the sketch wrote more than 16 KB between two takes");
+            buf.truncate(n as usize);
+            buf
+        }
+
+        pub fn baud(&mut self) -> u32 {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_baud(self.0) }
+        }
+
+        pub fn pin(&mut self, pin: u8) -> (u8, u8, i32) {
+            let (mut mode, mut kind, mut value) = (0u8, 0u8, 0i32);
+            // SAFETY: self.0 is a live sketch; the pointers are to locals; every u8 is a pin.
+            unsafe { fla_pin(self.0, pin, &mut mode, &mut kind, &mut value) };
+            (mode, kind, value)
+        }
+
+        pub fn log(&mut self) -> Vec<(u8, u8, i32)> {
+            // SAFETY: self.0 is a live sketch.
+            let n = unsafe { fla_log_len(self.0) };
+            (0..n)
+                .map(|i| {
+                    let (mut pin, mut kind, mut value) = (0u8, 0u8, 0i32);
+                    // SAFETY: i is below the log's length, and the pointers are to locals.
+                    unsafe { fla_log_at(self.0, i, &mut pin, &mut kind, &mut value) };
+                    (pin, kind, value)
+                })
+                .collect()
+        }
+
+        pub fn clear_log(&mut self) {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_clear_log(self.0) }
+        }
+
+        pub fn set_analog(&mut self, pin: u8, value: i32) {
+            // SAFETY: self.0 is a live sketch; every u8 is a pin.
+            unsafe { fla_set_analog(self.0, pin, value) }
+        }
+
+        pub fn set_echo_us(&mut self, us: u32) {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_set_echo_us(self.0, us) }
+        }
+    }
+
+    impl Drop for SketchHandle {
+        fn drop(&mut self) {
+            // SAFETY: self.0 came from fla_new and is freed exactly once.
+            unsafe { fla_free(self.0) }
+        }
     }
 
     /// Owns one harness. Every call passes the pointer `flh_new` returned, which stays valid until
@@ -343,5 +453,165 @@ impl FakeBoard {
     /// The board's FABERLINK_MAX_PAYLOAD as compiled on this machine.
     pub fn max_payload() -> usize {
         ffi::max_payload()
+    }
+}
+
+/// A part in a [`Sketch`]: the declaration a sketch would have.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SketchPart {
+    /// `FaberMotor name(name, pwm, dir, max_velocity)`: the PWM + DIR constructor every sketch
+    /// used before driver shapes.
+    Motor { name: &'static str, pwm: u8, dir: u8, max_velocity: f32 },
+    /// `FaberMotor name(name, driver, pins[0], pins[1], pins[2], pins[3])`, with [`NO_PIN`] for a
+    /// pin left out. A `max_velocity` above 0 is set with `setMaxVelocity()`.
+    DriverMotor { name: &'static str, driver: Driver, pins: [u8; 4], max_velocity: f32 },
+    /// `FaberDistance name(name, pin)`.
+    Distance { name: &'static str, pin: u8 },
+    /// `FaberUltrasonic name(name, trig, echo)`.
+    Ultrasonic { name: &'static str, trig: u8, echo: u8 },
+    /// `FaberBattery name(name, pin, 3.0, 3)`.
+    Battery { name: &'static str, pin: u8 },
+}
+
+impl SketchPart {
+    fn name(&self) -> &'static str {
+        match self {
+            SketchPart::Motor { name, .. }
+            | SketchPart::DriverMotor { name, .. }
+            | SketchPart::Distance { name, .. }
+            | SketchPart::Ultrasonic { name, .. }
+            | SketchPart::Battery { name, .. } => name,
+        }
+    }
+}
+
+/// `faberlink::MotorDriver`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Driver {
+    PwmDir = 0,
+    EnIn1In2 = 1,
+    TwoPwm = 2,
+}
+
+/// `faberlink::NO_PIN`: a pin that isn't wired.
+pub const NO_PIN: u8 = 0xFF;
+
+/// What the sketch last did to a pin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PinOut {
+    /// Never written.
+    Unset,
+    /// `digitalWrite`: HIGH is true.
+    Digital(bool),
+    /// `analogWrite`, 0..255.
+    Pwm(u8),
+}
+
+impl PinOut {
+    fn from(kind: u8, value: i32) -> PinOut {
+        match kind {
+            1 => PinOut::Digital(value != 0),
+            2 => PinOut::Pwm(value.clamp(0, 255) as u8),
+            _ => PinOut::Unset,
+        }
+    }
+
+    /// The level a driver sees: HIGH for a digital HIGH or any PWM above 0.
+    pub fn is_high(self) -> bool {
+        matches!(self, PinOut::Digital(true)) || matches!(self, PinOut::Pwm(v) if v > 0)
+    }
+}
+
+/// `pinMode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PinMode {
+    Unset,
+    Input,
+    Output,
+}
+
+/// A whole sketch: `FaberLink link(Serial)` and `parts` declared as globals, after
+/// `link.begin(115200, "sketch", "0.1.0")`, on a stand-in Arduino core whose pins are numbered as
+/// on an Uno (A0 is pin 14). Time is a fake `millis()` passed to every call.
+pub struct Sketch {
+    handle: ffi::SketchHandle,
+}
+
+impl Sketch {
+    pub fn new(parts: &[SketchPart]) -> Sketch {
+        let names: Vec<std::ffi::CString> =
+            parts.iter().map(|p| std::ffi::CString::new(p.name()).expect("a name without NUL")).collect();
+        let specs: Vec<ffi::PartSpec> = parts
+            .iter()
+            .zip(&names)
+            .map(|(p, name)| {
+                let (kind, driver, pins, max_velocity) = match *p {
+                    SketchPart::Motor { pwm, dir, max_velocity, .. } => {
+                        (0, 0, [pwm, dir, NO_PIN, NO_PIN], max_velocity)
+                    }
+                    SketchPart::DriverMotor { driver, pins, max_velocity, .. } => {
+                        (1, driver as u8, pins, max_velocity)
+                    }
+                    SketchPart::Distance { pin, .. } => (2, 0, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0),
+                    SketchPart::Ultrasonic { trig, echo, .. } => (3, 0, [trig, echo, NO_PIN, NO_PIN], 0.0),
+                    SketchPart::Battery { pin, .. } => (4, 0, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0),
+                };
+                ffi::PartSpec { kind, name: name.as_ptr(), driver, pins, max_velocity }
+            })
+            .collect();
+        Sketch { handle: ffi::SketchHandle::new(&specs) }
+    }
+
+    /// Bytes from the core, then one `link.poll()` at `now_ms`.
+    pub fn feed(&mut self, bytes: &[u8], now_ms: u32) {
+        self.handle.feed(bytes, now_ms);
+    }
+
+    /// One `link.poll()` at `now_ms`.
+    pub fn tick(&mut self, now_ms: u32) {
+        self.handle.tick(now_ms);
+    }
+
+    /// Everything the sketch has written to the serial port since the last call.
+    pub fn take_output(&mut self) -> Vec<u8> {
+        self.handle.take()
+    }
+
+    /// The baud rate `link.begin()` started the serial port at.
+    pub fn baud(&mut self) -> u32 {
+        self.handle.baud()
+    }
+
+    /// What the sketch last wrote to `pin`.
+    pub fn pin(&mut self, pin: u8) -> PinOut {
+        let (_, kind, value) = self.handle.pin(pin);
+        PinOut::from(kind, value)
+    }
+
+    pub fn pin_mode(&mut self, pin: u8) -> PinMode {
+        match self.handle.pin(pin).0 {
+            0 => PinMode::Input,
+            1 => PinMode::Output,
+            _ => PinMode::Unset,
+        }
+    }
+
+    /// Every pin write since the last [`Sketch::clear_writes`], in order.
+    pub fn writes(&mut self) -> Vec<(u8, PinOut)> {
+        self.handle.log().into_iter().map(|(pin, kind, value)| (pin, PinOut::from(kind, value))).collect()
+    }
+
+    pub fn clear_writes(&mut self) {
+        self.handle.clear_log();
+    }
+
+    /// What `analogRead(pin)` returns from now on (0..1023).
+    pub fn set_analog(&mut self, pin: u8, value: i32) {
+        self.handle.set_analog(pin, value);
+    }
+
+    /// What `pulseIn()` measures from now on (0: no echo).
+    pub fn set_echo_us(&mut self, us: u32) {
+        self.handle.set_echo_us(us);
     }
 }

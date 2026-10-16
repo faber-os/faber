@@ -305,7 +305,14 @@ async fn a_mega_with_faberlink_shows_its_motors_and_distance_sensors() {
     assert_eq!(left["bridge"], "mega");
     assert_eq!(left["signals"][0]["address"], "mega.left/motor");
     assert_eq!(left["signals"][0]["info"]["info"]["maxVelocityRadS"], 10.0, "{left}");
+    assert_eq!(
+        left["pins"],
+        json!([{"role": "pwm", "pin": 9, "label": "D9"}, {"role": "dir", "pin": 8, "label": "D8"}]),
+        "the pins the board says the motor uses"
+    );
     assert_eq!(all[3]["signals"][0]["address"], "mega.front/distance");
+    assert_eq!(all[3]["pins"], json!([{"role": "signal", "pin": 54, "label": "A0"}]));
+    assert!(mega.get("pins").is_none(), "the board itself has none");
 
     c.cable.board(|b| b.set_distance_of(Sensor::Front, 0.37));
     until("a reading of 0.37 m", async || {

@@ -610,10 +610,56 @@ pub struct PartInfo {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge: Option<String>,
+    /// For a sub-part whose board says (`PINS`, docs/faberlink.md): the board's pins it uses.
+    /// Absent when the board doesn't say: an older FaberLink library, or a part class of the
+    /// sketch's own.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pins: Option<Vec<BoardPinInfo>>,
     /// For a bridge (`faber-bridge`): its board and the link to it.
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub board: Option<BoardLink>,
+}
+
+/// One pin a part on a FaberLink board uses.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BoardPinInfo {
+    pub role: PinRole,
+    /// The Arduino pin number, as in the sketch (`A0` is 14 on an Uno, 54 on a Mega).
+    pub pin: u8,
+    /// As printed on the board: `D7`, `A0`; just the number when the board doesn't say where its
+    /// analog pins start.
+    pub label: String,
+}
+
+/// What a pin does for its part (docs/faberlink.md, `PINS`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum PinRole {
+    /// A motor driver's speed input, beside a direction pin.
+    Pwm,
+    /// A motor driver's direction input.
+    Dir,
+    /// A motor driver's enable input (its speed), beside IN1 and IN2.
+    En,
+    In1,
+    In2,
+    /// A motor driver's standby input, held high.
+    Stby,
+    /// A range finder's trigger.
+    Trig,
+    /// A range finder's echo.
+    Echo,
+    /// A sensor's output, read by the board.
+    Signal,
+    /// A battery's voltage, through a divider.
+    Sense,
+    /// A role a newer FaberLink library added.
+    Other,
 }
 
 /// A FaberLink board as its bridge part sees it (docs/faberlink.md).

@@ -175,6 +175,8 @@ pub struct PartView {
     pub signals: Vec<SignalView>,
     /// For a sub-part: the bridge it is on.
     pub bridge: Option<PartName>,
+    /// For a sub-part whose board says: the pins it uses.
+    pub pins: Option<Vec<bridge::BoardPin>>,
     /// For a bridge: its board and the link to it.
     pub board: Option<BoardView>,
     /// For a bridge whose board has answered: the code it says it runs (docs/arduino-editor.md).
@@ -591,6 +593,7 @@ impl Machine {
                     signals,
                     address: cfg.address,
                     bridge: None,
+                    pins: None,
                     board: None,
                     code: None, // a paused board isn't heard, so nothing says what it runs
                 });
@@ -609,6 +612,7 @@ impl Machine {
                 status: self.status.get(name).unwrap_or(PartStatus::Starting),
                 signals,
                 bridge: None,
+                pins: None,
                 board: handle.map(BridgeHandle::view),
                 code: handle
                     .map(BridgeHandle::view)
@@ -640,6 +644,7 @@ impl Machine {
             status,
             signals,
             bridge: Some(bridge.clone()),
+            pins: None,
             board: None,
             code: None,
         };
@@ -655,7 +660,10 @@ impl Machine {
                         info: p.info.clone(),
                     })
                     .collect();
-                view(s.name.clone(), self.status.get(&s.name).unwrap_or(PartStatus::Starting), signals)
+                PartView {
+                    pins: s.pins.clone(),
+                    ..view(s.name.clone(), self.status.get(&s.name).unwrap_or(PartStatus::Starting), signals)
+                }
             })
             .collect();
         for local in cfg.parts.keys() {
@@ -2169,6 +2177,7 @@ fn paused_sub_part_views(bridge: &PartName, cfg: &PartConfig, had: &[PartName]) 
             signals: Vec::new(),
             address: None,
             bridge: Some(bridge.clone()),
+            pins: None,
             board: None,
             code: None,
         })

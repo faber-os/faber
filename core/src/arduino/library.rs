@@ -23,6 +23,7 @@ pub const FILES: &[(&str, &str)] = library![
     "examples/MotorAndDistance/MotorAndDistance.ino",
     "examples/Ultrasonic/Ultrasonic.ino",
     "examples/BatteryMonitor/BatteryMonitor.ino",
+    "examples/MotorL298N/MotorL298N.ino",
 ];
 
 /// Writes the library to `<dir>/FaberLink/` (only the files that differ) and returns that folder.
@@ -74,6 +75,13 @@ pub const TEMPLATES: &[Template] = &[
         example: Some("MotorAndDistance"),
     },
     Template {
+        id: "motor-l298n",
+        name: "FaberLink: two motors on an L298N",
+        description: "Two DC motors on an L298N (or TB6612) motor driver.",
+        faberlink: true,
+        example: Some("MotorL298N"),
+    },
+    Template {
         id: "ultrasonic",
         name: "FaberLink: ultrasonic distance (HC-SR04)",
         description: "An HC-SR04 range finder on pins 7 and 6.",
@@ -109,7 +117,8 @@ impl Template {
                 "// {name}: a board Faber talks to over FaberLink (docs/connect-an-arduino.md).\n\
                  //\n\
                  // Add a part for each motor and sensor, e.g.\n\
-                 //   FaberMotor left(\"left\", 9, 8);    // an H-bridge: PWM on pin 9, direction on pin 8\n\
+                 //   FaberMotor left(\"left\", 9, 8);    // a motor driver: PWM on pin 9, direction on pin 8\n\
+                 //   FaberMotor right(\"right\", faberlink::DRIVER_EN_IN1_IN2, 10, 7, 6); // an L298N: EN, IN1, IN2\n\
                  //   FaberDistance front(\"front\", A0); // an analog distance sensor on A0\n\
                  // The library's examples (New sketch) show every kind of part.\n\
                  //\n\
@@ -193,6 +202,8 @@ mod tests {
         let t = Template::by_id("faberlink-board").unwrap().text("Rover2");
         assert!(t.starts_with("// Rover2: a board"), "{t}");
         assert!(t.contains("link.begin(115200, \"rover2\", \"0.1.0\");"));
+        let m = Template::by_id("motor-l298n").unwrap().text("Anything");
+        assert!(m.contains("FaberMotor left(\"left\", faberlink::DRIVER_EN_IN1_IN2, 10, 8, 7);"));
         let u = Template::by_id("ultrasonic").unwrap().text("Anything");
         assert!(u.contains("FaberUltrasonic front(\"front\", 7, 6);"));
         assert!(Template::by_id("blank").unwrap().text("X").contains("void loop() {"));

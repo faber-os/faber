@@ -8,6 +8,7 @@ import {
   linkText,
   localName,
   nameFromBoard,
+  pinsText,
   removable,
 } from './bridges';
 
@@ -27,6 +28,33 @@ describe('bridges', () => {
     expect(removable(bridgePart('mega'))).toBe(true);
     expect(removable(boardMotor('mega', 'left'))).toBe(false);
     expect(removable(boardMotor('mega', 'arm', { signals: [] }))).toBe(true);
+  });
+
+  it("says which of the board's pins a part uses, when its board says", () => {
+    const sonar = boardMotor('mega', 'sonar', {
+      pins: [
+        { role: 'trig', pin: 7, label: 'D7' },
+        { role: 'echo', pin: 6, label: 'D6' },
+      ],
+    });
+    expect(pinsText(sonar)).toBe('Trig D7 · Echo D6');
+    const motor = boardMotor('mega', 'left', {
+      pins: [
+        { role: 'en', pin: 10, label: 'D10' },
+        { role: 'in1', pin: 8, label: 'D8' },
+        { role: 'in2', pin: 7, label: 'D7' },
+        { role: 'stby', pin: 4, label: 'D4' },
+      ],
+    });
+    expect(pinsText(motor)).toBe('EN D10 · IN1 D8 · IN2 D7 · STBY D4');
+    const ir = boardMotor('mega', 'ir', { pins: [{ role: 'signal', pin: 54, label: 'A0' }] });
+    expect(pinsText(ir)).toBe('Signal A0');
+    // A role from a newer library still shows its pin.
+    expect(
+      pinsText(boardMotor('mega', 'x', { pins: [{ role: 'other', pin: 3, label: 'D3' }] })),
+    ).toBe('Pin D3');
+    // An older library says nothing.
+    expect(pinsText(boardMotor('mega', 'left'))).toBe('');
   });
 
   it('names a board as the core names its parts', () => {
