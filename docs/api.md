@@ -76,6 +76,13 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 | `serial-open` | `id`, `port`, `baud` | Open a port for the serial monitor. Fails with `port-claimed` while a part uses it. |
 | `serial-send` | `id`, `data` (bytes) | Write bytes. |
 | `serial-close` | `id` | Close it. |
+| `app-window-open` | `id`, `app` | Open an app window's live link to its app's logic (see [App windows](#app-windows)). |
+| `app-window-send` | `id`, `kind`, `data` (`{"text": …}` or `{"bytes": …}`) | A message from the window for the logic. |
+| `app-window-heartbeat` | `id` | The window's page is alive. |
+| `app-window-drive` | `id`, `role`, `index?` | The window drives a `drive = "window"` role through the logic (after the D46 confirm). |
+| `app-window-release` | `id`, `role`, `index?` | It lets go of it. |
+| `app-window-stop` | `id` | The user pressed the shell's Stop for this window. |
+| `app-window-close` | `id` | Close the link. |
 
 **Topics** (`Topic`, tagged by `kind`):
 
@@ -99,8 +106,9 @@ One connection carries everything live. The default `format` is `msgpack`, sent 
 **Core → client** (`ServerMessage`, tagged by `type`): `signal`, `parts`, `ports`, `log`,
 `serial-opened`, `serial-data`, `serial-closed`, `leases`, `lease-granted`, `lease-ended`, `estop`,
 `packages`, `apps`, `world`, `world-changed`, `flash`, `notice`, `app-state`, `app-state-changed`,
-`error`. Each carries the `id` of the subscription
-or serial session it belongs to. `error` may come without an `id`.
+`app-window-opened`, `app-window-message`, `app-window-driving`, `app-window-drive-refused`,
+`app-window-drive-ended`, `app-window-closed`, `error`. Each carries the `id` of the subscription,
+serial session or app window link it belongs to. `error` may come without an `id`.
 
 **Serial sessions**, step by step:
 
@@ -115,6 +123,32 @@ or serial session it belongs to. `error` may come without an `id`.
 While a session is open, the port shows `claimedBy: "tool:serial-monitor"`. A part's claim shows
 the part's name.
 
+### App windows
+
+An app window's live link to its own logic ([apps.md](apps.md) §12). Only the shell's app host
+opens these, for the app's page (which can't reach the API itself) after checking every request.
+
+1. `app-window-open` (`app`) is answered by `app-window-opened` (`window`: the window's id as the
+   app's logic sees it) or an `error` (`unknown-app`, `id-in-use`).
+2. **Messages.** `app-window-send` (`kind`: 1–64 characters of `a-z`, `0-9`, `-`; `data`:
+   `{"text": "…"}` or `{"bytes": <binary>}`, at most 4 KB with the kind) reaches the logic's next
+   `messages.poll()`. Nothing is saved: it is dropped while the logic isn't running. At most 50 a
+   second per window; past that, or past the size, an `error` (`too-many-messages`,
+   `message-too-large`, `bad-kind`, `reserved-kind` for `drive-started` and `drive-ended`, which
+   only the core sends). The logic's messages for the window arrive as `app-window-message`
+   (`kind`, `data`), also at most 50 a second.
+3. **Driving through the logic.** `app-window-drive` (`role`, `index?`) is answered by
+   `app-window-driving` or `app-window-drive-refused` (`error`: `app-not-running`, `unknown-role`,
+   `not-window-driven`, `no-part`). From then until the drive ends, the app's logic may hold the
+   role's lease; before and after, the core refuses it. It ends with `app-window-release`,
+   `app-window-stop` (the shell's Stop bar), `app-window-close`, the WebSocket closing, the app's
+   logic stopping, or no `app-window-heartbeat` for 300 ms; the window hears
+   `app-window-drive-ended` (`reason`: `released`, `stopped`, `heartbeat-lost`, `app-stopped`) and
+   the logic `drive-ended`, and the core has already ended the logic's lease on the role (unless
+   another window still drives it).
+4. The link ends with `app-window-close` or the WebSocket. If the app is uninstalled, the core
+   says `app-window-closed` (`reason`: `app-removed`).
+
 **WebSocket error codes:**
 
 | Code | When |
@@ -126,6 +160,8 @@ the part's name.
 | `unknown-port`, `port-claimed`, `port-unavailable` | `serial-open` failed (see step 2) |
 | `serial-write-failed` | `serial-send` couldn't write. The session stays open. |
 | `unknown-session` | `serial-send` for a session that isn't open |
+| `unknown-app`, `unknown-window` | `app-window-open` for an app that isn't installed, or another `app-window-*` for a link that isn't open |
+| `bad-kind`, `reserved-kind`, `message-too-large`, `too-many-messages` | `app-window-send` broke a limit (see [App windows](#app-windows)) |
 | `internal` | A bug in the core. The log has details. |
 
 Every error carries `message` and `hint`, like REST errors.
@@ -571,9 +607,16 @@ ends it, and an operator can take over (`{"takeOver": true}`): the app's next co
 confirm before driving is the shell's: for an app, turning it on is the user's go-ahead. Its leases
 end when it is turned off, when it stops or traps, and when the core stops.
 
+A command role declared **`drive = "window"`** is different: the logic may hold its lease only
+while one of the app's windows drives it through the logic ([App windows](#app-windows)), after the
+shell's D46 confirm and with the shell's Stop bar showing. Before that, its `acquire` is refused
+(`part-not-ready`, "no window is driving …"); when the window lets go, the user presses Stop, the
+window closes or its heartbeat stops, the core ends the lease itself (the logic's next command
+answers `lease-ended`, `drive-ended`). `AppInfo.roles[].drive` says which (`logic` or `window`).
+
 | Method and path | Body / result |
 |---|---|
-| `GET /api/v0/apps` | `AppInfo[]`: `id`, `name`, `version`, `publisher?`, `enabled`, `state` (a `PartState`: the same states as a part, below), `logic` (it has a component), `tickHz?`, `roles` (`role`, `capability`, `command`, `count`: `1`, `1..`, or for an optional role `0..1` or `0..`, `parts`: the parts picked), `publishes` (`name`, `capability`, `address`: `app:<id>/<name>`), `ui?` (`/apps/<id>/ui/index.html`), `icon?` (what the shell shows for it: its `[window]` icon, else the package's own `icon.svg` as `/apps/<id>/icon.svg`) and `window?` (`title?`, `icon?` (a URL, for an icon under `ui/`), `width?`, `height?`, `pinned`). |
+| `GET /api/v0/apps` | `AppInfo[]`: `id`, `name`, `version`, `publisher?`, `enabled`, `state` (a `PartState`: the same states as a part, below), `logic` (it has a component), `tickHz?`, `roles` (`role`, `capability`, `command`, `count`: `1`, `1..`, or for an optional role `0..1` or `0..`, `parts`: the parts picked, `drive`: `logic` or `window`), `publishes` (`name`, `capability`, `address`: `app:<id>/<name>`), `ui?` (`/apps/<id>/ui/index.html`), `icon?` (what the shell shows for it: its `[window]` icon, else the package's own `icon.svg` as `/apps/<id>/icon.svg`) and `window?` (`title?`, `icon?` (a URL, for an icon under `ui/`), `width?`, `height?`, `pinned`). |
 | `GET /api/v0/apps/{id}` | One `AppInfo`. `404 unknown-app`. |
 | `POST /api/v0/apps/{id}/enable` | Turns it on (`enabled = true` in apps.toml): `200 AppInfo`. It starts when its roles are filled. `404 unknown-app`, `422 config-broken` (apps.toml can't be read: the message has its line). |
 | `POST /api/v0/apps/{id}/disable` | Turns it off: its logic stops, its leases end and its parts get their safe state before this answers. `200 AppInfo`. |

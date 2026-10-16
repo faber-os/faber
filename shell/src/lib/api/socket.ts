@@ -52,6 +52,34 @@ export interface SerialSession {
   stopRecording(): void;
 }
 
+/** What a message between an app's window and its logic carries. */
+export type AppMessageData = string | Uint8Array;
+
+export interface AppWindowHandlers {
+  /** The link is open; `window` is the window's id as the app's logic sees it. */
+  onOpened(window: number): void;
+  /** A message from the app's logic. */
+  onMessage(kind: string, data: AppMessageData): void;
+  /** The core answered `app-window-drive`: the window now drives `role`, or `error` says why not. */
+  onDrive(role: string, index: number, error: ErrorBody | null): void;
+  /** The window no longer drives `role` through the logic (`stopped`, `heartbeat-lost`, …). */
+  onDriveEnded(role: string, index: number, reason: string): void;
+  /** The link is over: the core closed it (the app was removed), or the connection went. */
+  onClosed(reason?: string): void;
+  onError(error: ErrorBody): void;
+}
+
+/** An app window's live link to its app's logic (docs/apps.md §12). */
+export interface AppWindowSession {
+  send(kind: string, data: AppMessageData): void;
+  heartbeat(): void;
+  drive(role: string, index: number): void;
+  release(role: string, index: number): void;
+  /** The user pressed the shell's Stop for this window. */
+  stop(): void;
+  close(): void;
+}
+
 const OPEN = 1;
 const BACKOFF_START_MS = 500;
 const BACKOFF_MAX_MS = 10_000;
@@ -93,6 +121,8 @@ export class CoreSocket {
     number,
     { handlers: SerialHandlers; opened: boolean; closing: boolean }
   >();
+  /** Open app window links. Like serial sessions, they end with the connection. */
+  private readonly appWindows = new Map<number, { handlers: AppWindowHandlers; opened: boolean }>();
   private readonly statusListeners = new Set<(s: ConnectionStatus) => void>();
   private readonly errorListeners = new Set<(e: ErrorBody) => void>();
 
@@ -131,6 +161,7 @@ export class CoreSocket {
       ws.close();
     }
     this.endSerials(t('errors.socket.closedByShell'));
+    this.endAppWindows(t('errors.socket.closedByShell'));
     this.setStatus('closed');
   }
 
@@ -178,6 +209,57 @@ export class CoreSocket {
     };
   }
 
+  /**
+   * Opens an app window's live link to its app's logic. It doesn't survive a lost connection:
+   * the core ends what the window drove when the connection goes, and `onClosed` says so.
+   */
+  openAppWindow(app: string, handlers: AppWindowHandlers): AppWindowSession {
+    const id = this.nextId++;
+    const none: AppWindowSession = {
+      send: () => {},
+      heartbeat: () => {},
+      drive: () => {},
+      release: () => {},
+      stop: () => {},
+      close: () => {},
+    };
+    if (!this.isOpen()) {
+      handlers.onError({
+        code: 'not-connected',
+        message: t('errors.socket.notConnected.message'),
+        hint: t('errors.socket.notConnected.hint'),
+      });
+      handlers.onClosed();
+      return none;
+    }
+    this.appWindows.set(id, { handlers, opened: false });
+    this.send({ type: 'app-window-open', id, app });
+    const whileOpen = (fn: () => void) => {
+      if (this.appWindows.get(id)?.opened) fn();
+    };
+    return {
+      send: (kind, data) =>
+        whileOpen(() =>
+          this.send({
+            type: 'app-window-send',
+            id,
+            kind,
+            data: typeof data === 'string' ? { text: data } : { bytes: data },
+          }),
+        ),
+      heartbeat: () => whileOpen(() => this.send({ type: 'app-window-heartbeat', id })),
+      drive: (role, index) =>
+        whileOpen(() => this.send({ type: 'app-window-drive', id, role, index })),
+      release: (role, index) =>
+        whileOpen(() => this.send({ type: 'app-window-release', id, role, index })),
+      stop: () => whileOpen(() => this.send({ type: 'app-window-stop', id })),
+      close: () => {
+        if (!this.appWindows.delete(id)) return;
+        this.send({ type: 'app-window-close', id });
+      },
+    };
+  }
+
   private isOpen(): boolean {
     return this.ws !== null && this.ws.readyState === OPEN;
   }
@@ -202,6 +284,7 @@ export class CoreSocket {
       if (this.ws !== ws) return;
       this.ws = null;
       this.endSerials(t('errors.socket.lost'));
+      this.endAppWindows(t('errors.socket.lost'));
       if (!this.wanted) return;
       this.setStatus('reconnecting');
       const delay = backoffDelay(this.attempt++);
@@ -256,6 +339,9 @@ export class CoreSocket {
       return;
     }
 
+    const win = this.appWindows.get(id);
+    if (win) return this.appWindowFrame(id, win, msg);
+
     const sub = this.subs.get(id);
     if (!sub) return; // A late message for something already unsubscribed.
     if (msg.type === 'error') {
@@ -264,6 +350,52 @@ export class CoreSocket {
       return;
     }
     sub.handlers.onMessage(msg);
+  }
+
+  private appWindowFrame(
+    id: number,
+    win: { handlers: AppWindowHandlers; opened: boolean },
+    msg: ServerMessage,
+  ): void {
+    const h = win.handlers;
+    const data = (d: { text: string } | { bytes: Uint8Array }): AppMessageData =>
+      'text' in d ? d.text : d.bytes;
+    switch (msg.type) {
+      case 'app-window-opened':
+        win.opened = true;
+        h.onOpened(msg.window);
+        break;
+      case 'app-window-message':
+        h.onMessage(msg.kind, data(msg.data));
+        break;
+      case 'app-window-driving':
+        h.onDrive(msg.role, msg.index, null);
+        break;
+      case 'app-window-drive-refused':
+        h.onDrive(msg.role, msg.index, msg.error);
+        break;
+      case 'app-window-drive-ended':
+        h.onDriveEnded(msg.role, msg.index, msg.reason);
+        break;
+      case 'app-window-closed':
+        this.appWindows.delete(id);
+        h.onClosed(msg.reason);
+        break;
+      case 'error':
+        h.onError(msg.error);
+        // An error before `app-window-opened` means the link never opened.
+        if (!win.opened) {
+          this.appWindows.delete(id);
+          h.onClosed();
+        }
+        break;
+    }
+  }
+
+  private endAppWindows(reason: string): void {
+    const all = [...this.appWindows.values()];
+    this.appWindows.clear();
+    for (const w of all) w.handlers.onClosed(reason);
   }
 
   private endSerials(reason: string): void {

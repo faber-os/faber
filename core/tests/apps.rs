@@ -523,6 +523,15 @@ async fn a_trap_ends_the_lease_and_stops_the_base() {
     assert_eq!(holder(&c, "base"), None);
 }
 
+/// Sends one JSON message on the WebSocket.
+async fn say<S>(ws: &mut S, m: Value)
+where
+    S: futures_util::Sink<Message> + Unpin,
+    S::Error: std::fmt::Debug,
+{
+    ws.send(Message::Text(m.to_string().into())).await.unwrap();
+}
+
 /// What a window hears from the core, collected.
 fn window_sink() -> (faber_core::apps::channel::Sink, Arc<std::sync::Mutex<Vec<ToWindow>>>) {
     let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -627,6 +636,83 @@ async fn the_core_ends_a_window_driven_lease_even_when_the_app_ignores_drive_end
     let took = stays_stopped("the window to close").await;
     assert!(took < Duration::from_millis(50), "closing ends the lease at once: {took:?}");
     assert_eq!(base(&c).commanded, faber_capabilities::Twist2d::ZERO, "and the base got its safe state");
+    call(&c.app, "POST", "/api/v0/apps/ignorer/disable", None).await;
+}
+
+/// The same, through the WebSocket the shell uses: a window's link opens, drives through the
+/// logic, hears its drive end when Stop is pressed, and the connection closing ends the drive.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_app_window_drives_through_the_logic_over_the_websocket() {
+    let Some(wasm) = component("faber-test-app") else { return };
+    let c = sennep_by_a_wall().await;
+    let (s, e) = install(&c, ignorer_package(&wasm), "ignorer.faberpkg").await;
+    assert_eq!(s, StatusCode::CREATED, "{e}");
+    call(&c.app, "PUT", "/api/v0/apps/ignorer/roles", Some(json!({"roles": {"base": "base"}}))).await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = c.app.clone();
+    tokio::spawn(async move { axum::serve(listener, server).await.unwrap() });
+    let (mut ws, _) =
+        tokio_tungstenite::connect_async(format!("ws://{addr}/api/v0/ws?format=json")).await.unwrap();
+    say(&mut ws, json!({"type": "app-window-open", "id": 1, "app": "nope"})).await;
+    say(&mut ws, json!({"type": "app-window-open", "id": 2, "app": "ignorer"})).await;
+    let e = next_where(&mut ws, |m| m["id"] == 1).await;
+    assert_eq!(
+        (e["type"].as_str(), e["error"]["code"].as_str()),
+        (Some("error"), Some("unknown-app")),
+        "{e}"
+    );
+    let o = next_where(&mut ws, |m| m["id"] == 2).await;
+    assert_eq!(o["type"], "app-window-opened", "{o}");
+    assert!(o["window"].as_u64().is_some(), "{o}");
+
+    // Off: nothing to drive through.
+    say(&mut ws, json!({"type": "app-window-drive", "id": 2, "role": "base"})).await;
+    say(&mut ws, json!({"type": "app-window-open", "id": 2, "app": "ignorer"})).await;
+    let r = next_where(&mut ws, |m| m["id"] == 2).await;
+    assert_eq!(
+        (r["type"].as_str(), r["error"]["code"].as_str()),
+        (Some("app-window-drive-refused"), Some("app-not-running")),
+        "{r}"
+    );
+    let r = next_where(&mut ws, |m| m["id"] == 2).await;
+    assert_eq!(r["error"]["code"], "id-in-use", "{r}");
+
+    call(&c.app, "POST", "/api/v0/apps/ignorer/enable", None).await;
+    app_state_where(&c, "ignorer", "it runs", kind_is("running")).await;
+    say(
+        &mut ws,
+        json!({"type": "app-window-send", "id": 2, "kind": "drive-ended", "data": {"text": "base 0 x"}}),
+    )
+    .await;
+    say(&mut ws, json!({"type": "app-window-heartbeat", "id": 2})).await;
+    say(&mut ws, json!({"type": "app-window-drive", "id": 2, "role": "base"})).await;
+    let e = next_where(&mut ws, |m| m["id"] == 2).await;
+    assert_eq!(e["error"]["code"], "reserved-kind", "a window can't pretend to be the core: {e}");
+    let d = next_where(&mut ws, |m| m["id"] == 2).await;
+    assert_eq!(d, json!({"type": "app-window-driving", "id": 2, "role": "base", "index": 0}));
+    wait_for("the app to drive", 3.0, || {
+        (holder(&c, "base").as_deref() == Some("app:ignorer")).then_some(())
+    })
+    .await;
+
+    say(&mut ws, json!({"type": "app-window-stop", "id": 2})).await;
+    let ended = next_where(&mut ws, |m| m["type"] == "app-window-drive-ended").await;
+    assert_eq!(
+        ended,
+        json!({"type": "app-window-drive-ended", "id": 2, "role": "base", "index": 0, "reason": "stopped"})
+    );
+    assert_eq!(holder(&c, "base"), None);
+
+    // Driving again, then the connection drops (the browser tab closed): the drive ends with it.
+    say(&mut ws, json!({"type": "app-window-drive", "id": 2, "role": "base"})).await;
+    next_where(&mut ws, |m| m["type"] == "app-window-driving").await;
+    wait_for("the app to drive", 3.0, || holder(&c, "base").is_some().then_some(())).await;
+    ws.close(None).await.unwrap();
+    let closed = Instant::now();
+    wait_for("the lease to end", 1.0, || holder(&c, "base").is_none().then_some(())).await;
+    assert!(closed.elapsed() < Duration::from_millis(250), "{:?}", closed.elapsed());
     call(&c.app, "POST", "/api/v0/apps/ignorer/disable", None).await;
 }
 

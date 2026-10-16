@@ -109,6 +109,21 @@ describe('decodeServerMessage', () => {
     expect([...msg.data]).toEqual([72, 105]);
   });
 
+  it("turns an app message's JSON bytes into Uint8Array, and leaves its text alone", () => {
+    const bytes = decodeServerMessage(
+      JSON.stringify({ type: 'app-window-message', id: 2, kind: 'b', data: { bytes: [1, 2] } }),
+      'json',
+    );
+    if (bytes.type !== 'app-window-message' || !('bytes' in bytes.data)) throw new Error('bytes');
+    expect(bytes.data.bytes).toBeInstanceOf(Uint8Array);
+    expect([...bytes.data.bytes]).toEqual([1, 2]);
+    const text = decodeServerMessage(
+      JSON.stringify({ type: 'app-window-message', id: 2, kind: 't', data: { text: 'hi' } }),
+      'json',
+    );
+    expect(text).toEqual({ type: 'app-window-message', id: 2, kind: 't', data: { text: 'hi' } });
+  });
+
   it('decodes msgpack bin into Uint8Array', () => {
     const bytes = encode({ type: 'serial-data', id: 7, tUs: 5, data: new Uint8Array([1, 2]) });
     const msg = decodeServerMessage(bytes, 'msgpack') as Extract<

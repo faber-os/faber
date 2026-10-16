@@ -218,6 +218,110 @@ describe('CoreSocket', () => {
     ]);
   });
 
+  describe('app window links', () => {
+    function handlers() {
+      return {
+        onOpened: vi.fn(),
+        onMessage: vi.fn(),
+        onDrive: vi.fn(),
+        onDriveEnded: vi.fn(),
+        onClosed: vi.fn(),
+        onError: vi.fn(),
+      };
+    }
+
+    it('opens, carries messages both ways, drives through the logic and closes', () => {
+      const s = make();
+      s.connect();
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      const h = handlers();
+      const link = s.openAppWindow('sennep', h);
+      expect(sentMsgpack(ws)[0]).toEqual({ type: 'app-window-open', id: 1, app: 'sennep' });
+      link.send('drive', '1 0 0');
+      expect(sentMsgpack(ws)).toHaveLength(1);
+
+      ws.receive(bin({ type: 'app-window-opened', id: 1, window: 7 }));
+      expect(h.onOpened).toHaveBeenCalledWith(7);
+      link.send('drive', '1 0 0');
+      link.send('blob', new Uint8Array([1, 2]));
+      link.heartbeat();
+      link.drive('base', 0);
+      link.release('base', 0);
+      link.stop();
+      const sent = sentMsgpack(ws).slice(1) as Record<string, unknown>[];
+      expect(sent[0]).toEqual({
+        type: 'app-window-send',
+        id: 1,
+        kind: 'drive',
+        data: { text: '1 0 0' },
+      });
+      expect([...(sent[1]?.data as { bytes: Uint8Array }).bytes]).toEqual([1, 2]);
+      expect(sent.slice(2)).toEqual([
+        { type: 'app-window-heartbeat', id: 1 },
+        { type: 'app-window-drive', id: 1, role: 'base', index: 0 },
+        { type: 'app-window-release', id: 1, role: 'base', index: 0 },
+        { type: 'app-window-stop', id: 1 },
+      ]);
+
+      ws.receive(bin({ type: 'app-window-message', id: 1, kind: 'limits', data: { text: '{}' } }));
+      ws.receive(
+        bin({ type: 'app-window-message', id: 1, kind: 'b', data: { bytes: new Uint8Array([3]) } }),
+      );
+      expect(h.onMessage).toHaveBeenNthCalledWith(1, 'limits', '{}');
+      expect(h.onMessage).toHaveBeenNthCalledWith(2, 'b', new Uint8Array([3]));
+      ws.receive(bin({ type: 'app-window-driving', id: 1, role: 'base', index: 0 }));
+      const error = { code: 'no-part', message: 'No part.', hint: 'Pick one.' };
+      ws.receive(bin({ type: 'app-window-drive-refused', id: 1, role: 'arm', index: 0, error }));
+      expect(h.onDrive.mock.calls).toEqual([
+        ['base', 0, null],
+        ['arm', 0, error],
+      ]);
+      ws.receive(
+        bin({ type: 'app-window-drive-ended', id: 1, role: 'base', index: 0, reason: 'stopped' }),
+      );
+      expect(h.onDriveEnded).toHaveBeenCalledWith('base', 0, 'stopped');
+
+      link.close();
+      expect(sentMsgpack(ws).at(-1)).toEqual({ type: 'app-window-close', id: 1 });
+      ws.receive(bin({ type: 'app-window-message', id: 1, kind: 'late', data: { text: '' } }));
+      expect(h.onMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('ends when the link never opened, the app is removed or the connection goes', () => {
+      const s = make();
+      s.connect();
+      const ws = FakeWebSocket.latest();
+      ws.open();
+      const refused = handlers();
+      s.openAppWindow('nope', refused);
+      const error = { code: 'unknown-app', message: 'No app.', hint: 'Install it.' };
+      ws.receive(bin({ type: 'error', id: 1, error }));
+      expect(refused.onError).toHaveBeenCalledWith(error);
+      expect(refused.onClosed).toHaveBeenCalledTimes(1);
+
+      const removed = handlers();
+      s.openAppWindow('sennep', removed);
+      ws.receive(bin({ type: 'app-window-opened', id: 2, window: 1 }));
+      ws.receive(bin({ type: 'app-window-closed', id: 2, reason: 'app-removed' }));
+      expect(removed.onClosed).toHaveBeenCalledWith('app-removed');
+
+      const lost = handlers();
+      s.openAppWindow('sennep', lost);
+      ws.receive(bin({ type: 'app-window-opened', id: 3, window: 2 }));
+      ws.close();
+      expect(lost.onClosed).toHaveBeenCalledTimes(1);
+      expect(removed.onClosed).toHaveBeenCalledTimes(1);
+
+      const offline = handlers();
+      s.openAppWindow('sennep', offline);
+      expect(offline.onError).toHaveBeenCalledWith(
+        expect.objectContaining({ code: 'not-connected' }),
+      );
+      expect(offline.onClosed).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('serial sessions', () => {
     it('opens, receives data, sends bytes and closes', () => {
       const s = make();

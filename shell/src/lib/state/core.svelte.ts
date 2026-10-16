@@ -1,5 +1,11 @@
 import { CoreError, type CoreHttp, type WriteMode } from '../api/http';
-import type { CoreSocket, SerialHandlers, SerialSession } from '../api/socket';
+import type {
+  AppWindowHandlers,
+  AppWindowSession,
+  CoreSocket,
+  SerialHandlers,
+  SerialSession,
+} from '../api/socket';
 import { RingBuffer } from './ringBuffer';
 import { locale } from '../i18n';
 import {
@@ -677,6 +683,11 @@ export class CoreState {
 
   openSerial(port: string, baud: number, handlers: SerialHandlers): SerialSession {
     return this.socket.openSerial(port, baud, handlers);
+  }
+
+  /** An app window's live link to its app's logic (docs/apps.md §12), for the window's host. */
+  openAppWindow(app: string, handlers: AppWindowHandlers): AppWindowSession {
+    return this.socket.openAppWindow(app, handlers);
   }
 
   /** Wall-clock time (ms) of a core timestamp, or null before the system info has loaded. */
