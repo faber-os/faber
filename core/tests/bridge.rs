@@ -176,6 +176,7 @@ fn core_with(board: FakeBoard) -> TestCore {
         usb_problems: Arc::new(MegaPort),
         disks: Arc::new(MegaPort),
         opener: Arc::new(Opener(Arc::clone(&cable))),
+        hardware: Arc::new(faber_core::ports::NoHardware),
         replays: ReplayLibrary::default(),
         connectors: faber_core::connectors::built_in(),
         timing: Timing {

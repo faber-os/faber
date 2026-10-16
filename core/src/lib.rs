@@ -55,12 +55,23 @@ pub struct Core {
 }
 
 impl Core {
-    /// Starts the machine on real hardware: OS serial ports, plus every recording in the home
-    /// folder's Recordings.
+    /// Starts the machine on real hardware: OS serial ports, the machine's own I²C, SPI and GPIO
+    /// (Linux only), plus every recording in the home folder's Recordings.
     pub fn start(
         data_dir: PathBuf,
         logs: Arc<logs::LogBook>,
         clock: clock::SharedClock,
+    ) -> std::io::Result<Core> {
+        Core::start_with_buses(data_dir, logs, clock, ports::system_hardware())
+    }
+
+    /// The same, with these I²C, SPI and GPIO buses instead of the machine's own
+    /// (`--fake-hardware` passes [`ports::fake::FakeHardware::standard`]).
+    pub fn start_with_buses(
+        data_dir: PathBuf,
+        logs: Arc<logs::LogBook>,
+        clock: clock::SharedClock,
+        hardware: Arc<dyn ports::Hardware>,
     ) -> std::io::Result<Core> {
         // Replay ports come from home:/Recordings (D35); the machine keeps this in sync.
         let replays = ports::ReplayLibrary::default();
@@ -71,6 +82,7 @@ impl Core {
             usb_problems: Arc::new(ports::SystemUsbProblems),
             disks: Arc::new(disks::SystemDisks),
             opener: Arc::new(ports::SystemOpener::new(replays.clone())),
+            hardware,
             replays,
             connectors: connectors::built_in(),
             timing: runtime::Timing::default(),

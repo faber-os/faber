@@ -276,6 +276,9 @@ export const en = {
   'parts.portKind.serial': 'Serial',
   'parts.portKind.bluetooth': 'Bluetooth',
   'parts.portKind.replay': 'Recording',
+  'parts.portKind.i2c': 'I²C bus',
+  'parts.portKind.spi': 'SPI',
+  'parts.portKind.gpio': 'GPIO pin',
 
   // Parts: a FaberLink board (a bridge) and the parts on it (sub-parts, `mega.left`).
   // `{bridge}` is the board's part name, e.g. "mega".
@@ -585,6 +588,10 @@ export const en = {
   'install.touch.title': 'What it can touch',
   'install.touch.serial': 'A serial port you pick, at {baud} baud',
   'install.touch.bridge': 'A FaberLink bridge you pick',
+  // `{addresses}` is a list like "0x48, 0x49".
+  'install.touch.i2c': 'One device on an I²C bus you pick, at {addresses}',
+  'install.touch.spi': 'One SPI device you pick',
+  'install.touch.gpio': 'One GPIO pin you pick',
   'install.touch.nothingElse': 'Nothing else: no files, no network, no other hardware.',
   'install.notChecked.title': 'Not checked by the Faber registry',
   'install.notChecked.body':

@@ -64,6 +64,7 @@ fn core() -> TestCore {
         usb_problems: Arc::new(NoPorts),
         disks: Arc::new(NoPorts),
         opener: Arc::new(SystemOpener::new(replays.clone())),
+        hardware: Arc::new(faber_core::ports::NoHardware),
         replays,
         connectors: faber_core::connectors::built_in(),
         timing: Timing::default(),

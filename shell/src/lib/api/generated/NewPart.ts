@@ -5,7 +5,11 @@ import type { Simulate } from "./Simulate";
 /**
  * Body of `POST /api/v0/parts`: a `port` for the real part, or `simulate`.
  */
-export type NewPart = { name: string, connector: string, port?: string, simulate?: Simulate, mount?: Mount, 
+export type NewPart = { name: string, connector: string, port?: string, 
+/**
+ * For a part on an I²C bus: its 7-bit address. Left out: the connector's default.
+ */
+address?: number, simulate?: Simulate, mount?: Mount, 
 /**
  * The connector's settings, as in `[parts.<name>.settings]`, e.g. `{"max-vx": 0.6}`.
  */

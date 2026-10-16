@@ -12,13 +12,34 @@ export function isPackageFile(name: string): boolean {
 }
 
 /** The one port a connector needs, as the API describes it (`PortRequirementInfo`). */
-export type PortNeed = { kind: 'serial'; baud: number } | { kind: 'bridge' };
+export type PortNeed =
+  | { kind: 'serial'; baud: number }
+  | { kind: 'bridge' }
+  | { kind: 'i2c'; addresses: number[]; default: number }
+  | { kind: 'spi' }
+  | { kind: 'gpio' };
 
 /** What a connector can touch: the port a user picks for each part, and nothing else. */
 export function touchWords(port: PortNeed): string {
-  return port.kind === 'serial'
-    ? t('install.touch.serial', { baud: port.baud })
-    : t('install.touch.bridge');
+  switch (port.kind) {
+    case 'serial':
+      return t('install.touch.serial', { baud: port.baud });
+    case 'i2c':
+      return t('install.touch.i2c', {
+        addresses: port.addresses.map((a) => hexAddress(a)).join(', '),
+      });
+    case 'spi':
+      return t('install.touch.spi');
+    case 'gpio':
+      return t('install.touch.gpio');
+    default:
+      return t('install.touch.bridge');
+  }
+}
+
+/** An I²C address as datasheets write it: `0x48`. */
+export function hexAddress(address: number): string {
+  return `0x${address.toString(16).padStart(2, '0')}`;
 }
 
 /** How it runs, in words: `wasm` or `declarative`. */

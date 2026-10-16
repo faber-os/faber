@@ -88,6 +88,7 @@ impl<B: Board> Wire<B> {
 
     pub fn entry() -> PortEntry {
         PortEntry {
+            reserved: None,
             id: PortId::Serial("FAKE".into()),
             kind: PortKind::Serial,
             label: "FAKE".into(),

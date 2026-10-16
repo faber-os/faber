@@ -117,6 +117,7 @@ async fn a_connector_from_the_template_installs_and_runs_sandboxed() {
         usb_problems: Arc::new(Nothing),
         disks: Arc::new(Nothing),
         opener: Arc::new(SystemOpener::new(replays.clone())),
+        hardware: Arc::new(faber_core::ports::NoHardware),
         replays,
         connectors: faber_core::connectors::built_in(),
         timing: faber_core::runtime::Timing::default(),

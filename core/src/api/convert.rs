@@ -52,6 +52,7 @@ pub fn part(p: &PartView) -> dto::PartInfo {
         name: p.name.to_string(),
         connector: p.connector.clone(),
         port: p.source.port().map(str::to_string),
+        address: p.address,
         simulate: p.source.simulate().map(simulate),
         state: part_state(&p.status),
         signals: p
@@ -210,6 +211,9 @@ pub fn port(p: &PortView) -> dto::PortInfo {
             PortKind::Serial => dto::PortKind::Serial,
             PortKind::Bluetooth => dto::PortKind::Bluetooth,
             PortKind::Replay => dto::PortKind::Replay,
+            PortKind::I2c => dto::PortKind::I2c,
+            PortKind::Spi => dto::PortKind::Spi,
+            PortKind::Gpio => dto::PortKind::Gpio,
         },
         label: p.entry.label.clone(),
         usb: p.entry.usb.as_ref().map(|u| dto::UsbInfo {
@@ -220,6 +224,12 @@ pub fn port(p: &PortView) -> dto::PortInfo {
             product: u.product.clone(),
         }),
         claimed_by: p.claimed_by.clone(),
+        addresses: p
+            .addresses
+            .iter()
+            .map(|(address, who)| dto::AddressClaim { address: *address, claimed_by: who.clone() })
+            .collect(),
+        reserved: p.entry.reserved.clone(),
         suggestions: p
             .suggestions
             .iter()
@@ -389,9 +399,14 @@ pub fn connector(m: &Manifest, kind: ConnectorKind) -> dto::ConnectorInfo {
         name: m.name.clone(),
         version: m.version.clone(),
         kind: kind.id().into(),
-        port: match m.port {
-            PortRequirement::Serial { baud } => dto::PortRequirementInfo::Serial { baud },
+        port: match &m.port {
+            PortRequirement::Serial { baud } => dto::PortRequirementInfo::Serial { baud: *baud },
             PortRequirement::Bridge => dto::PortRequirementInfo::Bridge,
+            PortRequirement::I2c { addresses, default } => {
+                dto::PortRequirementInfo::I2c { addresses: addresses.clone(), default: *default }
+            }
+            PortRequirement::Spi => dto::PortRequirementInfo::Spi,
+            PortRequirement::Gpio => dto::PortRequirementInfo::Gpio,
         },
         provides: m
             .provides

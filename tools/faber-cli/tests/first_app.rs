@@ -86,6 +86,7 @@ fn an_app_from_the_template_checks_packs_installs_and_runs() {
         usb_problems: Arc::new(Nothing),
         disks: Arc::new(Nothing),
         opener: Arc::new(SystemOpener::new(replays.clone())),
+        hardware: Arc::new(faber_core::ports::NoHardware),
         replays,
         connectors: faber_core::connectors::built_in(),
         timing: faber_core::runtime::Timing::default(),
@@ -99,6 +100,7 @@ fn an_app_from_the_template_checks_packs_installs_and_runs() {
     }
     machine
         .add_part(NewPart {
+            address: None,
             name: "front".into(),
             connector: "generic-distance".into(),
             port: None,

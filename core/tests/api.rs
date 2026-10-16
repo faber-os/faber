@@ -79,6 +79,7 @@ fn core() -> TestCore {
         usb_problems: Arc::clone(&usb_problems) as Arc<dyn UsbProblemDiscovery>,
         disks: Arc::clone(&disks) as Arc<dyn DiskDiscovery>,
         opener: Arc::new(SystemOpener::new(replays.clone())),
+        hardware: Arc::new(faber_core::ports::NoHardware),
         replays,
         connectors: faber_core::connectors::built_in(),
         timing: Timing::default(),

@@ -122,6 +122,8 @@ impl LineConnector {
         match self.package.manifest.port {
             PortRequirement::Serial { baud } => format!("{baud} baud"),
             PortRequirement::Bridge => "its bridge".into(),
+            // A line connector only ever runs on a serial port.
+            PortRequirement::I2c { .. } | PortRequirement::Spi | PortRequirement::Gpio => "its bus".into(),
         }
     }
 

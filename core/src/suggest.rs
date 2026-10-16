@@ -43,6 +43,7 @@ mod tests {
 
     fn usb(vid: u16, pid: u16) -> PortEntry {
         PortEntry {
+            reserved: None,
             id: PortId::Usb { vid, pid, serial: None },
             kind: PortKind::UsbSerial,
             label: "x".into(),
@@ -71,6 +72,7 @@ mod tests {
     #[test]
     fn recordings_suggest_what_they_were_made_with() {
         let p = PortEntry {
+            reserved: None,
             id: PortId::Replay("demo-ld19".into()),
             kind: PortKind::Replay,
             label: "x".into(),

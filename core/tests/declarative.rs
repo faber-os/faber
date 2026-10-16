@@ -66,6 +66,7 @@ pub fn core(connectors: &[(&str, &str)], replays: Vec<(&str, Vec<Chunk>)>) -> Te
         usb_problems: Arc::new(NoUsbProblems),
         disks: Arc::new(NoDisks),
         opener: Arc::new(SystemOpener::new(library.clone())),
+        hardware: Arc::new(faber_core::ports::NoHardware),
         replays: library,
         connectors: faber_core::connectors::built_in(),
         timing: faber_core::runtime::Timing::default(),

@@ -140,6 +140,11 @@ async fn system(State(s): State<AppState>) -> Json<dto::SystemInfo> {
             hint: e.hint,
             reason: None,
         }),
+        buses: match s.machine.bus_support() {
+            crate::ports::BusSupport::System => dto::Buses::System,
+            crate::ports::BusSupport::Fake => dto::Buses::Fake,
+            crate::ports::BusSupport::None => dto::Buses::None,
+        },
     })
 }
 
@@ -222,6 +227,7 @@ async fn add_part(
         name: body.name,
         connector: body.connector,
         port: body.port,
+        address: body.address,
         simulate: body.simulate.map(convert::simulate_from),
         mount: body.mount.unwrap_or_default(),
         settings,

@@ -11,6 +11,10 @@ export type PartInfo = { name: string, connector: string,
  */
 port?: string, 
 /**
+ * Its address, for a part on an I²C bus.
+ */
+address?: number, 
+/**
  * Set for a simulated part (D36): where its values come from.
  */
 simulate?: Simulate, state: PartState, signals: Array<SignalInfo>, mount: Mount, 

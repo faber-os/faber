@@ -10,11 +10,13 @@
 
 use crate::clock::SharedClock;
 use crate::names::{PartName, SignalAddress};
-use crate::ports::{PortEntry, PortEvent, PortOpener, spawn_reader};
+use crate::ports::{AddressedDevice, Hardware, PortEntry, PortEvent, PortId, PortOpener, spawn_reader};
 use crate::router::{PublishError, Router};
 use faber_capabilities::{Command, Reading};
+use faber_connector::bus::{GpioLine, PortAccess, SpiDevice};
 use faber_connector::{
-    Applied, CommandError, Connector, Context, Definition, Health, Manifest, Problem, Settings,
+    Applied, CommandError, Connector, Context, Definition, Health, Manifest, PortRequirement, Problem,
+    Settings,
 };
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -118,6 +120,8 @@ pub struct RunSpec {
     pub create: faber_connector::CreateFn,
     pub settings: Settings,
     pub port: PortEntry,
+    /// Its address, for a part on an I²C bus.
+    pub address: Option<u8>,
 }
 
 impl RunSpec {
@@ -128,7 +132,13 @@ impl RunSpec {
             create: Arc::clone(&definition.create),
             settings,
             port,
+            address: None,
         }
+    }
+
+    /// The same part, at this address on its I²C bus.
+    pub fn at_address(self, address: Option<u8>) -> RunSpec {
+        RunSpec { address, ..self }
     }
 }
 
@@ -137,6 +147,8 @@ impl RunSpec {
 pub struct RunDeps {
     pub clock: SharedClock,
     pub opener: Arc<dyn PortOpener>,
+    /// Opens I²C, SPI and GPIO devices.
+    pub hardware: Arc<dyn Hardware>,
     pub router: Arc<Router>,
     pub status: Arc<StatusBoard>,
     pub timing: Timing,
@@ -210,6 +222,29 @@ fn not_running(name: &PartName) -> CommandError {
     ))
 }
 
+/// The device a part on a bus has, lent to its connector through [`Context::port`].
+enum Lent {
+    I2c(AddressedDevice),
+    Spi(Box<dyn SpiDevice>),
+    Gpio(Box<dyn GpioLine>),
+}
+
+/// Opens a bus part's own device: its address on its I²C bus, its SPI device, its GPIO line.
+fn open_device(spec: &RunSpec, hardware: &dyn Hardware) -> std::io::Result<Lent> {
+    let wrong = |what: String| std::io::Error::new(std::io::ErrorKind::InvalidInput, what);
+    match (&spec.manifest.port, &spec.port.id) {
+        (PortRequirement::I2c { .. }, PortId::I2c(bus)) => {
+            let address = spec.address.ok_or_else(|| wrong("the part has no I²C address".into()))?;
+            Ok(Lent::I2c(AddressedDevice::new(hardware.open_i2c(*bus)?, address)))
+        }
+        (PortRequirement::Spi, PortId::Spi { bus, cs }) => Ok(Lent::Spi(hardware.open_spi(*bus, *cs)?)),
+        (PortRequirement::Gpio, PortId::Gpio(line)) => {
+            Ok(Lent::Gpio(hardware.open_gpio(*line, &crate::ports::gpio_consumer(spec.name.as_str()))?))
+        }
+        _ => Err(wrong(format!("a {} part can't use {}", spec.manifest.port.kind(), spec.port.id))),
+    }
+}
+
 /// The connector's view of the core while it runs.
 struct PartContext<'a> {
     part: &'a PartName,
@@ -218,6 +253,8 @@ struct PartContext<'a> {
     status: &'a StatusBoard,
     /// A connector bug found while it ran (publishing the wrong capability); ends the run.
     bug: Option<Problem>,
+    /// The device of a part on a bus.
+    device: Option<Lent>,
 }
 
 impl Context for PartContext<'_> {
@@ -247,6 +284,14 @@ impl Context for PartContext<'_> {
             Health::Failed(p) => PartStatus::Failed(p),
         };
         self.status.set(self.part, status);
+    }
+
+    fn port(&mut self) -> Option<PortAccess<'_>> {
+        Some(match self.device.as_mut()? {
+            Lent::I2c(d) => PortAccess::I2c(d),
+            Lent::Spi(d) => PortAccess::Spi(d.as_mut()),
+            Lent::Gpio(d) => PortAccess::Gpio(d.as_mut()),
+        })
     }
 }
 
@@ -377,34 +422,49 @@ fn run_once(
     stop: &Arc<AtomicBool>,
     (run, events, inbox): (u64, &Sender<Event>, &Receiver<Event>),
 ) -> RunEnd {
-    let baud = match spec.manifest.port {
-        faber_connector::PortRequirement::Serial { baud } => baud,
-        faber_connector::PortRequirement::Bridge => unreachable!("`supervise` never runs a bridge part"),
-    };
-    let (reader, _writer) = match deps.opener.open(&spec.port, baud) {
-        Ok(rw) => rw,
-        Err(e) => {
-            return RunEnd::PortFailed(Problem::new(
-                format!("Could not open {}: {e}", spec.port.label),
-                "Check that it is plugged in and that no other program (for example a serial terminal) uses it.",
-            ));
+    let (device, reader) = match spec.manifest.port {
+        PortRequirement::Serial { baud } => {
+            let (reader, _writer) = match deps.opener.open(&spec.port, baud) {
+                Ok(rw) => rw,
+                Err(e) => {
+                    return RunEnd::PortFailed(Problem::new(
+                        format!("Could not open {}: {e}", spec.port.label),
+                        "Check that it is plugged in and that no other program (for example a serial terminal) uses it.",
+                    ));
+                }
+            };
+            let tx = events.clone();
+            let reader_stop = Arc::new(AtomicBool::new(false));
+            let reader_thread = spawn_reader(
+                reader,
+                Arc::clone(&deps.clock),
+                move |e| tx.send(Event::Port(run, e)).is_ok(),
+                Arc::clone(&reader_stop),
+            );
+            (None, Some((reader_thread, reader_stop)))
+        }
+        PortRequirement::Bridge => unreachable!("`supervise` never runs a bridge part"),
+        PortRequirement::I2c { .. } | PortRequirement::Spi | PortRequirement::Gpio => {
+            match open_device(spec, deps.hardware.as_ref()) {
+                Ok(d) => (Some(d), None),
+                Err(e) => {
+                    return RunEnd::PortFailed(Problem::new(
+                        format!("Could not open {}: {e}", spec.port.label),
+                        "Check that the bus is switched on (raspi-config, Interface Options) and that no other program uses it. Faber tries again by itself.",
+                    ));
+                }
+            }
         }
     };
-    let tx = events.clone();
-    let reader_stop = Arc::new(AtomicBool::new(false));
-    let reader_thread = spawn_reader(
-        reader,
-        Arc::clone(&deps.clock),
-        move |e| tx.send(Event::Port(run, e)).is_ok(),
-        Arc::clone(&reader_stop),
-    );
     let mut ctx = PartContext {
         part: &spec.name,
         manifest: &spec.manifest,
         router: &deps.router,
         status: &deps.status,
         bug: None,
+        device,
     };
+    let reader_finished = || reader.as_ref().is_some_and(|(t, _)| t.is_finished());
     let mut next_tick = Instant::now();
     let end = loop {
         if stop.load(Ordering::Relaxed) {
@@ -428,7 +488,7 @@ fn run_once(
                 let _ = reply.send(answer);
                 result.map(|_| ())
             }
-            Err(RecvTimeoutError::Timeout) if reader_thread.is_finished() => {
+            Err(RecvTimeoutError::Timeout) if reader_finished() => {
                 break RunEnd::PortFailed(Problem::new(
                     format!("{} stopped working.", spec.port.label),
                     "Check the cable and the power. Faber reconnects as soon as the port is back.",
@@ -451,8 +511,10 @@ fn run_once(
             break RunEnd::Crashed(bug);
         }
     };
-    reader_stop.store(true, Ordering::Relaxed);
-    let _ = reader_thread.join();
+    if let Some((thread, stop)) = reader {
+        stop.store(true, Ordering::Relaxed);
+        let _ = thread.join();
+    }
     end
 }
 
@@ -608,7 +670,9 @@ mod tests {
                 label: "FAKE".into(),
                 path: Some("FAKE".into()),
                 usb: None,
+                reserved: None,
             },
+            address: None,
         }
     }
 
@@ -616,6 +680,7 @@ mod tests {
         RunDeps {
             clock: Arc::new(MonotonicClock::new()),
             opener,
+            hardware: Arc::new(crate::ports::NoHardware),
             router: Arc::new(Router::new()),
             status: Arc::new(StatusBoard::default()),
             timing: Timing {
