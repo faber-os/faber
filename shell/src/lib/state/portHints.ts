@@ -56,6 +56,17 @@ export function portKindLabel(port: Pick<PortInfo, 'kind'>): string {
   }
 }
 
+/**
+ * Whether a port's label already names its id, so showing both would say it twice: a port the
+ * core can only tell apart by its system name has the id `serial:COM6`, and its label is "COM6"
+ * or ends in "(COM6)". A USB id (`usb:2341:0042`) says something the label doesn't, so it is shown.
+ */
+export function labelNamesId(port: Pick<PortInfo, 'id' | 'label'>): boolean {
+  if (!port.id.startsWith('serial:')) return false;
+  const path = port.id.slice('serial:'.length);
+  return port.label === path || port.label.endsWith(`(${path})`);
+}
+
 /** Port problems with the same code shown once, with how many there are. */
 export function groupPortProblems(
   problems: readonly PortProblem[],

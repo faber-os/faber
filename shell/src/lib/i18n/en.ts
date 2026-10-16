@@ -1007,6 +1007,7 @@ export const en = {
   'serial.port.none': 'No ports found',
   'serial.port.option': '{label} ({id})',
   'serial.port.optionBluetooth': 'Bluetooth: {label} ({id})',
+  'serial.port.optionBluetoothNoId': 'Bluetooth: {label}',
   'serial.port.optionBusy': '{option} · {reason}',
   'serial.baud.label': 'Baud',
   'serial.close': 'Close port',

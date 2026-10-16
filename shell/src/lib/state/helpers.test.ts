@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { RingBuffer } from './ringBuffer';
 import { validatePartName } from './partName';
-import { groupPortProblems, portHints, portAvailability, portKindLabel } from './portHints';
+import {
+  groupPortProblems,
+  labelNamesId,
+  portHints,
+  portAvailability,
+  portKindLabel,
+} from './portHints';
 import { defaultRecordingName, validateRecordingName } from './recordingName';
 import { filterLogs, LOG_LEVELS } from './logFilter';
 import type { ConnectorInfo, LogEntry, PortInfo } from './types';
@@ -151,5 +157,18 @@ describe('groupPortProblems', () => {
       { ...other, count: 1 },
     ]);
     expect(groupPortProblems([])).toEqual([]);
+  });
+});
+
+describe('labelNamesId', () => {
+  it('is true when a serial id is already in the label', () => {
+    expect(labelNamesId({ id: 'serial:COM6', label: 'Arduino Mega 2560 (COM6)' })).toBe(true);
+    expect(labelNamesId({ id: 'serial:/dev/ttyACM0', label: '/dev/ttyACM0' })).toBe(true);
+  });
+
+  it('is false for another port, a USB id or a recording', () => {
+    expect(labelNamesId({ id: 'serial:COM6', label: 'Arduino Mega 2560 (COM16)' })).toBe(false);
+    expect(labelNamesId({ id: 'usb:2341:0042', label: 'Arduino Mega 2560 (COM6)' })).toBe(false);
+    expect(labelNamesId({ id: 'replay:x', label: 'Recording: x' })).toBe(false);
   });
 });

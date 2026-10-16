@@ -1,6 +1,6 @@
 <script lang="ts">
   import { useCore } from '../lib/state/context';
-  import { portAvailability } from '../lib/state/portHints';
+  import { labelNamesId, portAvailability } from '../lib/state/portHints';
   import { defaultRecordingName, validateRecordingName } from '../lib/state/recordingName';
   import { wallParts } from '../lib/desktop/wallClock';
   import {
@@ -194,13 +194,14 @@
         {#if ports.length === 0}<option value="">{t('serial.port.none')}</option>{/if}
         {#each ports as p (p.id)}
           {@const a = portAvailability(p)}
-          {@const name = t(
-            p.kind === 'bluetooth' ? 'serial.port.optionBluetooth' : 'serial.port.option',
-            {
-              label: p.label,
-              id: p.id,
-            },
-          )}
+          {@const name = labelNamesId(p)
+            ? p.kind === 'bluetooth'
+              ? t('serial.port.optionBluetoothNoId', { label: p.label })
+              : p.label
+            : t(p.kind === 'bluetooth' ? 'serial.port.optionBluetooth' : 'serial.port.option', {
+                label: p.label,
+                id: p.id,
+              })}
           <option value={p.id}
             >{a.free ? name : t('serial.port.optionBusy', { option: name, reason: a.text })}</option
           >

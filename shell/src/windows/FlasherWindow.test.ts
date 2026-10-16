@@ -152,6 +152,16 @@ describe('Arduino flasher', () => {
     expect(screen.queryByRole('button', { name: 'Check for a FaberLink board' })).toBeNull();
   });
 
+  it('names a port once when its label already ends in it', async () => {
+    const mega = { ...UNO_PORT, id: 'serial:COM6', label: 'Arduino Mega 2560 (COM6)' };
+    const shell = fakeShell([{ path: '/api/v0/flasher/boards', body: BOARDS }]);
+    shell.pushPorts([mega]);
+    render(FlasherWindow, { props: { win, visible: true }, context: shell.context });
+    const option = await screen.findByRole('option', { name: /Arduino Mega 2560/ });
+    expect(option.textContent).toMatch(/^Arduino Mega 2560 \(COM6\)/);
+    expect(option.textContent).not.toContain('serial:COM6');
+  });
+
   it('asks for the board on a clone', async () => {
     await setup();
     await userEvent.selectOptions(screen.getByLabelText('Port'), CLONE_PORT.id);

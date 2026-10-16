@@ -194,6 +194,34 @@ describe('Serial monitor', () => {
     ).toBeInTheDocument();
   });
 
+  it('names a port once: no id after a label that already ends in it', async () => {
+    const shell = fakeShell();
+    shell.pushPorts([
+      // Two Megas: the core can only tell them apart by their COM port.
+      { id: 'serial:COM6', kind: 'usb-serial', label: 'Arduino Mega 2560 (COM6)', suggestions: [] },
+      { id: 'serial:COM9', kind: 'serial', label: 'COM9', suggestions: [] },
+      {
+        id: 'serial:COM7',
+        kind: 'bluetooth',
+        label: 'Standard Serial over Bluetooth link (COM7)',
+        suggestions: [],
+      },
+      {
+        id: 'usb:2341:0042',
+        kind: 'usb-serial',
+        label: 'Arduino Mega 2560 (COM4)',
+        suggestions: [],
+      },
+    ]);
+    render(SerialMonitorWindow, { props: { win, visible: true }, context: shell.context });
+    await screen.findByRole('option', { name: 'Arduino Mega 2560 (COM6)' });
+    const names = screen.getAllByRole('option').map((o) => o.textContent?.trim());
+    expect(names).toContain('COM9');
+    expect(names).toContain('Bluetooth: Standard Serial over Bluetooth link (COM7)');
+    // A USB id says something the label doesn't (which board model), so it stays.
+    expect(names).toContain('Arduino Mega 2560 (COM4) (usb:2341:0042)');
+  });
+
   it('lets a port problem be dismissed, as in Parts', async () => {
     const shell = await setup();
     const problem = {
