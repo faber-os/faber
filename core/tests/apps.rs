@@ -600,6 +600,66 @@ async fn a_trap_ends_the_lease_and_stops_the_base() {
     assert_eq!(holder(&c, "base"), None);
 }
 
+/// A role with `count = "0..1"` or `"0.."` may stay empty: the app runs without it, and a part
+/// picked for it later is checked like any other.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_app_runs_without_its_optional_roles() {
+    let Some(wasm) = component("faber-test-app") else { return };
+    let c = sennep_by_a_wall().await;
+    let manifest = format!(
+        "{TRAPPER}[[requires]]
+role = \"pack\"
+capability = \"battery@1\"
+count = \"0..1\"
+         [[requires]]
+role = \"ring\"
+capability = \"distance@1\"
+count = \"0..\"
+"
+    );
+    let files: BTreeMap<String, Vec<u8>> = [
+        ("faber.toml", manifest.as_bytes()),
+        ("README.md", b"# Trapper".as_slice()),
+        ("LICENSE", b"MIT".as_slice()),
+        ("app.wasm", wasm.as_slice()),
+    ]
+    .into_iter()
+    .map(|(n, d)| (n.to_string(), d.to_vec()))
+    .collect();
+    let (s, e) = install(&c, packages::pack(&files).unwrap(), "trapper.faberpkg").await;
+    assert_eq!(s, StatusCode::CREATED, "{e}");
+    let (_, a) = call(&c.app, "GET", "/api/v0/apps/trapper", None).await;
+    let counts: Vec<&str> =
+        a["roles"].as_array().unwrap().iter().map(|r| r["count"].as_str().unwrap()).collect();
+    assert_eq!(counts, ["1", "0..1", "0.."], "{a}");
+    call(&c.app, "PUT", "/api/v0/apps/trapper/roles", Some(json!({"roles": {"base": "base"}}))).await;
+    call(&c.app, "POST", "/api/v0/apps/trapper/enable", None).await;
+    app_state_where(&c, "trapper", "it runs without a pack or a ring", kind_is("running")).await;
+
+    // A 0..1 role still takes one part at most, and a 0.. role is written as a list.
+    let (s, e) = call(
+        &c.app,
+        "PUT",
+        "/api/v0/apps/trapper/roles",
+        Some(json!({"roles": {"base": "base", "pack": ["lidar", "base"]}})),
+    )
+    .await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::BAD_REQUEST, Some("too-many-parts")), "{e}");
+    let (s, e) = call(
+        &c.app,
+        "PUT",
+        "/api/v0/apps/trapper/roles",
+        Some(json!({"roles": {"base": "base", "ring": ["lidar"]}})),
+    )
+    .await;
+    assert_eq!(
+        (s, e["error"]["code"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("role-mismatch")),
+        "{e}"
+    );
+    call(&c.app, "POST", "/api/v0/apps/trapper/disable", None).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_connector_is_not_an_app() {
     let Some(wasm) = component("faber-test-guest") else { return };

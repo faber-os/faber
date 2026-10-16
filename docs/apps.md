@@ -105,7 +105,8 @@ its line. `[package]` has `type = "app"`, `module` (a `.wasm` next to `faber.tom
 (`"ui/"`), `tick-hz` (1–100, default 10, only with a module); at least one of `module` and `ui`.
 `[window]` (`title`, `icon`, `width`, `height` 100–4000 px, `pinned`) only with a UI.
 `[[requires]]`: `role`, `capability`, `command` (only for a capability that takes commands),
-`count` (`"1"` or `"1.."`). `[[suggests]]`: `connector`, `for-role` (a role above).
+`count` (`"1"` or `"1.."`; since 5d also `"0..1"` and `"0.."` for a role the app runs without).
+`[[suggests]]`: `connector`, `for-role` (a role above).
 `[[publishes]]`: `name`, `capability` (not one that takes commands: derived signals are
 read-only). `accept = ["part", "derived"]` (a role filled by another app's derived signal) is
 **not built**: roles take parts only.

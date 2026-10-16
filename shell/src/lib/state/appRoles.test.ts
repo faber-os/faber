@@ -6,6 +6,7 @@ import {
   initialPicks,
   picksChanged,
   rolesRequest,
+  isOptional,
   takesMany,
 } from './appRoles';
 import type { AppRole } from './types';
@@ -31,6 +32,14 @@ const ring: AppRole = {
   count: '1..',
   parts: [],
 };
+const pack: AppRole = {
+  role: 'pack',
+  capability: 'battery@1',
+  command: false,
+  count: '0..1',
+  parts: [],
+};
+const near: AppRole = { ...ring, role: 'near', count: '0..' };
 const parts = [part('lidar'), simBase('base'), simDistance('front'), simDistance('back')];
 
 describe('app roles', () => {
@@ -62,6 +71,17 @@ describe('app roles', () => {
   it('sends one part for a one-part role and a list for a 1.. role, leaving empty roles out', () => {
     const picks = { lidar: ['lidar'], base: [], ring: ['front'] };
     expect(rolesRequest([lidar, base, ring], picks)).toEqual({ lidar: 'lidar', ring: ['front'] });
+  });
+
+  it('lets an optional role stay empty, one part or a list as its count says', () => {
+    expect([pack, near, lidar, ring].map(isOptional)).toEqual([true, true, false, false]);
+    expect([pack, near].map(takesMany)).toEqual([false, true]);
+    expect(allFilled([lidar, pack, near], { lidar: ['lidar'] })).toBe(true);
+    expect(allFilled([pack], { pack: ['a', 'b'] })).toBe(false);
+    expect(rolesRequest([pack, near], { pack: ['p'], near: ['front'] })).toEqual({
+      pack: 'p',
+      near: ['front'],
+    });
   });
 
   it('knows when the picks differ from what the app has', () => {

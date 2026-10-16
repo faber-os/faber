@@ -54,7 +54,7 @@ pub struct Role {
     pub capability: String,
     /// The app may drive it (`command = true`).
     pub command: bool,
-    /// How many parts fill it (1, or more for `count = "1.."`).
+    /// How many parts fill it (1, more for `count = "1.."` or `"0.."`, maybe 0 for an optional role).
     pub parts: u32,
 }
 

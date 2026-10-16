@@ -9,9 +9,14 @@ import type { AppRole, PartInfo, RoleParts } from './types';
 /** The parts picked for each role, by role name. */
 export type RolePicks = Record<string, string[]>;
 
-/** Whether a role takes several parts (`count = "1.."`). */
+/** Whether a role takes several parts (`count = "1.."` or `"0.."`). */
 export function takesMany(role: AppRole): boolean {
-  return role.count !== '1';
+  return role.count === '1..' || role.count === '0..';
+}
+
+/** Whether the app runs without a part for the role (`count = "0..1"` or `"0.."`). */
+export function isOptional(role: AppRole): boolean {
+  return role.count.startsWith('0');
 }
 
 /** The parts that can fill a role: those that provide its capability, by name. */
@@ -37,15 +42,15 @@ export function initialPicks(roles: readonly AppRole[], parts: readonly PartInfo
   return picks;
 }
 
-/** Every role has a part (and a one-part role only one). */
+/** Every role the app needs has a part (and a one-part role only one); optional roles may be empty. */
 export function allFilled(roles: readonly AppRole[], picks: RolePicks): boolean {
   return roles.every((r) => {
     const n = picks[r.role]?.length ?? 0;
-    return n > 0 && (takesMany(r) || n === 1);
+    return (n > 0 || isOptional(r)) && (takesMany(r) || n <= 1);
   });
 }
 
-/** The body of `PUT /apps/{id}/roles`: only roles with parts; one part, or a list for `1..`. */
+/** The body of `PUT /apps/{id}/roles`: only roles with parts; one part, or a list for `1..`/`0..`. */
 export function rolesRequest(
   roles: readonly AppRole[],
   picks: RolePicks,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
-import { fakeShell, part, simBase } from '../test/fakeShell';
+import { fakeShell, part, simBase, simBattery } from '../test/fakeShell';
 import type { FakeRoute } from '../test/fakeFetch';
 import { openEntry } from '../components/fileOps';
 import { openDroppedPackage } from '../components/installWindow';
@@ -247,6 +247,37 @@ describe('Install window for an app', () => {
     expect(appWin).toMatchObject({ key: 'wall-follower', title: 'Wall follower' });
     expect(appWin?.rect).toMatchObject({ w: 420, h: 260 });
     expect(shell.desktop.state.windows.some((w) => w.id === win.id)).toBe(false);
+  });
+
+  it('says which roles are optional and turns on without them', async () => {
+    const optional = {
+      ...APP,
+      roles: [
+        ...APP.roles,
+        { role: 'battery', capability: 'battery@1', command: false, count: '0..1', parts: [] },
+        { role: 'proximity', capability: 'distance@1', command: false, count: '0..', parts: [] },
+      ],
+    };
+    const { shell } = setup([
+      {
+        method: 'POST',
+        path: `/api/v0/packages?mode=preview&${NAME}`,
+        body: { ...APP_PREVIEW, app: optional },
+      },
+    ]);
+    shell.pushParts([part('lidar'), simBase('base'), simBattery('pack'), simBattery('spare')]);
+    const battery = await screen.findByRole('combobox', { name: 'battery' });
+    expect([...battery.querySelectorAll('option')].map((o) => o.textContent)).toEqual([
+      'None',
+      'pack',
+      'spare',
+    ]);
+    const roles = screen.getByRole('list', { name: 'Roles' });
+    expect(roles).toHaveTextContent('one part, optional');
+    expect(roles).toHaveTextContent('any number of parts, optional');
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'Turn it on now' })).toBeEnabled(),
+    );
   });
 
   it('suggests the only part that fits, and installs without turning on', async () => {

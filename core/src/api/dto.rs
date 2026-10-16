@@ -402,7 +402,7 @@ pub struct AppPackagePreview {
     pub checked: bool,
 }
 
-/// The parts for one role: one part's name, or a list (for a `count = "1.."` role).
+/// The parts for one role: one part's name, or a list (for a `count = "1.."` or `"0.."` role).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(untagged)]
 #[ts(export)]

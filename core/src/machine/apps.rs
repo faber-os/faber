@@ -259,7 +259,7 @@ impl Machine {
                         ),
                     ));
                 };
-                if spec.count == Count::One && parts.len() > 1 {
+                if !spec.count.many() && parts.len() > 1 {
                     return Err(bad(
                         "too-many-parts",
                         format!("The role \"{role}\" takes one part, not {}.", parts.len()),
@@ -305,7 +305,7 @@ impl Machine {
             }
         }
         let lists: Vec<&str> =
-            m.requires.iter().filter(|r| r.count == Count::OneOrMore).map(|r| r.role.as_str()).collect();
+            m.requires.iter().filter(|r| r.count.many()).map(|r| r.role.as_str()).collect();
         let (text, parsed) = self.read_apps_config();
         parsed.map_err(|e| {
             let p = roles_problem(&e);
@@ -582,13 +582,13 @@ fn desired(st: &State, d: &AppDefinition, config: &Result<AppsConfig, RolesError
     let mut bound = Vec::new();
     for spec in &d.manifest.requires {
         let parts = entry.roles.get(&spec.role).cloned().unwrap_or_default();
-        if parts.is_empty() {
+        if parts.is_empty() && spec.count.required() {
             return Desired::Not(AppStatus::Invalid(Problem::new(
                 format!("The role \"{}\" has no part, so the app can't run.", spec.role),
                 format!("Pick a part that provides {} for it.", spec.capability.id()),
             )));
         }
-        if spec.count == Count::One && parts.len() > 1 {
+        if !spec.count.many() && parts.len() > 1 {
             return Desired::Not(AppStatus::Invalid(Problem::new(
                 format!("The role \"{}\" takes one part, but apps.toml names {}.", spec.role, parts.len()),
                 "Pick one part for it.",
