@@ -26,6 +26,8 @@ futures-util = "0.3.34"
 # Free and total space on the data folder's disk (GET /api/v0/storage). Only its statvfs is used.
 fs4 = { version = "1.1.0", default-features = false }
 # The machine's IANA time zone (GET /api/v0/system).
+# Unpacks arduino-cli's .tar.gz release (Linux, macOS); the .zip goes through `zip` below.
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 # Wall-clock time in an IANA zone: backup names and checking the time-zone setting.
 jiff = "0.2.38"
 ldrobot-ld19 = { version = "0.1.0", path = "../connectors/ldrobot-ld19" }
@@ -35,6 +37,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_bytes = "0.11.19"
 serde_json = "1.0.154"
 serialport = "4.10.1"
+# The Arduino editor: build ids, and checking a download against its published SHA-256.
+sha2 = "0.10.9"
 thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal", "fs", "io-util"] }
 toml = "1.1.8"
@@ -42,6 +46,9 @@ toml_edit = "0.25.17"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ts-rs = { version = "12.0.1", features = ["serde-json-impl"] }
+# Downloads arduino-cli from Arduino's GitHub releases, only when the user confirms "Install
+# Arduino tools" (docs/arduino-editor.md). Pure Rust TLS, so the core stays one binary.
+ureq = { version = "3.4.0", default-features = false, features = ["rustls"] }
 # Runs wasm connectors as sandboxed components (docs/packages.md §3, D07, D09). No WASI: the
 # only thing a connector can call is the core's `context`.
 wasmtime = { version = "49.0.3", default-features = false, features = ["cranelift", "runtime", "component-model", "std", "parallel-compilation"] }
