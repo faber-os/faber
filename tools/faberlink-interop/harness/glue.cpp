@@ -13,6 +13,7 @@
 #include "FaberLink.h"
 #include "FaberServo.h"
 #include "FaberEncoder.h"
+#include "FaberImu.h"
 
 namespace {
 
@@ -52,6 +53,15 @@ struct Pins {
   int servoMin[256], servoMax[256];
   // The routine attached to each external interrupt (D2, D3).
   void (*isr[2])(void) = {0, 0};
+  // The I2C bus: a register file for each address that answers (present), the register pointer
+  // a transfer set, what a read will hand out, and whether begin() and a time-out were set.
+  bool i2cPresent[128] = {};
+  uint8_t i2cRegs[128][256] = {};
+  uint8_t i2cPointer[128] = {};
+  std::vector<uint8_t> i2cOut, i2cIn;
+  int i2cAddress = -1;
+  bool wireBegun = false;
+  uint32_t wireTimeoutUs = 0;
   std::vector<PinWrite> log;
   unsigned long nowMs;
   unsigned long echoUs;
@@ -83,7 +93,8 @@ class FakeSerial : public HardwareSerial {
 // maxVelocity as the trigger distance), 7 FaberOutput(name, pin, driver as the mode, pins[1] as
 // the active level), 8 FaberServo(name, pin, 0, 180, driver as the safe state), 9 FaberEncoder(name,
 // pins[0], pins[1], maxVelocity as the pulses per rev), 10 FaberMotor(name, pins[0], pins[1]) using
-// the encoder declared just before it, 11 FaberAnalogIn(name, pins[0], 10, 5.0).
+// the encoder declared just before it, 11 FaberAnalogIn(name, pins[0], 10, 5.0), 12 FaberImu(name,
+// pins[0] as its address).
 struct PartSpec {
   uint8_t type;
   const char* name;
@@ -108,6 +119,7 @@ struct Sketch {
   std::vector<std::unique_ptr<FaberServo>> servos;
   std::vector<std::unique_ptr<FaberEncoder>> encoders;
   std::vector<std::unique_ptr<FaberAnalogIn>> analogs;
+  std::vector<std::unique_ptr<FaberImu>> imus;
 };
 
 // Parts register themselves in a global table until the next FaberLink::begin(), as globals in a
@@ -167,6 +179,61 @@ void attachInterrupt(uint8_t interrupt, void (*isr)(void), int) {
 void noInterrupts() {}
 
 void interrupts() {}
+
+// The stand-in Wire library: a write sets a device's register pointer, then writes registers from
+// it on; a read hands out registers from the pointer on. Absent devices don't acknowledge.
+TwoWire Wire;
+
+void TwoWire::begin() {
+  if (current) current->wireBegun = true;
+}
+
+void TwoWire::setWireTimeout(uint32_t timeout, bool) {
+  if (current) current->wireTimeoutUs = timeout;
+}
+
+void TwoWire::beginTransmission(uint8_t address) {
+  if (!current) return;
+  current->i2cAddress = address & 0x7F;
+  current->i2cOut.clear();
+}
+
+size_t TwoWire::write(uint8_t data) {
+  if (!current) return 0;
+  current->i2cOut.push_back(data);
+  return 1;
+}
+
+uint8_t TwoWire::endTransmission(bool) {
+  if (!current || current->i2cAddress < 0) return 4;
+  const int a = current->i2cAddress;
+  if (!current->i2cPresent[a]) return 2;  // address not acknowledged
+  if (!current->i2cOut.empty()) {
+    uint8_t reg = current->i2cOut[0];
+    current->i2cPointer[a] = reg;
+    for (size_t i = 1; i < current->i2cOut.size(); i++) current->i2cRegs[a][reg++] = current->i2cOut[i];
+  }
+  return 0;
+}
+
+uint8_t TwoWire::requestFrom(uint8_t address, uint8_t quantity) {
+  if (!current) return 0;
+  const int a = address & 0x7F;
+  current->i2cIn.clear();
+  if (!current->i2cPresent[a]) return 0;
+  uint8_t reg = current->i2cPointer[a];
+  for (uint8_t i = 0; i < quantity; i++) current->i2cIn.push_back(current->i2cRegs[a][reg++]);
+  return quantity;
+}
+
+int TwoWire::available() { return current ? static_cast<int>(current->i2cIn.size()) : 0; }
+
+int TwoWire::read() {
+  if (!current || current->i2cIn.empty()) return -1;
+  const int v = current->i2cIn.front();
+  current->i2cIn.erase(current->i2cIn.begin());
+  return v;
+}
 
 // The stand-in Servo library: the pulse goes to the pin while attached.
 uint8_t Servo::attach(int pin) { return attach(pin, 544, 2400); }
@@ -269,6 +336,13 @@ void* fla_new(const PartSpec* parts, size_t n) {
       case 11:
         s->analogs.emplace_back(new FaberAnalogIn(name, p.pins[0]));
         break;
+      case 12:
+        if (p.pins[0] == faberlink::IMU_ADDRESS_68) {
+          s->imus.emplace_back(new FaberImu(name));  // the shortest call
+        } else {
+          s->imus.emplace_back(new FaberImu(name, static_cast<faberlink::ImuAddress>(p.pins[0])));
+        }
+        break;
       default:
         s->batteries.emplace_back(new FaberBattery(name, p.pins[0], 3.0f, 3));
         break;
@@ -340,4 +414,13 @@ void fla_set_digital(void* h, uint8_t pin, int32_t level) {
 }
 
 int32_t fla_servo_us(void* h, uint8_t pin) { return use(h)->pins.servoUs[pin]; }
+
+// A device at `address` on the I2C bus (present), or none.
+void fla_i2c_device(void* h, uint8_t address, int32_t present) { use(h)->pins.i2cPresent[address & 0x7F] = present != 0; }
+
+void fla_i2c_set(void* h, uint8_t address, uint8_t reg, uint8_t value) { use(h)->pins.i2cRegs[address & 0x7F][reg] = value; }
+
+uint8_t fla_i2c_get(void* h, uint8_t address, uint8_t reg) { return use(h)->pins.i2cRegs[address & 0x7F][reg]; }
+
+uint32_t fla_wire_timeout(void* h) { return use(h)->pins.wireBegun ? use(h)->pins.wireTimeoutUs : 0xFFFFFFFFu; }
 }

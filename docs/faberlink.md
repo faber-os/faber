@@ -219,6 +219,7 @@ layout maps 1:1 onto the types in `sdk/rust/capabilities` (and `wit/capabilities
 | 10 | `servo@1` (added 2026-10-16) |
 | 11 | `encoder@1` (added 2026-10-16) |
 | 12 | `analog-in@1` (added 2026-10-16) |
+| 13 | `imu@1` (added 2026-10-16) |
 
 Other capabilities have no FaberLink layout yet; one is added (with a new code) when a board needs
 it. A capability without info (`digital-in@1`) has an empty info layout, and the core's
@@ -237,6 +238,7 @@ it. A capability without info (`digital-in@1`) has an empty info layout, and the
 | `servo@1` | `holding u8 · angle_rad f32` (5 B): the angle it holds, 0 while released (holding 0). | `kind u8 · angle_rad f32` (5 B). `kind`: 0 set-angle, 1 release, 2 safe (the angle is 0 for 1 and 2). The safe state is `safe`: the board answers with set-angle to the angle it holds (hold) or release. | `min_angle_rad f32 · max_angle_rad f32 · safe_state u8` (9 B). `safe_state`: 0 hold, 1 release. |
 | `encoder@1` | `present u8 · count i64 · delta i32 · counts_per_s f32 · velocity_rad_s f32` (21 B). `present` bit 0: the rad/s are known (else sent as 0). `delta` is the counts since the previous reading. | — | `counts_per_rev f32` (4 B), NaN when not known. |
 | `analog-in@1` | `present u8 · fraction f32 · volts f32` (9 B). `present` bit 0: the volts are known (else sent as 0). `fraction` is 0..1, always finite. | — | — (0 B) |
+| `imu@1` | `present u8 · angular_velocity vec3 · linear_acceleration vec3`, then the present ones of `orientation` (x, y, z, w f32), `orientation_variance`, `angular_velocity_variance`, `linear_acceleration_variance` (vec3 each) in that order (25 B without them). `present` bits 0/1/2/3. A `vec3` is `x f32 · y f32 · z f32`; every value is finite. | — | — (0 B) |
 | `obstacle@1` | `detected u8` (1 B) | — | `kind u8 · trigger_distance_m f32` (5 B). `kind`: 0 bumper, 1 infrared, 2 limit. A NaN trigger distance means "unknown". |
 
 ## 5. Rules a board follows (the library enforces them, not the sketch)
@@ -393,10 +395,19 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   volts: `FaberAnalogIn knob("knob", A0);` (further arguments: readings a second, 10 by default,
   and the analog reference, 5 V). Each reading averages 4 `analogRead()`s. A thumb joystick is two
   of these and a `FaberButton`; a joystick as one `rc-input@1` part needs that capability first.
+- `FaberImu` (`imu@1`, `#include <FaberImu.h>`, 2026-10-16) reads an MPU6050 (a GY-521 board) on
+  I²C through the core's Wire library, with no third-party library: the registers and scales are
+  in the header, cited to InvenSense's register map (RM-MPU-6000A-00 rev. 4.2): awake on the X
+  gyro's clock, the 44/42 Hz filter, ±2 g and ±250 °/s. Rates in rad/s and accelerations in m/s²
+  (gravity included), 20 times a second; no orientation (the DMP isn't used).
+  `faberlink::IMU_ADDRESS_69` for AD0 high. Every transfer has a 3 ms time-out
+  (`Wire.setWireTimeout`, AVR core 1.8.3 and later), so a missing or stuck IMU never hangs `loop()`
+  and the board's safety checks; it is woken again when it answers. `whoAmI()` says which chip
+  answered, since boards sold as MPU6050 sometimes carry another.
 - Examples: `examples/MotorAndDistance`, `examples/MotorL298N` (two motors on an L298N),
   `examples/Ultrasonic`, `examples/BatteryMonitor`, `examples/ButtonAndBumper`,
-  `examples/LedAndRelay`, `examples/ServoArm`, `examples/WheelEncoder` and
-  `examples/KnobAndJoystick`. CI compiles every example for an Uno and a
+  `examples/LedAndRelay`, `examples/ServoArm`, `examples/WheelEncoder`,
+  `examples/KnobAndJoystick` and `examples/Mpu6050`. CI compiles every example for an Uno and a
   Mega.
 - **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
   does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
@@ -488,6 +499,7 @@ flash and 2 B of RAM (a virtual table entry per part class, and the loop in `pol
 | `ServoArm` (new, with the Servo library 1.3.0) | 8 576 B | 588 B | 9 808 B | 1 071 B |
 | `WheelEncoder` (new: a motor using an encoder) | 10 716 B | 673 B | 12 618 B | 1 057 B |
 | `KnobAndJoystick` (new: three analog inputs and a button) | 7 726 B | 677 B | 8 560 B | 1 049 B |
+| `Mpu6050` (new, with the core's Wire library) | 9 124 B | 736 B | 9 930 B | 1 108 B |
 | `MotorAndDistance` (with `useEncoder` in `Motor`) | 10 108 B (+34) | 638 B (+2) | 11 242 B (+34) | 1 010 B (+2) |
 | `MotorL298N` | 8 514 B (+42) | 594 B (+4) | 9 596 B (+42) | 966 B (+4) |
 

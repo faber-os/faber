@@ -31,6 +31,7 @@ const FILES: &[(&str, &str)] = &[
     ("servo", include_str!("parts/servo.toml")),
     ("encoder", include_str!("parts/encoder.toml")),
     ("potentiometer", include_str!("parts/potentiometer.toml")),
+    ("imu-mpu6050", include_str!("parts/imu-mpu6050.toml")),
 ];
 
 /// What a pin must be able to do for a role.

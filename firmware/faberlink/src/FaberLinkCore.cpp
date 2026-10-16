@@ -466,6 +466,25 @@ uint8_t AnalogIn::writeReading(uint8_t* out, uint32_t) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// IMUs
+
+Imu::Imu(const char* name, uint16_t readingPeriodMs) : Part(name, IMU, 0, readingPeriodMs == 0 ? 50 : readingPeriodMs) {}
+
+// imu@1 reading layout: present u8 (0: no orientation, no variances), angular velocity x, y, z,
+// linear acceleration x, y, z (f32).
+uint8_t Imu::writeReading(uint8_t* out, uint32_t) {
+  float w[3], a[3];
+  if (!measure(w, a)) return 0;
+  out[0] = 0;
+  for (uint8_t i = 0; i < 3; i++) {
+    if (!isFinite(w[i]) || !isFinite(a[i])) return 0;
+    putF32(out + 1 + 4 * i, w[i]);
+    putF32(out + 13 + 4 * i, a[i]);
+  }
+  return 25;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Battery
 
 namespace {

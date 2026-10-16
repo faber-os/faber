@@ -37,9 +37,10 @@ fn main() {
             "FaberLink.h",
             "FaberServo.h",
             "FaberEncoder.h",
+            "FaberImu.h",
         ],
     );
-    watch(&harness, &["harness.cpp", "glue.cpp", "arduino/Arduino.h", "arduino/Servo.h"]);
+    watch(&harness, &["harness.cpp", "glue.cpp", "arduino/Arduino.h", "arduino/Servo.h", "arduino/Wire.h"]);
 
     let mut build = cc::Build::new();
     strict(&mut build);

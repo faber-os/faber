@@ -46,6 +46,12 @@ shape = "out"
 pins = { signal = 26 }
 settings = { trigger-distance-m = 0 }
 
+[parts.imu]
+template = "imu-mpu6050"
+shape = "i2c"
+pins = {}
+settings = { address = "0x68", rate-hz = 20 }
+
 [parts.knob]
 template = "potentiometer"
 shape = "wiper"

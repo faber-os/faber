@@ -79,6 +79,7 @@ enum Capability : uint8_t {
   SERVO = 10,
   ENCODER = 11,
   ANALOG_IN = 12,
+  IMU = 13,
 };
 
 // Why an actuator's output changed (APPLIED.cause).
@@ -512,6 +513,21 @@ class AnalogIn : public Part {
 
  private:
   float referenceVolts_;
+};
+
+// imu@1 without fusion: rates (rad/s) and accelerations (m/s^2, gravity included) about and along
+// its own x, y and z. No info. It reports 20 times a second by default.
+class Imu : public Part {
+ public:
+  explicit Imu(const char* name, uint16_t readingPeriodMs = 50);
+  const char* capabilityId() const override { return "imu@1"; }
+  uint8_t writeInfo(uint8_t*) const override { return 0; }
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+
+ protected:
+  ~Imu() {}
+  // Fills the rates and accelerations; false when it can't measure now (nothing is sent).
+  virtual bool measure(float angularVelocity[3], float linearAcceleration[3]) = 0;
 };
 
 // The board's side of the protocol.

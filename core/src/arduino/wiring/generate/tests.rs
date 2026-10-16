@@ -5,7 +5,7 @@
 //! deliberate change; review the diff before committing it. CI's Arduino job compiles them too.
 
 use super::*;
-use crate::arduino::wiring::allocator::{Candidate, suggest};
+use crate::arduino::wiring::allocator::{Candidate, Severity, check, suggest};
 use crate::arduino::wiring::parts::{BuiltIn, templates};
 use crate::arduino::wiring::pins;
 use crate::arduino::wiring::plan;
@@ -21,9 +21,18 @@ fn everything(board: &str) -> Vec<Plan> {
     for t in templates() {
         for shape in &t.shapes {
             let c = Candidate { template: t.id.clone(), shape: Some(shape.id.clone()), ..Default::default() };
+            // It fits when every role has a pin and the plan with it has no errors (an I²C part
+            // can't join a plan that uses the bus's pins for something else).
             let fits = |p: &Plan| {
                 let s = suggest(&map, p, &BuiltIn, &[], &c).unwrap();
-                s.roles.iter().all(|r| r.optional || r.suggested.is_some()).then_some(s)
+                if !s.roles.iter().all(|r| r.optional || r.suggested.is_some()) {
+                    return None;
+                }
+                let mut with = p.clone();
+                with.parts.insert(s.name.clone(), s.part.clone());
+                let errors =
+                    check(&map, &with, &BuiltIn, &[]).into_iter().any(|e| e.severity == Severity::Error);
+                (!errors).then_some(s)
             };
             let s = match fits(plans.last().unwrap()) {
                 Some(s) => s,

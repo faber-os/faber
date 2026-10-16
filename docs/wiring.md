@@ -276,7 +276,10 @@ What exists, and where it differs in detail from the design above. The decisions
   needs an interrupt pin, B any digital pin; the allocator keeps interrupt pins for roles that need
   them, so B lands on a plain pin and counts 2 a pulse unless the plan puts it on one).
   `potentiometer` (`FaberAnalogIn`: knobs, sliders, a joystick axis, an LDR in a divider; a thumb
-  joystick is two of these and a button until `rc-input` exists).
+  joystick is two of these and a button until `rc-input` exists). `imu-mpu6050` (`FaberImu`:
+  `bus = "i2c"`, addresses 0x68/0x69 with the AD0 hint, so the allocator catches a clash with a
+  clock module at 0x68). The golden plans now also split when a part would make the plan wrong
+  (an I²C part where the bus's pins are already used as GPIO).
 - **Libraries a part needs.** A part whose class needs another library has its own header
   (`FaberServo.h` needs the Arduino Servo library). The Servo library comes with the Arduino IDE,
   but an `arduino-cli` run on its own (Faber's own copy, or the IDE's run by Faber) doesn't look

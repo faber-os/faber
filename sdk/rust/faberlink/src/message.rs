@@ -658,7 +658,7 @@ mod tests {
                     id,
                     count: 9,
                     lease_ms,
-                    capability: "imu@1".into(),
+                    capability: "thermal-camera@1".into(),
                     name,
                     info: PartInfo::Unknown(raw),
                 })

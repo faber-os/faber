@@ -16,6 +16,12 @@ template = "mosfet"
 shape = "sig"
 pins = { out = 5 }
 
+[parts.imu]
+template = "imu-mpu6050"
+shape = "i2c"
+pins = {}
+settings = { address = "0x68", rate-hz = 20 }
+
 [parts.knob]
 template = "potentiometer"
 shape = "wiper"

@@ -8,8 +8,9 @@ use crate::bytes::{Reader, Writer};
 use crate::{DecodeError, EncodeError};
 use faber_capabilities::{
     Capability, Command, Info, Reading, Timestamp, Twist2d, analog_in, battery, digital_in, digital_out,
-    distance, encoder, estop, motor, obstacle, planar_base, pwm_out, servo,
+    distance, encoder, estop, imu, motor, obstacle, planar_base, pwm_out, servo,
 };
+use faber_capabilities::{Quaternion, Vec3};
 
 /// The one-byte code a capability has in `READING`, `COMMAND` and `APPLIED` (protocol v1).
 pub fn code(capability: Capability) -> Option<u8> {
@@ -26,12 +27,9 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::Servo => 10,
         Capability::Encoder => 11,
         Capability::AnalogIn => 12,
+        Capability::Imu => 13,
         // No layout yet: the board side (the Arduino library) has none either.
-        Capability::LaserScan
-        | Capability::Pose
-        | Capability::Position
-        | Capability::Temperature
-        | Capability::Imu => {
+        Capability::LaserScan | Capability::Pose | Capability::Position | Capability::Temperature => {
             return None;
         }
     })
@@ -50,6 +48,17 @@ fn twist(w: &mut Writer, t: Twist2d) {
     w.f32(t.vx);
     w.f32(t.vy);
     w.f32(t.omega);
+}
+
+fn vec3(w: &mut Writer, v: Vec3) {
+    w.f32(v.x);
+    w.f32(v.y);
+    w.f32(v.z);
+}
+
+fn read_vec3(r: &mut Reader, field: &'static str) -> Result<Vec3, DecodeError> {
+    let v = Vec3 { x: r.f32()?, y: r.f32()?, z: r.f32()? };
+    if [v.x, v.y, v.z].iter().all(|c| c.is_finite()) { Ok(v) } else { Err(DecodeError::BadValue { field }) }
 }
 
 fn read_twist(r: &mut Reader) -> Result<Twist2d, DecodeError> {
@@ -142,6 +151,26 @@ pub fn encode_reading(reading: &Reading, out: &mut Vec<u8>) -> Result<(), Encode
         Reading::Servo(r) => {
             w.bool(r.angle_rad.is_some());
             w.f32(r.angle_rad.unwrap_or(0.0));
+        }
+        Reading::Imu(r) => {
+            w.u8(r.orientation.is_some() as u8
+                | (r.orientation_variance.is_some() as u8) << 1
+                | (r.angular_velocity_variance.is_some() as u8) << 2
+                | (r.linear_acceleration_variance.is_some() as u8) << 3);
+            vec3(w, r.angular_velocity);
+            vec3(w, r.linear_acceleration);
+            if let Some(q) = r.orientation {
+                w.f32(q.x);
+                w.f32(q.y);
+                w.f32(q.z);
+                w.f32(q.w);
+            }
+            for v in [r.orientation_variance, r.angular_velocity_variance, r.linear_acceleration_variance]
+                .into_iter()
+                .flatten()
+            {
+                vec3(w, v);
+            }
         }
         Reading::AnalogIn(r) => {
             w.bool(r.volts.is_some());
@@ -242,6 +271,32 @@ pub fn decode_reading(capability: Capability, t_us: Timestamp, bytes: &[u8]) -> 
                 return Err(DecodeError::BadValue { field: "angleRad" });
             }
             Reading::Servo(servo::Reading { t_us, angle_rad: holding.then_some(angle) })
+        }
+        Capability::Imu => {
+            let present = flags(r, 0b1111, "present")?;
+            let angular_velocity = read_vec3(r, "angularVelocity")?;
+            let linear_acceleration = read_vec3(r, "linearAcceleration")?;
+            let orientation = if present & 1 != 0 {
+                let q = Quaternion { x: r.f32()?, y: r.f32()?, z: r.f32()?, w: r.f32()? };
+                if ![q.x, q.y, q.z, q.w].iter().all(|c| c.is_finite()) {
+                    return Err(DecodeError::BadValue { field: "orientation" });
+                }
+                Some(q)
+            } else {
+                None
+            };
+            let mut variance = |bit: u8, field| -> Result<Option<Vec3>, DecodeError> {
+                if present & bit != 0 { Ok(Some(read_vec3(r, field)?)) } else { Ok(None) }
+            };
+            Reading::Imu(imu::Reading {
+                t_us,
+                orientation,
+                angular_velocity,
+                linear_acceleration,
+                orientation_variance: variance(2, "orientationVariance")?,
+                angular_velocity_variance: variance(4, "angularVelocityVariance")?,
+                linear_acceleration_variance: variance(8, "linearAccelerationVariance")?,
+            })
         }
         Capability::AnalogIn => {
             let has_volts = r.bool("present")?;
@@ -413,7 +468,11 @@ pub fn encode_info(info: &Info, out: &mut Vec<u8>) -> Result<(), EncodeError> {
 pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Option<Info>, DecodeError> {
     let r = &mut Reader::new(bytes);
     let info = match capability {
-        Capability::DigitalIn | Capability::DigitalOut | Capability::PwmOut | Capability::AnalogIn => None,
+        Capability::DigitalIn
+        | Capability::DigitalOut
+        | Capability::PwmOut
+        | Capability::AnalogIn
+        | Capability::Imu => None,
         Capability::Distance => Some(Info::Distance(distance::Info {
             min_m: r.f32()?,
             max_m: r.f32()?,
@@ -491,6 +550,10 @@ pub(crate) mod tests {
         -1.0e6f32..1.0e6
     }
 
+    fn vec3() -> impl Strategy<Value = Vec3> {
+        (finite(), finite(), finite()).prop_map(|(x, y, z)| Vec3 { x, y, z })
+    }
+
     fn twist() -> impl Strategy<Value = Twist2d> {
         (finite(), finite(), finite()).prop_map(|(a, b, c)| Twist2d::new(a, b, c))
     }
@@ -538,6 +601,23 @@ pub(crate) mod tests {
             (t.clone(), finite(), proptest::option::of(finite())).prop_map(|(t_us, fraction, volts)| {
                 Reading::AnalogIn(analog_in::Reading { t_us, fraction, volts })
             }),
+            (
+                t.clone(),
+                proptest::option::of((finite(), finite(), finite(), finite())),
+                (vec3(), vec3()),
+                (proptest::option::of(vec3()), proptest::option::of(vec3()), proptest::option::of(vec3())),
+            )
+                .prop_map(|(t_us, q, (av, la), (ov, avv, lav))| {
+                    Reading::Imu(imu::Reading {
+                        t_us,
+                        orientation: q.map(|(x, y, z, w)| Quaternion { x, y, z, w }),
+                        angular_velocity: av,
+                        linear_acceleration: la,
+                        orientation_variance: ov,
+                        angular_velocity_variance: avv,
+                        linear_acceleration_variance: lav,
+                    })
+                }),
             (t.clone(), any::<i64>(), any::<i32>(), finite(), proptest::option::of(finite())).prop_map(
                 |(t_us, count, delta, counts_per_s, velocity_rad_s)| {
                     Reading::Encoder(encoder::Reading { t_us, count, delta, counts_per_s, velocity_rad_s })
@@ -732,7 +812,14 @@ pub(crate) mod tests {
         });
         encode_reading(&e, &mut out).unwrap();
         assert_eq!(out.len(), 21, "encoder: present, count i64, delta i32, counts/s, rad/s");
+
         assert_eq!(out[..13], [0, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        out.clear();
+        let raw = imu::Reading::raw(0, Vec3 { x: 0.0, y: 0.0, z: 1.0 }, Vec3 { x: 0.0, y: 0.0, z: 9.0 });
+        encode_reading(&Reading::Imu(raw), &mut out).unwrap();
+        assert_eq!(out.len(), 25, "imu without fusion: present, then the rates and accelerations");
+        assert_eq!(out[0], 0);
     }
 
     #[test]

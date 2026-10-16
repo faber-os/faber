@@ -119,8 +119,8 @@ Viewer for all three: the value plus a plot.
 - **Settings:** mount, rate-hz.
 - **Viewer:** a 3D orientation plus plots.
 - **As built** (2026-10-16): no info. `linear-acceleration` includes gravity, as in ROS: an IMU
-  lying still reads about +9.81 m/s² up (standard gravity 9.80665). `generic-imu` for the
-  simulator, and an IMU viewer with the six values and a plot of the
+  lying still reads about +9.81 m/s² up (standard gravity 9.80665). FaberLink code 13,
+  `FaberImu` (an MPU6050 on I²C), `generic-imu` for the simulator, and an IMU viewer with the six values and a plot of the
   turn about z (no 3D orientation yet: the first IMU has none to show).
 
 **`obstacle`** (added 2026-10-16, [research/common-parts.md](research/common-parts.md) §4.1)

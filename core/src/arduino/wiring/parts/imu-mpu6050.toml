@@ -1,0 +1,59 @@
+# An MPU6050 IMU (GY-521 board) on I2C: FaberImu (firmware/faberlink/src/FaberImu.h, on the Wire
+# library of the board's core), imu@1.
+# Part facts: docs/research/common-parts.md §2.2 (AD0 picks 0x68 low or open, 0x69 high; the
+# GY-521 has a 3.3 V regulator and I2C pull-ups to 3.3 V, so VCC 5 V is fine; 0x68 is also the
+# DS3231/DS1307 clocks' address; many boards carry clones) and the register map cited in
+# FaberImu.h.
+
+faber-part = 1
+id = "imu-mpu6050"
+name = "IMU (MPU6050, GY-521)"
+description = "Measures how the machine turns and accelerates: the MPU6050 on a GY-521 board, on I²C."
+covers = ["MPU6050", "GY-521"]
+capability = "imu"
+class = "FaberImu"
+include = "FaberImu.h"
+default-name = "imu"
+bus = "i2c"
+i2c-addresses = [0x68, 0x69]
+address-setting = "address"
+address-hint = "Connect the IMU's AD0 pin to VCC: that moves it to 0x69. A DS3231 or DS1307 clock is always at 0x68."
+warnings = [
+  "It gives rates and accelerations, not an orientation: Faber shows no heading from it.",
+  "Boards sold as MPU6050 sometimes carry another chip: if its values look wrong, check what it says it is (whoAmI() in the sketch).",
+]
+
+[power]
+supply = "5V"
+current-ma = 4
+# Its I2C lines are pulled up to 3.3 V on the GY-521 (research §2.2).
+logic-volts = 3.3
+
+[[settings]]
+id = "address"
+name = "I²C address"
+type = "choice"
+default = "0x68"
+apply = "build"
+help = "0x68 with AD0 open or to GND, 0x69 with AD0 to VCC."
+options = [
+  { id = "0x68", name = "0x68 (AD0 open or low)", code = "faberlink::IMU_ADDRESS_68" },
+  { id = "0x69", name = "0x69 (AD0 high)", code = "faberlink::IMU_ADDRESS_69" },
+]
+
+[[settings]]
+id = "rate-hz"
+name = "Readings a second"
+unit = "Hz"
+type = "number"
+default = 20
+min = 1
+max = 200
+apply = "build"
+
+[[shapes]]
+id = "i2c"
+name = "I²C"
+args = ["name", "setting:address", "setting:rate-hz"]
+wiring = ["VCC → 5V", "GND → GND", "SDA → the board's SDA", "SCL → the board's SCL", "AD0 → open for 0x68, VCC for 0x69"]
+roles = []

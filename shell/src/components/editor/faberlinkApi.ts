@@ -227,6 +227,25 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
     members: inherited(PART_MEMBERS),
   },
   {
+    name: 'FaberImu',
+    doc: 'An MPU6050 IMU (a GY-521 board) on I²C: its rates (rad/s) and accelerations (m/s², gravity included) along its own axes, 20 times a second. Needs #include <FaberImu.h>. At 0x68 by default; faberlink::IMU_ADDRESS_69 when its AD0 is at VCC. No orientation: the chip’s motion processor isn’t used.',
+    library: 'faberlink',
+    include: 'FaberImu.h',
+    constructors: [
+      parseSignature(
+        'FaberImu(const char* name, faberlink::ImuAddress address = faberlink::IMU_ADDRESS_68, float rateHz = 20)',
+      ).overload,
+    ],
+    members: [
+      f('void begin()', 'Starts the I²C bus and wakes the IMU; FaberLink calls it from begin().'),
+      f(
+        'uint8_t whoAmI() const',
+        'What the chip says it is (0x68 for an MPU6050), 0 while it doesn’t answer.',
+      ),
+      ...inherited(PART_MEMBERS),
+    ],
+  },
+  {
     name: 'FaberBattery',
     doc: 'A battery measured through a voltage divider (battery + to R1 to the pin to R2 to GND). dividerRatio is (R1 + R2) / R2; keep the pin below referenceVolts when the battery is full.',
     library: 'faberlink',
@@ -285,6 +304,8 @@ export const FABERLINK_CONSTANTS: ApiConstant[] = [
     'ACTIVE_HIGH',
     'FaberButton, FaberObstacle: HIGH means pressed or detected, no pull-up (a TTP223 touch pad). FaberOutput: HIGH means on; its default.',
   ),
+  k('IMU_ADDRESS_68', 'FaberImu: the MPU6050 at 0x68, its AD0 open or low (the default).'),
+  k('IMU_ADDRESS_69', 'FaberImu: the MPU6050 at 0x69, its AD0 at VCC.'),
   k('SERVO_HOLD', 'FaberServo: holds its angle when nobody drives it (the default).'),
   k('SERVO_RELEASE', 'FaberServo: goes limp (no pulses) when nobody drives it.'),
   k('OUTPUT_ON_OFF', 'FaberOutput: on or off, Faber sees a digital output (the default).'),

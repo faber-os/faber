@@ -63,6 +63,10 @@ mod ffi {
         pub fn fla_set_echo_us(h: *mut c_void, us: u32);
         pub fn fla_set_digital(h: *mut c_void, pin: u8, level: i32);
         pub fn fla_servo_us(h: *mut c_void, pin: u8) -> i32;
+        pub fn fla_i2c_device(h: *mut c_void, address: u8, present: i32);
+        pub fn fla_i2c_set(h: *mut c_void, address: u8, reg: u8, value: u8);
+        pub fn fla_i2c_get(h: *mut c_void, address: u8, reg: u8) -> u8;
+        pub fn fla_wire_timeout(h: *mut c_void) -> u32;
     }
 
     /// `PartSpec` in glue.cpp.
@@ -147,6 +151,26 @@ mod ffi {
         pub fn set_echo_us(&mut self, us: u32) {
             // SAFETY: self.0 is a live sketch.
             unsafe { fla_set_echo_us(self.0, us) }
+        }
+
+        pub fn i2c_device(&mut self, address: u8, present: bool) {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_i2c_device(self.0, address, present as i32) }
+        }
+
+        pub fn i2c_set(&mut self, address: u8, reg: u8, value: u8) {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_i2c_set(self.0, address, reg, value) }
+        }
+
+        pub fn i2c_get(&mut self, address: u8, reg: u8) -> u8 {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_i2c_get(self.0, address, reg) }
+        }
+
+        pub fn wire_timeout(&mut self) -> u32 {
+            // SAFETY: self.0 is a live sketch.
+            unsafe { fla_wire_timeout(self.0) }
         }
 
         pub fn servo_us(&mut self, pin: u8) -> i32 {
@@ -498,6 +522,8 @@ pub enum SketchPart {
     MotorWithEncoder { name: &'static str, pwm: u8, dir: u8 },
     /// `FaberAnalogIn name(name, pin)`: 10 readings a second, 5 V reference.
     AnalogIn { name: &'static str, pin: u8 },
+    /// `FaberImu name(name, address)`: an MPU6050 on I2C.
+    Imu { name: &'static str, address: u8 },
 }
 
 impl SketchPart {
@@ -514,7 +540,8 @@ impl SketchPart {
             | SketchPart::Servo { name, .. }
             | SketchPart::Encoder { name, .. }
             | SketchPart::MotorWithEncoder { name, .. }
-            | SketchPart::AnalogIn { name, .. } => name,
+            | SketchPart::AnalogIn { name, .. }
+            | SketchPart::Imu { name, .. } => name,
         }
     }
 }
@@ -607,6 +634,7 @@ impl Sketch {
                     }
                     SketchPart::MotorWithEncoder { pwm, dir, .. } => (10, 0, [pwm, dir, NO_PIN, NO_PIN], 0.0),
                     SketchPart::AnalogIn { pin, .. } => (11, 0, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0),
+                    SketchPart::Imu { address, .. } => (12, 0, [address, NO_PIN, NO_PIN, NO_PIN], 0.0),
                 };
                 ffi::PartSpec { kind, name: name.as_ptr(), driver, pins, max_velocity }
             })
@@ -667,6 +695,27 @@ impl Sketch {
     /// `None` nothing (its pull-up, if on, holds it HIGH).
     pub fn set_input(&mut self, pin: u8, level: Option<bool>) {
         self.handle.set_digital(pin, level.map_or(-1, i32::from));
+    }
+
+    /// Puts a device on the I²C bus at `address` (it acknowledges), or takes it off.
+    pub fn i2c_device(&mut self, address: u8, present: bool) {
+        self.handle.i2c_device(address, present);
+    }
+
+    /// Sets register `reg` of the device at `address`.
+    pub fn i2c_set(&mut self, address: u8, reg: u8, value: u8) {
+        self.handle.i2c_set(address, reg, value);
+    }
+
+    /// Register `reg` of the device at `address`, as the sketch left it.
+    pub fn i2c_get(&mut self, address: u8, reg: u8) -> u8 {
+        self.handle.i2c_get(address, reg)
+    }
+
+    /// The Wire time-out the sketch set (µs), `Some(0)` for none, `None` before `Wire.begin()`.
+    pub fn wire_timeout(&mut self) -> Option<u32> {
+        let t = self.handle.wire_timeout();
+        (t != u32::MAX).then_some(t)
     }
 
     /// The pulse the Servo library sends on `pin` (µs), or `None` while no servo pulses it.

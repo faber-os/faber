@@ -22,6 +22,7 @@ pub const FILES: &[(&str, &str)] = library![
     "src/FaberLinkCore.cpp",
     "src/FaberServo.h",
     "src/FaberEncoder.h",
+    "src/FaberImu.h",
     "examples/MotorAndDistance/MotorAndDistance.ino",
     "examples/Ultrasonic/Ultrasonic.ino",
     "examples/BatteryMonitor/BatteryMonitor.ino",
@@ -31,6 +32,7 @@ pub const FILES: &[(&str, &str)] = library![
     "examples/ServoArm/ServoArm.ino",
     "examples/WheelEncoder/WheelEncoder.ino",
     "examples/KnobAndJoystick/KnobAndJoystick.ino",
+    "examples/Mpu6050/Mpu6050.ino",
 ];
 
 /// Writes the library to `<dir>/FaberLink/` (only the files that differ) and returns that folder.
@@ -129,6 +131,13 @@ pub const TEMPLATES: &[Template] = &[
         description: "A potentiometer on A0, and a thumb joystick on A1, A2 and pin 4.",
         faberlink: true,
         example: Some("KnobAndJoystick"),
+    },
+    Template {
+        id: "mpu6050",
+        name: "FaberLink: an IMU (MPU6050)",
+        description: "A GY-521 board on the board's I²C pins.",
+        faberlink: true,
+        example: Some("Mpu6050"),
     },
     Template {
         id: "battery-monitor",

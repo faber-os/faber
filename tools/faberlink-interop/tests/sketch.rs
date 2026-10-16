@@ -689,3 +689,59 @@ fn an_analog_input_reports_its_share_of_full_scale_and_volts_ten_times_a_second(
     assert_eq!(l.session.pins()[0], pins(0, &[(PinRole::Signal, 14)]));
     assert_eq!(l.session.pins()[0].label(14), "A0");
 }
+
+/// An MPU6050 at `address`: WHO_AM_I 0x68 and the 14 data bytes from ACCEL_XOUT_H (0x3B), big
+/// endian: acceleration x, y, z, the temperature, the rates x, y, z.
+fn mpu6050(l: &mut Link, address: u8, accel: [i16; 3], gyro: [i16; 3]) {
+    l.sketch.i2c_device(address, true);
+    l.sketch.i2c_set(address, 0x75, 0x68);
+    let words = [accel[0], accel[1], accel[2], 0, gyro[0], gyro[1], gyro[2]];
+    for (i, w) in words.iter().enumerate() {
+        let [hi, lo] = w.to_be_bytes();
+        l.sketch.i2c_set(address, 0x3B + 2 * i as u8, hi);
+        l.sketch.i2c_set(address, 0x3C + 2 * i as u8, lo);
+    }
+}
+
+fn last_imu(l: &Link) -> Option<faber_capabilities::imu::Reading> {
+    l.events.iter().rev().find_map(|e| match e {
+        Event::Reading { reading: Reading::Imu(r), .. } => Some(r.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn an_mpu6050_is_woken_and_reports_its_rates_and_accelerations_in_si() {
+    let mut l = Link::ready(&[SketchPart::Imu { name: "imu", address: 0x68 }]);
+    assert_eq!(l.session.parts()[0].capability, "imu@1");
+    assert_eq!(l.sketch.wire_timeout(), Some(3000), "a stuck bus never hangs loop()");
+    assert_eq!(last_imu(&l), None, "nothing on the bus yet: nothing is sent");
+    // Lying flat (1 g = 16384 up), turning at 131 LSB = 1 deg/s about z.
+    mpu6050(&mut l, 0x68, [0, 0, 16384], [0, 0, 131]);
+    l.run(100);
+    let r = last_imu(&l).expect("it found the IMU and reads it");
+    assert!((r.linear_acceleration.z - 9.80665).abs() < 1e-4, "{r:?}");
+    assert!((r.angular_velocity.z - 1f32.to_radians()).abs() < 1e-6, "{r:?}");
+    assert_eq!(r.orientation, None, "no fusion: no orientation");
+    assert_eq!(l.sketch.i2c_get(0x68, 0x6B), 0x01, "PWR_MGMT_1: awake, on the X gyro's clock");
+    assert_eq!(l.sketch.i2c_get(0x68, 0x1A), 0x03, "CONFIG: the 44 Hz filter");
+    assert_eq!(l.session.pins()[0], pins(0, &[(PinRole::Sda, 18), (PinRole::Scl, 19)]));
+}
+
+#[test]
+fn an_imu_with_ad0_high_is_at_0x69_and_one_that_goes_away_stops_reporting() {
+    let mut l = Link::ready(&[SketchPart::Imu { name: "imu", address: 0x69 }]);
+    mpu6050(&mut l, 0x68, [0, 0, 16384], [0, 0, 0]); // another 0x68 device (a clock) is ignored
+    mpu6050(&mut l, 0x69, [-16384, 0, 0], [0, 0, 0]);
+    l.run(100);
+    let r = last_imu(&l).unwrap();
+    assert!((r.linear_acceleration.x + 9.80665).abs() < 1e-4, "it reads 0x69: {r:?}");
+    l.sketch.i2c_device(0x69, false);
+    l.run(100);
+    l.events.clear();
+    l.run(200);
+    assert_eq!(last_imu(&l), None);
+    l.sketch.i2c_device(0x69, true);
+    l.run(200);
+    assert!(last_imu(&l).is_some(), "plugged back in: it wakes it again");
+}
