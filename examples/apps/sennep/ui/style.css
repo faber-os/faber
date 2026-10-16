@@ -1,0 +1,378 @@
+/* The shell's look comes in as CSS custom properties (applyTheme in app.js); these are the
+   fallbacks for the moment before it arrives. */
+:root {
+  --surface: #fbfbfc;
+  --surface-2: #f2f3f5;
+  --surface-3: #e8eaed;
+  --surface-sunken: #eef0f2;
+  --text: #1d2126;
+  --text-muted: #5e6670;
+  --text-faint: #8a929b;
+  --line: #d8dce1;
+  --line-strong: #b9bfc6;
+  --accent: #0f6f6a;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcefed;
+  --ok: #1f7a3d;
+  --warn: #9a6200;
+  --warn-soft: #fbefd9;
+  --danger: #b3261e;
+  --danger-soft: #fbe3e1;
+  --info: #2a5db0;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --font-ui: system-ui, sans-serif;
+  --font-data: ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--text);
+  background: var(--surface);
+}
+
+/* The LiDAR view on the left, everything else in two columns on the right. Sized for a window
+   of about 980 × 540 (the 7" screen is 1024 × 600); narrower, it stacks and scrolls. */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 470px;
+  gap: 12px;
+  height: 100%;
+  padding: 10px;
+}
+
+.view {
+  position: relative;
+  min-height: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.view-note {
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.zoom {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.zoom button {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 17px;
+}
+
+h2 {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.state {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.state[data-on="true"] {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.message {
+  min-height: 2.7em;
+  margin: 6px 0 2px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.message[data-kind="stop"] {
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.message[data-kind="warn"] {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.drive,
+.status {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The joystick. Its edges turn red where the safety layer blocks that way. */
+.pad {
+  position: relative;
+  align-self: center;
+  width: 132px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.pad[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cross {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    linear-gradient(var(--line), var(--line)) center / 1px 100% no-repeat,
+    linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat;
+}
+
+.edge {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 4px solid transparent;
+  pointer-events: none;
+}
+
+.edge.forward[data-blocked="true"] {
+  border-top-color: var(--danger);
+}
+.edge.back[data-blocked="true"] {
+  border-bottom-color: var(--danger);
+}
+.edge.left[data-blocked="true"] {
+  border-left-color: var(--danger);
+}
+.edge.right[data-blocked="true"] {
+  border-right-color: var(--danger);
+}
+
+.knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.turns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.btn {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+}
+
+.stop {
+  margin-top: 6px;
+  border-color: var(--danger);
+  background: var(--danger);
+  /* The page's own background reads on the danger colour in both schemes, as on the shell's Stop. */
+  color: var(--surface);
+  font-weight: 700;
+}
+
+.hint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.reading {
+  margin: 4px 0 0;
+  font-family: var(--font-data);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.setting {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.setting output {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="range"] {
+  width: 100%;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.status .btn {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.gauge {
+  height: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+#battery-bar {
+  width: 0;
+  height: 100%;
+  background: var(--ok);
+}
+
+#battery-bar[data-level="low"] {
+  background: var(--warn);
+}
+
+#battery-bar[data-level="critical"] {
+  background: var(--danger);
+}
+
+.ring {
+  align-self: center;
+  width: 110px;
+  height: 110px;
+}
+
+.ring .body {
+  fill: var(--surface-3);
+  stroke: var(--line-strong);
+}
+
+.ring .segment {
+  fill: none;
+  stroke-width: 9;
+  stroke: var(--line);
+}
+
+.ring .segment[data-near="near"] {
+  stroke: var(--warn);
+}
+
+.ring .segment[data-near="stop"] {
+  stroke: var(--danger);
+}
+
+.ring .segment[data-near="clear"][data-seen="true"] {
+  stroke: var(--ok);
+}
+
+.problem {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+@media (max-width: 760px) {
+  .layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .view {
+    height: 320px;
+  }
+
+  .side {
+    overflow: visible;
+  }
+}

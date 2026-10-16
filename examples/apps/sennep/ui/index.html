@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SENNEP</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- The page talks to Faber only through faber-shell.js (the @faber-os/shell SDK). -->
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <main class="layout">
+      <section class="view" aria-label="LiDAR top view">
+        <canvas
+          id="scan"
+          data-testid="lidar-view"
+          role="img"
+          aria-label="What the LiDAR sees around SENNEP, forward up"
+        ></canvas>
+        <p id="scan-note" class="view-note" data-testid="scan-note">
+          Waiting for the LiDAR…
+        </p>
+        <div class="zoom">
+          <button
+            id="zoom-out"
+            type="button"
+            aria-label="Show more around SENNEP"
+          >
+            −
+          </button>
+          <span id="zoom-value">3 m</span>
+          <button
+            id="zoom-in"
+            type="button"
+            aria-label="Show less around SENNEP"
+          >
+            +
+          </button>
+        </div>
+      </section>
+
+      <section class="side">
+        <header>
+          <h1>SENNEP</h1>
+          <span id="state" class="state" data-on="false">…</span>
+        </header>
+        <p id="message" class="message" role="status" data-testid="limits"></p>
+
+        <div class="cols">
+          <section class="drive" aria-labelledby="drive-label">
+            <h2 id="drive-label">Drive</h2>
+            <div
+              id="pad"
+              class="pad"
+              data-testid="drive-pad"
+              role="group"
+              aria-label="Joystick: drag from the middle to drive, let go to stop"
+            >
+              <span class="edge forward" data-way="forward"></span>
+              <span class="edge back" data-way="back"></span>
+              <span class="edge left" data-way="left"></span>
+              <span class="edge right" data-way="right"></span>
+              <span class="cross" aria-hidden="true"></span>
+              <span id="knob" class="knob" aria-hidden="true"></span>
+            </div>
+            <div class="turns">
+              <button id="turn-left" type="button" class="btn">
+                Turn left
+              </button>
+              <button id="turn-right" type="button" class="btn">
+                Turn right
+              </button>
+            </div>
+            <button id="stop" type="button" class="btn stop" data-testid="stop">
+              Stop
+            </button>
+            <p class="hint">
+              <b>W A S D</b> or the arrows drive, <b>Q E</b> turn,
+              <b>Space</b> stops.
+            </p>
+            <p id="velocity" class="reading" data-testid="velocity">
+              Standing still
+            </p>
+            <p id="nearest" class="hint" data-testid="nearest">&nbsp;</p>
+
+            <label class="setting" for="speed">
+              <span>Top speed</span>
+              <output id="speed-value" for="speed">0.30 m/s</output>
+            </label>
+            <input
+              id="speed"
+              type="range"
+              min="0.05"
+              max="0.6"
+              step="0.05"
+              value="0.3"
+              data-testid="speed"
+            />
+            <label class="setting" for="stop-distance">
+              <span>Stop distance</span>
+              <output id="stop-value" for="stop-distance">0.35 m</output>
+            </label>
+            <input
+              id="stop-distance"
+              type="range"
+              min="0.1"
+              max="1"
+              step="0.05"
+              value="0.35"
+              data-testid="stop-distance"
+            />
+          </section>
+
+          <section class="status">
+            <h2>Pose</h2>
+            <p id="pose" class="reading" data-testid="pose">–</p>
+            <p class="hint">Dead reckoning: it drifts.</p>
+            <button id="reset-pose" type="button" class="btn">
+              Reset pose
+            </button>
+
+            <h2>Battery</h2>
+            <div class="gauge" aria-hidden="true">
+              <div id="battery-bar"></div>
+            </div>
+            <p id="battery" class="reading" data-testid="battery">
+              No battery picked
+            </p>
+
+            <h2>Proximity</h2>
+            <svg
+              id="ring"
+              class="ring"
+              viewBox="-60 -60 120 120"
+              data-testid="proximity-ring"
+              role="img"
+              aria-label="Proximity sensors around SENNEP, forward up"
+            ></svg>
+            <p id="ring-note" class="hint">No proximity sensors picked</p>
+          </section>
+        </div>
+        <p id="problem" class="problem" hidden></p>
+      </section>
+    </main>
+  </body>
+</html>

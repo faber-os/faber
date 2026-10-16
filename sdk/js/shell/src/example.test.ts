@@ -11,6 +11,7 @@ import { builtModule } from '../scripts/transpile.ts';
  */
 const COPIES = [
   '../../../../examples/apps/wall-follower/ui/faber-shell.js',
+  '../../../../examples/apps/sennep/ui/faber-shell.js',
   // What `faber new app` copies into a new app (tools/faber-cli embeds it).
   '../../../../templates/app-rust/ui/faber-shell.js',
 ];
