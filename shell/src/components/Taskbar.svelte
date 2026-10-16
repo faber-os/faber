@@ -341,7 +341,9 @@
   }
   .tasks {
     display: flex;
-    justify-content: center;
+    /* `safe`: when there are more tasks than room, they start at the left edge and scroll,
+       instead of the first ones being centred out of reach under the start button. */
+    justify-content: safe center;
     gap: 2px;
     min-width: 0;
     max-width: calc(100vw - 280px);

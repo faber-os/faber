@@ -34,9 +34,12 @@ export default defineConfig({
     },
   ],
   webServer: {
+    // --fake-hardware: simulated I²C, SPI and GPIO (a TMP102 on i2c-1), never real buses. The
+    // TMP102 example connector is installed in the test data folder for the I²C test.
     command:
+      `node -e "require('fs').cpSync('examples/connectors/ti-tmp102', 'target/e2e-data/connectors/ti-tmp102', { recursive: true })" && ` +
       'npm --prefix shell run build && cargo run -p faber-core --features embed-shell -- ' +
-      `--data target/e2e-data --listen 127.0.0.1:${port}`,
+      `--data target/e2e-data --listen 127.0.0.1:${port} --fake-hardware`,
     cwd: '..',
     url: `http://127.0.0.1:${port}/api/v0/system`,
     reuseExistingServer: !process.env.CI,
