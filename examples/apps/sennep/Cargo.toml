@@ -1,0 +1,16 @@
+[package]
+name = "sennep"
+version = "0.1.0"
+description = "SENNEP V2's Faber app: drive it by hand with a LiDAR view, a safety stop, dead reckoning and its battery."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+faber-app-wasm = { version = "0.1.0", path = "../../../sdk/rust/app-wasm" }
+faber-capabilities = { version = "0.1.0", path = "../../../sdk/rust/capabilities" }
