@@ -1,0 +1,178 @@
+# Design: parts on a board's pins (guided and code mode)
+
+Status: **design v1, proposed** (2026-10-16). Nothing here is built yet. Builds on the Arduino
+editor ([arduino-editor.md](arduino-editor.md)), FaberLink ([faberlink.md](faberlink.md)) and the
+same-code check (D54).
+
+## 1. The problem
+
+A part wired to an Arduino (a sonar on pins 7 and 6) reaches Faber only through the sketch:
+`FaberUltrasonic front("front", 7, 6);`. That is fine for someone who writes C++, and a wall for
+everyone else. They have to know which pins can do what, which are already taken, how to wire the
+part, and how to write and upload the sketch.
+
+## 2. Two modes, chosen per board
+
+| | **Code mode** | **Guided mode** |
+|---|---|---|
+| Who owns the sketch | You. You write it in the editor (or the Arduino IDE). | Faber. It writes the sketch from the board's *plan*. |
+| How a part is added | Declare it in the sketch, upload. | Parts → **Add part → On a board's pins** → pick the part → pick pins → upload. |
+| Pins | You choose; Faber shows what the board reports in use (§6). | Faber suggests free, suitable pins and refuses unsuitable ones. |
+| Your own code | Anything. | In `my_code.h`, a tab Faber never overwrites (§5). |
+| Leaving | — | **Take over the code** turns a guided board into a code-mode board (one way, §8). |
+
+A board is in exactly one mode. The mode belongs to the board, so a Mega can be guided while an Uno
+next to it runs your own sketch.
+
+## 3. The guided flow (what the user sees)
+
+1. **Add part → On a board's pins.** Pick the board (a connected FaberLink board, or "a new board":
+   pick its type, plug it in when asked). Then pick the part type from a catalogue with pictures:
+   ultrasonic distance, IR distance, DC motor with an H-bridge, battery voltage, and later servo,
+   encoder, button, LED and I²C sensors.
+2. **Name it** ("front"), with a sensible default.
+3. **Pins.** A drawing of the board's headers shows every pin, coloured:
+   - **suggested**: Faber's pick, which is free and suitable;
+   - **suitable**: any other free pin that can do the job;
+   - **unsuitable**, with the reason on hover ("Echo needs a digital pin; A6 on a Nano is analog
+     only");
+   - **in use**, with what by ("D7: front, Trig");
+   - **reserved**, with the reason ("D0/D1: the USB link to Faber").
+
+   Each role of the part (Trig, Echo, PWM, IN1, IN2, …) is filled by clicking a pin. Suggested
+   pins are filled in from the start, so most users only press Next.
+4. **Wiring.** A checklist with the drawing: "HC-SR04 VCC → 5V · GND → GND · Trig → D7 · Echo → D6",
+   plus warnings where they matter ("Motors need their own supply: never power the motor from the
+   board's 5V pin"; "This sensor is 3.3 V only: use a level shifter"). It can be printed or kept
+   open in a window while wiring.
+5. **Upload.** Faber writes the sketch, compiles it, shows the size, and uploads after the usual
+   confirm. The same-code check (D54) records it.
+6. **Check it works.** The new part appears under the board with a live value. For an actuator,
+   a short guarded test ("Spin the left motor slowly for 1 s?") runs with the D46 confirm and the
+   Stop bar.
+
+Removing or moving a part works the same way: edit the plan, see the new wiring, upload.
+
+## 4. What Faber must know
+
+### Board pin maps (data, one file per board)
+Every pin with its abilities: digital I/O, analog in (and analog-*only* pins like A6/A7 on a Nano),
+PWM, external interrupt, I²C (SDA/SCL), SPI (MOSI/MISO/SCK/SS), hardware serial, the on-board LED,
+and the voltage (5 V or 3.3 V). Also the **conflicts that bite beginners**:
+- D0/D1 carry the USB link to Faber, so they are reserved (Serial1–3 on a Mega are free);
+- the `Servo` library takes over PWM on D9/D10 on an Uno (D11/D12 and others on a Mega);
+- `tone()` takes PWM on D3/D11 on an Uno;
+- I²C pins can't be used as ordinary pins while an I²C part exists;
+- D13 drives the on-board LED, which is fine for outputs but weak as an input with a pull-up.
+
+The first set is Uno, Nano (old and new bootloader), Mega 2560, i.e. the flasher's boards. The
+values come from the ATmega datasheets and Arduino's published board pinouts. Each file is checked
+by tests (every pin has a valid type, no ability claimed that its chip lacks).
+
+### Part templates (data, one per FaberLink part class)
+For each part: its **pin roles** with requirements (Trig: digital out; Echo: digital in; motor PWM:
+PWM-capable; encoder A: interrupt-capable), its **settings** (range, a battery's divider resistor
+values, the motor's max speed), its **power** (voltage, typical current, "needs its own supply"),
+the **wiring lines**, and the **code** it adds to the sketch (the declaration, plus any `begin()`).
+
+A part template exists only for a class the FaberLink library has. A test fails if a library class
+has no template, or a template names a class or constructor the library doesn't have (the same
+kind of drift test as the editor's completion catalogue).
+
+### The allocator (pure logic, heavily tested)
+Given the board's pin map, the parts already in the plan and the new part's roles, it returns, per
+role, the suggested pin, the suitable pins and every unsuitable pin with its reason. It also
+re-checks the whole plan for conflicts (two parts on one pin, a Servo plus PWM on D9, I²C pins
+used as GPIO).
+
+## 5. The plan and the generated sketch
+
+A guided board is a folder like any sketch, so it can be backed up, opened in Files and taken over
+later:
+
+```
+home:/Arduino/mega/
+  board.toml      # the plan: board type, parts, their pins and settings
+  mega.ino        # generated from board.toml; marked "generated, don't edit"
+  my_code.h       # yours: userSetup() and userLoop(), never overwritten
+```
+
+```toml
+# board.toml
+faber-board = 1
+board = "mega2560"
+name = "mega"
+
+[parts.front]
+template = "ultrasonic"
+pins = { trig = 7, echo = 6 }
+settings = { max-m = 4.0 }
+```
+
+The editor opens `mega.ino` read-only, with a bar reading "Faber writes this file from the board's
+plan" and the buttons *Edit the plan* and *Take over the code*. `my_code.h` opens normally, so a
+guided board can still blink an LED or read a button without leaving guided mode. The generated
+sketch calls `userSetup()` and `userLoop()` (and checks they don't block; `delay()` in
+`userLoop()` is flagged by Verify as a warning, because it starves the link).
+
+## 6. "What's already connected", in both modes
+
+- **Guided boards**: from `board.toml`, before anything is uploaded.
+- **Code-mode boards**: the library knows each part's pins, so the board can tell Faber. This
+  needs a small protocol addition: an optional **`PINS`** message after each `PART`
+  (`part u8 · (role u8 · pin u8)*`), sent only by a library that has it. An older core ignores
+  the message type, and an older library just doesn't send it. Faber then shows the pins a
+  code-mode board uses in Parts and on the drawing, and the editor's completion could warn when a
+  new declaration takes a pin already in use.
+- **Boards without FaberLink**: Faber can't know, and says "Unknown: this board doesn't run
+  FaberLink".
+
+## 7. Where it lives
+
+| Piece | Where |
+|---|---|
+| Pin maps, part templates, allocator, plan parse/write, sketch generator | `core/src/arduino/wiring/` (layer 2, pure; data files beside it) |
+| Plan storage, upload, the live check | `core/src/machine/arduino.rs` (layer 4) |
+| API | `GET /api/v0/arduino/boards/{type}/pins`, `GET /api/v0/arduino/parts` (templates), `POST /api/v0/arduino/plans/{board}/suggest` (allocator), `PUT /api/v0/arduino/plans/{board}` (save plan + generate), then the existing compile/upload |
+| `PINS` message | `sdk/rust/faberlink` + `firmware/faberlink` + interop tests + faberlink.md |
+| Shell | "Add part → On a board's pins" wizard, the pin drawing (an SVG drawn by Faber from the pin map, not Arduino's artwork), the wiring checklist window, the editor's read-only bar |
+
+Access: reading pin maps and plans is for anyone; editing a plan is an **operator**, and uploading
+is an **admin** (D53, as for the editor).
+
+## 8. Switching modes
+
+- **Guided → code**: "Take over the code" removes the generated mark and `board.toml` becomes a
+  read-only note in the folder. From then on the board is code mode. This is one way, with a
+  confirm; the point is that your edits are never overwritten.
+- **Code → guided**: no conversion. Faber offers "Start a guided plan for this board", which
+  begins empty or, for a FaberLink sketch whose board reports `PINS`, pre-filled from what the
+  board reports. You review it, and nothing is uploaded until you confirm.
+
+## 9. Building it (order)
+
+1. Pin maps for the four boards, plus tests.
+2. Part templates for the existing library classes (motor + H-bridge, IR distance, ultrasonic,
+   battery), plus the drift test.
+3. The allocator and its conflict rules, plus tests (the bulk of the logic).
+4. Plan file and sketch generator: the generated sketch must compile with `--warnings all` for
+   every template on every board (the fake toolchain in unit tests, real `arduino-cli` in the
+   Arduino CI job).
+5. API and the shell wizard, the pin drawing and the wiring checklist.
+6. The `PINS` message (library, core, interop), and code-mode pin display.
+7. New part classes in the library (servo, encoder, button, LED, an I²C sensor), each with a template.
+
+## 10. Open questions for Mikkel
+
+1. **`my_code.h` in guided mode** (recommended), or should guided boards be generated with no
+   code of yours at all?
+2. **The `PINS` message** so code-mode boards report their pins (recommended), or should only
+   guided boards know their pins?
+3. **Take over the code is one way** (recommended), or should Faber try to keep a hand-edited
+   sketch in sync with the plan? Keeping them in sync means parsing C++, which is fragile.
+4. **First part catalogue**: the four existing library classes, then which new ones first? Servo,
+   encoder, button and LED are the common beginner parts; for SENNEP, the encoders and the IMU
+   matter.
+5. **Pi GPIO** (Phase 6b) could later use the same wizard, pin drawing and allocator, with the Pi's
+   40-pin header as one more pin map. Should the design aim for that now? Recommended: yes, in the
+   data format only.
