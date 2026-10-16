@@ -153,8 +153,11 @@ fn the_ld19_component_imports_nothing_but_the_connector_world() {
     assert!(imports.iter().all(|i| i.starts_with("faber:")), "no WASI: {imports:?}");
 }
 
+/// The test guest with a call budget no busy test machine reaches, for tests that aren't about
+/// time: under load, a panic or a refusal could otherwise be stopped as "took too long" first.
+/// The 20 ms budget itself is tested with `guest_with(Limits::default())`.
 fn guest() -> Option<Box<dyn Connector>> {
-    guest_with(Limits::default())
+    guest_with(Limits { call_time: Duration::from_secs(5), ..Limits::default() })
 }
 
 fn guest_with(limits: Limits) -> Option<Box<dyn Connector>> {
@@ -183,7 +186,7 @@ fn a_well_behaved_call_publishes_and_reports_health() {
 
 #[test]
 fn a_connector_that_never_returns_is_stopped_after_its_time() {
-    let Some(mut c) = guest() else { return };
+    let Some(mut c) = guest_with(Limits::default()) else { return };
     let mut ctx = RecordingContext::new();
     let started = Instant::now();
     let p = send(c.as_mut(), &mut ctx, faber_test_guest::byte::LOOP_FOREVER).expect("stopped");

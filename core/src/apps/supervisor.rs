@@ -149,6 +149,8 @@ impl Drop for AppHandle {
 
 /// Starts an app's thread, `app:<id>`.
 pub fn start(spec: RunSpec, deps: RunDeps) -> AppHandle {
+    // Before the thread exists, so nobody sees an earlier run's Running for this one.
+    deps.status.set(&spec.id, AppStatus::Starting);
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
     let thread = std::thread::Builder::new()
@@ -385,6 +387,22 @@ mod tests {
         assert_eq!(router.latest(&addr), None, "its signals go with it");
         let log = driver.log.lock().unwrap().clone();
         assert_eq!(log, ["acquire base as app:wf", "release base lease-base"]);
+    }
+
+    /// A restart (other parts, an update) must never be reported as the old run's Running: the
+    /// API would say "running" while the new run hasn't started, and a window driving then is
+    /// refused with app-not-running.
+    #[test]
+    fn a_new_run_reports_starting_before_start_returns() {
+        let router = Arc::new(Router::new());
+        let driver = Arc::new(FakeDriver::default());
+        let (spec, _) = spec(&router, &driver, None);
+        let deps = deps(&router);
+        let status = Arc::clone(&deps.status);
+        status.set("wf", AppStatus::Running); // the run before this one
+        let h = start(spec, deps);
+        assert_ne!(status.get("wf"), Some(AppStatus::Running), "still the old run's state");
+        h.stop();
     }
 
     #[test]
