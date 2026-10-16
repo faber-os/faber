@@ -19,6 +19,8 @@ export class FaberError extends Error {
 }
 /** A lease must be renewed within 250 ms; every 100 ms survives one late beat. */
 const RENEW_MS = 100;
+/** A drive through the logic needs a heartbeat within 300 ms; every 100 ms survives two late beats. */
+const HEARTBEAT_MS = 100;
 function noShell() {
     return new FaberError({
         code: 'no-shell',
@@ -42,6 +44,10 @@ export function connect(options = {}) {
     const themeWatchers = new Set();
     const stateWatchers = new Set();
     let stateWatch = null;
+    const messageWatchers = new Set();
+    let messageWatch = null;
+    const vias = new Map();
+    let heart = null;
     let hello = null;
     let closed = false;
     function request(req) {
@@ -101,6 +107,13 @@ export function connect(options = {}) {
                 break;
             case 'lease-ended':
                 drives.get(key(m.role, m.index))?.lost(new FaberError(m.error));
+                break;
+            case 'message':
+                for (const w of [...messageWatchers])
+                    w(m.kind, m.data);
+                break;
+            case 'drive-ended':
+                vias.get(key(m.role, m.index))?.lost(new FaberError(m.error));
                 break;
         }
     }
@@ -191,6 +204,57 @@ export function connect(options = {}) {
             });
         }
     }
+    /** The page's heartbeat, while it drives anything through the logic. */
+    function beatWhileDriving() {
+        if (vias.size > 0 && heart === null) {
+            heart = setInterval(() => {
+                request({ type: 'heartbeat' }).catch((e) => {
+                    if (e.code === 'no-shell')
+                        for (const v of [...vias.values()])
+                            v.lost(e);
+                });
+            }, HEARTBEAT_MS);
+        }
+        else if (vias.size === 0 && heart !== null) {
+            clearInterval(heart);
+            heart = null;
+        }
+    }
+    class ViaHandle {
+        role;
+        index;
+        ended = false;
+        callbacks = [];
+        constructor(role, index) {
+            this.role = role;
+            this.index = index;
+        }
+        async release() {
+            if (this.ended)
+                return;
+            this.finish();
+            await request({
+                type: 'drive-via-release',
+                role: this.role,
+                index: this.index,
+            });
+        }
+        onEnd(callback) {
+            this.callbacks.push(callback);
+        }
+        lost(error) {
+            if (this.ended)
+                return;
+            this.finish();
+            for (const c of this.callbacks)
+                c(error);
+        }
+        finish() {
+            this.ended = true;
+            vias.delete(key(this.role, this.index));
+            beatWhileDriving();
+        }
+    }
     const api = {
         hello() {
             hello ??= request({ type: 'hello' }).catch((e) => {
@@ -213,6 +277,28 @@ export function connect(options = {}) {
             const handle = new DriveHandle(role, index);
             drives.set(key(role, index), handle);
             return handle;
+        },
+        async driveVia(role, opts = {}) {
+            const index = opts.index ?? 0;
+            const existing = vias.get(key(role, index));
+            if (existing)
+                return existing;
+            await request({ type: 'drive-via', role, index });
+            const handle = vias.get(key(role, index)) ?? new ViaHandle(role, index);
+            vias.set(key(role, index), handle);
+            beatWhileDriving();
+            return handle;
+        },
+        send: (kind, data) => request({ type: 'message-send', kind, data }).then(() => undefined),
+        onMessage(callback) {
+            messageWatchers.add(callback);
+            // The shell passes the logic's messages on once asked; ask once (again after a failure).
+            messageWatch ??= request({ type: 'message-watch' }).catch((e) => {
+                messageWatch = null;
+                throw e;
+            });
+            messageWatch.catch(() => undefined);
+            return () => void messageWatchers.delete(callback);
         },
         status: () => request({ type: 'status' }),
         onStatus(callback) {
@@ -250,6 +336,8 @@ export function connect(options = {}) {
             pending.clear();
             for (const d of [...drives.values()])
                 d.lost(noShell());
+            for (const v of [...vias.values()])
+                v.lost(noShell());
         },
     };
     return api;

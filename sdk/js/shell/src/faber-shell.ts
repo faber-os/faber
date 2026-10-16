@@ -13,6 +13,11 @@
  * await base.release();
  *
  * await faber.state.set('speed', '0.3');   // shared with the app's logic, saved by Faber
+ *
+ * // Driving through the app's own logic (a role with drive = "window"): live messages, never saved.
+ * const drive = await faber.driveVia('base');
+ * await faber.send('drive', '1 0 0');
+ * faber.onMessage((kind, data) => console.log(kind, data));
  * ```
  *
  * No dependencies; one ES module. The protocol it speaks is in `protocol.ts`.
@@ -23,6 +28,7 @@ import type {
   CommandResult,
   ErrorBody,
   Hello,
+  MessageData,
   Mount,
   PublishedInfo,
   Reading,
@@ -41,6 +47,7 @@ export type {
   CommandResult,
   ErrorBody,
   Hello,
+  MessageData,
   PublishedInfo,
   Reading,
   RoleInfo,
@@ -114,6 +121,24 @@ export interface Drive {
 }
 
 /**
+ * A role driven through the app's own logic (`faber.driveVia`): the logic may drive it until
+ * `release()`, or until it ends on its own.
+ */
+export interface DriveVia {
+  readonly role: string;
+  readonly index: number;
+  /** True once it ended, released or not. */
+  readonly ended: boolean;
+  /** Lets go: the logic may no longer drive the role, and its lease ends. */
+  release(): Promise<void>;
+  /**
+   * Called once if it ends without `release()`: the user pressed Stop, the app stopped, or this
+   * page was too busy to beat for 300 ms.
+   */
+  onEnd(callback: (error: FaberError) => void): void;
+}
+
+/**
  * The app's saved state: a few strings by name (64 KB together), kept by Faber across restarts
  * and shared with the app's logic, so a setting made in the window is what the logic reads.
  */
@@ -168,6 +193,17 @@ export interface Faber {
   theme(): Promise<Theme>;
   /** Calls `callback` whenever the shell's look changes. */
   onTheme(callback: (theme: Theme) => void): () => void;
+  /**
+   * Drives a role through the app's own logic: for a role declared `drive = "window"`, which the
+   * logic may drive only while a window does. Faber asks the user first (once per session) and
+   * shows its Stop bar. Send the logic what to do with `send`; the SDK beats every 100 ms while
+   * the page runs, and if it hangs the drive ends within 300 ms.
+   */
+  driveVia(role: string, options?: { index?: number }): Promise<DriveVia>;
+  /** A message for the app's logic, which reads it on its next tick. Never saved. */
+  send(kind: string, data: MessageData): Promise<void>;
+  /** Calls `callback` with every message the app's logic sends this window. Returns a stop function. */
+  onMessage(callback: (kind: string, data: MessageData) => void): () => void;
   /** The app's saved state, shared with its logic. */
   readonly state: AppState;
   /** Stops listening to the shell (tests; a page that goes away needs nothing). */
@@ -176,6 +212,8 @@ export interface Faber {
 
 /** A lease must be renewed within 250 ms; every 100 ms survives one late beat. */
 const RENEW_MS = 100;
+/** A drive through the logic needs a heartbeat within 300 ms; every 100 ms survives two late beats. */
+const HEARTBEAT_MS = 100;
 
 function noShell(): FaberError {
   return new FaberError({
@@ -213,6 +251,10 @@ export function connect(options: ConnectOptions = {}): Faber {
   const themeWatchers = new Set<(t: Theme) => void>();
   const stateWatchers = new Set<(key: string, value: string | null) => void>();
   let stateWatch: Promise<null> | null = null;
+  const messageWatchers = new Set<(kind: string, data: MessageData) => void>();
+  let messageWatch: Promise<null> | null = null;
+  const vias = new Map<string, ViaHandle>();
+  let heart: ReturnType<typeof setInterval> | null = null;
   let hello: Promise<Hello> | null = null;
   let closed = false;
 
@@ -267,6 +309,12 @@ export function connect(options: ConnectOptions = {}): Faber {
         break;
       case 'lease-ended':
         drives.get(key(m.role, m.index))?.lost(new FaberError(m.error));
+        break;
+      case 'message':
+        for (const w of [...messageWatchers]) w(m.kind, m.data);
+        break;
+      case 'drive-ended':
+        vias.get(key(m.role, m.index))?.lost(new FaberError(m.error));
         break;
     }
   }
@@ -367,6 +415,56 @@ export function connect(options: ConnectOptions = {}): Faber {
     }
   }
 
+  /** The page's heartbeat, while it drives anything through the logic. */
+  function beatWhileDriving(): void {
+    if (vias.size > 0 && heart === null) {
+      heart = setInterval(() => {
+        request<'heartbeat'>({ type: 'heartbeat' }).catch((e: FaberError) => {
+          if (e.code === 'no-shell') for (const v of [...vias.values()]) v.lost(e);
+        });
+      }, HEARTBEAT_MS);
+    } else if (vias.size === 0 && heart !== null) {
+      clearInterval(heart);
+      heart = null;
+    }
+  }
+
+  class ViaHandle implements DriveVia {
+    ended = false;
+    private readonly callbacks: ((e: FaberError) => void)[] = [];
+
+    constructor(
+      readonly role: string,
+      readonly index: number,
+    ) {}
+
+    async release(): Promise<void> {
+      if (this.ended) return;
+      this.finish();
+      await request<'drive-via-release'>({
+        type: 'drive-via-release',
+        role: this.role,
+        index: this.index,
+      });
+    }
+
+    onEnd(callback: (error: FaberError) => void): void {
+      this.callbacks.push(callback);
+    }
+
+    lost(error: FaberError): void {
+      if (this.ended) return;
+      this.finish();
+      for (const c of this.callbacks) c(error);
+    }
+
+    private finish(): void {
+      this.ended = true;
+      vias.delete(key(this.role, this.index));
+      beatWhileDriving();
+    }
+  }
+
   const api: Faber = {
     hello() {
       hello ??= request<'hello'>({ type: 'hello' }).catch((e: unknown) => {
@@ -390,6 +488,28 @@ export function connect(options: ConnectOptions = {}): Faber {
       const handle = new DriveHandle(role, index);
       drives.set(key(role, index), handle);
       return handle;
+    },
+    async driveVia(role, opts = {}) {
+      const index = opts.index ?? 0;
+      const existing = vias.get(key(role, index));
+      if (existing) return existing;
+      await request<'drive-via'>({ type: 'drive-via', role, index });
+      const handle = vias.get(key(role, index)) ?? new ViaHandle(role, index);
+      vias.set(key(role, index), handle);
+      beatWhileDriving();
+      return handle;
+    },
+    send: (kind, data) =>
+      request<'message-send'>({ type: 'message-send', kind, data }).then(() => undefined),
+    onMessage(callback) {
+      messageWatchers.add(callback);
+      // The shell passes the logic's messages on once asked; ask once (again after a failure).
+      messageWatch ??= request<'message-watch'>({ type: 'message-watch' }).catch((e: unknown) => {
+        messageWatch = null;
+        throw e;
+      });
+      messageWatch.catch(() => undefined);
+      return () => void messageWatchers.delete(callback);
     },
     status: () => request<'status'>({ type: 'status' }),
     onStatus(callback) {
@@ -428,6 +548,7 @@ export function connect(options: ConnectOptions = {}): Faber {
       }
       pending.clear();
       for (const d of [...drives.values()]) d.lost(noShell());
+      for (const v of [...vias.values()]) v.lost(noShell());
     },
   };
   return api;

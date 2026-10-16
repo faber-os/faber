@@ -235,6 +235,86 @@ describe('driving', () => {
   });
 });
 
+describe('driving through the logic', () => {
+  it('asks to drive, beats every 100 ms while it does, and stops beating on release', async () => {
+    vi.useFakeTimers();
+    const p = faber.driveVia('base');
+    expect(shell.last('drive-via')).toMatchObject({ role: 'base', index: 0 });
+    shell.ok('drive-via', null);
+    const via = await p;
+    expect(await faber.driveVia('base')).toBe(via);
+    expect(shell.requests('drive-via')).toHaveLength(1);
+    vi.advanceTimersByTime(350);
+    expect(shell.requests('heartbeat')).toHaveLength(3);
+    const released = via.release();
+    expect(shell.last('drive-via-release')).toMatchObject({ role: 'base', index: 0 });
+    shell.ok('drive-via-release', null);
+    await released;
+    expect(via.ended).toBe(true);
+    vi.advanceTimersByTime(500);
+    expect(shell.requests('heartbeat')).toHaveLength(3);
+  });
+
+  it('says when the drive ends without the page (the user pressed Stop)', async () => {
+    vi.useFakeTimers();
+    const p = faber.driveVia('base', { index: 1 });
+    shell.ok('drive-via', null);
+    const via = await p;
+    const onEnd = vi.fn();
+    via.onEnd(onEnd);
+    const error = { code: 'drive-ended', message: 'You pressed Stop.', hint: 'Drive again.' };
+    shell.deliver({
+      faber: 1,
+      event: 'drive-ended',
+      role: 'base',
+      index: 1,
+      reason: 'stopped',
+      error,
+    });
+    expect(via.ended).toBe(true);
+    expect(onEnd.mock.calls[0]?.[0]).toMatchObject({ code: 'drive-ended', hint: 'Drive again.' });
+    vi.advanceTimersByTime(500);
+    expect(shell.requests('heartbeat')).toHaveLength(0);
+  });
+
+  it('a refused drive rejects (the user said no, or the role is not window-driven)', async () => {
+    const p = faber.driveVia('lidar');
+    shell.fail('drive-via', 'not-window-driven');
+    await expect(p).rejects.toMatchObject({ code: 'not-window-driven' });
+  });
+
+  it('sends messages to the logic and hands the logic’s to every watcher until it stops', async () => {
+    const sent = faber.send('drive', '1 0 0');
+    expect(shell.last('message-send')).toMatchObject({ kind: 'drive', data: '1 0 0' });
+    shell.ok('message-send', null);
+    await expect(sent).resolves.toBeUndefined();
+    const bytes = new Uint8Array([1, 2]);
+    void faber.send('blob', bytes).catch(() => undefined);
+    expect(shell.last('message-send').data).toBe(bytes);
+
+    const a = vi.fn();
+    const b = vi.fn();
+    const stopA = faber.onMessage(a);
+    faber.onMessage(b);
+    expect(shell.requests('message-watch')).toHaveLength(1);
+    shell.ok('message-watch', null);
+    shell.deliver({ faber: 1, event: 'message', kind: 'limits', data: '{}' });
+    stopA();
+    shell.deliver({ faber: 1, event: 'message', kind: 'limits', data: '{"x":1}' });
+    expect(a.mock.calls).toEqual([['limits', '{}']]);
+    expect(b.mock.calls).toEqual([
+      ['limits', '{}'],
+      ['limits', '{"x":1}'],
+    ]);
+  });
+
+  it('a message the shell refuses rejects with why', async () => {
+    const p = faber.send('Bad Kind', 'x');
+    shell.fail('message-send', 'bad-kind');
+    await expect(p).rejects.toMatchObject({ code: 'bad-kind' });
+  });
+});
+
 describe('status and theme', () => {
   it('passes the shell’s status and theme events on until stopped', () => {
     const seen: unknown[] = [];
