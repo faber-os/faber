@@ -3,7 +3,8 @@
 //!
 //! The Mega is the Arduino library's real protocol core (`faberlink_interop::FakeBoard::mega`,
 //! the same C++ that runs on the board) behind a fake serial port. The program is a client of
-//! the HTTP API, as any app or script is. No hardware, no real COM port.
+//! the HTTP API, as any app or script is. No hardware, no real COM port. The last test drives a
+//! simulated SENNEP Mega through the SENNEP app.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -442,4 +443,118 @@ async fn a_free_port_is_checked_for_a_board_only_when_asked() {
         (StatusCode::CONFLICT, Some("port-claimed")),
         "a port in use is left alone"
     );
+}
+
+// ---- Phase 5: the SENNEP app drives a FaberLink board -----------------------------------------
+
+mod support;
+
+/// The SENNEP app (examples/apps/sennep) with its roles on SENNEP's Mega: the board's planar base,
+/// its front distance sensor and its battery (and a simulated LiDAR, which the board doesn't
+/// have). A client drives it the way the app's window does, through the app's state.
+///
+/// It proves that the app's commands reach the board, that the board's sensor and battery feed
+/// its safety layer, and that the base on the board stops when the window goes quiet or the app
+/// is turned off: through the core's SAFE, since the board's own lease is a whole second here.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sennep_app_drives_the_boards_base_and_stops_it() {
+    let Some(wasm) = support::component("sennep") else { return };
+    let c = core_with(FakeBoard::sennep(250, 1000));
+    let (s, body) = call(
+        &c.app,
+        "POST",
+        "/api/v0/parts",
+        Some(json!({"name": "mega", "connector": "faber-bridge", "port": "serial:MEGA"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "{body}");
+    until("the board's parts", async || part(&c, "mega.battery").await["state"]["kind"] == "running").await;
+    let base = part(&c, "mega.base").await;
+    assert_eq!(base["signals"][0]["capability"], "planar-base@1", "{base}");
+    // Nothing in front of its distance sensor yet.
+    c.cable.board(|b| b.set_distance_of(Sensor::Front, -1.0));
+
+    // The board has no LiDAR: a simulated one in the empty world stands in for SENNEP's LD19.
+    assert_eq!(call(&c.app, "PUT", "/api/v0/world", Some(json!({"name": "empty"}))).await.0, StatusCode::OK);
+    let lidar =
+        json!({"name": "lidar", "connector": "ldrobot-ld19", "simulate": "world", "mount": {"x": 0.2}});
+    assert_eq!(call(&c.app, "POST", "/api/v0/parts", Some(lidar)).await.0, StatusCode::CREATED);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v0/packages?name=sennep-0.1.0.faberpkg")
+        .header("content-type", "application/octet-stream")
+        .body(Body::from(support::example_package("sennep", &wasm)))
+        .unwrap();
+    assert_eq!(c.app.clone().oneshot(req).await.unwrap().status(), StatusCode::CREATED);
+    // The sensor's mount isn't set: it sits at SENNEP's centre, looking ahead.
+    let roles = json!({"roles": {"lidar": "lidar", "base": "mega.base", "proximity": ["mega.front"], "battery": "mega.battery"}});
+    let (s, a) = call(&c.app, "PUT", "/api/v0/apps/sennep/roles", Some(roles)).await;
+    assert_eq!(s, StatusCode::OK, "{a}");
+    call(&c.app, "POST", "/api/v0/apps/sennep/enable", None).await;
+    until("the app to run", async || {
+        call(&c.app, "GET", "/api/v0/apps/sennep", None).await.1["state"]["kind"] == "running"
+    })
+    .await;
+
+    let vx = |c: &TestCore| c.cable.board(|b| b.base_velocity()[0]);
+    let window = Window::hold(&c);
+    until("the board's base to drive at the top speed", async || (vx(&c) - 0.3).abs() < 1e-4).await;
+    let leases = call(&c.app, "GET", "/api/v0/leases", None).await.1;
+    assert_eq!(leases[0]["holder"], "app:sennep", "{leases}");
+
+    // Something 0.1 m in front of SENNEP's front edge, seen by the board's own sensor: it stops.
+    c.cable.board(|b| b.set_distance_of(Sensor::Front, 0.5));
+    until("the board's sensor to stop it", async || vx(&c) == 0.0).await;
+    c.cable.board(|b| b.set_distance_of(Sensor::Front, -1.0));
+    until("it to drive on once clear", async || (vx(&c) - 0.3).abs() < 1e-4).await;
+
+    // The board's battery goes critical (3S Li-ion below 9.9 V): 30 % of the top speed.
+    c.cable.board(|b| b.set_battery_volts(9.6));
+    until("the speed to be capped", async || (vx(&c) - 0.09).abs() < 1e-4).await;
+    c.cable.board(|b| b.set_battery_volts(12.0));
+
+    // The window goes quiet: the app lets go, the core sends SAFE, the base stops.
+    drop(window);
+    let quiet = Instant::now();
+    until("the board's base to stop", async || vx(&c) == 0.0).await;
+    assert!(quiet.elapsed() < Duration::from_millis(500), "it took {:?}", quiet.elapsed());
+
+    // Turned off while driving: at once.
+    let window = Window::hold(&c);
+    until("it to drive again", async || vx(&c) > 0.0).await;
+    let (s, _) = call(&c.app, "POST", "/api/v0/apps/sennep/disable", None).await;
+    assert_eq!(s, StatusCode::OK);
+    let off = Instant::now();
+    until("the board's base to stop", async || vx(&c) == 0.0).await;
+    assert!(off.elapsed() < SLACK, "it took {:?}", off.elapsed());
+    drop(window);
+}
+
+/// What the SENNEP app's window does while W is held: "full ahead" into the app's state, a new
+/// counter every 100 ms. Dropping it is the window closing: nothing more, not even a stop.
+struct Window {
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Window {
+    fn hold(c: &TestCore) -> Window {
+        let app = c.app.clone();
+        let task = tokio::spawn(async move {
+            let mut seq = 0u64;
+            loop {
+                seq += 1;
+                let body = json!({"key": "drive", "value": format!("{seq} 1 0 0")});
+                call(&app, "PUT", "/api/v0/apps/sennep/state", Some(body)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        });
+        Window { task }
+    }
+}
+
+impl Drop for Window {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }

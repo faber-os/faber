@@ -69,26 +69,101 @@ class SimDistance : public faberlink::Distance {
   float measure() override { return meters; }
 };
 
+// planar-base@1 the way SENNEP's Mega will host it (docs/faberlink.md). The library has no
+// planar-base part type yet, so this test part writes the capability's layouts itself. Holonomic,
+// at most 0.6 m/s and 1.5 rad/s; its "hardware" is the velocity it was last given, which it also
+// reports as measured. Its safe state is standing still.
+class SimPlanarBase : public faberlink::Part {
+ public:
+  SimPlanarBase(const char* name, uint16_t leaseMs)
+      : faberlink::Part(name, faberlink::PLANAR_BASE, leaseMs, 50), vx(0), vy(0), omega(0) {}
+  uint8_t writeInfo(uint8_t* out) const override {
+    out[0] = 1;  // holonomic
+    putTwist(out + 1, kMaxV, kMaxV, kMaxOmega);
+    putTwist(out + 13, 1.0f, 1.0f, 3.0f);  // max acceleration
+    out[25] = 0;                           // built from: nothing named
+    return 26;
+  }
+  uint8_t writeReading(uint8_t* out, uint32_t) override {
+    out[0] = 1;  // measured is known; not bumped
+    putTwist(out + 1, vx, vy, omega);
+    putTwist(out + 13, vx, vy, omega);
+    return 25;
+  }
+  uint8_t apply(const uint8_t* c, uint8_t len, uint8_t* out, bool* clamped) override {
+    if (len != 13 || c[0] != 0) return 0;  // only set-velocity
+    float v[3] = {faberlink::getF32(c + 1), faberlink::getF32(c + 5), faberlink::getF32(c + 9)};
+    const float max[3] = {kMaxV, kMaxV, kMaxOmega};
+    for (int i = 0; i < 3; i++) {
+      if (!(v[i] == v[i]) || v[i] > 1e30f || v[i] < -1e30f) return 0;  // NaN or infinite
+      if (v[i] > max[i]) {
+        v[i] = max[i];
+        *clamped = true;
+      } else if (v[i] < -max[i]) {
+        v[i] = -max[i];
+        *clamped = true;
+      }
+    }
+    vx = v[0];
+    vy = v[1];
+    omega = v[2];
+    out[0] = 0;
+    putTwist(out + 1, vx, vy, omega);
+    return 13;
+  }
+  uint8_t enterSafeState(uint8_t* out) override {
+    vx = vy = omega = 0;
+    out[0] = 0;
+    putTwist(out + 1, 0, 0, 0);
+    return 13;
+  }
+  float vx, vy, omega;
+
+ private:
+  static const float kMaxV;
+  static const float kMaxOmega;
+  static void putTwist(uint8_t* p, float a, float b, float c) {
+    faberlink::putF32(p, a);
+    faberlink::putF32(p + 4, b);
+    faberlink::putF32(p + 8, c);
+  }
+};
+
+const float SimPlanarBase::kMaxV = 0.6f;
+const float SimPlanarBase::kMaxOmega = 1.5f;
+
 // The small board hosts `left` (part 0) and `front` (part 1), and with a battery `battery` (part 2).
 // The Mega also hosts `right` (part 1) and `rear` (part 3): motors left, right, then distances
-// front, rear.
+// front, rear. SENNEP's Mega hosts a planar base `base` (part 0), distances `front` and `rear`
+// (parts 1 and 2) and a 3S Li-ion `battery` (part 3).
+enum Kind { SMALL, MEGA, SENNEP };
+
 struct Harness {
-  Harness(uint16_t heartbeatTimeoutMs, bool mega, uint16_t motorLeaseMs, bool withBattery = false,
+  Harness(uint16_t heartbeatTimeoutMs, Kind kind, uint16_t leaseMs, bool withBattery = false,
           faberlink::BatteryChemistry chemistry = faberlink::BATTERY_LI_ION, uint8_t cells = 3,
           float capacityAh = 0)
       : board(out),
-        motor("left", motorLeaseMs),
-        motor2("right", motorLeaseMs),
+        motor("left", leaseMs),
+        motor2("right", leaseMs),
         distance("front"),
         distance2("rear"),
-        battery(chemistry, cells, capacityAh) {
-    board.setIdentity(mega ? "sim-mega" : "sim-board", "faberlink-harness", "0.1.0");
+        battery(chemistry, cells, capacityAh),
+        base("base", leaseMs) {
+    board.setIdentity(kind == SENNEP ? "sim-sennep-mega" : kind == MEGA ? "sim-mega" : "sim-board",
+                      "faberlink-harness", "0.1.0");
     board.setHeartbeatTimeout(heartbeatTimeoutMs);
-    board.add(motor);
-    if (mega) board.add(motor2);
-    board.add(distance);
-    if (mega) board.add(distance2);
-    if (withBattery) board.add(battery);
+    if (kind == SENNEP) {
+      board.add(base);
+      board.add(distance);
+      board.add(distance2);
+      board.add(battery);
+    } else {
+      board.add(motor);
+      if (kind == MEGA) board.add(motor2);
+      board.add(distance);
+      if (kind == MEGA) board.add(distance2);
+      if (withBattery) board.add(battery);
+    }
     board.begin();
   }
   SimMotor& motorAt(int i) { return i == 1 ? motor2 : motor; }
@@ -100,6 +175,7 @@ struct Harness {
   SimDistance distance;
   SimDistance distance2;
   SimBattery battery;
+  SimPlanarBase base;
 };
 
 }  // namespace
@@ -107,18 +183,31 @@ struct Harness {
 extern "C" {
 
 void* flh_new(uint16_t heartbeat_timeout_ms) {
-  return new Harness(heartbeat_timeout_ms, false, faberlink::DEFAULT_LEASE_MS);
+  return new Harness(heartbeat_timeout_ms, SMALL, faberlink::DEFAULT_LEASE_MS);
 }
 
 // The Mega; its motors stop by themselves after motor_lease_ms without a command.
 void* flh_new_mega(uint16_t heartbeat_timeout_ms, uint16_t motor_lease_ms) {
-  return new Harness(heartbeat_timeout_ms, true, motor_lease_ms);
+  return new Harness(heartbeat_timeout_ms, MEGA, motor_lease_ms);
+}
+
+// SENNEP's Mega; its base stops by itself after base_lease_ms without a command.
+void* flh_new_sennep(uint16_t heartbeat_timeout_ms, uint16_t base_lease_ms) {
+  return new Harness(heartbeat_timeout_ms, SENNEP, base_lease_ms);
+}
+
+// The velocity SENNEP's base is driven at now: vx, vy and omega into out[0..3].
+void flh_base_velocity(void* h, float* out) {
+  const SimPlanarBase& b = static_cast<Harness*>(h)->base;
+  out[0] = b.vx;
+  out[1] = b.vy;
+  out[2] = b.omega;
 }
 
 // The small board with a battery (part 2) of this chemistry (a faberlink::BatteryChemistry),
 // cell count and capacity (0 = unknown). It reports every 100 ms.
 void* flh_new_with_battery(uint16_t heartbeat_timeout_ms, uint8_t chemistry, uint8_t cells, float capacity_ah) {
-  return new Harness(heartbeat_timeout_ms, false, faberlink::DEFAULT_LEASE_MS, true,
+  return new Harness(heartbeat_timeout_ms, SMALL, faberlink::DEFAULT_LEASE_MS, true,
                      static_cast<faberlink::BatteryChemistry>(chemistry), cells, capacity_ah);
 }
 
