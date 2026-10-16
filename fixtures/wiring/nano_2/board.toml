@@ -16,6 +16,12 @@ template = "mosfet"
 shape = "sig"
 pins = { out = 5 }
 
+[parts.knob]
+template = "potentiometer"
+shape = "wiper"
+pins = { signal = "A0" }
+settings = { rate-hz = 10 }
+
 [parts.wheel]
 template = "encoder"
 shape = "quadrature"

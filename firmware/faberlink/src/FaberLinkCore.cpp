@@ -448,6 +448,24 @@ uint8_t Encoder::writeReading(uint8_t* out, uint32_t nowMs) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Analog inputs
+
+AnalogIn::AnalogIn(const char* name, float referenceVolts, uint16_t readingPeriodMs)
+    : Part(name, ANALOG_IN, 0, readingPeriodMs == 0 ? 100 : readingPeriodMs),
+      referenceVolts_(referenceVolts > 0 && isFinite(referenceVolts) ? referenceVolts : 0) {}
+
+// analog-in@1 reading layout: present u8 (bit 0: volts), fraction f32, volts f32.
+uint8_t AnalogIn::writeReading(uint8_t* out, uint32_t) {
+  float f = measureFraction();
+  if (!isFinite(f) || f < 0) return 0;
+  if (f > 1) f = 1;
+  out[0] = referenceVolts_ > 0 ? 1 : 0;
+  putF32(out + 1, f);
+  putF32(out + 5, f * referenceVolts_);
+  return 9;
+}
+
+// ---------------------------------------------------------------------------------------------
 // Battery
 
 namespace {

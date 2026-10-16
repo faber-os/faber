@@ -46,6 +46,12 @@ shape = "out"
 pins = { signal = 26 }
 settings = { trigger-distance-m = 0 }
 
+[parts.knob]
+template = "potentiometer"
+shape = "wiper"
+pins = { signal = "A2" }
+settings = { rate-hz = 10 }
+
 [parts.led]
 template = "led"
 shape = "on-off"

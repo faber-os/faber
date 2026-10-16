@@ -496,6 +496,8 @@ pub enum SketchPart {
     /// `FaberMotor name(name, pwm, dir)` with `name.useEncoder(...)` of the encoder declared just
     /// before it.
     MotorWithEncoder { name: &'static str, pwm: u8, dir: u8 },
+    /// `FaberAnalogIn name(name, pin)`: 10 readings a second, 5 V reference.
+    AnalogIn { name: &'static str, pin: u8 },
 }
 
 impl SketchPart {
@@ -511,7 +513,8 @@ impl SketchPart {
             | SketchPart::Output { name, .. }
             | SketchPart::Servo { name, .. }
             | SketchPart::Encoder { name, .. }
-            | SketchPart::MotorWithEncoder { name, .. } => name,
+            | SketchPart::MotorWithEncoder { name, .. }
+            | SketchPart::AnalogIn { name, .. } => name,
         }
     }
 }
@@ -603,6 +606,7 @@ impl Sketch {
                         (9, 0, [a, b, NO_PIN, NO_PIN], pulses_per_rev)
                     }
                     SketchPart::MotorWithEncoder { pwm, dir, .. } => (10, 0, [pwm, dir, NO_PIN, NO_PIN], 0.0),
+                    SketchPart::AnalogIn { pin, .. } => (11, 0, [pin, NO_PIN, NO_PIN, NO_PIN], 0.0),
                 };
                 ffi::PartSpec { kind, name: name.as_ptr(), driver, pins, max_velocity }
             })

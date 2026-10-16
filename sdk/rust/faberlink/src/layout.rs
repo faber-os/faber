@@ -7,8 +7,8 @@
 use crate::bytes::{Reader, Writer};
 use crate::{DecodeError, EncodeError};
 use faber_capabilities::{
-    Capability, Command, Info, Reading, Timestamp, Twist2d, battery, digital_in, digital_out, distance,
-    encoder, estop, motor, obstacle, planar_base, pwm_out, servo,
+    Capability, Command, Info, Reading, Timestamp, Twist2d, analog_in, battery, digital_in, digital_out,
+    distance, encoder, estop, motor, obstacle, planar_base, pwm_out, servo,
 };
 
 /// The one-byte code a capability has in `READING`, `COMMAND` and `APPLIED` (protocol v1).
@@ -25,13 +25,15 @@ pub fn code(capability: Capability) -> Option<u8> {
         Capability::PwmOut => 9,
         Capability::Servo => 10,
         Capability::Encoder => 11,
+        Capability::AnalogIn => 12,
         // No layout yet: the board side (the Arduino library) has none either.
         Capability::LaserScan
         | Capability::Pose
         | Capability::Position
         | Capability::Temperature
-        | Capability::AnalogIn
-        | Capability::Imu => return None,
+        | Capability::Imu => {
+            return None;
+        }
     })
 }
 
@@ -141,6 +143,11 @@ pub fn encode_reading(reading: &Reading, out: &mut Vec<u8>) -> Result<(), Encode
             w.bool(r.angle_rad.is_some());
             w.f32(r.angle_rad.unwrap_or(0.0));
         }
+        Reading::AnalogIn(r) => {
+            w.bool(r.volts.is_some());
+            w.f32(r.fraction);
+            w.f32(r.volts.unwrap_or(0.0));
+        }
         Reading::Encoder(r) => {
             w.bool(r.velocity_rad_s.is_some());
             w.u64(r.count as u64);
@@ -235,6 +242,14 @@ pub fn decode_reading(capability: Capability, t_us: Timestamp, bytes: &[u8]) -> 
                 return Err(DecodeError::BadValue { field: "angleRad" });
             }
             Reading::Servo(servo::Reading { t_us, angle_rad: holding.then_some(angle) })
+        }
+        Capability::AnalogIn => {
+            let has_volts = r.bool("present")?;
+            let (fraction, volts) = (r.f32()?, r.f32()?);
+            if !fraction.is_finite() || (has_volts && !volts.is_finite()) {
+                return Err(DecodeError::BadValue { field: "fraction" });
+            }
+            Reading::AnalogIn(analog_in::Reading { t_us, fraction, volts: has_volts.then_some(volts) })
         }
         Capability::Encoder => {
             let has_velocity = r.bool("present")?;
@@ -398,7 +413,7 @@ pub fn encode_info(info: &Info, out: &mut Vec<u8>) -> Result<(), EncodeError> {
 pub fn decode_info(capability: Capability, bytes: &[u8]) -> Result<Option<Info>, DecodeError> {
     let r = &mut Reader::new(bytes);
     let info = match capability {
-        Capability::DigitalIn | Capability::DigitalOut | Capability::PwmOut => None,
+        Capability::DigitalIn | Capability::DigitalOut | Capability::PwmOut | Capability::AnalogIn => None,
         Capability::Distance => Some(Info::Distance(distance::Info {
             min_m: r.f32()?,
             max_m: r.f32()?,
@@ -520,6 +535,9 @@ pub(crate) mod tests {
             (t.clone(), finite()).prop_map(|(t_us, duty)| Reading::PwmOut(pwm_out::Reading { t_us, duty })),
             (t.clone(), proptest::option::of(finite()))
                 .prop_map(|(t_us, angle_rad)| Reading::Servo(servo::Reading { t_us, angle_rad })),
+            (t.clone(), finite(), proptest::option::of(finite())).prop_map(|(t_us, fraction, volts)| {
+                Reading::AnalogIn(analog_in::Reading { t_us, fraction, volts })
+            }),
             (t.clone(), any::<i64>(), any::<i32>(), finite(), proptest::option::of(finite())).prop_map(
                 |(t_us, count, delta, counts_per_s, velocity_rad_s)| {
                     Reading::Encoder(encoder::Reading { t_us, count, delta, counts_per_s, velocity_rad_s })

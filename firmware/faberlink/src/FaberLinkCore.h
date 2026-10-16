@@ -78,6 +78,7 @@ enum Capability : uint8_t {
   PWM_OUT = 9,
   SERVO = 10,
   ENCODER = 11,
+  ANALOG_IN = 12,
 };
 
 // Why an actuator's output changed (APPLIED.cause).
@@ -493,6 +494,24 @@ class Encoder : public Part {
   int32_t last_, motorLast_;
   uint32_t lastMs_, motorLastMs_;
   bool started_;
+};
+
+// analog-in@1: an analog input as a share of full scale (0..1), and its volts when the reference
+// is known (referenceVolts > 0). No info.
+class AnalogIn : public Part {
+ public:
+  AnalogIn(const char* name, float referenceVolts = 0, uint16_t readingPeriodMs = 100);
+  const char* capabilityId() const override { return "analog-in@1"; }
+  uint8_t writeInfo(uint8_t*) const override { return 0; }
+  uint8_t writeReading(uint8_t* out, uint32_t nowMs) override;
+
+ protected:
+  ~AnalogIn() {}
+  // The input now as a share of full scale, 0..1; a negative or non-finite value sends nothing.
+  virtual float measureFraction() = 0;
+
+ private:
+  float referenceVolts_;
 };
 
 // The board's side of the protocol.

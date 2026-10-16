@@ -30,6 +30,7 @@ pub const FILES: &[(&str, &str)] = library![
     "examples/LedAndRelay/LedAndRelay.ino",
     "examples/ServoArm/ServoArm.ino",
     "examples/WheelEncoder/WheelEncoder.ino",
+    "examples/KnobAndJoystick/KnobAndJoystick.ino",
 ];
 
 /// Writes the library to `<dir>/FaberLink/` (only the files that differ) and returns that folder.
@@ -121,6 +122,13 @@ pub const TEMPLATES: &[Template] = &[
         description: "A motor on a PWM + DIR driver, measured by a hall encoder on pins 2 and 3.",
         faberlink: true,
         example: Some("WheelEncoder"),
+    },
+    Template {
+        id: "knob-and-joystick",
+        name: "FaberLink: a knob and a joystick",
+        description: "A potentiometer on A0, and a thumb joystick on A1, A2 and pin 4.",
+        faberlink: true,
+        example: Some("KnobAndJoystick"),
     },
     Template {
         id: "battery-monitor",

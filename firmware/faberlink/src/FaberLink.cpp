@@ -209,6 +209,27 @@ void FaberOutput::drive(float value) {
   }
 }
 
+// The period for a rate, 1 ms to 60 s.
+static uint16_t periodMs(float rateHz) {
+  if (!(rateHz > 0)) return 100;
+  const float ms = 1000.0f / rateHz;
+  return ms < 1 ? 1 : ms > 60000 ? 60000 : static_cast<uint16_t>(ms + 0.5f);
+}
+
+FaberAnalogIn::FaberAnalogIn(const char* name, uint8_t analogPin, float rateHz, float referenceVolts)
+    : faberlink::AnalogIn(name, referenceVolts, periodMs(rateHz)), pin_(analogPin) {
+  enqueue(this);
+}
+
+uint8_t FaberAnalogIn::writePins(uint8_t* out) const { return putPin(out, faberlink::ROLE_SIGNAL, pin_); }
+
+// analogRead() gives 0..1023 on every AVR board (10 bits).
+float FaberAnalogIn::measureFraction() {
+  long sum = 0;
+  for (uint8_t i = 0; i < 4; i++) sum += analogRead(pin_);
+  return sum / (4 * 1023.0f);
+}
+
 FaberBattery::FaberBattery(const char* name, uint8_t analogPin, float dividerRatio, uint8_t cellsInSeries,
                            faberlink::BatteryChemistry chemistry, float referenceVolts, float capacityAh)
     : faberlink::Battery(name, chemistry, cellsInSeries, capacityAh),

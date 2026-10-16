@@ -659,3 +659,33 @@ fn an_encoder_whose_a_is_no_interrupt_pin_counts_nothing() {
     l.run(60);
     assert_eq!(last_encoder(&l).count, 0);
 }
+
+#[test]
+fn an_analog_input_reports_its_share_of_full_scale_and_volts_ten_times_a_second() {
+    let mut l = Link::ready(&[SketchPart::AnalogIn { name: "knob", pin: 14 }]);
+    assert_eq!(l.session.parts()[0].capability, "analog-in@1");
+    assert_eq!(l.session.parts()[0].info, PartInfo::Empty);
+    l.sketch.set_analog(14, 1023);
+    l.events.clear();
+    l.run(1000);
+    let readings: Vec<_> = l
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Reading { reading: Reading::AnalogIn(r), .. } => Some(r.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(readings.len(), 10, "10 a second");
+    assert_eq!((readings[9].fraction, readings[9].volts), (1.0, Some(5.0)));
+    l.sketch.set_analog(14, 256);
+    l.run(100);
+    let Some(Event::Reading { reading: Reading::AnalogIn(r), .. }) =
+        l.events.iter().rev().find(|e| matches!(e, Event::Reading { .. }))
+    else {
+        panic!()
+    };
+    assert!((r.fraction - 256.0 / 1023.0).abs() < 1e-6);
+    assert_eq!(l.session.pins()[0], pins(0, &[(PinRole::Signal, 14)]));
+    assert_eq!(l.session.pins()[0].label(14), "A0");
+}

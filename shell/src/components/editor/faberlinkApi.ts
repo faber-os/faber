@@ -215,6 +215,18 @@ export const FABERLINK_CLASSES: FaberLinkClass[] = [
     ],
   },
   {
+    name: 'FaberAnalogIn',
+    doc: 'An analog input: a potentiometer, a slide pot, one axis of a thumb joystick, a light sensor in a divider. Faber gets it as a share of full scale (0 to 1) and, with the board’s reference voltage (5.0 on an Uno or Mega), in volts. rateHz is how many readings a second (10 by default).',
+    library: 'faberlink',
+    include: 'FaberLink.h',
+    constructors: [
+      parseSignature(
+        'FaberAnalogIn(const char* name, uint8_t analogPin, float rateHz = 10, float referenceVolts = 5.0f)',
+      ).overload,
+    ],
+    members: inherited(PART_MEMBERS),
+  },
+  {
     name: 'FaberBattery',
     doc: 'A battery measured through a voltage divider (battery + to R1 to the pin to R2 to GND). dividerRatio is (R1 + R2) / R2; keep the pin below referenceVolts when the battery is full.',
     library: 'faberlink',

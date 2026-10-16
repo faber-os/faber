@@ -83,7 +83,7 @@ class FakeSerial : public HardwareSerial {
 // maxVelocity as the trigger distance), 7 FaberOutput(name, pin, driver as the mode, pins[1] as
 // the active level), 8 FaberServo(name, pin, 0, 180, driver as the safe state), 9 FaberEncoder(name,
 // pins[0], pins[1], maxVelocity as the pulses per rev), 10 FaberMotor(name, pins[0], pins[1]) using
-// the encoder declared just before it.
+// the encoder declared just before it, 11 FaberAnalogIn(name, pins[0], 10, 5.0).
 struct PartSpec {
   uint8_t type;
   const char* name;
@@ -107,6 +107,7 @@ struct Sketch {
   std::vector<std::unique_ptr<FaberOutput>> outputs;
   std::vector<std::unique_ptr<FaberServo>> servos;
   std::vector<std::unique_ptr<FaberEncoder>> encoders;
+  std::vector<std::unique_ptr<FaberAnalogIn>> analogs;
 };
 
 // Parts register themselves in a global table until the next FaberLink::begin(), as globals in a
@@ -264,6 +265,9 @@ void* fla_new(const PartSpec* parts, size_t n) {
       case 10:
         s->motors.emplace_back(new FaberMotor(name, p.pins[0], p.pins[1]));
         s->motors.back()->useEncoder(*s->encoders.back());
+        break;
+      case 11:
+        s->analogs.emplace_back(new FaberAnalogIn(name, p.pins[0]));
         break;
       default:
         s->batteries.emplace_back(new FaberBattery(name, p.pins[0], 3.0f, 3));

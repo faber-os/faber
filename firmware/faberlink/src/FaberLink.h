@@ -211,6 +211,27 @@ class FaberOutput : public faberlink::PinOutput {
   faberlink::ActiveLevel active_;
 };
 
+// An analog input (analog-in@1): a potentiometer, a slide pot, a light-dependent resistor in a
+// divider, one axis of a thumb joystick. Faber gets it as a share of full scale (0..1) and, with
+// the board's reference voltage, in volts.
+//
+//   FaberAnalogIn knob("knob", A0);              // 10 readings a second, 5 V reference
+//   FaberAnalogIn x("x", A1, 20);                // a joystick axis, 20 a second
+//
+// referenceVolts is the board's analog reference: 5.0 on an Uno or Mega, 3.3 on 3.3 V boards.
+// Each reading is the average of 4 analogRead()s, which takes under half a millisecond.
+class FaberAnalogIn : public faberlink::AnalogIn {
+ public:
+  FaberAnalogIn(const char* name, uint8_t analogPin, float rateHz = 10, float referenceVolts = 5.0f);
+
+ protected:
+  uint8_t writePins(uint8_t* out) const override;
+  float measureFraction() override;
+
+ private:
+  uint8_t pin_;
+};
+
 // A battery measured through a voltage divider on an analog pin: battery + -> R1 -> pin -> R2 -> GND.
 // dividerRatio is (R1 + R2) / R2, e.g. 3.0 for 20 kOhm over 10 kOhm, which brings a 3S pack's
 // 12.6 V down to 4.2 V, safely under a 5 V board's reference. Pick resistors that keep the pin

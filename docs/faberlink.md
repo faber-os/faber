@@ -218,6 +218,7 @@ layout maps 1:1 onto the types in `sdk/rust/capabilities` (and `wit/capabilities
 | 9 | `pwm-out@1` (added 2026-10-16) |
 | 10 | `servo@1` (added 2026-10-16) |
 | 11 | `encoder@1` (added 2026-10-16) |
+| 12 | `analog-in@1` (added 2026-10-16) |
 
 Other capabilities have no FaberLink layout yet; one is added (with a new code) when a board needs
 it. A capability without info (`digital-in@1`) has an empty info layout, and the core's
@@ -235,6 +236,7 @@ it. A capability without info (`digital-in@1`) has an empty info layout, and the
 | `pwm-out@1` | `duty f32` (4 B), 0..1; always finite. | `kind u8 (0 = set-duty) · duty f32` (5 B). The safe state is duty 0. | — (0 B) |
 | `servo@1` | `holding u8 · angle_rad f32` (5 B): the angle it holds, 0 while released (holding 0). | `kind u8 · angle_rad f32` (5 B). `kind`: 0 set-angle, 1 release, 2 safe (the angle is 0 for 1 and 2). The safe state is `safe`: the board answers with set-angle to the angle it holds (hold) or release. | `min_angle_rad f32 · max_angle_rad f32 · safe_state u8` (9 B). `safe_state`: 0 hold, 1 release. |
 | `encoder@1` | `present u8 · count i64 · delta i32 · counts_per_s f32 · velocity_rad_s f32` (21 B). `present` bit 0: the rad/s are known (else sent as 0). `delta` is the counts since the previous reading. | — | `counts_per_rev f32` (4 B), NaN when not known. |
+| `analog-in@1` | `present u8 · fraction f32 · volts f32` (9 B). `present` bit 0: the volts are known (else sent as 0). `fraction` is 0..1, always finite. | — | — (0 B) |
 | `obstacle@1` | `detected u8` (1 B) | — | `kind u8 · trigger_distance_m f32` (5 B). `kind`: 0 bumper, 1 infrared, 2 limit. A NaN trigger distance means "unknown". |
 
 ## 5. Rules a board follows (the library enforces them, not the sketch)
@@ -387,9 +389,14 @@ void loop()  { link.poll(); }            // everything else is done by the libra
   `left.useEncoder(wheel)` makes a `FaberMotor` report the speed and position the encoder measures
   (its `motor@1` readings, 20 times a second); set-velocity stays open loop. That costs a sketch
   with motors 34 B of flash and 2 B of RAM per motor; the code is in the encoder's class.
+- `FaberAnalogIn` (`analog-in@1`, 2026-10-16) reads an analog pin as a share of full scale and
+  volts: `FaberAnalogIn knob("knob", A0);` (further arguments: readings a second, 10 by default,
+  and the analog reference, 5 V). Each reading averages 4 `analogRead()`s. A thumb joystick is two
+  of these and a `FaberButton`; a joystick as one `rc-input@1` part needs that capability first.
 - Examples: `examples/MotorAndDistance`, `examples/MotorL298N` (two motors on an L298N),
   `examples/Ultrasonic`, `examples/BatteryMonitor`, `examples/ButtonAndBumper`,
-  `examples/LedAndRelay`, `examples/ServoArm` and `examples/WheelEncoder`. CI compiles every example for an Uno and a
+  `examples/LedAndRelay`, `examples/ServoArm`, `examples/WheelEncoder` and
+  `examples/KnobAndJoystick`. CI compiles every example for an Uno and a
   Mega.
 - **Build id:** when the sketch is compiled with `FABER_BUILD_ID` defined (Faber's Arduino editor
   does that, [arduino-editor.md](arduino-editor.md)), `link.begin()` hands it to the board, which
@@ -480,6 +487,7 @@ flash and 2 B of RAM (a virtual table entry per part class, and the loop in `pol
 | `LedAndRelay` (new, outputs) | 7 592 B | 588 B | 8 680 B | 960 B |
 | `ServoArm` (new, with the Servo library 1.3.0) | 8 576 B | 588 B | 9 808 B | 1 071 B |
 | `WheelEncoder` (new: a motor using an encoder) | 10 716 B | 673 B | 12 618 B | 1 057 B |
+| `KnobAndJoystick` (new: three analog inputs and a button) | 7 726 B | 677 B | 8 560 B | 1 049 B |
 | `MotorAndDistance` (with `useEncoder` in `Motor`) | 10 108 B (+34) | 638 B (+2) | 11 242 B (+34) | 1 010 B (+2) |
 | `MotorL298N` | 8 514 B (+42) | 594 B (+4) | 9 596 B (+42) | 966 B (+4) |
 
