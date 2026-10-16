@@ -7,6 +7,8 @@
 //! machine without that target the tests say so and pass; CI sets `FABER_REQUIRE_WASM=1`, which
 //! makes a missing target a failure.
 
+mod support;
+
 use faber_capabilities::{Command, motor};
 use faber_connector::testing::RecordingContext;
 use faber_connector::{Applied, CommandError, Connector, ConnectorKind, Health, Manifest, Problem, Settings};
@@ -371,7 +373,6 @@ mod installed {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use faber_core::api;
     use faber_core::clock::MonotonicClock;
     use faber_core::disks::{Disk, DiskDiscovery};
     use faber_core::logs::LogBook;
@@ -418,7 +419,7 @@ mod installed {
             world: Arc::new(faber_core::simparts::SimWorld::new()),
         })
         .unwrap();
-        let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+        let app = crate::support::signed_in_api(&machine, LogBook::new(clock));
         (machine, app)
     }
 

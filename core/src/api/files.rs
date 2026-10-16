@@ -1,14 +1,16 @@
 //! Files, storage, backups and settings routes (docs/api.md, "Files", "Storage and backups" and
 //! "Settings").
 
+use super::access::{FileUse, path_need, settings_need};
+use super::auth::Caller;
 use super::{ApiJson, AppState, Failure, blocking, convert, dto};
 use crate::files::{MAX_FILE_BYTES, WriteMode};
-use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use axum::{Extension, Json};
 use serde::Deserialize;
 
 pub fn routes() -> axum::Router<AppState> {
@@ -55,10 +57,18 @@ async fn roots(State(s): State<AppState>) -> Json<Vec<dto::FileRoot>> {
     )
 }
 
+/// Refused unless the caller may `use_` every one of `paths` (docs/auth.md: the whole machine's
+/// files and Backups are for admins).
+fn may(caller: &Caller, use_: FileUse, paths: &[&str]) -> Result<(), Failure> {
+    paths.iter().try_for_each(|p| caller.require(path_need(p, use_)))
+}
+
 async fn list(
     State(s): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Query(q): Query<PathQuery>,
 ) -> Result<Json<dto::FolderListing>, Failure> {
+    may(&caller, FileUse::Read, &[&q.path])?;
     let path = q.path.clone();
     let entries = blocking(move || s.machine.list_files(&path)).await??;
     Ok(Json(convert::folder_listing(&q.path, &entries)))
@@ -66,7 +76,12 @@ async fn list(
 
 /// Inline reads (Notes, previews) load the file and are capped at 16 MB. Downloads stream from
 /// disk in chunks, so a backup with recordings of any size can be saved.
-async fn read(State(s): State<AppState>, Query(q): Query<PathQuery>) -> Result<Response, Failure> {
+async fn read(
+    State(s): State<AppState>,
+    Extension(caller): Extension<Caller>,
+    Query(q): Query<PathQuery>,
+) -> Result<Response, Failure> {
+    may(&caller, FileUse::Read, &[&q.path])?;
     let path = q.path.clone();
     if q.download != Some(1) {
         let (p, bytes) = blocking(move || s.machine.read_file(&path)).await??;
@@ -129,9 +144,11 @@ fn chunks(
 
 async fn write(
     State(s): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Query(q): Query<PathQuery>,
     body: Bytes,
 ) -> Result<StatusCode, Failure> {
+    may(&caller, FileUse::Change, &[&q.path])?;
     let mode = match q.mode.as_deref() {
         None | Some("replace") => WriteMode::Replace,
         Some("create") => WriteMode::CreateOnly,
@@ -150,40 +167,50 @@ async fn write(
 
 async fn create_folder(
     State(s): State<AppState>,
+    Extension(caller): Extension<Caller>,
     ApiJson(body): ApiJson<dto::PathRequest>,
 ) -> Result<StatusCode, Failure> {
+    may(&caller, FileUse::Change, &[&body.path])?;
     blocking(move || s.machine.create_folder(&body.path)).await??;
     Ok(StatusCode::CREATED)
 }
 
 async fn move_file(
     State(s): State<AppState>,
+    Extension(caller): Extension<Caller>,
     ApiJson(body): ApiJson<dto::MoveRequest>,
 ) -> Result<StatusCode, Failure> {
+    may(&caller, FileUse::Change, &[&body.from, &body.to])?;
     blocking(move || s.machine.move_file(&body.from, &body.to)).await??;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn trash(
     State(s): State<AppState>,
+    Extension(caller): Extension<Caller>,
     ApiJson(body): ApiJson<dto::PathsRequest>,
 ) -> Result<StatusCode, Failure> {
+    may(&caller, FileUse::Change, &body.paths.iter().map(String::as_str).collect::<Vec<_>>())?;
     blocking(move || s.machine.trash_files(&body.paths)).await??;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn restore(
     State(s): State<AppState>,
+    Extension(caller): Extension<Caller>,
     ApiJson(body): ApiJson<dto::PathsRequest>,
 ) -> Result<StatusCode, Failure> {
+    may(&caller, FileUse::Change, &body.paths.iter().map(String::as_str).collect::<Vec<_>>())?;
     blocking(move || s.machine.restore_files(&body.paths)).await??;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn delete(
     State(s): State<AppState>,
+    Extension(caller): Extension<Caller>,
     ApiJson(body): ApiJson<dto::PathsRequest>,
 ) -> Result<StatusCode, Failure> {
+    may(&caller, FileUse::Change, &body.paths.iter().map(String::as_str).collect::<Vec<_>>())?;
     blocking(move || s.machine.delete_files(&body.paths)).await??;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -224,11 +251,19 @@ async fn share_setup(State(s): State<AppState>) -> Result<(StatusCode, Json<dto:
     Ok((StatusCode::CREATED, Json(dto::BackupInfo { path, bytes })))
 }
 
+/// Keeps this machine's users unless `users` asks for the backup's (docs/auth.md, "Backups").
 async fn restore_backup(
     State(s): State<AppState>,
-    ApiJson(body): ApiJson<dto::PathRequest>,
+    ApiJson(body): ApiJson<dto::RestoreRequest>,
 ) -> Result<StatusCode, Failure> {
-    blocking(move || s.machine.restore_backup(&body.path)).await??;
+    blocking(move || {
+        if body.users {
+            s.machine.restore_backup_with_users(&body.path)
+        } else {
+            s.machine.restore_backup(&body.path)
+        }
+    })
+    .await??;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -240,10 +275,13 @@ async fn settings(State(s): State<AppState>) -> Json<dto::Settings> {
     Json(s.machine.settings())
 }
 
+/// Display settings need an operator; the machine's name, time and screen role an admin.
 async fn update_settings(
     State(s): State<AppState>,
+    Extension(caller): Extension<Caller>,
     ApiJson(body): ApiJson<dto::Settings>,
 ) -> Result<Json<dto::Settings>, Failure> {
+    caller.require(settings_need(&s.machine.settings(), &body))?;
     Ok(Json(blocking(move || s.machine.update_settings(body)).await??))
 }
 

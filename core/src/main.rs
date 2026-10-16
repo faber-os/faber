@@ -18,18 +18,33 @@ struct Args {
     /// Where Faber keeps its config and captures.
     #[arg(long, default_value = "./data")]
     data: PathBuf,
-    /// Address to listen on. Phase 1 only allows this machine (127.0.0.1 or ::1).
+    /// Address to listen on. 0.0.0.0:7878 lets other computers sign in too.
     #[arg(long, default_value = "127.0.0.1:7878")]
     listen: SocketAddr,
+    /// The attached screen's own listener (the kiosk browser opens it). Requests on it from this
+    /// machine are signed in as the screen's role (Settings → This machine). Loopback only.
+    #[arg(long)]
+    screen_listen: Option<SocketAddr>,
+    /// Development only: no sign-in, everyone is an admin. Refused unless --listen is loopback.
+    #[arg(long)]
+    no_auth: bool,
 }
 
 fn main() -> ExitCode {
     let args = Args::parse();
-    if !args.listen.ip().is_loopback() {
+    if args.no_auth && !args.listen.ip().is_loopback() {
         eprintln!(
-            "faber-core: {} is reachable from other computers, but Faber has no login yet.\n\
-             Use 127.0.0.1 for now. Remote access arrives together with login (Phase 6).",
-            args.listen
+            "faber-core: --no-auth makes everyone an admin, so it only works on this computer.\n\
+             Use --listen 127.0.0.1:7878 with it, or leave --no-auth out and sign in."
+        );
+        return ExitCode::FAILURE;
+    }
+    if let Some(screen) = args.screen_listen
+        && !screen.ip().is_loopback()
+    {
+        eprintln!(
+            "faber-core: --screen-listen {screen} would let other computers act as the attached screen.\n\
+             Use a loopback address, e.g. 127.0.0.1:7879."
         );
         return ExitCode::FAILURE;
     }
@@ -55,8 +70,23 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        let screen = match args.screen_listen {
+            Some(addr) => match Core::bind(addr).await {
+                Ok(l) => Some(l),
+                Err(e) => {
+                    eprintln!("faber-core: could not listen on {addr} for the attached screen: {e}");
+                    return ExitCode::FAILURE;
+                }
+            },
+            None => None,
+        };
         let core = match Core::start(args.data.clone(), logs, clock) {
-            Ok(c) => c,
+            Ok(mut c) => {
+                if args.no_auth {
+                    c.auth = faber_core::api::auth::AuthMode::Off;
+                }
+                c
+            }
             Err(e) => {
                 eprintln!("faber-core: could not use the data folder {}: {e}", args.data.display());
                 return ExitCode::FAILURE;
@@ -66,7 +96,7 @@ fn main() -> ExitCode {
             let _ = tokio::signal::ctrl_c().await;
             tracing::info!(target: "core", "stopping");
         };
-        match core.serve(listener, shutdown).await {
+        match core.serve_with_screen(listener, screen, shutdown).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("faber-core: the server stopped with an error: {e}");

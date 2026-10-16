@@ -17,8 +17,9 @@ the one below it can.
 | **operator** | Also: drive (leases, commands, an app window's drive), release the e-stop, set simulated values and the world, the serial monitor, change their own app state, files in the home folder, display settings (look, accessibility, units, taskbar, desktop). | Install or remove packages, add or remove parts, turn apps on or off, flash a board, back up or restore, change the machine's own settings (name, time, the attached screen's role, developer settings), manage users. |
 | **admin** | Everything, including users, developer settings, installs, flashing, the e-stop release, backups and restore. | — |
 
-**Engaging the e-stop is never gated.** Anyone who is signed in, with any role, and the attached
-screen can press Stop (`POST /api/v0/estop`, and the Stop of an app window). Releasing it needs
+**Engaging the e-stop is never gated.** Anyone who can reach the machine can press Stop
+(`POST /api/v0/estop` needs no sign-in at all, so the sign-in screen has a Stop button too), and
+so can every role and the attached screen in an app window (`app-window-stop`). Releasing it needs
 an operator.
 
 A role is checked by the core, never only by the shell. The shell shows what a role can't do as
@@ -27,14 +28,18 @@ and whom to ask.
 
 ### Where each rule lives
 
-One table in the core (`core/src/api/access.rs`) gives every route its minimum role. A route
-without an entry is refused for everyone (and logged), and a test reads the API's source and fails
-if any route lacks an entry, so a new endpoint can't be forgotten. Another test calls every route
-as nobody, viewer, operator and admin and checks the boundary.
+One table in the core (`core/src/api/access.rs`) gives every route its minimum role, or `Public`
+for the few that need no sign-in: the session and setup routes, `GET /api/v0/system`, the
+translations (the sign-in screen speaks the machine's language), engaging the e-stop, and the
+app UI files. A route without an entry is refused for everyone (`500 no-access-rule`, logged), and
+a test reads the API's source and fails if any route lacks an entry (or an entry has no route), so
+a new endpoint can't be forgotten. Another test (`core/tests/auth.rs`) calls every route as nobody,
+viewer, operator and admin and checks the boundary.
 
 WebSocket messages have their own table in the same file (an exhaustive `match`, so a new message
-doesn't compile without a rule): subscribing and opening, beating and closing an app window are for
-viewers; the serial monitor and an app window's messages and drives need an operator.
+doesn't compile without a rule): subscribing, and opening, beating, stopping, releasing and closing
+an app window are for viewers; the serial monitor and an app window's messages and drives need an
+operator. Each message is checked with the sender's role at that moment.
 
 A few rules depend on more than the route, and are checked where the request is handled:
 
@@ -80,16 +85,16 @@ connection to it on the machine itself, e.g. over SSH, already has more access t
 
 ## Developer mode: `--no-auth`
 
-`faber-core --no-auth` treats every request as an admin called `developer`, for development on a PC.
-It refuses to start unless `--listen` is a loopback address, and the shell shows a warning bar
-("Sign-in is off") on every screen. Without `--no-auth`, `--listen` may now be any address: remote
-access needs a login.
+`faber-core --no-auth` treats every request as an admin (no user name), for development on a PC.
+It refuses to start unless `--listen` is a loopback address, logs a warning, and the shell shows a
+warning bar ("Sign-in is off") on every screen. Without `--no-auth`, `--listen` may now be any
+address: remote access needs a login.
 
 **The tests don't use it.** The Rust test harnesses sign in through the real path: they create an
-admin and an API token and send it with every request (`core/tests/support`), and the end-to-end
-tests create the admin through the real setup screen once and reuse its cookie
-(`shell/e2e/global-setup.ts`). That way every test runs the same code as a real machine, and
-`--no-auth` stays a convenience nobody depends on.
+admin and an API token and send it with every request (`core/tests/support`, `signed_in_api`), and
+the end-to-end tests start the core without users, create the admin through the real "Create the
+admin" screen once and reuse its cookie (`shell/e2e/global-setup.ts`). That way every test runs
+the same code as a real machine, and `--no-auth` stays a convenience nobody depends on.
 
 ## Passwords
 
@@ -140,16 +145,20 @@ created = "2026-10-16T21:04:11Z"
 ### CSRF and DNS rebinding
 
 - `SameSite=Strict` keeps the cookie off requests started by other sites.
-- Every **state-changing request** (anything but `GET`/`HEAD`) authenticated by the cookie, and
-  **every WebSocket upgrade**, must carry an `Origin` header equal to the address the browser used
-  (`http://` + its `Host`). Otherwise: `403 bad-origin`. Sign-in and setup check `Origin` too when
-  it is present (login CSRF). Requests with a bearer token aren't checked: browsers never add one
-  by themselves.
-- **Host check:** the core answers API requests only for host names that can be this machine:
-  an IP address, `localhost`, `*.local`, `*.internal`, `*.ts.net`, `*.localhost`, or the machine's
-  name. A web page that points its own domain at the machine's address (DNS rebinding) gets
-  `421 unknown-host`, so it can't create the admin on a fresh machine or use a `--no-auth` core.
-  **Confirm:** a public tunnel to your own domain (later) will need that domain added in Settings.
+- Every **state-changing request** (anything but `GET`/`HEAD`) and **every WebSocket upgrade**
+  that carries an `Origin` header must carry this machine's, as the browser addressed it
+  (`http://` or `https://` + its `Host`). Otherwise: `403 bad-origin`. That covers sign-in and
+  setup too (login CSRF) and the public Stop. A request without `Origin` passes: every current
+  browser sends it on these requests, so its absence means a program, which can't be tricked into
+  sending someone's cookie. (A sandboxed app frame's `Origin` is `null`, which is refused: app UIs
+  talk only through the shell.)
+- **Host check:** the core answers routes only for host names that can be this machine: an IP
+  address, a name without dots (the local network's own names, e.g. `sennep`), or one under
+  `.local`, `.internal`, `.localhost`, `.lan`, `.home.arpa` or `.ts.net`, or the machine's name. A
+  web page that points its own (dotted, public) domain at the machine's address (DNS rebinding)
+  gets `421 unknown-host`, so it can't create the admin on a fresh machine or use a `--no-auth`
+  core. **Confirm:** a public tunnel to your own domain (later) will need that domain added in
+  Settings.
 
 ### Rate limiting
 
@@ -188,9 +197,9 @@ they are the package's code, not data, and a sandboxed frame may not send the co
 ## What Mikkel must confirm
 
 1. Sessions are in memory: a core restart signs browsers out (the screen and tokens are fine).
-2. Stop needs *some* identity: it works for every signed-in user and the attached screen, but not
-   on the sign-in screen of a browser nobody has signed in on. Making Stop work there too is one
-   table entry; the risk is that anyone on the network could keep the machine stopped.
+2. Stop needs **no** sign-in ("never gate stopping"): the sign-in screen has a Stop button, and
+   anyone who can reach the machine can press it. The cost: someone on the network could keep it
+   stopped (they still can't release it or drive). Gating it is one table entry.
 3. Viewers can't send messages to an app's logic (only open and watch its window), because a message
    could make the logic move things. Apps that only show data still work.
 4. Operators may change display settings (look, accessibility, taskbar), which are machine-wide

@@ -125,10 +125,19 @@ async fn a_connector_from_the_template_installs_and_runs_sandboxed() {
     })
     .unwrap();
     machine.refresh_ports();
-    let app = faber_core::api::router(faber_core::api::AppState {
-        machine: Arc::clone(&machine),
-        logs: LogBook::new(clock),
-    });
+    // Signed in as a program is: the first admin's API token on every request (docs/auth.md).
+    let (admin, _) = machine.create_first_admin("tester", "test password").unwrap();
+    let (_, token) = machine.create_token("tests", faber_core::users::UserRole::Admin, &admin).unwrap();
+    let bearer = axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap();
+    let app =
+        faber_core::api::router(faber_core::api::AppState::new(Arc::clone(&machine), LogBook::new(clock)))
+            .layer(axum::middleware::map_request(move |mut req: axum::extract::Request| {
+                let bearer = bearer.clone();
+                async move {
+                    req.headers_mut().insert(axum::http::header::AUTHORIZATION, bearer);
+                    req
+                }
+            }));
     let bytes = std::fs::read(&file).unwrap();
     let (s, preview) =
         call(&app, "POST", "/api/v0/packages?mode=preview", Body::from(bytes.clone()), false).await;

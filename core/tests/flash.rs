@@ -2,9 +2,10 @@
 //! `faber-flash`'s simulated bootloaders behind fake serial ports: an official Uno, a CH340
 //! clone and a Mega. NEVER a real port: the opener below is the only one this core has.
 
+mod support;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use faber_core::api;
 use faber_core::clock::{MonotonicClock, SharedClock};
 use faber_core::disks::{Disk, DiskDiscovery};
 use faber_core::logs::LogBook;
@@ -184,7 +185,7 @@ fn core_with(uno: SimBoard) -> TestCore {
     for c in [&uno, &clone, &mega] {
         let _ = c.machine.set(Arc::downgrade(&machine));
     }
-    let app = api::router(api::AppState { machine: Arc::clone(&machine), logs: LogBook::new(clock) });
+    let app = crate::support::signed_in_api(&machine, LogBook::new(clock));
     TestCore { app, machine, uno, clone, mega, dir }
 }
 

@@ -281,3 +281,35 @@ impl Drop for AppWindow {
         }
     }
 }
+
+/// The API as a program signed in with an admin's API token sees it (docs/auth.md). The tests go
+/// through the real sign-in path: a first admin, a token, and `Authorization: Bearer` on every
+/// request (including WebSocket upgrades) that doesn't carry its own.
+pub fn signed_in_api(
+    machine: &std::sync::Arc<faber_core::machine::Machine>,
+    logs: std::sync::Arc<faber_core::logs::LogBook>,
+) -> axum::Router {
+    let app = faber_core::api::router(faber_core::api::AppState::new(std::sync::Arc::clone(machine), logs));
+    with_token(app, &admin_token(machine))
+}
+
+/// Creates the first admin (`tester`) and returns an admin API token of theirs.
+pub fn admin_token(machine: &faber_core::machine::Machine) -> String {
+    let (admin, _) = machine.create_first_admin("tester", ADMIN_PASSWORD).unwrap();
+    machine.create_token("tests", faber_core::users::UserRole::Admin, &admin).unwrap().1
+}
+
+/// The test admin's password.
+pub const ADMIN_PASSWORD: &str = "test password";
+
+/// `app`, with `Authorization: Bearer <token>` on every request that has none.
+pub fn with_token(app: axum::Router, token: &str) -> axum::Router {
+    let value = axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap();
+    app.layer(axum::middleware::map_request(move |mut req: axum::extract::Request| {
+        let value = value.clone();
+        async move {
+            req.headers_mut().entry(axum::http::header::AUTHORIZATION).or_insert(value);
+            req
+        }
+    }))
+}

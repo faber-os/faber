@@ -2,7 +2,9 @@
 //! logic of its own. Machine calls that may block (starting or stopping parts) run on the
 //! blocking pool so they never stall the async runtime.
 
+pub mod access;
 mod apps;
+pub mod auth;
 mod convert;
 mod driving;
 pub mod dto;
@@ -28,8 +30,18 @@ use std::sync::Arc;
 pub struct AppState {
     pub machine: Arc<Machine>,
     pub logs: Arc<LogBook>,
+    /// Whether requests must say who sent them (docs/auth.md).
+    pub auth: auth::AuthMode,
 }
 
+impl AppState {
+    /// Sign-in required, as on a real machine.
+    pub fn new(machine: Arc<Machine>, logs: Arc<LogBook>) -> AppState {
+        AppState { machine, logs, auth: auth::AuthMode::Required }
+    }
+}
+
+/// Every route, each behind the access check (`auth::check`, with `access::ROUTES`).
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v0/system", get(system))
@@ -50,6 +62,9 @@ pub fn router(state: AppState) -> Router {
         .merge(flash::routes())
         .merge(translations::routes())
         .merge(world::routes())
+        .merge(auth::routes())
+        // After every route, so it covers them all; the shell's own files (the fallback) are public.
+        .route_layer(axum::middleware::from_fn_with_state(state.clone(), auth::check))
         .fallback(shell::serve)
         .with_state(state)
 }
@@ -61,7 +76,13 @@ impl Failure {
     fn new(status: StatusCode, code: &str, message: impl Into<String>, hint: impl Into<String>) -> Failure {
         Failure(
             status,
-            dto::ErrorBody { code: code.into(), message: message.into(), hint: hint.into(), reason: None },
+            dto::ErrorBody {
+                code: code.into(),
+                message: message.into(),
+                hint: hint.into(),
+                reason: None,
+                needs: None,
+            },
         )
     }
 }
@@ -139,6 +160,7 @@ async fn system(State(s): State<AppState>) -> Json<dto::SystemInfo> {
             },
             hint: e.hint,
             reason: None,
+            needs: None,
         }),
     })
 }

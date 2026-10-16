@@ -54,6 +54,8 @@ use std::time::Duration;
 pub struct Core {
     pub machine: Arc<machine::Machine>,
     pub logs: Arc<logs::LogBook>,
+    /// Whether requests must say who sent them (`--no-auth` turns it off; docs/auth.md).
+    pub auth: api::auth::AuthMode,
 }
 
 impl Core {
@@ -79,11 +81,15 @@ impl Core {
             port_scan: Some(Duration::from_secs(2)),
             world: Arc::new(simparts::SimWorld::new()),
         })?;
-        Ok(Core { machine, logs })
+        Ok(Core { machine, logs, auth: api::auth::AuthMode::Required })
     }
 
     pub fn router(&self) -> axum::Router {
-        api::router(api::AppState { machine: Arc::clone(&self.machine), logs: Arc::clone(&self.logs) })
+        api::router(api::AppState {
+            machine: Arc::clone(&self.machine),
+            logs: Arc::clone(&self.logs),
+            auth: self.auth,
+        })
     }
 
     /// Serves the API on `listener` until `shutdown` resolves, then stops every part.
@@ -92,8 +98,49 @@ impl Core {
         listener: tokio::net::TcpListener,
         shutdown: impl Future<Output = ()> + Send + 'static,
     ) -> std::io::Result<()> {
+        self.serve_with_screen(listener, None, shutdown).await
+    }
+
+    /// Like [`Core::serve`], plus the attached screen's own listener (`--screen-listen`): requests
+    /// on it from this machine are signed in as the screen's role (docs/auth.md).
+    pub async fn serve_with_screen(
+        self,
+        listener: tokio::net::TcpListener,
+        screen: Option<tokio::net::TcpListener>,
+        shutdown: impl Future<Output = ()> + Send + 'static,
+    ) -> std::io::Result<()> {
+        use std::net::SocketAddr;
         tracing::info!(target: "core", "Faber core listening on http://{}", listener.local_addr()?);
-        axum::serve(listener, self.router()).with_graceful_shutdown(shutdown).await?;
+        if self.auth == api::auth::AuthMode::Off {
+            tracing::warn!(target: "core", "sign-in is off (--no-auth): everyone who can reach this core is an admin");
+        }
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        let stopped = |mut rx: tokio::sync::watch::Receiver<bool>| async move {
+            let _ = rx.wait_for(|s| *s).await;
+        };
+        let screen_task = match screen {
+            Some(l) => {
+                tracing::info!(target: "core", "the attached screen's listener is on http://{}", l.local_addr()?);
+                let app = self.router().layer(axum::Extension(api::auth::OnScreen));
+                let until = stopped(stop_rx.clone());
+                Some(tokio::spawn(async move {
+                    axum::serve(l, app.into_make_service_with_connect_info::<SocketAddr>())
+                        .with_graceful_shutdown(until)
+                        .await
+                }))
+            }
+            None => None,
+        };
+        tokio::spawn(async move {
+            shutdown.await;
+            let _ = stop_tx.send(true);
+        });
+        axum::serve(listener, self.router().into_make_service_with_connect_info::<SocketAddr>())
+            .with_graceful_shutdown(stopped(stop_rx))
+            .await?;
+        if let Some(t) = screen_task {
+            let _ = t.await;
+        }
         let machine = Arc::clone(&self.machine);
         let _ = tokio::task::spawn_blocking(move || machine.shutdown()).await;
         Ok(())

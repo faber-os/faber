@@ -2,12 +2,15 @@
 //! serial monitor. One writer task owns the socket; every subscription is its own task that
 //! feeds it, so a slow topic never holds up another.
 
+use super::access::message_need;
+use super::auth::{Caller, Proof, not_allowed};
 use super::{AppState, convert, dto};
 use crate::apps::{Payload, ToWindow};
 use crate::machine::{AppWindowLink, LeaseEvent, SerialSession};
 use crate::names::SignalAddress;
 use crate::ports::PortEvent;
-use axum::extract::ws::{Message, WebSocket};
+use axum::Extension;
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::extract::{Query, State, WebSocketUpgrade};
 use axum::response::Response;
 use futures_util::{SinkExt, StreamExt};
@@ -31,12 +34,48 @@ pub struct Params {
     format: Format,
 }
 
+/// Signed in at the upgrade (the cookie, a token or the attached screen); each message is checked
+/// again with the role its sender has now, and the socket closes (code 4401) when their session ends.
 pub async fn upgrade(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
+    Extension(caller): Extension<Caller>,
     Query(p): Query<Params>,
 ) -> Response {
-    ws.on_upgrade(move |socket| session(socket, state, p.format))
+    let proof = caller.proof.unwrap_or(Proof::Developer);
+    ws.on_upgrade(move |socket| session(socket, state, p.format, proof))
+}
+
+/// The close code when the sender is no longer signed in.
+pub const SIGNED_OUT: u16 = 4401;
+
+/// A message the sender's role may not send: what they hear instead. A refused drive is answered
+/// as a refused drive, so the window says why.
+fn refusal(
+    msg: &dto::ClientMessage,
+    needs: crate::users::UserRole,
+    have: crate::users::UserRole,
+) -> dto::ServerMessage {
+    let error = not_allowed(needs, have).1;
+    use dto::ClientMessage as C;
+    match msg {
+        C::AppWindowDrive { id, role, index } => {
+            dto::ServerMessage::AppWindowDriveRefused { id: *id, role: role.clone(), index: *index, error }
+        }
+        C::Subscribe { id, .. }
+        | C::Unsubscribe { id }
+        | C::SerialOpen { id, .. }
+        | C::SerialSend { id, .. }
+        | C::SerialClose { id }
+        | C::SerialRecordStart { id, .. }
+        | C::SerialRecordStop { id }
+        | C::AppWindowOpen { id, .. }
+        | C::AppWindowSend { id, .. }
+        | C::AppWindowHeartbeat { id }
+        | C::AppWindowRelease { id, .. }
+        | C::AppWindowStop { id }
+        | C::AppWindowClose { id } => dto::ServerMessage::Error { id: Some(*id), error },
+    }
 }
 
 /// How many messages may wait for a slow client before subscriptions pause.
@@ -70,24 +109,54 @@ fn error(
 ) -> dto::ServerMessage {
     dto::ServerMessage::Error {
         id,
-        error: dto::ErrorBody { code: code.into(), message: message.into(), hint: hint.into(), reason: None },
+        error: dto::ErrorBody {
+            code: code.into(),
+            message: message.into(),
+            hint: hint.into(),
+            reason: None,
+            needs: None,
+        },
     }
 }
 
-async fn session(socket: WebSocket, state: AppState, format: Format) {
+async fn session(socket: WebSocket, state: AppState, format: Format, proof: Proof) {
     let (mut sink, mut stream) = socket.split();
     let (out_tx, mut out_rx) = mpsc::channel::<dto::ServerMessage>(OUTBOX);
+    let (close_tx, mut close_rx) = tokio::sync::oneshot::channel::<()>();
     let writer = tokio::spawn(async move {
-        while let Some(msg) = out_rx.recv().await {
-            if sink.send(encode(&msg, format)).await.is_err() {
-                break;
+        loop {
+            tokio::select! {
+                // Signed out: say so before anything else, then nothing more.
+                biased;
+                Ok(()) = &mut close_rx => {
+                    let frame = CloseFrame { code: SIGNED_OUT, reason: "signed out".into() };
+                    let _ = sink.send(Message::Close(Some(frame))).await;
+                    break;
+                }
+                msg = out_rx.recv() => {
+                    let Some(msg) = msg else { break };
+                    if sink.send(encode(&msg, format)).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
     let mut subs: HashMap<u32, JoinHandle<()>> = HashMap::new();
     let mut serial: HashMap<u32, Arc<SerialSession>> = HashMap::new();
     let mut windows = Windows::new();
-    while let Some(Ok(msg)) = stream.next().await {
+    // Signed out (a session ended, a user removed): the socket closes.
+    let [mut users_changed, mut sessions_changed, _] = state.machine.access_changed();
+    let mut close_tx = Some(close_tx);
+    loop {
+        let msg = tokio::select! {
+            m = stream.next() => match m {
+                Some(Ok(m)) => m,
+                _ => break,
+            },
+            Ok(()) = users_changed.changed() => { if proof.still(&state).is_none() { break } else { continue } }
+            Ok(()) = sessions_changed.changed() => { if proof.still(&state).is_none() { break } else { continue } }
+        };
         if matches!(msg, Message::Close(_)) {
             break;
         }
@@ -106,6 +175,13 @@ async fn session(socket: WebSocket, state: AppState, format: Format) {
                 continue;
             }
         };
+        // Checked with the sender's role now: a role change applies to the next message.
+        let Some(who) = proof.still(&state) else { break };
+        let needs = message_need(&msg);
+        if who.role < needs {
+            let _ = out_tx.send(refusal(&msg, needs, who.role)).await;
+            continue;
+        }
         if let dto::ClientMessage::AppWindowOpen { .. }
         | dto::ClientMessage::AppWindowSend { .. }
         | dto::ClientMessage::AppWindowHeartbeat { .. }
@@ -133,6 +209,11 @@ async fn session(socket: WebSocket, state: AppState, format: Format) {
     windows.close_all().await;
     let sessions: Vec<_> = serial.drain().map(|(_, s)| s).collect();
     let _ = tokio::task::spawn_blocking(move || drop(sessions)).await;
+    if proof.still(&state).is_none()
+        && let Some(tx) = close_tx.take()
+    {
+        let _ = tx.send(());
+    }
     drop(out_tx);
     let _ = writer.await;
 }
