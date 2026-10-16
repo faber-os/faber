@@ -100,6 +100,7 @@ pub fn not_allowed(needs: UserRole, have: UserRole) -> Failure {
             hint: "Ask an admin to change your role in Settings → Users.".into(),
             reason: None,
             needs: Some(needs),
+            problems: None,
         },
     )
 }

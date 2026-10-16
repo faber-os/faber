@@ -64,6 +64,13 @@ pub const ROUTES: &[(&str, &str, Need)] = &[
     ("GET", "/api/v0/arduino", VIEWER),
     // Reads only what the board told Faber when it connected; never resets it.
     ("GET", "/api/v0/arduino/boards/{port}/code", VIEWER),
+    // Guided boards (docs/wiring.md): pin maps, part templates and plans are for anyone to read,
+    // and a suggestion writes nothing.
+    ("GET", "/api/v0/arduino/pins/{board}", VIEWER),
+    ("GET", "/api/v0/arduino/parts", VIEWER),
+    ("GET", "/api/v0/arduino/plans", VIEWER),
+    ("GET", "/api/v0/arduino/plans/{name}", VIEWER),
+    ("POST", "/api/v0/arduino/plans/{name}/suggest", VIEWER),
     ("GET", "/api/v0/worlds", VIEWER),
     ("GET", "/api/v0/world", VIEWER),
     // Your own password and API tokens (the handlers check whose).
@@ -96,6 +103,10 @@ pub const ROUTES: &[(&str, &str, Need)] = &[
     ("POST", "/api/v0/arduino/sketches", OPERATOR),
     ("POST", "/api/v0/arduino/compile", OPERATOR),
     ("POST", "/api/v0/arduino/flashed/{id}/open", OPERATOR),
+    // A plan and its sketch are files in home:/Arduino, like any sketch; uploading stays admin.
+    ("POST", "/api/v0/arduino/plans", OPERATOR),
+    ("PUT", "/api/v0/arduino/plans/{name}", OPERATOR),
+    ("POST", "/api/v0/arduino/plans/{name}/take-over", OPERATOR),
     // Display settings; the machine's own settings in it need an admin (`settings_need`).
     ("PUT", "/api/v0/settings", OPERATOR),
     // The machine itself: parts, packages, apps, flashing, backups, settings and users.

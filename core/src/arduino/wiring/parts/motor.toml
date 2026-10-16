@@ -1,0 +1,74 @@
+# A DC motor on a motor driver (H-bridge): FaberMotor (firmware/faberlink/src/FaberLink.h).
+# Drivers take one of three pin shapes (docs/research/common-parts.md §2.6). FaberMotor takes the
+# PWM + DIR one on this branch; the other two follow its driver constructor and are marked `todo`
+# until it is merged (a test that is ignored until then checks them against FaberLink.h).
+# Role ids are the PINS message's role names (FaberLinkCore.h ROLE_*): pwm, dir, en, in1, in2, stby.
+
+faber-part = 1
+id = "motor"
+name = "DC motor with a driver"
+description = "A DC motor that Faber drives forwards and backwards at any speed, through a motor driver board."
+covers = ["Cytron MD10C", "Cytron MDD10A", "L298N", "L293D", "TB6612FNG", "L9110S", "DRV8833", "BTS7960"]
+capability = "motor"
+class = "FaberMotor"
+include = "FaberLink.h"
+default-name = "left"
+warnings = [
+  "Motors need their own supply: never power a motor from the board's 5V pin.",
+  "Join the motor supply's - to the board's GND, or the driver won't understand the board.",
+]
+
+[power]
+supply = "own"
+own-supply = true
+
+[[settings]]
+id = "max-velocity-rad-s"
+name = "Speed at full power"
+unit = "rad/s"
+type = "number"
+default = 0
+min = 0
+max = 1000
+apply = "build"
+help = "The wheel's speed at full duty, from the motor's data (rpm × 0.1047). 0 if you don't know it: then Faber drives it by duty only."
+
+[[shapes]]
+id = "pwm-dir"
+name = "PWM + DIR (Cytron and similar)"
+description = "One PWM pin sets the speed, one pin the direction."
+args = ["name", "pin:pwm", "pin:dir", "setting:max-velocity-rad-s"]
+wiring = ["Driver PWM → {pin:pwm}", "Driver DIR → {pin:dir}", "Driver GND → GND", "Driver power → the motor's own supply", "Motor → the driver's motor terminals"]
+roles = [
+  { id = "pwm", name = "PWM", needs = "pwm", help = "The speed." },
+  { id = "dir", name = "DIR", needs = "digital-out", help = "The direction." },
+]
+
+[[shapes]]
+id = "en-in1-in2"
+name = "EN + IN1 + IN2 (L298N, L293D, TB6612)"
+description = "One PWM pin sets the speed, two pins the direction; a TB6612 may use STBY too."
+todo = "Waits for FaberMotor's EN + IN1 + IN2 constructor (branch pins-motor): once it is merged, remove this line and the #[ignore] on drift_pending_shapes_match_the_library_too."
+args = ["name", "code:faberlink::DRIVER_EN_IN1_IN2", "pin:en", "pin:in1", "pin:in2", "pin:stby"]
+setup = ["{var}.setMaxVelocity({setting:max-velocity-rad-s});"]
+wiring = ["Driver EN (ENA, PWMA) → {pin:en} (on an L298N, take the jumper off ENA)", "Driver IN1 → {pin:in1}", "Driver IN2 → {pin:in2}", "Driver STBY → {pin:stby}", "Driver GND → GND", "Driver power → the motor's own supply", "Motor → the driver's motor terminals"]
+roles = [
+  { id = "en", name = "EN", needs = "pwm", help = "The speed." },
+  { id = "in1", name = "IN1", needs = "digital-out", help = "The direction, with IN2." },
+  { id = "in2", name = "IN2", needs = "digital-out", help = "The direction, with IN1." },
+  { id = "stby", name = "STBY", needs = "digital-out", optional = true, help = "A TB6612's standby; leave it out and tie STBY to VCC if you like." },
+]
+
+[[shapes]]
+id = "two-pwm"
+name = "Two PWM inputs (L9110S, DRV8833, BTS7960)"
+description = "Two PWM pins: one drives forwards, the other backwards; a BTS7960 may use an enable pin too."
+todo = "Waits for FaberMotor's two-PWM constructor (branch pins-motor): once it is merged, remove this line and the #[ignore] on drift_pending_shapes_match_the_library_too."
+args = ["name", "code:faberlink::DRIVER_TWO_PWM", "pin:in1", "pin:in2", "pin:stby"]
+setup = ["{var}.setMaxVelocity({setting:max-velocity-rad-s});"]
+wiring = ["Driver IN1 (IA, AIN1, RPWM) → {pin:in1}", "Driver IN2 (IB, AIN2, LPWM) → {pin:in2}", "Driver enable (R_EN and L_EN, nSLEEP) → {pin:stby}", "Driver GND → GND", "Driver power → the motor's own supply", "Motor → the driver's motor terminals"]
+roles = [
+  { id = "in1", name = "IN1", needs = "pwm", help = "Forwards." },
+  { id = "in2", name = "IN2", needs = "pwm", help = "Backwards." },
+  { id = "stby", name = "Enable", needs = "digital-out", optional = true, help = "The driver's enable; leave it out and tie it high if you like." },
+]

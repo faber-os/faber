@@ -1,0 +1,51 @@
+# The Raspberry Pi's 40-pin header as a pin map (docs/wiring.md §4 and §10.5: planned now, in the
+# data format only; guided plans for the Pi are not built yet).
+#
+# Which physical pin carries which GPIO line, and the power pins, are NOT repeated here: they come
+# from the header table in core/src/ports/header.rs, the same one GET /api/v0/ports/header serves.
+# This file only adds what each GPIO line can do beyond plain digital I/O.
+#
+# Sources:
+# - the Raspberry Pi documentation, "GPIO and the 40-pin header" (3.3 V logic, not 5 V-tolerant;
+#   I2C1 on GPIO2/3 with fixed pull-ups; GPIO0/1 for HAT ID EEPROMs; SPI0 on GPIO7-11; SPI1 on
+#   GPIO16-21; UART0 on GPIO14/15);
+# - for the Pi 5's hardware PWM channels (RP1 PWM0: channels 0/1 on GPIO12/13, 2/3 on GPIO18/19):
+#   docs/research/common-parts.md §5 and its sources (the rpi-hardware-pwm documentation);
+# - the Pi has no analog inputs, and its GPIO edge events go through Linux, which isn't real-time,
+#   so no pin is given `analog` or `interrupt` (wheel encoders and echo timing belong on a board).
+
+faber-pins = 1
+id = "pi-header"
+name = "Raspberry Pi 40-pin header"
+chip = "Raspberry Pi 5 (RP1)"
+kind = "pi"
+logic-volts = 3.3
+
+gpio = [
+  { line = 2, buses = ["i2c-1:sda"] },
+  { line = 3, buses = ["i2c-1:scl"] },
+  { line = 7, buses = ["spi-0:ce1"] },
+  { line = 8, buses = ["spi-0:ce0"] },
+  { line = 9, buses = ["spi-0:miso"] },
+  { line = 10, buses = ["spi-0:mosi"] },
+  { line = 11, buses = ["spi-0:sck"] },
+  { line = 12, pwm = "pwm0-ch0" },
+  { line = 13, pwm = "pwm0-ch1" },
+  { line = 14, buses = ["uart0:tx"] },
+  { line = 15, buses = ["uart0:rx"] },
+  { line = 16, buses = ["spi-1:ce2"] },
+  { line = 17, buses = ["spi-1:ce1"] },
+  { line = 18, pwm = "pwm0-ch2", buses = ["spi-1:ce0"] },
+  { line = 19, pwm = "pwm0-ch3", buses = ["spi-1:miso"] },
+  { line = 20, buses = ["spi-1:mosi"] },
+  { line = 21, buses = ["spi-1:sck"] },
+]
+
+[[reserved]]
+pins = ["GPIO0", "GPIO1"]
+reason = "GPIO0 and GPIO1 belong to the HAT identification EEPROM (ID_SD/ID_SC)."
+
+[[notes]]
+pins = ["GPIO2", "GPIO3"]
+note = "GPIO2 and GPIO3 have fixed 1.8 kΩ pull-ups to 3.3 V for I²C: they read high when nothing pulls them down."
+avoid = ["digital-in"]

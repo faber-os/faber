@@ -88,6 +88,7 @@ impl Failure {
                 hint: hint.into(),
                 reason: None,
                 needs: None,
+                problems: None,
             },
         )
     }
@@ -167,6 +168,7 @@ async fn system(State(s): State<AppState>) -> Json<dto::SystemInfo> {
             hint: e.hint,
             reason: None,
             needs: None,
+            problems: None,
         }),
         buses: match s.machine.bus_support() {
             crate::ports::BusSupport::System => dto::Buses::System,

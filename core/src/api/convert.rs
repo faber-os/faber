@@ -28,6 +28,7 @@ pub fn error_body(e: &MachineError) -> dto::ErrorBody {
         hint: e.hint.clone(),
         reason: e.lease_ended.map(lease_end_reason),
         needs: None,
+        problems: (!e.plan_problems.is_empty()).then(|| e.plan_problems.clone()),
     }
 }
 

@@ -1,0 +1,65 @@
+# Sharp infrared distance sensor on an analog pin: FaberDistance (firmware/faberlink/src/FaberLink.h)
+# with the GP2Y0A21's curve.
+# Part facts: docs/research/common-parts.md §2.1 (10-80 cm, 5 V, about 30 mA in bursts). The curve
+# is the one the library's MotorAndDistance example uses: a commonly used fit to the datasheet's
+# graph, so it is worth checking against a ruler. Other Sharp models (GP2Y0A02, GP2Y0A41) have
+# other curves and need their own template.
+
+faber-part = 1
+id = "ir-distance"
+name = "Infrared distance sensor (Sharp GP2Y0A21)"
+description = "Measures the distance to what is in front of it with infrared light, 10 to 80 cm."
+covers = ["GP2Y0A21YK0F"]
+capability = "distance"
+class = "FaberDistance"
+include = "FaberLink.h"
+default-name = "front"
+warnings = [
+  "It draws current in short bursts: a 10 µF capacitor across its 5V and GND, at the sensor, keeps the readings steady.",
+]
+helper = """
+// {name}: the GP2Y0A21's curve, about 29.988 * volts^-1.173 cm (a commonly used fit to its
+// datasheet graph, so check it against a ruler). Below 0.4 V nothing is in range.
+float {var}ToMeters(int raw) {
+  float volts = raw * {board:analog-reference}f / 1023.0f;
+  if (volts < 0.4f) return -1;  // no target
+  return 0.29988f * pow(volts, -1.173f);
+}
+"""
+
+[power]
+supply = "5V"
+current-ma = 30
+# Its output stays under about 3.1 V (datasheet), so it is safe on 3.3 V inputs too.
+logic-volts = 3.3
+
+[[settings]]
+id = "min-m"
+name = "Shortest distance"
+unit = "m"
+type = "number"
+default = 0.1
+min = 0.1
+max = 0.8
+apply = "build"
+help = "Closer than 10 cm the GP2Y0A21's reading turns back down, so it can't be trusted."
+
+[[settings]]
+id = "max-m"
+name = "Longest distance"
+unit = "m"
+type = "number"
+default = 0.8
+min = 0.1
+max = 0.8
+apply = "build"
+help = "Anything further reads as no target."
+
+[[shapes]]
+id = "analog"
+name = "Analog output"
+args = ["name", "pin:signal", "setting:min-m", "setting:max-m", "code:faberlink::DISTANCE_INFRARED", "code:{var}ToMeters"]
+wiring = ["Vcc → 5V", "GND → GND", "Vo → {pin:signal}"]
+roles = [
+  { id = "signal", name = "Signal", needs = "analog-in", help = "A voltage that falls as the distance grows." },
+]

@@ -356,3 +356,77 @@ pub struct BoardCodeLink {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub record: Option<FlashRecord>,
 }
+
+// ---- Guided boards (docs/wiring.md). The pin maps, templates, plans, problems and suggestions
+// are the wiring module's own types (core/src/arduino/wiring), exported as they are.
+
+/// One guided board in `GET /api/v0/arduino/plans`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct GuidedBoardSummary {
+    /// Its name: the sketch folder `home:/Arduino/<name>/`.
+    pub name: String,
+    /// The board type (`mega2560`), unless `board.toml` can't be read.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board: Option<String>,
+    pub parts: u32,
+    /// Its code was taken over: it is in code mode now.
+    pub taken_over: bool,
+    /// The first thing wrong with it, if anything is.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
+/// A guided board (`GET`/`PUT /api/v0/arduino/plans/{name}`, …).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct GuidedBoard {
+    pub name: String,
+    /// Its folder in Files (`home:/Arduino/mega`).
+    pub folder: String,
+    /// Its sketch (`home:/Arduino/mega/mega.ino`), for the editor's compile and upload.
+    pub sketch: String,
+    /// The plan; missing when `board.toml` can't be read (`fileProblem` says why).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<crate::arduino::wiring::Plan>,
+    /// What is wrong with `board.toml` itself, with its `line`.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_problem: Option<crate::arduino::wiring::Problem>,
+    /// What the allocator says about the plan (errors and warnings), with their lines.
+    pub problems: Vec<crate::arduino::wiring::Problem>,
+    /// The wiring checklist, part by part.
+    pub wiring: Vec<crate::arduino::wiring::generate::Wiring>,
+    /// The sketch still carries Faber's mark (it is Faber's to rewrite).
+    pub generated: bool,
+    /// The sketch was changed outside Faber since Faber wrote it.
+    pub edited: bool,
+}
+
+/// Body of `POST /api/v0/arduino/plans`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct NewPlanRequest {
+    /// The board's name, a sketch name (`mega`).
+    pub name: String,
+    /// The board type: `uno`, `nano`, `nano-old` or `mega2560`.
+    pub board: String,
+}
+
+/// Body of `PUT /api/v0/arduino/plans/{name}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SavePlanRequest {
+    pub plan: crate::arduino::wiring::Plan,
+    /// Replace a sketch that was changed outside Faber (`sketch-edited`).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overwrite_edits: Option<bool>,
+}

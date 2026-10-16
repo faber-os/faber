@@ -1,0 +1,30 @@
+# The plan for the board "nano-old": which parts are on its pins. Faber writes nano-old.ino from it.
+# Edit it in Faber, or here (Faber checks it when it is read). Your own code goes in my_code.h.
+
+faber-board = 1
+board = "nano-old"
+name = "nano-old"
+
+[parts.battery]
+template = "battery"
+shape = "divider"
+pins = { sense = "A1" }
+settings = { r1-ohm = 20000, r2-ohm = 10000, cells = 3, chemistry = "li-ion", capacity-ah = 0 }
+
+[parts.front]
+template = "ultrasonic"
+shape = "trig-echo"
+pins = { trig = 4, echo = 7 }
+settings = { min-m = 0.02, max-m = 4 }
+
+[parts.front_2]
+template = "ir-distance"
+shape = "analog"
+pins = { signal = "A0" }
+settings = { min-m = 0.1, max-m = 0.8 }
+
+[parts.left]
+template = "motor"
+shape = "pwm-dir"
+pins = { pwm = 5, dir = 8 }
+settings = { max-velocity-rad-s = 0 }

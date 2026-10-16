@@ -1,0 +1,57 @@
+# Ultrasonic range finder on two pins: FaberUltrasonic (firmware/faberlink/src/FaberLink.h).
+# Part facts: the HC-SR04's datasheet (2 cm to 4 m, 5 V, about 15 mA, Echo is a 5 V output) and
+# docs/research/common-parts.md §2.1.
+
+faber-part = 1
+id = "ultrasonic"
+name = "Ultrasonic distance sensor"
+description = "Measures the distance to what is in front of it with sound, 2 cm to 4 m."
+covers = ["HC-SR04", "HC-SR04P", "JSN-SR04T", "SRF05"]
+capability = "distance"
+class = "FaberUltrasonic"
+include = "FaberLink.h"
+default-name = "front"
+warnings = [
+  "Two sonars measuring at the same moment hear each other's echoes: point them apart.",
+  "A measurement waits up to about 24 ms for the echo, so several sonars slow the board down.",
+]
+
+[power]
+supply = "5V"
+current-ma = 15
+# The Echo output is at the sensor's supply voltage.
+logic-volts = 5.0
+
+
+
+[[settings]]
+id = "min-m"
+name = "Shortest distance"
+unit = "m"
+type = "number"
+default = 0.02
+min = 0.02
+max = 4.0
+apply = "build"
+help = "Anything closer reads as too close. The HC-SR04 can't measure under 2 cm."
+
+[[settings]]
+id = "max-m"
+name = "Longest distance"
+unit = "m"
+type = "number"
+default = 4.0
+min = 0.1
+max = 4.0
+apply = "build"
+help = "Anything further reads as no target. A shorter range makes each measurement quicker."
+
+[[shapes]]
+id = "trig-echo"
+name = "Trig and Echo pins"
+args = ["name", "pin:trig", "pin:echo", "setting:min-m", "setting:max-m"]
+wiring = ["VCC → 5V", "GND → GND", "Trig → {pin:trig}", "Echo → {pin:echo}"]
+roles = [
+  { id = "trig", name = "Trig", needs = "digital-out", help = "Starts a measurement." },
+  { id = "echo", name = "Echo", needs = "digital-in", help = "Answers with a pulse as long as the echo took." },
+]

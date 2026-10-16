@@ -757,3 +757,231 @@ async fn uploading_to_a_board_in_use_needs_its_bridge_stopped() {
     assert_eq!(s, StatusCode::OK, "{r}");
     assert_eq!(r["flashed"]["stoppedPart"], "rover");
 }
+
+// ---- Guided boards (docs/wiring.md §5-§8) ----
+
+async fn new_plan(c: &TestCore, name: &str, board: &str) -> Value {
+    let (s, v) =
+        call(&c.app, "POST", "/api/v0/arduino/plans", Some(json!({"name": name, "board": board}))).await;
+    assert_eq!(s, StatusCode::CREATED, "{v}");
+    v
+}
+
+async fn suggest(c: &TestCore, plan: &str, template: &str) -> Value {
+    let (s, v) = call(
+        &c.app,
+        "POST",
+        &format!("/api/v0/arduino/plans/{plan}/suggest"),
+        Some(json!({"template": template})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    v
+}
+
+#[tokio::test]
+async fn pin_maps_and_part_templates_are_served() {
+    let c = core();
+    let (s, uno) = call(&c.app, "GET", "/api/v0/arduino/pins/uno", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(uno["name"], "Arduino Uno");
+    let d9 = uno["pins"].as_array().unwrap().iter().find(|p| p["name"] == "D9").unwrap();
+    assert_eq!(d9["pwm"], "timer1a");
+    assert_eq!(uno["reserved"][0]["pins"], json!(["D0", "D1"]));
+    assert_eq!(uno["servoTimers"], json!(["timer1"]));
+    let (_, pi) = call(&c.app, "GET", "/api/v0/arduino/pins/pi-header", None).await;
+    assert_eq!(pi["kind"], "pi");
+    assert_eq!(pi["pins"].as_array().unwrap().len() + pi["power"].as_array().unwrap().len(), 40);
+    let (s, e) = call(&c.app, "GET", "/api/v0/arduino/pins/esp32", None).await;
+    assert_eq!((s, e["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("unknown-board")));
+    let (_, parts) = call(&c.app, "GET", "/api/v0/arduino/parts", None).await;
+    let ids: Vec<&str> = parts.as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["ultrasonic", "ir-distance", "battery", "motor"]);
+    let motor = parts.as_array().unwrap().iter().find(|t| t["id"] == "motor").unwrap();
+    assert_eq!(motor["shapes"].as_array().unwrap().len(), 1, "only shapes FaberMotor has");
+    assert_eq!(motor["shapes"][0]["roles"][0]["needs"], "pwm");
+    assert_eq!(motor["power"]["ownSupply"], true);
+}
+
+#[tokio::test]
+async fn a_guided_board_is_planned_saved_compiled_and_uploaded() {
+    let c = core();
+    let g = new_plan(&c, "rover", "uno").await;
+    assert_eq!(g["sketch"], "home:/Arduino/rover/rover.ino");
+    assert_eq!(g["generated"], true);
+    assert_eq!(g["plan"]["parts"], json!({}));
+    let ino = std::fs::read_to_string(c.local("home:/Arduino/rover/rover.ino")).unwrap();
+    assert!(ino.starts_with("// rover.ino: Faber writes this file from board.toml."), "{ino}");
+    assert!(c.local("home:/Arduino/rover/my_code.h").is_file());
+
+    // The wizard: suggest, then save the plan with the suggested part.
+    let s = suggest(&c, "rover", "ultrasonic").await;
+    assert_eq!(s["name"], "front");
+    assert_eq!(s["roles"][0]["suggested"], "D4");
+    assert_eq!(s["roles"][0]["reserved"][0]["reason"], "D0 and D1 carry the USB link to Faber (Serial).");
+    let mut plan = g["plan"].clone();
+    plan["parts"]["front"] = s["part"].clone();
+    let (st, saved) =
+        call(&c.app, "PUT", "/api/v0/arduino/plans/rover", Some(json!({ "plan": plan.clone() }))).await;
+    assert_eq!(st, StatusCode::OK, "{saved}");
+    assert_eq!(saved["wiring"][0]["lines"], json!(["VCC → 5V", "GND → GND", "Trig → D4", "Echo → D7"]));
+    let ino = std::fs::read_to_string(c.local("home:/Arduino/rover/rover.ino")).unwrap();
+    assert!(ino.contains("FaberUltrasonic front(\"front\", 4, 7, 0.02, 4.0);"), "{ino}");
+    let toml = std::fs::read_to_string(c.local("home:/Arduino/rover/board.toml")).unwrap();
+    assert!(toml.contains("pins = { trig = 4, echo = 7 }"), "{toml}");
+
+    // my_code.h is never overwritten.
+    let mine = c.local("home:/Arduino/rover/my_code.h");
+    std::fs::write(&mine, "void userSetup() {}\nvoid userLoop() {}\n").unwrap();
+    let (st, _) =
+        call(&c.app, "PUT", "/api/v0/arduino/plans/rover", Some(json!({ "plan": plan.clone() }))).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(std::fs::read_to_string(&mine).unwrap(), "void userSetup() {}\nvoid userLoop() {}\n");
+
+    // The editor's compile and upload take it like any sketch.
+    let up = c.upload("home:/Arduino/rover/rover.ino", "uno", UNO_PORT).await;
+    assert_eq!(up["compile"]["ok"], true, "{up}");
+    assert_eq!(up["record"]["sketchName"], "rover");
+    // But not for a board the plan is not for.
+    let (st, e) = call(
+        &c.app,
+        "POST",
+        "/api/v0/arduino/compile",
+        Some(json!({"sketch": "home:/Arduino/rover/rover.ino", "board": "mega2560"})),
+    )
+    .await;
+    assert_eq!(
+        (st, e["error"]["code"].as_str()),
+        (StatusCode::CONFLICT, Some("plan-for-another-board")),
+        "{e}"
+    );
+
+    let (_, list) = call(&c.app, "GET", "/api/v0/arduino/plans", None).await;
+    assert_eq!(list, json!([{"name": "rover", "board": "uno", "parts": 1, "takenOver": false}]));
+}
+
+#[tokio::test]
+async fn an_invalid_plan_is_refused_with_every_problem() {
+    let c = core();
+    new_plan(&c, "rover", "uno").await;
+    let plan = json!({
+        "board": "uno",
+        "name": "rover",
+        "parts": {
+            "front": {"template": "ultrasonic", "pins": {"trig": "D0", "echo": "D7"}},
+            "left": {"template": "motor", "pins": {"pwm": "D7", "dir": "D8"}}
+        }
+    });
+    let (st, e) = call(&c.app, "PUT", "/api/v0/arduino/plans/rover", Some(json!({ "plan": plan }))).await;
+    assert_eq!(
+        (st, e["error"]["code"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("invalid-plan")),
+        "{e}"
+    );
+    let codes: Vec<&str> =
+        e["error"]["problems"].as_array().unwrap().iter().map(|p| p["code"].as_str().unwrap()).collect();
+    assert_eq!(codes, ["reserved-pin", "unsuitable-pin", "pin-used-twice"], "{e}");
+    assert!(e["error"]["message"].as_str().unwrap().ends_with("(and 2 more)"));
+    // Nothing was written.
+    let (_, g) = call(&c.app, "GET", "/api/v0/arduino/plans/rover", None).await;
+    assert_eq!(g["plan"]["parts"], json!({}));
+}
+
+#[tokio::test]
+async fn a_hand_edited_plan_file_is_read_with_its_lines() {
+    let c = core();
+    new_plan(&c, "rover", "uno").await;
+    let file = c.local("home:/Arduino/rover/board.toml");
+    let text = std::fs::read_to_string(&file).unwrap();
+    let edited =
+        format!("{text}\n[parts.front]\ntemplate = \"ultrasonic\"\npins = {{ trig = 0, echo = 7 }}\n");
+    std::fs::write(&file, &edited).unwrap();
+    let (_, g) = call(&c.app, "GET", "/api/v0/arduino/plans/rover", None).await;
+    let p = &g["problems"][0];
+    assert_eq!(p["code"], "reserved-pin", "{g}");
+    let line = p["line"].as_u64().unwrap() as usize;
+    assert!(edited.lines().nth(line - 1).unwrap().starts_with("pins = { trig = 0"), "{line}");
+    std::fs::write(&file, "faber-board = 1\nboard = \"uno\"\nname = \"rover\"\ncolour = 3\n").unwrap();
+    let (_, g) = call(&c.app, "GET", "/api/v0/arduino/plans/rover", None).await;
+    assert_eq!(g["fileProblem"]["line"], 4, "{g}");
+    assert!(g.get("plan").is_none());
+}
+
+#[tokio::test]
+async fn a_sketch_edited_outside_faber_is_never_overwritten_without_asking() {
+    let c = core();
+    let g = new_plan(&c, "rover", "uno").await;
+    let ino = c.local("home:/Arduino/rover/rover.ino");
+    let mut text = std::fs::read_to_string(&ino).unwrap();
+    text.push_str("// my tweak\n");
+    std::fs::write(&ino, &text).unwrap();
+    let (_, now) = call(&c.app, "GET", "/api/v0/arduino/plans/rover", None).await;
+    assert_eq!(now["edited"], true);
+    let body = json!({ "plan": g["plan"].clone() });
+    let (st, e) = call(&c.app, "PUT", "/api/v0/arduino/plans/rover", Some(body.clone())).await;
+    assert_eq!((st, e["error"]["code"].as_str()), (StatusCode::CONFLICT, Some("sketch-edited")));
+    assert!(std::fs::read_to_string(&ino).unwrap().ends_with("// my tweak\n"));
+    let mut body = body;
+    body["overwriteEdits"] = json!(true);
+    let (st, g) = call(&c.app, "PUT", "/api/v0/arduino/plans/rover", Some(body)).await;
+    assert_eq!(st, StatusCode::OK, "{g}");
+    assert_eq!(g["edited"], false);
+}
+
+#[tokio::test]
+async fn taking_over_the_code_is_one_way() {
+    let c = core();
+    let g = new_plan(&c, "rover", "uno").await;
+    let (st, t) = call(&c.app, "POST", "/api/v0/arduino/plans/rover/take-over", None).await;
+    assert_eq!(st, StatusCode::OK, "{t}");
+    assert_eq!(t["generated"], false);
+    assert!(t["plan"]["takenOver"].is_string());
+    let ino = std::fs::read_to_string(c.local("home:/Arduino/rover/rover.ino")).unwrap();
+    assert!(ino.starts_with("// rover.ino: your code."), "{ino}");
+    assert!(ino.contains("link.poll();"), "the code itself stays");
+    let toml = std::fs::read_to_string(c.local("home:/Arduino/rover/board.toml")).unwrap();
+    assert!(toml.starts_with("# Taken over:"), "{toml}");
+    let (st, e) =
+        call(&c.app, "PUT", "/api/v0/arduino/plans/rover", Some(json!({ "plan": g["plan"].clone() }))).await;
+    assert_eq!((st, e["error"]["code"].as_str()), (StatusCode::CONFLICT, Some("plan-taken-over")));
+    let (st, again) = call(&c.app, "POST", "/api/v0/arduino/plans/rover/take-over", None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(again["plan"]["takenOver"], t["plan"]["takenOver"], "doing it again changes nothing");
+    // A taken-over sketch compiles for any board: it is code mode now.
+    let (st, r) = call(
+        &c.app,
+        "POST",
+        "/api/v0/arduino/compile",
+        Some(json!({"sketch": "home:/Arduino/rover/rover.ino", "board": "mega2560"})),
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    let (_, list) = call(&c.app, "GET", "/api/v0/arduino/plans", None).await;
+    assert_eq!(list[0]["takenOver"], true);
+}
+
+#[tokio::test]
+async fn new_guided_boards_are_checked() {
+    let c = core();
+    c.new_sketch("Blink", "blank").await;
+    let (st, e) =
+        call(&c.app, "POST", "/api/v0/arduino/plans", Some(json!({"name": "Blink", "board": "uno"}))).await;
+    assert_eq!((st, e["error"]["code"].as_str()), (StatusCode::CONFLICT, Some("already-exists")));
+    let (st, e) =
+        call(&c.app, "POST", "/api/v0/arduino/plans", Some(json!({"name": "pi", "board": "pi-header"})))
+            .await;
+    assert_eq!(
+        (st, e["error"]["code"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("board-not-guided"))
+    );
+    let (st, e) =
+        call(&c.app, "POST", "/api/v0/arduino/plans", Some(json!({"name": "my board", "board": "uno"})))
+            .await;
+    assert_eq!((st, e["error"]["code"].as_str()), (StatusCode::BAD_REQUEST, Some("invalid-board-name")));
+    let (st, e) = call(&c.app, "GET", "/api/v0/arduino/plans/Blink", None).await;
+    assert_eq!((st, e["error"]["code"].as_str()), (StatusCode::NOT_FOUND, Some("unknown-plan")), "code mode");
+    let (st, e) =
+        call(&c.app, "POST", "/api/v0/arduino/plans/Blink/suggest", Some(json!({"template": "ultrasonic"})))
+            .await;
+    assert_eq!(st, StatusCode::NOT_FOUND, "{e}");
+}

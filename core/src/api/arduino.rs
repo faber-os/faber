@@ -5,6 +5,8 @@ use crate::arduino::diagnostics::{Diagnostic, Severity};
 use crate::arduino::library::TEMPLATES;
 use crate::arduino::records::{BoardIdentity, Record};
 use crate::arduino::toolchain::Source;
+use crate::arduino::wiring::{Candidate, PinMap, Suggestion, Template};
+use crate::machine::GuidedBoard;
 use crate::machine::{
     ArduinoStatus, BoardCode, CodeResult, CompileReport, Flashed, Proof, ToolsProgress, ToolsState,
     UploadReport,
@@ -23,6 +25,12 @@ pub fn routes() -> Router<AppState> {
         .route("/api/v0/arduino/boards/{port}/code", get(board_code))
         .route("/api/v0/arduino/boards/{port}/check", post(check_code))
         .route("/api/v0/arduino/flashed/{id}/open", post(open_flashed))
+        .route("/api/v0/arduino/pins/{board}", get(pin_map))
+        .route("/api/v0/arduino/parts", get(part_templates))
+        .route("/api/v0/arduino/plans", get(plans).post(new_plan))
+        .route("/api/v0/arduino/plans/{name}", get(plan).put(save_plan))
+        .route("/api/v0/arduino/plans/{name}/suggest", post(suggest))
+        .route("/api/v0/arduino/plans/{name}/take-over", post(take_over))
 }
 
 fn tools(s: &ArduinoStatus) -> dto::ArduinoTools {
@@ -250,6 +258,87 @@ async fn open_flashed(
     let copy = body.copy.unwrap_or(false);
     let o = blocking(move || s.machine.open_flashed(&id, copy)).await??;
     Ok(Json(dto::SketchRef { path: o.path, copy: o.copy }))
+}
+
+// ---- Guided boards (docs/wiring.md) ----
+
+fn guided(g: GuidedBoard) -> dto::GuidedBoard {
+    dto::GuidedBoard {
+        name: g.name,
+        folder: g.folder,
+        sketch: g.sketch,
+        plan: g.plan,
+        file_problem: g.file_problem,
+        problems: g.problems,
+        wiring: g.wiring,
+        generated: g.generated,
+        edited: g.edited,
+    }
+}
+
+/// A board's pins and rules: `uno`, `nano`, `nano-old`, `mega2560`, or `pi-header`.
+async fn pin_map(State(s): State<AppState>, Path(board): Path<String>) -> Result<Json<PinMap>, Failure> {
+    Ok(Json(s.machine.pin_map(&board)?))
+}
+
+async fn part_templates(State(s): State<AppState>) -> Json<Vec<Template>> {
+    Json(s.machine.part_templates().to_vec())
+}
+
+async fn plans(State(s): State<AppState>) -> Result<Json<Vec<dto::GuidedBoardSummary>>, Failure> {
+    let list = blocking(move || s.machine.guided_boards()).await??;
+    Ok(Json(
+        list.into_iter()
+            .map(|b| dto::GuidedBoardSummary {
+                name: b.name,
+                board: b.board,
+                parts: b.parts as u32,
+                taken_over: b.taken_over,
+                problem: b.problem,
+            })
+            .collect(),
+    ))
+}
+
+async fn plan(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<dto::GuidedBoard>, Failure> {
+    Ok(Json(guided(blocking(move || s.machine.guided_board(&name)).await??)))
+}
+
+async fn new_plan(
+    State(s): State<AppState>,
+    ApiJson(body): ApiJson<dto::NewPlanRequest>,
+) -> Result<(axum::http::StatusCode, Json<dto::GuidedBoard>), Failure> {
+    let g = blocking(move || s.machine.new_guided_board(&body.name, &body.board)).await??;
+    Ok((axum::http::StatusCode::CREATED, Json(guided(g))))
+}
+
+/// Saves the plan and writes the sketch; an invalid plan is `422 invalid-plan` with `problems`.
+async fn save_plan(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    ApiJson(body): ApiJson<dto::SavePlanRequest>,
+) -> Result<Json<dto::GuidedBoard>, Failure> {
+    let overwrite = body.overwrite_edits.unwrap_or(false);
+    Ok(Json(guided(blocking(move || s.machine.save_plan(&name, body.plan, overwrite)).await??)))
+}
+
+/// Where a part could go; writes nothing.
+async fn suggest(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    ApiJson(body): ApiJson<Candidate>,
+) -> Result<Json<Suggestion>, Failure> {
+    Ok(Json(blocking(move || s.machine.suggest_part(&name, &body)).await??))
+}
+
+async fn take_over(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<dto::GuidedBoard>, Failure> {
+    Ok(Json(guided(blocking(move || s.machine.take_over_plan(&name)).await??)))
 }
 
 /// One `arduino-tools` message.

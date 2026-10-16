@@ -235,3 +235,56 @@ settle:
   Faber (parts, signals, values with units), and a YAML/TOML view for those who want text.
 - **Safety.** Automations that move things are off until turned on and confirmed, and they show
   in the Stop bar while they drive.
+
+## 13. As built: the core (steps 1–4 of §9, and the API of step 5)
+
+What exists, and where it differs in detail from the design above. The decisions stand.
+
+- **Where.** `core/src/arduino/wiring/` (layer 2): `pins.rs` and `boards/*.toml` (pin maps),
+  `parts.rs` and `parts/*.toml` (templates), `allocator.rs`, `plan.rs` (`board.toml`) and
+  `generate.rs` (the sketch and `my_code.h`). Plans on disk and the API: `core/src/machine/wiring.rs`
+  and `core/src/api/arduino.rs`; the endpoints are in [api.md](api.md#guided-boards).
+- **Pin maps** for `uno`, `nano` (A6/A7 analog only; `nano-old` uses the same file) and `mega2560`,
+  with every value cited to the Arduino AVR core 1.8.8 (`variants/*/pins_arduino.h`), the Servo
+  library's `ServoTimers.h` and the core's `Tone.cpp`; tests check the files against those
+  headers' macros, and against the installed headers' timer tables when the Arduino IDE is on the
+  computer. The **Pi header** is a pin map too (`pi-header`), in the data format only: its
+  physical pins come from the port manager's header table (the one `GET /api/v0/ports/header`
+  serves) and `boards/pi-header.toml` adds what each line can do; no plan can be saved for it yet.
+  The Mega's on-board I²C pull-ups (research §5, "verify") are left out until checked.
+- **The API path** for a pin map is `GET /api/v0/arduino/pins/{board}`, not
+  `/arduino/boards/{type}/pins`: the router can't hold that next to `/arduino/boards/{port}/code`.
+- **Templates** exist for the four library classes. The infrared one is the Sharp GP2Y0A21 with
+  the curve from the library's example; other Sharp models need their own curve and template.
+  The motor has all three driver shapes, written against `FaberMotor`'s driver constructor
+  (`faberlink::DRIVER_EN_IN1_IN2` with an optional STBY, `faberlink::DRIVER_TWO_PWM` with an
+  optional enable, and `setMaxVelocity()` in `setup()`); the two new ones stay marked `todo`, and
+  their drift test ignored, until that library change is merged into this branch. A role can be
+  `optional` (STBY, enable): it is left out of the call when it has no pin, so it comes last. Role
+  ids are the `PINS` message's role names (`pwm`, `dir`, `en`, `in1`, `in2`, `stby`, `trig`,
+  `echo`, `signal`, `sense`), so a plan and a code-mode board's report speak of pins the same way. Every setting of these four is a **build** setting: the library takes
+  them in constructors and has no runtime settings yet, so nothing is `live`.
+- **Pin providers**: a template's `provides` adds pins named `<part>.<pin>` (`servos.ch3`) while
+  that part is in the plan; only a role marked `provided` may take one. No provider template
+  exists yet (tested with a test PCA9685).
+- **The allocator** suggests the cheapest free pin per role: pins with abilities the role doesn't
+  need (an interrupt, PWM, an analog input, a serial port or a bus) cost more, as do the pins a
+  first servo or `tone()` would take, pins noted to avoid (D13 as an input), and distance from the
+  part's other pins. Roles with the fewest choices go first. Its checks and their codes are in
+  [api.md](api.md#guided-boards). Pins in use from outside the plan come in as `ExternalUse`: the
+  hook for the `PINS` message (§6), empty until boards report their pins.
+- **`board.toml`**: a pin is written as its number for a plain digital pin (`trig = 7`) and as its
+  name otherwise (`out = "A0"`); both are read. Every setting is written out, so a later change
+  of a template's default never changes a saved board. Faber also keeps `sketch-sha256`, the hash
+  of the sketch it last wrote: a sketch changed outside Faber is reported (`edited`) and only
+  overwritten when asked (`409 sketch-edited`). Taking over adds `taken-over` and a comment.
+- **The sketch**: `<name>.ino` starts with the generated mark and the wiring, then the includes,
+  `FaberLink link(Serial);`, each part's declaration (and helper, like the Sharp curve), then
+  `#include "my_code.h"` (so your code can use the parts), `setup()` with
+  `link.begin(115200, "<name>", "guided")` and `userSetup()`, and `loop()` with `link.poll()` and
+  `userLoop()`. Golden files for every template on every board are in `fixtures/wiring/`; the
+  real `arduino-cli` compiles them with `--warnings all` in a test when the computer has one (it
+  did, with no warnings, on 2026-10-16) and in CI's Arduino job.
+- **Not built yet**: the shell (wizard, pin drawing, wiring checklist, the editor's read-only bar),
+  the `PINS` message (§6), Verify's warning for `delay()` in `userLoop()` (§5), the live check
+  after upload (§3 step 6), and the new library classes of §9 step 7.
