@@ -203,6 +203,31 @@ pub fn pattern_from(p: dto::Pattern) -> Pattern {
     }
 }
 
+pub fn i2c_scan(s: &crate::machine::I2cScan) -> dto::I2cScan {
+    dto::I2cScan {
+        port: s.port.clone(),
+        first: crate::ports::scan::FIRST,
+        last: crate::ports::scan::LAST,
+        found: s
+            .found
+            .iter()
+            .map(|f| dto::I2cFound {
+                address: f.address,
+                used_by: f.used_by.clone(),
+                suggestions: f
+                    .suggestions
+                    .iter()
+                    .map(|g| dto::I2cSuggestion {
+                        chip: g.chip.clone(),
+                        connector: g.connector.clone(),
+                        reason: g.reason.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
 pub fn port(p: &PortView) -> dto::PortInfo {
     dto::PortInfo {
         id: p.entry.id.to_string(),

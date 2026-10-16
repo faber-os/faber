@@ -231,6 +231,22 @@ pub struct About {
     pub time_zone: String,
 }
 
+/// What an I²C scan found ([`Machine::scan_i2c`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct I2cScan {
+    pub port: String,
+    /// The addresses that answered or that a part uses, lowest first.
+    pub found: Vec<I2cFound>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct I2cFound {
+    pub address: u8,
+    /// The part that uses it (not probed), or `None`: something answered.
+    pub used_by: Option<String>,
+    pub suggestions: Vec<crate::suggest::I2cSuggestion>,
+}
+
 /// A request to add a part.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewPart {
@@ -1325,6 +1341,64 @@ impl Machine {
     /// Where the I²C, SPI and GPIO buses come from.
     pub fn bus_support(&self) -> BusSupport {
         self.hardware.support()
+    }
+
+    /// Scans an I²C bus for devices, safely (reads only, the reserved addresses skipped, a part's
+    /// address never touched; [`crate::ports::scan`]), and says what each might be. Only when
+    /// someone asks: Faber never scans by itself.
+    pub fn scan_i2c(&self, port: &str) -> Result<I2cScan, MachineError> {
+        let (bus, used) = {
+            let st = self.state.lock().expect("machine lock");
+            let entry = PortId::parse(port)
+                .and_then(|id| st.ports.iter().find(|p| p.id == id).cloned())
+                .ok_or_else(|| {
+                    MachineError::new(
+                        ErrorKind::BadRequest,
+                        "unknown-port",
+                        format!("There is no port called \"{port}\" right now."),
+                        "Pick an I²C bus from the list. On a Pi, switch I²C on first (raspi-config, Interface Options).",
+                    )
+                })?;
+            let PortId::I2c(bus) = entry.id else {
+                return Err(MachineError::new(
+                    ErrorKind::BadRequest,
+                    "not-an-i2c-bus",
+                    format!("{} is not an I²C bus, so there is nothing to scan.", entry.label),
+                    "Pick an I²C bus (i2c-…).",
+                ));
+            };
+            if let Some(holder) = st.claims.holder(&entry.id) {
+                return Err(port_claimed(&entry, &holder.to_string()));
+            }
+            let used: Vec<(u8, String)> =
+                st.claims.addresses(&entry.id).into_iter().map(|(a, c)| (a, c.to_string())).collect();
+            (bus, used)
+        };
+        let mut handle = self.hardware.open_i2c(bus).map_err(|e| {
+            MachineError::new(
+                ErrorKind::Conflict,
+                "port-unavailable",
+                format!("Could not open I²C bus {bus}: {e}"),
+                "Check that I²C is switched on (raspi-config, Interface Options).",
+            )
+        })?;
+        let seen = crate::ports::scan::scan(handle.as_mut(), &used);
+        tracing::info!(target: "core::ports", "scanned i2c-{bus}: {} address(es) answered or in use", seen.len());
+        let manifests = self.connectors();
+        Ok(I2cScan {
+            port: PortId::I2c(bus).to_string(),
+            found: seen
+                .into_iter()
+                .map(|(address, seen)| I2cFound {
+                    address,
+                    used_by: match seen {
+                        crate::ports::scan::Seen::Used(who) => Some(who),
+                        crate::ports::scan::Seen::Found => None,
+                    },
+                    suggestions: crate::suggest::i2c_suggestions(address, &manifests),
+                })
+                .collect(),
+        })
     }
 
     pub fn about(&self) -> About {

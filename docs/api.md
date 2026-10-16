@@ -36,6 +36,8 @@ access, in Phase 6).
 | `GET /api/v0/apps`, `POST /api/v0/apps/{id}/enable` and `/disable`, `PUT /api/v0/apps/{id}/roles` | Apps: see [Apps](#apps). |
 | `GET /api/v0/ports` | `PortInfo[]`: every port of every kind (see [Ports](#ports)), with what claims it and suggestions. `claimedBy?` is who holds the whole port; on an I²C bus, `addresses?` lists who holds which address (`address`, `claimedBy`), lowest first, and is left out when none is used. `reserved?` says, in words, why no part can have the port: something outside Faber uses it, e.g. `used by I²C bus 1 (i2c-1)` for GPIO2, whose pin belongs to the bus while the bus is on. |
 | `GET /api/v0/ports/problems` | `PortProblem[]`: things plugged in that never became a port (see [Port problems](#port-problems)) |
+| `POST /api/v0/ports/scan-i2c` | `{"port": "i2c-1"}` → `200 I2cScan`: a safe scan of one I²C bus, only when someone asks (never by itself). See [I²C scan](#i²c-scan). Errors: `400 unknown-port`, `400 not-an-i2c-bus`, `409 port-claimed` (a tool holds the whole bus), `409 port-unavailable`. |
+| `GET /api/v0/ports/header` | `HeaderPin[]`: the Raspberry Pi's 40-pin header, pins 1–40: `pin`, `name` (`GPIO17`, `3V3`, `5V`, `GND`), `line?` (its `gpio-<line>` port) and `function?` (`I²C 1 SDA`, `UART TX`, …). The same on every Pi with a 40-pin header, so it is answered on any computer. |
 | `POST /api/v0/ports/check-board` | `{"port": "usb:2341:0042"}` → `200 BoardCheck`, after up to 2.5 s: is a FaberLink board on this port? See [FaberLink boards](#faberlink-boards-bridges). |
 | `GET /api/v0/flasher/boards`, `POST /api/v0/ports/{id}/flash` | The Arduino flasher: puts a program on an Uno, Nano or Mega. See [The Arduino flasher](#the-arduino-flasher). |
 | `GET /api/v0/parts` | `PartInfo[]` |
@@ -687,6 +689,22 @@ I²C, SPI and GPIO exist only on Linux (the Pi), through the kernel's own interf
 macOS there are none (`SystemInfo.buses` is `none`). `faber-core --fake-hardware` attaches
 simulated buses instead: `i2c-1` with a TMP102 at 0x48 and a BME280 at 0x76 (which only says who it
 is), `spi-0.0` and `spi-0.1` with MOSI looped back to MISO, and every header GPIO.
+
+## I²C scan
+
+`POST /api/v0/ports/scan-i2c` looks for devices the way `i2cdetect` does, but it only ever
+**reads**: each address from `first` (0x08) to `last` (0x77) gets a one-byte read, skipping the
+ranges the I²C specification reserves (0x00–0x07, 0x78–0x7f) as `i2cdetect` does. `i2cdetect`'s
+default "quick write" is never used, so the scan writes nothing to a device it doesn't know. An
+address a part uses isn't probed at all.
+
+`I2cScan`: `port`, `first`, `last`, and `found`: only the addresses that answered or are in use,
+lowest first. Each has `address`, `usedBy?` (the part using it; not probed) and `suggestions`
+(`chip`, `connector?`, `reason`): what it might be, from common default addresses (0x48–0x4B
+TMP102, 0x76/0x77 BME280, 0x68 MPU-6050, 0x29 VL53L0X, 0x3C SSD1306) and from installed connectors
+that can be at that address. `connector` is set when one is installed, so Add part can use it.
+These are guesses: other chips use the same addresses, and each `reason` says the scan can't be
+sure.
 
 ## Port problems
 

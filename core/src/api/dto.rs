@@ -651,6 +651,74 @@ pub enum LinkState {
     Incompatible,
 }
 
+/// Body of `POST /api/v0/ports/scan-i2c`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct I2cScanRequest {
+    /// The bus's port id, e.g. `i2c-1`.
+    pub port: String,
+}
+
+/// What a safe I²C scan found: only the addresses that answered or that a part uses. The scan
+/// probes 0x08–0x77 (`first`–`last`); everything else in that range didn't answer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct I2cScan {
+    pub port: String,
+    pub first: u8,
+    pub last: u8,
+    pub found: Vec<I2cFound>,
+}
+
+/// One address in an I²C scan.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct I2cFound {
+    pub address: u8,
+    /// The part using it: not probed (`i2cdetect` shows `UU`). Absent: something answered.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_by: Option<String>,
+    /// What it might be, most likely first. Guesses from common default addresses.
+    pub suggestions: Vec<I2cSuggestion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct I2cSuggestion {
+    /// What it might be, e.g. "TI TMP102 temperature sensor".
+    pub chip: String,
+    /// An installed connector for it, which Add part can use.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<String>,
+    /// Why, in plain words, saying the scan can't be sure.
+    pub reason: String,
+}
+
+/// One pin of the Raspberry Pi's 40-pin header (`GET /api/v0/ports/header`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HeaderPin {
+    /// The physical pin, 1–40.
+    pub pin: u8,
+    /// `GPIO17`, `3V3`, `5V` or `GND`.
+    pub name: String,
+    /// Its GPIO line (port `gpio-<line>`), for a GPIO pin.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// Its job when a bus or the UART is on, e.g. `I²C 1 SDA`. Absent: none.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function: Option<String>,
+}
+
 /// Body of `POST /api/v0/ports/check-board`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

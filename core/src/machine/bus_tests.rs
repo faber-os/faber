@@ -204,3 +204,25 @@ fn an_output_needs_a_lease_and_goes_to_its_safe_level_when_the_lease_ends() {
     assert!(sent.elapsed() >= Duration::from_millis(900), "not before its 1 s ran out");
     m.shutdown();
 }
+
+#[test]
+fn a_scan_finds_what_answers_suggests_what_it_might_be_and_leaves_parts_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut connectors = crate::connectors::built_in();
+    connectors.push(i2c_thermometer());
+    let m = Machine::start(MachineOptions { connectors, ..options(dir.path(), &FakeHardware::standard()) })
+        .unwrap();
+    add(&m, "inside", "test-thermometer", "i2c-1", Some(0x4a)).unwrap();
+    let scan = m.scan_i2c("i2c-1").unwrap();
+    let found: Vec<(u8, Option<&str>)> =
+        scan.found.iter().map(|f| (f.address, f.used_by.as_deref())).collect();
+    assert_eq!(found, [(0x48, None), (0x4a, Some("inside")), (0x76, None)]);
+    let tmp = &scan.found[0].suggestions;
+    assert!(tmp.iter().any(|s| s.chip.contains("TMP102")), "{tmp:?}");
+    assert!(tmp.iter().any(|s| s.connector.as_deref() == Some("test-thermometer")), "{tmp:?}");
+    assert!(scan.found[2].suggestions[0].chip.contains("BME280"));
+
+    assert_eq!(m.scan_i2c("gpio-17").unwrap_err().code, "not-an-i2c-bus");
+    assert_eq!(m.scan_i2c("i2c-7").unwrap_err().code, "unknown-port");
+    m.shutdown();
+}

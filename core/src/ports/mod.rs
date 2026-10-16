@@ -11,6 +11,7 @@ pub mod header;
 mod id;
 mod linux;
 mod replay;
+pub mod scan;
 mod stream;
 mod usb_problems;
 
