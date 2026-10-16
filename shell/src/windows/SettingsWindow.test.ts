@@ -138,6 +138,7 @@ describe('Settings', () => {
       'Accessibility',
       'Units',
       'Desktop and taskbar',
+      'Users',
       'Name',
       'Date and time',
       'Storage and backups',

@@ -4,7 +4,14 @@ import { createHttp } from '../lib/api/http';
 import { CoreSocket } from '../lib/api/socket';
 import { CoreState } from '../lib/state/core.svelte';
 import { CORE_CONTEXT_KEY } from '../lib/state/context';
-import type { ConnectorInfo, PartInfo, PortInfo, Settings } from '../lib/state/types';
+import type {
+  ConnectorInfo,
+  PartInfo,
+  PortInfo,
+  SessionInfo,
+  Settings,
+  UserRole,
+} from '../lib/state/types';
 import { MENU_CONTEXT_KEY, MenuController } from '../components/menuController.svelte';
 import { DESKTOP_CONTEXT_KEY, DesktopController } from '../components/desktopController.svelte';
 import { THEME_CONTEXT_KEY, ThemeController } from '../components/theme.svelte';
@@ -353,6 +360,17 @@ function bin(msg: unknown): ArrayBuffer {
  * A whole shell wired to fakes: real CoreState, real CoreSocket over a FakeWebSocket, real HTTP
  * client over a fake fetch. Components rendered with `context` behave as in the browser.
  */
+/** `GET /api/v0/session` for someone signed in with a password as `role`. */
+export function sessionAs(role: UserRole, user = 'mikkel'): SessionInfo {
+  return {
+    machineName: 'faber',
+    language: 'en',
+    needsSetup: false,
+    signInOff: false,
+    identity: { user, role, via: 'session' },
+  };
+}
+
 export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, height: 1000 }) {
   FakeWebSocket.reset();
   const fetch = fakeFetch([
@@ -387,6 +405,9 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
     },
     listing('home:/Backups', []),
     { path: '/api/v0/translations', body: [] },
+    { path: '/api/v0/session', body: sessionAs('admin') },
+    { path: '/api/v0/users', body: [{ name: 'mikkel', role: 'admin' }] },
+    { path: '/api/v0/tokens', body: [] },
     ...routes,
   ]);
   const socket = new CoreSocket({
@@ -400,6 +421,8 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
     format: 'msgpack',
     schedule: (fn) => fn(),
   });
+  // Signed in as an admin, so every control is there; `signInAs` changes the role.
+  core.auth.info = sessionAs('admin');
   core.start();
   const ws = FakeWebSocket.latest();
   ws.open();
@@ -478,6 +501,8 @@ export function fakeShell(routes: FakeRoute[] = [], viewport = { width: 1600, he
     /** A notice from the core (the `notices` topic), e.g. a battery's level changing. */
     pushNotice: (notice: unknown) =>
       ws.receive(bin({ type: 'notice', id: subscriptionId('notices'), notice })),
+    /** Whoever uses the shell now has `role` (docs/auth.md). */
+    signInAs: (role: UserRole) => (core.auth.info = sessionAs(role)),
     filesChanged: (folders: string[]) =>
       ws.receive(bin({ type: 'files-changed', id: subscriptionId('files'), folders })),
   };

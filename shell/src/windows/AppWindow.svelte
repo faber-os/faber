@@ -42,6 +42,7 @@
     watchSignal: (address, hz, handlers) => core.watchSignal(address, hz, handlers),
     leases: core,
     watchLeaseEnds: (fn) => core.watchLeaseEnds(fn),
+    role: () => core.auth.role,
     confirmDriving: (part) =>
       core.drivingConfirmed
         ? Promise.resolve(true)

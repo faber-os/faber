@@ -37,7 +37,7 @@ async function addSimulated(page: Page, connector: RegExp, name: string) {
 test('drive a simulated base, stop it with the e-stop and release it', async ({ page }) => {
   await page.goto('/');
   const taskbar = page.getByRole('navigation', { name: 'Taskbar' });
-  await expect(taskbar.getByText('Connected')).toBeVisible();
+  await expect(taskbar.getByText('Connected', { exact: true })).toBeVisible();
 
   const parts = page.getByRole('dialog', { name: 'Parts' });
   if (!(await parts.isVisible()))

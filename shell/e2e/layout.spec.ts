@@ -106,7 +106,7 @@ async function openSimViewers(page: Page) {
 test('no window cuts its content off, also after the browser shrinks', async ({ page }) => {
   await page.goto('/');
   await expect(
-    page.getByRole('navigation', { name: 'Taskbar' }).getByText('Connected'),
+    page.getByRole('navigation', { name: 'Taskbar' }).getByText('Connected', { exact: true }),
   ).toBeVisible();
   const kinds = await openEveryProgram(page);
   expect(kinds).toContain('drive');

@@ -3,7 +3,7 @@
   import { useCore } from '../lib/state/context';
   import Dialog from './Dialog.svelte';
 
-  /** "Release the e-stop?": until Phase 6 anyone may release it, so the shell asks first. */
+  /** "Release the e-stop?": an operator's decision (docs/auth.md), so the shell asks first. */
   let { onclose }: { onclose: () => void } = $props();
 
   const core = useCore();

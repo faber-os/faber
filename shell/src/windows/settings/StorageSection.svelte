@@ -7,6 +7,7 @@
   import { formatBytes } from '../../components/format';
   import { openFolder } from '../../components/fileOps';
   import { useDesktop } from '../../components/desktopController.svelte';
+  import RoleLock from '../../components/RoleLock.svelte';
   import { t } from '../../lib/i18n';
 
   let { winId }: { winId: string } = $props();
@@ -27,8 +28,18 @@
   let shared = $state<BackupInfo | null>(null);
   let restored = $state<string | null>(null);
   let confirming = $state<FileEntry | null>(null);
+  /** Restore the backup's users and API tokens too (docs/auth.md); off: this machine keeps its own. */
+  let withUsers = $state(false);
+  // Backups hold the users' password hashes: making, listing and restoring them is for admins.
+  const lock = $derived(core.auth.lock('admin'));
 
   async function load() {
+    if (lock) {
+      const s = await core.loadStorage();
+      if (s.ok) storage = s.value;
+      else error = s.error;
+      return;
+    }
     const [s, b] = await Promise.all([core.loadStorage(), core.listFolder(BACKUPS)]);
     if (s.ok) storage = s.value;
     else error = s.error;
@@ -119,7 +130,8 @@
     saved = null;
     shared = null;
     restored = null;
-    const r = await core.restoreBackup(entry.path);
+    const r = await core.restoreBackup(entry.path, withUsers && !isSetup(entry.name));
+    withUsers = false;
     busy = null;
     if (r.ok) restored = entry.name;
     else error = r.error;
@@ -131,6 +143,7 @@
 <section id="{winId}-storage" aria-labelledby="{winId}-storage-h">
   <h3 id="{winId}-storage-h">{t('settings.storage.title')}</h3>
   {#if error}<ErrorNotice {error} />{/if}
+  <RoleLock reason={lock} />
 
   <div class="block">
     <p class="name">{t('settings.storage.disk.name')}</p>
@@ -183,7 +196,11 @@
       <p class="name">{t('settings.storage.backup.name')}</p>
       <p class="desc">{t('settings.storage.backup.desc')}</p>
       <label class="tick">
-        <input type="checkbox" bind:checked={includeRecordings} disabled={busy !== null} />
+        <input
+          type="checkbox"
+          bind:checked={includeRecordings}
+          disabled={busy !== null || lock !== null}
+        />
         {storage
           ? t('settings.storage.backup.recordingsSize', {
               size: formatBytes(storage.recordingsBytes),
@@ -191,7 +208,12 @@
           : t('settings.storage.backup.recordings')}
       </label>
     </div>
-    <button class="btn primary" onclick={backUp} disabled={busy !== null}>
+    <button
+      class="btn primary"
+      onclick={backUp}
+      disabled={busy !== null || lock !== null}
+      title={lock ?? undefined}
+    >
       {busy === 'backup' ? t('settings.storage.backup.busy') : t('settings.storage.backup.now')}
     </button>
   </div>
@@ -216,7 +238,12 @@
       <p class="name">{t('settings.storage.setup.name')}</p>
       <p class="desc">{t('settings.storage.setup.desc')}</p>
     </div>
-    <button class="btn" onclick={shareSetup} disabled={busy !== null}>
+    <button
+      class="btn"
+      onclick={shareSetup}
+      disabled={busy !== null || lock !== null}
+      title={lock ?? undefined}
+    >
       {busy === 'setup' ? t('settings.storage.setup.busy') : t('settings.storage.setup.now')}
     </button>
   </div>
@@ -232,11 +259,16 @@
   <div class="block">
     <div class="list-head">
       <p class="name" id="{winId}-backups-label">{t('settings.storage.backups.name')}</p>
-      <button class="btn quiet" onclick={() => openFolder(desktop, BACKUPS)}
-        >{t('settings.storage.backups.open')}</button
+      <button
+        class="btn quiet"
+        disabled={lock !== null}
+        title={lock ?? undefined}
+        onclick={() => openFolder(desktop, BACKUPS)}>{t('settings.storage.backups.open')}</button
       >
     </div>
-    {#if backups === null}
+    {#if lock}
+      <p class="desc">{t('settings.storage.backups.locked')}</p>
+    {:else if backups === null}
       <p class="desc">{t('settings.storage.backups.loading')}</p>
     {:else if backups.length === 0}
       <p class="desc">{t('settings.storage.backups.empty')}</p>
@@ -283,6 +315,17 @@
         ? t('settings.storage.setup.restoreBody')
         : t('settings.storage.restore.body')}
     </p>
+    {#if !isSetup(entry.name)}
+      <label class="tick">
+        <input type="checkbox" bind:checked={withUsers} />
+        {t('settings.storage.restore.users')}
+      </label>
+      <p class="desc">
+        {withUsers
+          ? t('settings.storage.restore.users.on')
+          : t('settings.storage.restore.users.off')}
+      </p>
+    {/if}
     {#snippet actions()}
       <button class="btn" onclick={() => (confirming = null)}
         >{t('settings.storage.restore.cancel')}</button

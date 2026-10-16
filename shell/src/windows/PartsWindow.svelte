@@ -23,6 +23,8 @@
   let { win }: WindowProps = $props();
 
   const core = useCore();
+  // Adding and removing parts changes the machine: an admin's (docs/auth.md).
+  const lock = $derived(core.auth.lock('admin'));
   const desktop = useDesktop();
   const menu = useMenu();
 
@@ -106,7 +108,11 @@
             },
           ),
         removable(p) && separator(),
-        removable(p) && item('remove', t('parts.menu.remove'), { danger: true }),
+        removable(p) &&
+          item('remove', t('parts.menu.remove'), {
+            danger: true,
+            ...(lock ? { disabledReason: lock } : {}),
+          }),
       ],
       onSelect: (id: string) => {
         if (id === 'view' && signals[0]) openViewer(p, signals[0]);
@@ -193,7 +199,8 @@
       <button
         class="btn primary"
         onclick={() => (adding = true)}
-        disabled={core.connection !== 'connected'}
+        disabled={core.connection !== 'connected' || lock !== null}
+        title={lock ?? undefined}
       >
         <Icon name="plus" size={17} />
         {t('parts.toolbar.add')}
@@ -225,7 +232,8 @@
         <button
           class="btn primary"
           onclick={() => (adding = true)}
-          disabled={core.connection !== 'connected'}
+          disabled={core.connection !== 'connected' || lock !== null}
+          title={lock ?? undefined}
         >
           <Icon name="plus" size={17} />
           {t('parts.empty.addFirst')}
@@ -376,7 +384,8 @@
                   <button
                     class="btn quiet icon"
                     aria-label={t('parts.list.removeNamed', { name: p.name })}
-                    title={t('parts.list.removeNamed', { name: p.name })}
+                    title={lock ?? t('parts.list.removeNamed', { name: p.name })}
+                    disabled={lock !== null}
                     onclick={() => (confirming = p.name)}
                   >
                     <Icon name="trash" size={18} />

@@ -71,7 +71,7 @@ async function position(page: Page): Promise<{ x: number; y: number }> {
 test('add a world machine and LiDAR, see them, drive, and reset the position', async ({ page }) => {
   await page.goto('/');
   const taskbar = page.getByRole('navigation', { name: 'Taskbar' });
-  await expect(taskbar.getByText('Connected')).toBeVisible();
+  await expect(taskbar.getByText('Connected', { exact: true })).toBeVisible();
 
   // The World window starts empty and says how to add a machine.
   await openProgram(page, 'world');

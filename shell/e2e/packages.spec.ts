@@ -42,7 +42,7 @@ test.afterEach(async ({ request }) => clean(request));
 test('install a package from the desktop, use it, and uninstall it', async ({ page }) => {
   await page.goto('/');
   const taskbar = page.getByRole('navigation', { name: 'Taskbar' });
-  await expect(taskbar.getByText('Connected')).toBeVisible();
+  await expect(taskbar.getByText('Connected', { exact: true })).toBeVisible();
 
   // Double-click the package in Files (on the desktop, the Parts window may cover its icon).
   await taskbar.getByRole('button', { name: 'Start' }).click();

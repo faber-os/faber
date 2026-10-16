@@ -54,6 +54,8 @@
   const FOLLOW_SPAN_M = 12;
 
   const core = useCore();
+  // Switching the world and putting the machine back are an operator's (docs/auth.md).
+  const lock = $derived(core.auth.lock('operator'));
   const desktop = useDesktop();
   const theme = useTheme();
 
@@ -478,6 +480,8 @@
               class="item"
               role="option"
               aria-selected={w.name === view?.name}
+              disabled={lock !== null}
+              title={lock ?? undefined}
               onclick={() => choose(w)}
               onkeydown={(e) => e.key === 'Escape' && (picking = false)}
             >
@@ -502,7 +506,12 @@
       />
       <span class="follow-text">{t('world.follow')}</span>
     </label>
-    <button class="btn" title={t('world.reset.title')} onclick={resetPosition}>
+    <button
+      class="btn"
+      title={lock ?? t('world.reset.title')}
+      disabled={lock !== null}
+      onclick={resetPosition}
+    >
       <Icon name="undo" size={17} />
       <span>{t('world.reset')}</span>
     </button>

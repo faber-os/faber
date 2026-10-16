@@ -1,10 +1,23 @@
 <script lang="ts">
   import { machineNameProblem, tidyMachineName } from '../../lib/desktop/machineName';
   import type { SectionProps } from './types';
+  import type { ScreenRole } from '../../lib/state/types';
+  import { roleName } from '../../lib/state/session.svelte';
   import RichText from '../../components/RichText.svelte';
+  import RoleLock from '../../components/RoleLock.svelte';
+  import ChoiceRow from './ChoiceRow.svelte';
   import { t } from '../../lib/i18n';
 
-  let { winId, settings, saving, change }: SectionProps = $props();
+  let { winId, settings, saving, change, lock = null }: SectionProps = $props();
+
+  const SCREEN_ROLES: readonly (readonly [ScreenRole, string])[] = [
+    ['viewer', roleName('viewer')],
+    ['operator', roleName('operator')],
+  ];
+
+  function setScreenRole(role: ScreenRole) {
+    change((s) => ({ ...s, screen: { ...s.screen, role } }));
+  }
 
   let draft = $state('');
   // A change from elsewhere (another browser, a restore) replaces the draft.
@@ -24,6 +37,7 @@
 
 <section id="{winId}-machine" aria-labelledby="{winId}-machine-h">
   <h3 id="{winId}-machine-h">{t('settings.machine.title')}</h3>
+  <RoleLock reason={lock} />
   <form
     class="row"
     onsubmit={(e) => {
@@ -56,6 +70,15 @@
       />
     </div>
   </form>
+  <ChoiceRow
+    id="{winId}-screen-role"
+    label={t('settings.machine.screen.name')}
+    description={t('settings.machine.screen.desc')}
+    options={SCREEN_ROLES}
+    value={settings.screen.role}
+    disabled={saving}
+    onchange={setScreenRole}
+  />
 </section>
 
 <style>

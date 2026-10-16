@@ -91,7 +91,8 @@
           <button
             class="btn danger"
             aria-label={t('settings.connectors.uninstall.named', { name: p.name })}
-            disabled={p.usedBy.length > 0}
+            disabled={p.usedBy.length > 0 || core.auth.lock('admin') !== null}
+            title={core.auth.lock('admin') ?? undefined}
             onclick={() => (confirming = p)}>{t('settings.connectors.uninstall')}</button
           >
         </li>

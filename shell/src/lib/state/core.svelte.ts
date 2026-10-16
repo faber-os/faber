@@ -60,6 +60,7 @@ import type {
 } from './types';
 import type { ServerMessage } from '../api/generated/ServerMessage';
 import { canMove } from './driving';
+import { SessionState } from './session.svelte';
 import type { Result } from './result';
 
 export const LOG_CAPACITY = 1000;
@@ -166,6 +167,8 @@ export class CoreState {
   drivingConfirmed = $state(false);
 
   readonly format: WireFormat;
+  /** Who uses this shell and what they may do (docs/auth.md). */
+  readonly auth: SessionState;
 
   private readonly http: CoreHttp;
   private readonly socket: CoreSocket;
@@ -181,6 +184,7 @@ export class CoreState {
 
   constructor(deps: CoreDeps) {
     this.http = deps.http;
+    this.auth = new SessionState(deps.http);
     this.socket = deps.socket;
     this.format = deps.format;
     this.schedule = deps.schedule ?? ((fn) => void setTimeout(fn, LOG_FLUSH_MS));
@@ -517,8 +521,9 @@ export class CoreState {
     return this.call(() => this.http.shareSetup());
   }
 
-  restoreBackup(path: string): Promise<Result<void>> {
-    return this.call(() => this.http.restoreBackup(path));
+  /** `users` also replaces the users and tokens with the backup's (everyone signs in again). */
+  restoreBackup(path: string, users = false): Promise<Result<void>> {
+    return this.call(() => this.http.restoreBackup(path, users));
   }
 
   async setDeveloper(change: DeveloperChange): Promise<Result<Settings>> {
@@ -714,7 +719,11 @@ export class CoreState {
     try {
       return { ok: true, value: await fn() };
     } catch (e) {
-      if (e instanceof CoreError) return { ok: false, error: e.body };
+      if (e instanceof CoreError) {
+        // The session ended (signed out elsewhere, expired): find out, so the shell can say so.
+        if (e.body.code === 'not-signed-in') void this.auth.load();
+        return { ok: false, error: e.body };
+      }
       throw e;
     }
   }

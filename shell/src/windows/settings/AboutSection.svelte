@@ -78,6 +78,9 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
+  // Every setting, the machine's own too: an admin's (docs/auth.md).
+  const resetLock = $derived(core.auth.lock('admin'));
+
   async function reset() {
     resetting = true;
     error = null;
@@ -135,8 +138,11 @@
       <p class="name">{t('settings.about.reset.name')}</p>
       <p class="desc">{t('settings.about.reset.desc')}</p>
     </div>
-    <button class="btn danger" onclick={() => (confirmReset = true)}
-      >{t('settings.about.reset.open')}</button
+    <button
+      class="btn danger"
+      disabled={resetLock !== null}
+      title={resetLock ?? undefined}
+      onclick={() => (confirmReset = true)}>{t('settings.about.reset.open')}</button
     >
   </div>
 </section>

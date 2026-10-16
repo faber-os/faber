@@ -182,3 +182,43 @@ describe('Opening files in Notes', () => {
     );
   });
 });
+
+describe('The user menu on the taskbar', () => {
+  it('names who is signed in, opens their account and signs out', async () => {
+    const shell = setup();
+    shell.fetch.route({ method: 'DELETE', path: '/api/v0/session', status: 204 });
+    const nav = screen.getByRole('navigation', { name: 'Taskbar' });
+    await userEvent.click(within(nav).getByRole('button', { name: 'mikkel (Admin)' }));
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: 'Password and API tokens…' }),
+    );
+    // Settings opens at Users (and scrolls there).
+    expect(await screen.findByRole('region', { name: 'Users' })).toBeInTheDocument();
+    await userEvent.click(within(nav).getByRole('button', { name: 'mikkel (Admin)' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Sign out' }));
+    await waitFor(() =>
+      expect(shell.fetch.calls.map((c) => `${c.method} ${c.path}`)).toContain(
+        'DELETE /api/v0/session',
+      ),
+    );
+  });
+
+  it('on the attached screen, offers to sign in instead', async () => {
+    const shell = setup();
+    shell.core.auth.info = {
+      machineName: 'faber',
+      language: 'en',
+      needsSetup: true,
+      signInOff: false,
+      identity: { role: 'viewer', via: 'screen' },
+    };
+    const nav = screen.getByRole('navigation', { name: 'Taskbar' });
+    await userEvent.click(
+      await within(nav).findByRole('button', { name: 'Attached screen (Viewer)' }),
+    );
+    expect(screen.queryByRole('menuitem', { name: 'Sign out' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Create the admin…' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Sign in as someone…' }));
+    expect(shell.core.auth.prompt).toBe('sign-in');
+  });
+});

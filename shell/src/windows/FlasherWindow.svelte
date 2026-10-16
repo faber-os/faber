@@ -33,6 +33,8 @@
   let { win }: WindowProps = $props();
 
   const core = useCore();
+  // Flashing replaces a board's program: an admin's (docs/auth.md).
+  const lock = $derived(core.auth.lock('admin'));
   const desktop = useDesktop();
 
   let boards = $state<FlashBoard[]>([]);
@@ -316,7 +318,8 @@
         <div class="actions">
           <button
             class="btn primary"
-            disabled={!ready || phase !== 'idle'}
+            disabled={!ready || phase !== 'idle' || lock !== null}
+            title={lock ?? undefined}
             onclick={() => (phase = 'confirming')}
             ><Icon name="upload" size={16} /> {t('flasher.flash')}</button
           >
