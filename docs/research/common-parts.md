@@ -291,6 +291,14 @@ close-range distance, bumpers, battery, LED strip, RF joystick).
 | 11 | Addressable LED strip | WS2812B, SK6812 | **new `FaberPixels`** (optional header) | `light` ✔ |
 | 12 | Analog input / joystick | potentiometer, LDR, thumb joystick | **new `FaberAnalogIn`**, and a joystick template = 2 analog + 1 button | `analog-in` ✔ / `rc-input` ✔ |
 
+*Built 2026-10-16* ([faberlink.md](../faberlink.md) §7, templates in `core/src/arduino/wiring/parts/`):
+`FaberButton` (`digital-in`) and `FaberObstacle` (the new `obstacle`), `FaberOutput`, `FaberServo`,
+`FaberEncoder` (and `FaberMotor.useEncoder()`), `FaberAnalogIn`, `FaberImu` (the MPU6050 on the
+core's Wire library, no third-party library) and `FaberToF` (written to Pololu's VL53L0X library,
+not compiled against it; its template waits). Not built: `FaberPixels`, because `light` takes
+shared (unleased) commands, which the core doesn't have yet; the joystick as one `rc-input` part;
+`line-sensor`.
+
 Eight new library classes; **no new capability is strictly needed for the first wave** (only the
 bumper reads better as `obstacle`). The IMU, ToF and pixel classes depend on third-party libraries,
 so they should live in **optional headers** (`FaberImu.h`, `FaberPixels.h`, …) so that plain

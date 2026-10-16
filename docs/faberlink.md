@@ -552,6 +552,16 @@ each `FaberMotor` driver shape writes the right pins for a duty (EN 128, IN1 hig
 motor is stopped, holds STBY high, and refuses commands with a pin missing; every part class
 reports its pins with the analog base.
 
+The first wave of part classes (2026-10-16) is checked the same way, the stand-in core growing as
+they need it (`INPUT_PULLUP`, external interrupts on D2/D3, `delay()`, and stand-ins for the Servo,
+Wire and Pololu VL53L0X libraries with their documented APIs): a button's pull-up and a bouncing
+press counted once after the debounce time, an obstacle's info; an output's levels, an active-low
+relay's first write HIGH before `pinMode(OUTPUT)`, PWM duty and clamp, and off on every way a lease
+ends; a servo's pulse for an angle, holding or releasing when its lease ends; an encoder counting
+both ways on one or two interrupt pins and feeding its motor; an analog input's rate and volts; an
+MPU6050 woken, scaled to SI, at 0x69, and coming back after it was unplugged; several VL53L0X
+started one at a time with their own addresses and XSHUT never driven HIGH.
+
 ## 9. In the core: the `faber-bridge` connector
 
 Built in Phase 4b, in Rust inside the core (`core/src/bridge/`; wasm later). Add a board as one part
