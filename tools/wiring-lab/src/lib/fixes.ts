@@ -194,7 +194,13 @@ export function fixesFor(doc: Diagram, defs: DefLookup, issue: Issue): Fix[] {
   }
   // Removing one wire, where that alone solves it.
   if (['short', 'supplies-fight', 'board-pins-joined', 'signal-on-power', 'outputs-fight', 'load-on-board', 'cable-mismatch', 'self-joined', 'tx-tx', 'logic-joined', 'over-voltage', 'drives-into'].includes(issue.code)) {
-    for (const id of issue.wires.slice(0, 10)) candidates.push({ label: `Remove ${label(doc, defs, id)}`, remove: [id] });
+    // For a short, only the wires that reach ground are the mistake, not the battery's own lead.
+    const touchesGround = (id: string) => {
+      const w = doc.wires.find((x) => x.id === id)!;
+      return [w.a, w.b].some((k) => pinRef(doc, defs, k)?.pin.kind === 'gnd');
+    };
+    const suspects = issue.code === 'short' ? issue.wires.filter(touchesGround) : issue.wires;
+    for (const id of suspects.slice(0, 10)) candidates.push({ label: `Remove ${label(doc, defs, id)}`, remove: [id] });
   }
   const out: Fix[] = [];
   for (const f of candidates) {

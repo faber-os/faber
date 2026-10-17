@@ -299,7 +299,10 @@ export function runChecks(doc: Diagram, defs: DefLookup, nets: NetIndex, routing
   for (const part of doc.parts) {
     const d = defs(part.def);
     if (!d || d.kind !== 'part') continue;
-    const missing = d.pins.filter((p) => !p.optional && !touched.has(`${part.id}.${p.id}`));
+    // What a part needs wired: its inputs, signals, ground and plugs. Outputs it offers (a USB
+    // adapter's 3.3 V, its TXD) may stay free.
+    const NEEDED = new Set(['sig', 'vcc', 'vin', 'power-in', 'gnd', 'motor-in', 'speaker-in', 'pass']);
+    const missing = d.pins.filter((p) => !p.optional && (NEEDED.has(p.kind) || (p.kind === 'port' && !p.host)) && !touched.has(`${part.id}.${p.id}`));
     if (missing.length) push({ sev: 'warn', code: 'not-connected', text: `${part.name}: ${missing.map((p) => p.label).join(', ')} not connected`, more: d.name, parts: [part.id], wires: [], keys: missing.map((p) => `${part.id}.${p.id}`) });
   }
 
@@ -309,7 +312,9 @@ export function runChecks(doc: Diagram, defs: DefLookup, nets: NetIndex, routing
   const reach = (from: Set<unknown>, keys: string[]) => keys.some((k) => from.has(nets.of.get(k)));
   for (const part of doc.parts) {
     const d = defs(part.def);
-    if (!d || d.kind !== 'part' || !d.pins.some((x) => x.kind === 'supply')) continue;
+    // Only a source of its own (a battery, an adapter): a part fed through an input or a cable
+    // shares its ground with whatever feeds it.
+    if (!d || d.kind !== 'part' || !d.pins.some((x) => x.kind === 'supply') || d.pins.some((x) => POWER_IN.has(x.kind) || (x.kind === 'port' && !x.host))) continue;
     const g = d.pins.filter((x) => x.kind === 'gnd').map((x) => `${part.id}.${x.id}`);
     const mine = groundNets(g);
     if (!mine.size) continue;

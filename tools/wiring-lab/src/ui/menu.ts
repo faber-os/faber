@@ -57,13 +57,23 @@ export function partMenu(id: string): MenuItem[] {
   const p = lab.part(id);
   if (!p) return [];
   const d = lab.defs(p.def);
-  const wired = lab.doc.wires.some((w) => splitKey(w.a)[0] === id || splitKey(w.b)[0] === id);
+  const many = lab.selParts.length > 1 && lab.selParts.includes(id);
+  const ids = many ? lab.selParts : [id];
+  const wired = lab.doc.wires.some((w) => ids.includes(splitKey(w.a)[0]) || ids.includes(splitKey(w.b)[0]));
   const items: MenuItem[] = [];
-  if (d?.kind !== 'breadboard') items.push({ label: 'Connect to', children: connectItems(id) });
-  if (d?.kind !== 'breadboard') items.push({ label: 'Rotate', shortcut: 'R', action: () => lab.rotate(id) });
-  items.push({ label: 'Duplicate', action: () => lab.duplicate(id) });
-  if (wired) items.push({ label: 'Remove its wires', action: () => lab.disconnect(id) });
-  items.push({ separator: true, label: '' }, { label: `Remove ${p.name}`, shortcut: 'Del', danger: true, action: () => lab.removePart(id) });
+  if (!many && d?.kind !== 'breadboard') items.push({ label: 'Connect to', children: connectItems(id) });
+  if (lab.power && d?.switch) items.push({ label: p.open ? 'Close it' : d.switch === 'push' ? 'Press it' : 'Open it', hint: 'Power mode', action: () => lab.flick(id) });
+  if (d?.kind !== 'breadboard') {
+    items.push({ label: 'Rotate', shortcut: 'R', action: () => lab.rotate(ids) });
+    items.push({ label: 'Rotate back', shortcut: 'Shift R', action: () => lab.rotate(ids, true) });
+    items.push({ label: 'Mirror left–right', shortcut: 'H', action: () => lab.mirror('h', ids) });
+    items.push({ label: 'Mirror top–bottom', shortcut: 'V', action: () => lab.mirror('v', ids) });
+  }
+  items.push({ separator: true, label: '' });
+  items.push({ label: 'Copy', shortcut: 'Ctrl C', action: () => lab.copy() });
+  items.push({ label: 'Duplicate', shortcut: 'Ctrl D', action: () => lab.duplicate() });
+  if (wired) items.push({ label: many ? 'Remove their wires' : 'Remove its wires', action: () => lab.disconnect(ids) });
+  items.push({ separator: true, label: '' }, { label: many ? `Remove ${ids.length} parts` : `Remove ${p.name}`, shortcut: 'Del', danger: true, action: () => lab.removeParts(ids) });
   return items;
 }
 
@@ -133,6 +143,9 @@ export function wireMenu(id: string): MenuItem[] {
 
 export function matMenu(at: [number, number]): MenuItem[] {
   return [
+    { label: 'Paste here', shortcut: 'Ctrl V', action: () => lab.paste() },
+    { label: 'Select all', shortcut: 'Ctrl A', action: () => lab.selectAll() },
+    { separator: true, label: '' },
     {
       label: 'Add a part here',
       children: lab.allDefs.map((d) => ({ label: d.name, hint: d.covers, action: () => lab.addPart(d.id, at) })),
