@@ -156,7 +156,7 @@ systemd service. Flash the card with Raspberry Pi Imager (SSH on, public-key onl
 Wi-Fi set there), then from this repository:
 
 ```bash
-tools/pi/deploy.sh --setup mikkel@sennep.local
+tools/pi/deploy.sh --setup <user>@<hostname>.local
 ```
 
 `--setup` runs `tools/pi/setup.sh` on the Pi once: build tools, Rust, I²C and SPI on, the GPIO

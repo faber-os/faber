@@ -2,8 +2,8 @@
 # Builds the committed Faber on a Raspberry Pi and (re)starts it there. Runs on your computer
 # (Git Bash on Windows works) with SSH access to the Pi:
 #
-#   tools/pi/deploy.sh [user@host]        default: mikkel@sennep.local
-#   tools/pi/deploy.sh --setup [user@host] first time: also runs tools/pi/setup.sh on the Pi
+#   tools/pi/deploy.sh user@host
+#   tools/pi/deploy.sh --setup user@host   first time: also runs tools/pi/setup.sh on the Pi
 #
 # The shell is built here (the Pi needs no Node.js); the core is built on the Pi with the shell
 # compiled in. Only committed files are sent, so what runs on the Pi is always a known commit.
@@ -14,7 +14,17 @@ if [ "${1:-}" = "--setup" ]; then
     setup=1
     shift
 fi
-pi="${1:-mikkel@sennep.local}"
+if [ $# -ne 1 ]; then
+    echo "usage: tools/pi/deploy.sh [--setup] user@host" >&2
+    exit 2
+fi
+pi="$1"
+
+# On Windows, use Windows' own OpenSSH: it talks to the Windows ssh-agent, so a key with a
+# passphrase works without asking (Git Bash's ssh has no agent of its own).
+if [ -x /c/Windows/System32/OpenSSH/ssh.exe ]; then
+    ssh() { /c/Windows/System32/OpenSSH/ssh.exe "$@"; }
+fi
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo"
 
