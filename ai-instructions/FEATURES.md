@@ -54,3 +54,4 @@ Phase 1 is built (see `docs/roadmap.md`).
 | Restart / shut down | Planned | Power items exist in the start menu but are disabled until the machine image (Phase 6) | — | Image | Phase 6 |
 | Copy / paste, multi-select in Files | Planned | Also unlocks moving between disks and home | — | Files | — |
 | Real LD19 on the PC | Planned | Mikkel plugs in the LD19 and adds it via its USB port | — | Phase 1 | Mikkel |
+| Circuits (wiring diagram, D60/D61) | Implemented (D61 proposed) | Shell program: drawings as `.fbcircuit`, Connect to, breadboards, checks with fixes, resistor/diode advice, power mode with a DC circuit solve (volts, amps, wire gauges, fuses), Faber's parts with live state, sketches run on an emulated Uno/Nano/Mega (avr8js) | 2026-10-17 | Arduino editor (compile) | — |

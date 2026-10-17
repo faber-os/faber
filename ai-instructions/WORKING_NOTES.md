@@ -45,6 +45,8 @@
 - **Disk space:** every agent builds into `Faber-wt/target-<name>` (~15–35 GB each). Delete it together with the worktree when merging; 19 leftovers filled the C: drive on 2026-10-16.
 - **Processes:** never kill by name (`taskkill /IM node.exe` hit other programs). Run probe cores with `CARGO_TARGET_DIR=target/agent` on another port and stop them by PID.
 
+- **Circuits as built (D61 proposed, review later):** parts and check texts are English data (noRawText skips `lib/circuit/`); the electrical model's figures are typical (25 mΩ per 18650, 88 % buck, AVR pin 25 Ω/40 mA, Pi pin 40 Ω/16 mA, Dupont 1 A, 22/16/10 AWG 5/20/55 A, SENNEP motor 2 A running / 20 A stalled **estimated**); resistors from E12 (the kit's values unknown). The Mega's emulated timers 3–5, USART1–3 and ADC 8–15 are written from the 2560 datasheet tables, not avr8js's; only the CircuitBlink fixture proves them. A FaberLink board's type is guessed from its name (the core doesn't report it). Emulator loop runs on requestAnimationFrame: a hidden window runs slowly. Runs ~2.5× real time on Mikkel's PC. The SENNEP V2 example leaves out the e-stop's second contact to D23, the arm role, the shifter's RESET wire (the lab can't wire RESET) and L_IS; the LED strip (2 m, 60 LEDs on its own 5 A buck) is a guess.
+
 ## Context
 - Viam is the closest prior art (typed component APIs + a module registry), but it is cloud-first, AGPL, and has no OS image, sandbox or maker tools. Faber's niche is the gap list in `docs/research/prior-art-appliance-os.md`.
 - Research facts are as of 2026-10-15 and partly unverified (marked in the research files).
