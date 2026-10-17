@@ -166,8 +166,9 @@ function pi5(): PartDef {
       if (pwm.has(name)) caps.push('pwm');
       if (name === 'GPIO2') caps.push('sda');
       if (name === 'GPIO3') caps.push('scl');
-      if (name === 'GPIO14') caps.push('tx');
-      if (name === 'GPIO15') caps.push('rx');
+      // UART0 on 14/15; the Pi 5's extra UARTs (dtoverlay uart2-pi5 … uart4-pi5) on 4/5, 8/9, 12/13.
+      if (['GPIO14', 'GPIO4', 'GPIO8', 'GPIO12'].includes(name)) caps.push('tx');
+      if (['GPIO15', 'GPIO5', 'GPIO9', 'GPIO13'].includes(name)) caps.push('rx');
       if (name === 'GPIO11') caps.push('sck');
       if (name === 'GPIO10') caps.push('mosi');
       if (name === 'GPIO9') caps.push('miso');
@@ -328,8 +329,8 @@ export const BUILTIN: PartDef[] = [
     pins: [
       pin('RPWM', 0, 12, 3, { kind: 'sig', needs: ['pwm'] }),
       pin('LPWM', 0, 14, 3, { kind: 'sig', needs: ['pwm'] }),
-      pin('R_EN', 0, 16, 3, { kind: 'sig', needs: ['io'] }),
-      pin('L_EN', 0, 18, 3, { kind: 'sig', needs: ['io'] }),
+      pin('R_EN', 0, 16, 3, { kind: 'sig', needs: ['io'], pull: 'down' }),
+      pin('L_EN', 0, 18, 3, { kind: 'sig', needs: ['io'], pull: 'down' }),
       pin('R_IS', 0, 20, 3, { kind: 'sig', needs: ['analog'], optional: true, out: true }),
       pin('L_IS', 0, 22, 3, { kind: 'sig', needs: ['analog'], optional: true, out: true }),
       pin('VCC', 0, 24, 3, { kind: 'vcc', min: 3.3, max: 5.5 }),
@@ -349,6 +350,9 @@ export const BUILTIN: PartDef[] = [
     w: 44,
     h: 22,
     pins: [pin('M+', 0, 8, 3, { kind: 'motor-in' }), pin('M-', 0, 14, 3, { kind: 'motor-in', label: 'M−' })],
+    // The datasheet gives no stall current; SENNEP's electronics plan estimates 15–25 A.
+    elec: { t: 'motor', a: 'M+', b: 'M-', volts: 12, runA: 2, stallA: 20 },
+    notes: ['Running free it draws about 2 A; held still (stalled) an estimated 20 A, not measured yet. Power mode can show both.'],
   },
   {
     id: 'sg90',

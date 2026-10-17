@@ -23,6 +23,15 @@ const hole = (cx: number, cy: number, r = 5) => `<circle cx="${cx}" cy="${cy}" r
 
 type Look = (d: PartDef, W: number, H: number) => string;
 
+const BAND = ['#1c1c1c', '#7a4a1f', '#d6332b', '#f08a24', '#f2d23a', '#2f9a4a', '#2e62c9', '#7d4cc0', '#8c939a', '#f4f4f0'];
+/** A resistor's four colour bands: two digits, a multiplier, gold for 5 %. */
+function bands(ohms: number): string[] {
+  if (ohms < 10) return [BAND[Math.round(ohms)] ?? BAND[0]!, BAND[0]!, '#c9a227', '#c9a227'];
+  const exp = Math.floor(Math.log10(ohms)) - 1;
+  const two = Math.round(ohms / 10 ** exp);
+  return [BAND[Math.floor(two / 10) % 10]!, BAND[two % 10]!, BAND[exp] ?? BAND[0]!, '#c9a227'];
+}
+
 export const LOOKS: Record<string, Look> = {
   arduino: (d, W, H) => `
     ${board(W, H, '#0b7d84', '#065a5f', 10)}
@@ -148,6 +157,20 @@ export const LOOKS: Record<string, Look> = {
     return `<rect width="${W}" height="${H}" rx="2" fill="#1d1f22"/>${leds}`;
   },
   mb102: (_d, W, H) => `${board(W, H, '#1d4f9a', '#13386f', 4)}<rect x="${W - G * 6}" y="${G * 13}" width="${G * 6}" height="${G * 8}" rx="2" fill="#16181b"/><rect x="${W - G * 4}" y="${G * 27}" width="${G * 4}" height="${G * 6}" rx="1" fill="#c9ced4"/>${text(W / 2, H / 2 + 4, 'PSU', 9)}`,
+  resistor: (d, W, H) => {
+    const ohms = d.elec?.t === 'resistor' ? d.elec.ohms : 0;
+    return `<line x1="${G * 2}" y1="${H}" x2="${G * 2}" y2="${H / 2}" stroke="#8c939a" stroke-width="2"/><line x1="${W - G * 2}" y1="${H}" x2="${W - G * 2}" y2="${H / 2}" stroke="#8c939a" stroke-width="2"/>
+      <rect x="${G * 2.6}" y="${H / 2 - G * 1.3}" width="${W - G * 5.2}" height="${G * 2.6}" rx="${G * 1.2}" fill="#e7cf9f" stroke="#a8875a"/>
+      ${bands(ohms).map((c, i) => `<rect x="${G * 3.6 + i * G * 1.25}" y="${H / 2 - G * 1.3}" width="${G * 0.7}" height="${G * 2.6}" fill="${c}"/>`).join('')}`;
+  },
+  elcap: (_d, W, H) => `<rect x="${G * 0.5}" y="0" width="${W - G}" height="${H * 0.78}" rx="${G}" fill="#2a4f9a" stroke="#183268"/><rect x="${W - G * 2}" y="0" width="${G * 1.2}" height="${H * 0.78}" fill="#c9d4e8" opacity=".8"/><text x="${W - G * 1.4}" y="${H * 0.45}" text-anchor="middle" ${UI} font-size="8" font-weight="700" fill="#183268">−</text>`,
+  ceramic: (_d, W, H) => `<ellipse cx="${W / 2}" cy="${H * 0.38}" rx="${W / 2 - 2}" ry="${H * 0.34}" fill="#d9a23b" stroke="#9a6d16"/>`,
+  led5: (d, W, H) => `<line x1="${G * 2}" y1="${H}" x2="${G * 2}" y2="${H * 0.6}" stroke="#8c939a" stroke-width="2"/><line x1="${G * 4}" y1="${H}" x2="${G * 4}" y2="${H * 0.6}" stroke="#8c939a" stroke-width="2"/>
+    <path d="M ${G * 0.6} ${H * 0.66} V ${G * 2.6} a ${G * 2.4} ${G * 2.4} 0 0 1 ${G * 4.8} 0 V ${H * 0.66} Z" fill="${d.color ?? '#e23b3b'}" stroke="#00000055" stroke-width="1.5" opacity=".92"/>
+    <circle cx="${G * 2.2}" cy="${G * 2.4}" r="2.5" fill="#ffffffaa"/>`,
+  diode: (d, W, H) => `<line x1="${G * 2}" y1="${H}" x2="${G * 2}" y2="${H / 2}" stroke="#8c939a" stroke-width="2"/><line x1="${W - G * 2}" y1="${H}" x2="${W - G * 2}" y2="${H / 2}" stroke="#8c939a" stroke-width="2"/>
+    <rect x="${G * 2.6}" y="${H / 2 - G * 1.2}" width="${W - G * 5.2}" height="${G * 2.4}" rx="2" fill="${d.id === 'p6ke15a' ? '#3a3d42' : '#202226'}"/><rect x="${W - G * 4.2}" y="${H / 2 - G * 1.2}" width="${G * 0.9}" height="${G * 2.4}" fill="#d8dde2"/>`,
+  blade: (_d, W, H) => `<rect x="${G}" y="${H / 2 - G * 2}" width="${W - G * 2}" height="${G * 4}" rx="${G}" fill="#2b2f35"/><rect x="${W * 0.3}" y="${H / 2 - G * 1.5}" width="${W * 0.4}" height="${G * 3}" rx="2" fill="#3b82f6" stroke="#1e4f9a"/>`,
   generic: (d, W, H) => {
     const img = d.art ? `<image href="${esc(d.art)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="none"/>` : '';
     return `${board(W, H, esc(d.color ?? '#1d4f9a'), '#0e1726')}${img}`;
@@ -158,12 +181,11 @@ export function art(d: PartDef): string {
   return (LOOKS[d.look] ?? LOOKS.generic!)(d, d.w * G, d.h * G);
 }
 
-/** The transform that mirrors (in the part's own frame) and then turns the part. */
-export function transformOf(d: PartDef, rot: number, flip?: boolean): string {
+/** The transform that turns the part (a real part can't be mirrored, so neither can its drawing). */
+export function transformOf(d: PartDef, rot: number): string {
   let t = '';
   if (rot === 1) t = `translate(${d.h * G} 0) rotate(90)`;
   if (rot === 2) t = `translate(${d.w * G} ${d.h * G}) rotate(180)`;
   if (rot === 3) t = `translate(0 ${d.w * G}) rotate(270)`;
-  if (flip) t += ` translate(${d.w * G} 0) scale(-1 1)`;
   return t;
 }

@@ -168,6 +168,9 @@ export function routeAll(doc: Diagram, defs: DefLookup, nets: NetIndex): Routing
       prev[s0] = -1;
       heap.push(s0, Math.abs(sx - gx) + Math.abs(sy - gy));
     }
+    // A search that can't find its way gives up after a budget that grows with the distance:
+    // on a crowded machine one hopeless wire must not cost seconds.
+    const budget = 30000 + 300 * (Math.abs(sx - gx) + Math.abs(sy - gy));
     let guard = 0;
     while (heap.size) {
       const st = heap.pop();
@@ -180,7 +183,7 @@ export function routeAll(doc: Diagram, defs: DefLookup, nets: NetIndex): Routing
         for (let s = st; s >= 0; s = prev[s]!) out.push(s >> 2);
         return out.reverse().map((c): Cell => [ox + (c % W), oy + ((c / W) | 0)]);
       }
-      if (++guard > 600000) return null;
+      if (++guard > budget) return null;
       const cx = cell % W;
       const cy = (cell / W) | 0;
       for (let nd = 0; nd < 4; nd++) {
@@ -292,6 +295,27 @@ export function routeAll(doc: Diagram, defs: DefLookup, nets: NetIndex): Routing
     for (const [c, n] of deg) if (n >= 3) junctions.push({ x: ox + (c % W), y: oy + ((c / W) | 0), net });
   }
   return { routes, junctions };
+}
+
+/**
+ * While parts are dragged: the last full routing for every wire that stays put, and a plain
+ * L-shaped line for each wire on a moving part. The full routing runs again on the drop.
+ */
+export function quickRoutes(doc: Diagram, defs: DefLookup, last: Routing, moving: Set<string>): Routing {
+  const routes = new Map(last.routes);
+  const pinAt = (key: string): PinGeo | undefined => {
+    const [pid, pn] = splitKey(key);
+    const part = doc.parts.find((p) => p.id === pid);
+    return part ? geom(part, defs).pins[pn] : undefined;
+  };
+  for (const w of doc.wires) {
+    if (!moving.has(splitKey(w.a)[0]) && !moving.has(splitKey(w.b)[0]) && routes.has(w.id)) continue;
+    const a = pinAt(w.a);
+    const b = pinAt(w.b);
+    if (!a || !b) continue;
+    routes.set(w.id, { pts: simplify([[a.x, a.y], [b.x, a.y], [b.x, b.y]]), failed: false });
+  }
+  return { routes, junctions: last.junctions };
 }
 
 function dirBetween(a: Cell, b: Cell): number {

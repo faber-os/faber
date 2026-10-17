@@ -6,6 +6,7 @@
   import Library from './Library.svelte';
   import NewPart from './NewPart.svelte';
   import { lab } from './lab.svelte';
+  import { openMenu } from './menu';
   import { onMount } from 'svelte';
 
   const errors = $derived(lab.issues.filter((i) => i.sev === 'error').length);
@@ -121,7 +122,7 @@
       <button class="btn" onclick={() => lab.undo()} title="Undo (Ctrl+Z)">Undo</button>
       <button class="btn" onclick={() => lab.redo()} title="Redo (Ctrl+Y)">Redo</button>
       <button class="btn" onclick={() => lab.fit()} title="Fit (F)">Fit</button>
-      <button class="btn" onclick={() => (lab.reset(), requestAnimationFrame(() => lab.fit()))} title="Back to the SENNEP example">Example</button>
+      <button class="btn" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 4, [{ label: 'SENNEP V2, the whole machine', hint: 'From its electronics plan', action: () => (lab.reset('machine'), requestAnimationFrame(() => lab.fit())) }, { label: 'One corner of SENNEP', hint: 'Small: battery to one wheel', action: () => (lab.reset('corner'), requestAnimationFrame(() => lab.fit())) }]); }} title="Load an example">Example ▾</button>
       <button class="btn" onclick={copyJson}>Copy JSON</button>
     </div>
     <button class="icon" title={lab.panels.rightOpen ? 'Hide the inspector' : 'Show the inspector'} aria-label="Toggle inspector" onclick={() => (lab.panels.rightOpen = !lab.panels.rightOpen)}>
@@ -141,7 +142,13 @@
       {#if lab.sim}
         <div class="powerbar">
           {#each lab.sim.messages.slice(0, 4) as m, i (i)}<span class={m.sev}>{m.text}</span>{/each}
-          <small>Click a switch or the e-stop to flick it. P turns power off.</small>
+          <div class="motors" role="radiogroup" aria-label="Motors">
+            Motors
+            {#each [['off', 'off'], ['run', 'driving'], ['stall', 'held still']] as [v, t] (v)}
+              <button role="radio" aria-checked={lab.motors === v} class:on={lab.motors === v} onclick={() => (lab.motors = v as 'off' | 'run' | 'stall')}>{t}</button>
+            {/each}
+          </div>
+          <small>Click a switch or the e-stop to flick it. Checks lists everything the power shows up. P turns power off.</small>
         </div>
       {/if}
       <div class="legend">
@@ -313,6 +320,31 @@
   }
   .powerbar .error {
     background: #b91c1c;
+  }
+  .powerbar .motors {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px 4px 3px 10px;
+    border-radius: var(--r-md);
+    background: oklch(0.2 0.02 160 / 0.7);
+    color: oklch(0.97 0.01 150);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .powerbar .motors button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+  }
+  .powerbar .motors button.on {
+    background: var(--surface);
+    color: var(--text);
   }
   .powerbar small {
     color: oklch(0.97 0.01 150);

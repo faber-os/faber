@@ -1,6 +1,8 @@
 <script lang="ts">
   /** The right panel: what is selected (and its settings), the checks with their fixes, the build steps. */
   import { pinName } from '../lib/checks';
+  import { GAUGE_ORDER, GAUGES, gaugeOf } from '../lib/circuit';
+  import type { Gauge } from '../lib/types';
   import type { Fix } from '../lib/fixes';
   import { paramValues } from '../lib/library';
   import { splitKey } from '../lib/types';
@@ -51,7 +53,16 @@
     openMenu(r.left, r.bottom + 4, items);
   }
 
-  const POWER_TEXT: Record<string, string> = { on: 'On', source: 'Power source', off: 'No power', over: 'Too much voltage', under: 'Too little voltage', hot: 'On, regulator hot', tripped: 'Cut the power' };
+  const POWER_TEXT: Record<string, string> = { on: 'On', source: 'Power source', off: 'No power', over: 'Too much: it gets damaged', under: 'Too little voltage', hot: 'On, but hot', tripped: 'Cut the power', overload: 'Asked for more than it gives', burnt: 'Burns out' };
+
+  const amps = (a: number | undefined) => (a === undefined ? '–' : Math.abs(a) < 1 ? `${Math.round(Math.abs(a) * 1000)} mA` : `${Math.abs(a).toFixed(2)} A`);
+  const volts = (key: string) => {
+    const v = lab.sim?.volts.get(key);
+    return v === undefined ? '' : ` · ${v.toFixed(2)} V`;
+  };
+  function showFinding(parts: string[], wires: string[]) {
+    lab.hl = { parts, wires };
+  }
 </script>
 
 <div class="tabs" role="tablist">
@@ -65,6 +76,19 @@
 
 <div class="body">
   {#if lab.tab === 'checks'}
+    {#if lab.sim}
+      <h2>With the power on</h2>
+      <ul class="issues">
+        {#each lab.sim.findings as f, i (i)}
+          <li class="issue {f.sev}">
+            <button class="txt" onclick={() => showFinding(f.parts, f.wires)}>{f.text}{#if f.why}<small>{f.why}</small>{/if}</button>
+          </li>
+        {:else}
+          <li class="issue ok"><div class="txt">Every part gets what it needs.<small>Volts in range, no wire or pin over its current.</small></div></li>
+        {/each}
+      </ul>
+      <h2>The wiring</h2>
+    {/if}
     {#if !lab.issues.length}
       <ul class="issues"><li class="issue ok"><div class="txt">Every wire checks out.<small>Power, ground, pin types and voltages all match.</small></div></li></ul>
     {:else}
@@ -132,6 +156,7 @@
       <dt>Covers</dt><dd>{d.covers}</dd>
       <dt>Size</dt><dd class="mono">{(d.w * MM).toFixed(1)} × {(d.h * MM).toFixed(1)} mm</dd>
       {#if st}<dt>Power</dt><dd class="power {st}">{POWER_TEXT[st]}</dd>{/if}
+      {#if lab.sim && lab.sim.partAmps.has(part.id)}<dt>Current</dt><dd class="mono">{amps(lab.sim.partAmps.get(part.id))}</dd>{/if}
     </dl>
     {#if d.params}
       <div class="params">
@@ -148,7 +173,6 @@
       {#if d.kind !== 'breadboard'}
         <button class="btn primary" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 4, connectItems(part.id)); }}>Connect to…</button>
         <button class="btn" onclick={() => lab.rotate([part.id])}>Rotate</button>
-        <button class="btn" onclick={() => lab.mirror('h', [part.id])}>Mirror</button>
       {/if}
       {#if lab.power && d.switch}<button class="btn" onclick={() => lab.flick(part.id)}>{part.open ? 'Close' : d.switch === 'push' ? 'Press' : 'Open'}</button>{/if}
       <button class="btn danger" onclick={() => lab.removeParts([part.id])}>Remove</button>
@@ -164,7 +188,7 @@
             <tr class:on={r.to.length}>
               <td class="pin">{r.p.label}</td>
               <td class="dotcell">{#if r.color}<i class="dot" style:background={r.color}></i>{/if}</td>
-              <td class="to">{r.to.length ? r.to.join(', ') : r.p.optional ? 'free (optional)' : 'not connected'}</td>
+              <td class="to">{r.to.length ? r.to.join(', ') : r.p.optional ? 'free (optional)' : 'not connected'}{volts(`${part.id}.${r.p.id}`)}</td>
             </tr>
           {:else}
             <tr><td colspan="3" class="to">No wires yet. Right-click it, or click a pin, to start one.</td></tr>
@@ -180,9 +204,31 @@
       <dt>From</dt><dd>{pinName(lab.snap, lab.defs, wire.a)}</dd>
       <dt>To</dt><dd>{pinName(lab.snap, lab.defs, wire.b)}</dd>
       <dt>Carries</dt><dd>{net?.kind === 'power' ? `${net.volts} V` : net?.kind === 'gnd' ? 'Ground' : net?.kind === 'motor' ? 'Motor current' : net?.kind === 'cable' ? 'A cable' : 'A signal'}</dd>
-      {#if flow}<dt>Current</dt><dd>Flows toward {pinName(lab.snap, lab.defs, flow === 1 ? wire.b : wire.a)}</dd>{/if}
+      {#if flow}<dt>Current</dt><dd>{amps(lab.sim?.amps.get(wire.id))}, toward {pinName(lab.snap, lab.defs, flow === 1 ? wire.b : wire.a)}</dd>{/if}
+      {#if net?.kind !== 'cable'}
+        {@const g = gaugeOf(wire, lab.snap, lab.defs)}
+        <dt>Wire</dt><dd>{GAUGES[g].name}, takes {GAUGES[g].amps} A</dd>
+        {#if lab.sim}
+          {@const a = Math.abs(lab.sim.amps.get(wire.id) ?? 0)}
+          <dt>Loses</dt><dd class="mono">{(a * (GAUGES[g].ohmPerM * (wire.len ?? 0.25) + (g === 'dupont' ? 0.02 : 0))).toFixed(3)} V</dd>
+        {/if}
+      {/if}
       <dt>On paper</dt><dd class="mono">{wireLength(wire.id)} mm</dd>
     </dl>
+    {#if net?.kind !== 'cable'}
+      <div class="params">
+        <label class="field"
+          >Wire
+          <select value={gaugeOf(wire, lab.snap, lab.defs)} onchange={(e) => lab.setWire(wire.id, { gauge: e.currentTarget.value as Gauge })}>
+            {#each GAUGE_ORDER as g (g)}<option value={g}>{GAUGES[g].name} (up to {GAUGES[g].amps} A)</option>{/each}
+          </select>
+        </label>
+        <label class="field"
+          >Real length (m)
+          <input type="number" min="0.02" max="20" step="0.05" value={wire.len ?? 0.25} onchange={(e) => lab.setWire(wire.id, { len: Number(e.currentTarget.value) })} />
+        </label>
+      </div>
+    {/if}
     <div class="row">
       <button class="btn" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 4, wireMenu(wire.id)); }}>Colour…</button>
       <button class="btn danger" onclick={() => lab.removeWire(wire.id)}>Remove wire</button>
@@ -200,7 +246,7 @@
       <dt>Ctrl A · C · X · V · D</dt><dd>select all, copy, cut, paste, duplicate</dd>
       <dt>Ctrl Z · Ctrl Y</dt><dd>undo, redo</dd>
       <dt>R · Shift R</dt><dd>rotate, rotate back</dd>
-      <dt>H · V</dt><dd>mirror left–right, top–bottom</dd>
+      <dt>H · V</dt><dd>mirror the layout of the selection (the parts keep their pins)</dd>
       <dt>Shift + drag</dt><dd>move along one axis</dd>
       <dt>Drag the mat</dt><dd>select with a box (Ctrl adds)</dd>
       <dt>Space + drag</dt><dd>pan (or the middle button)</dd>
@@ -342,6 +388,7 @@
     color: var(--muted);
     min-width: 0;
   }
+  .field select,
   .field input {
     border: 1px solid var(--line-strong);
     border-radius: var(--r-md);

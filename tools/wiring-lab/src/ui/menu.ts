@@ -66,8 +66,10 @@ export function partMenu(id: string): MenuItem[] {
   if (d?.kind !== 'breadboard') {
     items.push({ label: 'Rotate', shortcut: 'R', action: () => lab.rotate(ids) });
     items.push({ label: 'Rotate back', shortcut: 'Shift R', action: () => lab.rotate(ids, true) });
-    items.push({ label: 'Mirror left–right', shortcut: 'H', action: () => lab.mirror('h', ids) });
-    items.push({ label: 'Mirror top–bottom', shortcut: 'V', action: () => lab.mirror('v', ids) });
+    if (many) {
+      items.push({ label: 'Mirror layout left–right', shortcut: 'H', action: () => lab.mirror('h', ids) });
+      items.push({ label: 'Mirror layout top–bottom', shortcut: 'V', action: () => lab.mirror('v', ids) });
+    }
   }
   items.push({ separator: true, label: '' });
   items.push({ label: 'Copy', shortcut: 'Ctrl C', action: () => lab.copy() });

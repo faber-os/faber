@@ -342,3 +342,35 @@ export function snapToBreadboard(doc: Diagram, defs: DefLookup, part: Part): boo
   part.y += best.dy;
   return true;
 }
+
+/**
+ * Mirrors where the parts `ids` sit, about the middle of their bounding box, left–right (`h`) or
+ * top–bottom (`v`). The parts themselves keep their face and turn: a real board's pins can't be
+ * mirrored. A module in a breadboard moves with the breadboard unless it is in `ids` itself.
+ */
+export function mirrorLayout(doc: Diagram, defs: DefLookup, ids: string[], axis: 'h' | 'v'): void {
+  const parts = ids.map((id) => doc.parts.find((p) => p.id === id)).filter((p): p is Part => !!p);
+  if (!parts.length) return;
+  const gs = parts.map((p) => geom(p, defs));
+  const cx = (Math.min(...gs.map((g) => g.x0)) + Math.max(...gs.map((g) => g.x1))) / 2;
+  const cy = (Math.min(...gs.map((g) => g.y0)) + Math.max(...gs.map((g) => g.y1))) / 2;
+  const even = (v: number) => Math.round(v / 2) * 2;
+  const shift = new Map<string, [number, number]>();
+  parts.forEach((p, i) => {
+    const g = gs[i]!;
+    const tx = axis === 'h' ? 2 * cx - (g.x0 + g.w / 2) : g.x0 + g.w / 2;
+    const ty = axis === 'v' ? 2 * cy - (g.y0 + g.h / 2) : g.y0 + g.h / 2;
+    shift.set(p.id, [even(tx - g.w / 2) - p.x, even(ty - g.h / 2) - p.y]);
+  });
+  const on = mountedOn(doc, defs);
+  for (const r of doc.parts) {
+    const host = on.get(r.id);
+    if (host && !shift.has(r.id) && shift.has(host)) shift.set(r.id, shift.get(host)!);
+  }
+  for (const p of doc.parts) {
+    const s = shift.get(p.id);
+    if (!s) continue;
+    p.x += s[0];
+    p.y += s[1];
+  }
+}

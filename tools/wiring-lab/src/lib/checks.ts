@@ -2,6 +2,7 @@
  * What Faber refuses or warns about before anyone plugs in a battery. Every issue carries a
  * `code` and the pins it is about, so fixes.ts can offer ways out of it.
  */
+import { advise, type AdviceCode } from './advice';
 import type { NetIndex } from './nets';
 import { pinDef } from './nets';
 import type { Routing } from './router';
@@ -35,7 +36,8 @@ export type IssueCode =
   | 'cable-mismatch'
   | 'over-budget'
   | 'caution'
-  | 'no-route';
+  | 'no-route'
+  | AdviceCode;
 
 export interface Issue {
   sev: Severity;
@@ -249,7 +251,15 @@ export function runChecks(doc: Diagram, defs: DefLookup, nets: NetIndex, routing
       }
       if (!ios.length) {
         const throughShifter = s.def.channels?.some((c) => c.includes(s.pin.id));
-        if (!s.pin.optional && !throughShifter) push({ sev: 'warn', code: 'signal-unrouted', text: `${tag(s)} doesn't reach a board pin`, more: 'Signals go to a board, or the code can\'t see them.', parts: [s.part.id], wires, keys: [s.key] });
+        // A series resistor (a strip's 330 Ω in DIN) passes the signal on to the pin behind it.
+        const throughResistor = net.keys.some((k) => {
+          const r = pinRef(doc, defs, k);
+          const e = r?.def.elec;
+          if (!r || e?.t !== 'resistor') return false;
+          const far = nets.of.get(`${r.part.id}.${r.pin.id === e.a ? e.b : e.a}`);
+          return !!far?.keys.some((x) => pinRef(doc, defs, x)?.pin.kind === 'io');
+        });
+        if (!s.pin.optional && !throughShifter && !throughResistor) push({ sev: 'warn', code: 'signal-unrouted', text: `${tag(s)} doesn't reach a board pin`, more: 'Signals go to a board, or the code can\'t see them.', parts: [s.part.id], wires, keys: [s.key] });
         continue;
       }
       const io = ios[0]!;
@@ -308,8 +318,23 @@ export function runChecks(doc: Diagram, defs: DefLookup, nets: NetIndex, routing
 
   // Every power source's minus must meet every board's ground, or signals have no reference.
   const boardGnds = doc.parts.filter((p) => defs(p.def)?.kind === 'board').map((p) => ({ p, k: defs(p.def)!.pins.filter((x) => x.kind === 'gnd').map((x) => `${p.id}.${x.id}`) }));
-  const groundNets = (keys: string[]) => new Set(keys.map((k) => nets.of.get(k)).filter((n) => n));
-  const reach = (from: Set<unknown>, keys: string[]) => keys.some((k) => from.has(nets.of.get(k)));
+  // A part's own grounds are one inside it (a buck's IN− and OUT−, a driver's GND and B−), so
+  // grounds meet through parts as well as wires.
+  const up = new Map<unknown, unknown>();
+  const top = (n: unknown): unknown => {
+    while (up.has(n) && up.get(n) !== n) n = up.get(n);
+    return n;
+  };
+  for (const part of doc.parts) {
+    const gs = (defs(part.def)?.pins ?? []).filter((x) => x.kind === 'gnd').map((x) => nets.of.get(`${part.id}.${x.id}`)).filter((n) => n);
+    for (let i = 1; i < gs.length; i++) {
+      const a = top(gs[0]);
+      const b = top(gs[i]);
+      if (a !== b) up.set(a, b);
+    }
+  }
+  const groundNets = (keys: string[]) => new Set(keys.map((k) => nets.of.get(k)).filter((n) => n).map(top));
+  const reach = (from: Set<unknown>, keys: string[]) => keys.some((k) => from.has(top(nets.of.get(k))));
   for (const part of doc.parts) {
     const d = defs(part.def);
     // Only a source of its own (a battery, an adapter): a part fed through an input or a cable
@@ -339,6 +364,7 @@ export function runChecks(doc: Diagram, defs: DefLookup, nets: NetIndex, routing
       }
     }
   }
+  out.push(...advise(doc, defs, nets));
   if (routing) {
     for (const w of doc.wires) {
       if (routing.routes.get(w.id)?.failed) push({ sev: 'warn', code: 'no-route', text: `No clear path for ${pinName(doc, defs, w.a)} → ${pinName(doc, defs, w.b)}`, more: 'Move the parts apart, or press Arrange.', parts: [], wires: [w.id], keys: [w.a, w.b] });

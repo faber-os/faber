@@ -85,6 +85,8 @@ export interface PinDef {
   limit?: number;
   /** Something to know the moment this pin is wired (a MOSFET that isn't logic level). */
   caution?: string;
+  /** A pin that must be held low (an enable, a gate) while its board boots: advice adds a pull-down. */
+  pull?: 'down';
 }
 
 export type PartKind = 'board' | 'part' | 'breadboard';
@@ -119,7 +121,25 @@ export interface PartDef {
   params?: ParamDef[];
   /** Notes shown in the inspector. */
   notes?: string[];
+  /** How it behaves electrically beyond its pin kinds (see circuit.ts). */
+  elec?: Elec;
+  /** A fuse's or BMS's trip current, in A: above it the part opens. */
+  trip?: number;
 }
+
+/**
+ * The electrical model of a two-legged part. Values are datasheet or typical figures (the part's
+ * notes say which).
+ */
+export type Elec =
+  | { t: 'resistor'; a: string; b: string; ohms: number; watts: number }
+  /** A diode or LED: `a` anode (+), `k` cathode (−). LEDs carry their colour. */
+  | { t: 'diode'; a: string; k: string; vf: number; rs: number; maxMa: number; led?: string; ma?: number }
+  /** A TVS diode: open until the voltage reaches `vbr`, then it clamps. */
+  | { t: 'tvs'; a: string; k: string; vbr: number }
+  | { t: 'cap'; a: string; b: string; uf: number; volts: number; polar: boolean }
+  /** A brushed motor: its current while running freely and with the shaft held, at `volts`. */
+  | { t: 'motor'; a: string; b: string; volts: number; runA: number; stallA: number };
 
 export interface ParamDef {
   id: string;
@@ -139,8 +159,6 @@ export interface Part {
   x: number;
   y: number;
   rot: Dir;
-  /** Mirrored left to right (before the rotation). */
-  flip?: boolean;
   /** A switch or button that is open (power mode). */
   open?: boolean;
 }
@@ -151,7 +169,14 @@ export interface Wire {
   a: string;
   b: string;
   color?: string;
+  /** The wire's thickness; without one it is a Dupont jumper between pins, 22 AWG on a terminal. */
+  gauge?: Gauge;
+  /** Its real length in metres (default 0.25 m). */
+  len?: number;
 }
+
+/** The wires in SENNEP's drawer: Dupont jumpers and 22, 16 and 10 AWG cable. */
+export type Gauge = 'dupont' | '22' | '16' | '10';
 
 export interface Diagram {
   name: string;
@@ -160,6 +185,8 @@ export interface Diagram {
   /** Build steps ticked off, by wire id (and `plug:partId` for parts plugged in). */
   done: Record<string, boolean>;
   seq: number;
+  /** Board pins the code sets to INPUT_PULLUP (no pull-up resistor needed). */
+  pullups?: string[];
 }
 
 export type DefLookup = (id: string) => PartDef | undefined;

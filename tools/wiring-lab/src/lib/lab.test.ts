@@ -4,11 +4,13 @@ import { pairVerdict, runChecks } from './checks';
 import { connectOptions } from './connect';
 import { seatShifter, sennepExample } from './example';
 import { geom, tooClose } from './geometry';
-import { arrange, mountedOn } from './layout';
+import { arrange, mirrorLayout, mountedOn } from './layout';
 import { computeNets } from './nets';
 import { CATALOG, listed, lookup } from './catalog';
 import { applyFix, fixesFor } from './fixes';
 import { simulate } from './power';
+import { runCircuit } from './circuit';
+import { seatSennepShifter, sennepV2 } from './sennep';
 import { snapToBreadboard } from './layout';
 import { routeAll } from './router';
 import type { Diagram, Part } from './types';
@@ -246,11 +248,13 @@ describe('parametric parts', () => {
 
   it('cover every electrical part in SENNEP\'s parts list', () => {
     const ids = CATALOG.map((d) => d.id);
-    for (const id of ['nano', 'l298n', 'bms3s', 'charger3s', 'l7805', 'ld1117', 'irfz44n', 'relay40', 'fuse', 'xt60', 'estop', 'e18', 'qmc5883l', 'neo6m', 'ina219', 'tsl2561', 'ds3231', 'mic', 'vs1838b', 'doorswitch', 'ld19', 'cp2102', 'aicam', 'nrf24', 'esp01', 'tca9548a', 'screen7', 'lcd2004', 'lcd1602', 'keypad', 'voltmeter', 'dfplayer', 'speaker', 'pam8403', 'led3w', 'irled', 'joystick', 'pot', 'keyswitch', 'toggle', 'adapter12', 'buckusb', 'shifter', 'hcsr04', 'vl53l0x', 'mpu6050', 'bts7960']) {
+    for (const id of ['nano', 'l298n', 'bms3s', 'charger3s', 'l7805', 'ld1117', 'irfz44n', 'relay40', 'xt60', 'estop', 'e18', 'qmc5883l', 'neo6m', 'ina219', 'tsl2561', 'ds3231', 'mic', 'vs1838b', 'doorswitch', 'ld19', 'cp2102', 'aicam', 'nrf24', 'esp01', 'tca9548a', 'screen7', 'lcd2004', 'lcd1602', 'keypad', 'voltmeter', 'dfplayer', 'speaker', 'pam8403', 'led3w', 'irled', 'joystick', 'pot', 'keyswitch', 'toggle', 'adapter12', 'buckusb', 'shifter', 'hcsr04', 'vl53l0x', 'mpu6050', 'bts7960']) {
       expect(ids, id).toContain(id);
     }
     expect(defs('ws2812?n=150')).toBeDefined();
     expect(defs('mb102?top=5&bottom=3.3')).toBeDefined();
+    expect(defs('fuse?a=5')?.trip).toBe(5);
+    expect(defs('res?ohms=220&w=0.25')?.elec).toBeDefined();
   });
 });
 
@@ -364,13 +368,200 @@ describe('the breadboard', () => {
 });
 
 describe('mirroring', () => {
-  it("swaps a part's left and right pins", () => {
-    const doc = blank(['d', 'bts7960', 0, 0]);
-    const plain = geom(doc.parts[0]!, defs).pins['RPWM']!;
-    doc.parts[0]!.flip = true;
-    const flipped = geom(doc.parts[0]!, defs).pins['RPWM']!;
-    expect(plain.x).toBe(0);
-    expect(flipped.x).toBe(40);
-    expect(flipped.d).toBe(1);
+  it('mirrors where parts sit, never their pins', () => {
+    const doc = blank(['d', 'bts7960', 0, 0], ['l', 'led', 100, 0]);
+    const before = geom(doc.parts[0]!, defs);
+    const rpwmOffset = before.pins['RPWM']!.x - before.x0;
+    mirrorLayout(doc, defs, ['d', 'l'], 'h');
+    const after = geom(doc.parts[0]!, defs);
+    expect(doc.parts[0]!.x).toBeGreaterThan(doc.parts[1]!.x);
+    expect(after.pins['RPWM']!.x - after.x0).toBe(rpwmOffset);
+    expect(doc.parts[0]!.rot).toBe(0);
+  });
+});
+
+describe('the circuit simulation', () => {
+  const high = (key: string) => new Map([[key, { mode: 'out' as const, level: 1 }]]);
+
+  it('an LED straight on a pin burns out, and takes the pin with it', () => {
+    const doc = blank(['u', 'uno', 0, 0], ['l', 'led-red', 0, -20], ['a', 'adapter12', -60, 0]);
+    wire(doc, 'a.+', 'u.VIN');
+    wire(doc, 'a.-', 'u.GND2');
+    wire(doc, 'u.D13', 'l.A');
+    wire(doc, 'l.K', 'u.GND1');
+    const c = runCircuit(doc, defs, { pins: high('u.D13') });
+    expect(c.parts.get('l')).toBe('burnt');
+    expect(c.findings.some((f) => f.text.startsWith('u D13 gives'))).toBe(true);
+  });
+
+  it('with 220 Ω in series the LED gets about 13 mA and lights', () => {
+    const doc = blank(['u', 'uno', 0, 0], ['l', 'led-red', 0, -20], ['r', 'res?ohms=220&w=0.25', 20, -20], ['a', 'adapter12', -60, 0]);
+    wire(doc, 'a.+', 'u.VIN');
+    wire(doc, 'a.-', 'u.GND2');
+    wire(doc, 'u.D13', 'r.1');
+    wire(doc, 'r.2', 'l.A');
+    wire(doc, 'l.K', 'u.GND1');
+    const c = runCircuit(doc, defs, { pins: high('u.D13') });
+    const ma = c.partAmps.get('l')! * 1000;
+    expect(ma).toBeGreaterThan(11);
+    expect(ma).toBeLessThan(15);
+    expect(c.parts.get('l')).toBe('on');
+    expect(c.findings.filter((f) => f.sev === 'error')).toEqual([]);
+  });
+
+  it("splits SENNEP's 12.6 V to about 2.2 V with 47 kΩ over 10 kΩ", () => {
+    const doc = blank(['b', 'bat?s=3&p=6', 0, 0], ['r1', 'res?ohms=47000&w=0.25', 20, 0], ['r2', 'res?ohms=10000&w=0.25', 40, 0]);
+    wire(doc, 'b.+', 'r1.1');
+    wire(doc, 'r1.2', 'r2.1');
+    wire(doc, 'r2.2', 'b.-');
+    const c = runCircuit(doc, defs);
+    expect(c.volts.get('r2.1')).toBeCloseTo(2.21, 1);
+  });
+
+  it('the e-stop in the relay coil cuts the motor bus', () => {
+    const doc = blank(['b', 'bat?s=3&p=6', 0, 0], ['e', 'estop', 20, 0], ['k', 'relay40', 40, 0], ['m', 'dcmotor', 60, 0]);
+    wire(doc, 'b.+', 'e.1');
+    wire(doc, 'e.2', 'k.86');
+    wire(doc, 'k.85', 'b.-');
+    wire(doc, 'b.+', 'k.30');
+    wire(doc, 'k.87', 'm.M+');
+    wire(doc, 'm.M-', 'b.-');
+    expect(runCircuit(doc, defs).volts.get('m.M+')).toBeGreaterThan(12);
+    doc.parts.find((p) => p.id === 'e')!.open = true;
+    expect(runCircuit(doc, defs).volts.get('m.M+') ?? 0).toBeLessThan(0.1);
+  });
+
+  it('a stalled motor on Dupont jumpers overheats them; 16 AWG carries it', () => {
+    const doc = blank(['b', 'bat?s=3&p=6', 0, 0], ['d', 'bts7960', 20, 0], ['m', 'dcmotor', 60, 0]);
+    wire(doc, 'b.+', 'd.B+');
+    wire(doc, 'b.-', 'd.B-');
+    wire(doc, 'd.M+', 'm.M+');
+    wire(doc, 'd.M-', 'm.M-');
+    for (const w of doc.wires) w.gauge = 'dupont';
+    const hot = runCircuit(doc, defs, { motors: 'stall' });
+    expect(hot.findings.some((f) => f.wires.length && f.sev === 'error')).toBe(true);
+    for (const w of doc.wires) w.gauge = '10';
+    const ok = runCircuit(doc, defs, { motors: 'run' });
+    expect(ok.findings.filter((f) => f.wires.length)).toEqual([]);
+    expect(Math.abs(ok.amps.get(doc.wires[0]!.id)!)).toBeGreaterThan(1.5);
+  });
+
+  it('5 V into a Raspberry Pi pin is an error', () => {
+    const doc = blank(['p', 'pi5', 0, 0], ['b', 'buckusb', -60, 0], ['a', 'adapter12', -100, 0], ['s', 'hcsr04', 0, -30]);
+    wire(doc, 'a.+', 'b.IN+');
+    wire(doc, 'a.-', 'b.IN-');
+    wire(doc, 'b.USBC', 'p.USBC');
+    wire(doc, 's.VCC', 'p.P2');
+    wire(doc, 's.GND', 'p.P6');
+    wire(doc, 's.ECHO', 'p.P11');
+    const c = runCircuit(doc, defs);
+    expect(c.findings.some((f) => f.text.includes('it is a 3.3 V pin'))).toBe(true);
+  });
+});
+
+describe('resistor advice', () => {
+  const issues = (doc: Diagram) => runChecks(doc, defs, computeNets(doc, defs));
+  const high = (key: string) => new Map([[key, { mode: 'out' as const, level: 1 }]]);
+
+  it('finds the LED without a resistor, and its fix adds one that keeps it lit and safe', () => {
+    const doc = blank(['u', 'uno', 0, 0], ['l', 'led-red', 30, -30], ['a', 'adapter12', -60, 0]);
+    wire(doc, 'a.+', 'u.VIN');
+    wire(doc, 'a.-', 'u.GND2');
+    wire(doc, 'u.D13', 'l.A');
+    wire(doc, 'l.K', 'u.GND1');
+    const issue = issues(doc).find((i) => i.code === 'led-no-resistor')!;
+    expect(issue.more).toContain('330');
+    const fix = fixesFor(doc, defs, issue)[0]!;
+    expect(fix.addParts![0]!.def).toBe('res?ohms=330&w=0.25');
+    applyFix(doc, fix);
+    expect(issues(doc).some((i) => i.code === 'led-no-resistor')).toBe(false);
+    const c = runCircuit(doc, defs, { pins: high('u.D13') });
+    expect(c.parts.get('l')).toBe('on');
+    expect(c.partAmps.get('l')! * 1000).toBeLessThan(11);
+  });
+
+  it('a button needs a pull-up: INPUT_PULLUP in the code, or a 10 kΩ resistor', () => {
+    const doc = blank(['m', 'mega', 0, 0], ['b', 'button', 0, -30]);
+    wire(doc, 'b.1', 'm.D29');
+    wire(doc, 'b.2', 'm.GND1');
+    const issue = issues(doc).find((i) => i.code === 'needs-pull-up')!;
+    const fixes = fixesFor(doc, defs, issue);
+    expect(fixes.map((f) => f.label)).toEqual(['I use INPUT_PULLUP in the code', 'Add a 10 kΩ pull-up resistor']);
+    applyFix(doc, fixes[1]!);
+    expect(issues(doc).some((i) => i.code === 'needs-pull-up')).toBe(false);
+  });
+
+  it('a motor driver enable gets a pull-down', () => {
+    const doc = blank(['m', 'mega', 0, 0], ['d', 'bts7960', 0, -60]);
+    wire(doc, 'd.R_EN', 'm.D22');
+    const issue = issues(doc).find((i) => i.code === 'needs-pull-down')!;
+    applyFix(doc, fixesFor(doc, defs, issue)[0]!);
+    expect(issues(doc).filter((i) => i.code === 'needs-pull-down' && i.keys.includes('d.R_EN'))).toEqual([]);
+  });
+
+  it('the battery on an analog pin gets a divider that keeps it under 5 V', () => {
+    const doc = blank(['m', 'mega', 0, 0], ['b', 'bat?s=3&p=6', -80, 0]);
+    wire(doc, 'b.-', 'm.GND1');
+    wire(doc, 'b.+', 'm.A4');
+    const issue = issues(doc).find((i) => i.code === 'needs-divider')!;
+    applyFix(doc, fixesFor(doc, defs, issue)[0]!);
+    expect(issues(doc).some((i) => i.code === 'needs-divider')).toBe(false);
+    const v = runCircuit(doc, defs).volts.get('m.A4')!;
+    expect(v).toBeLessThan(4.6);
+    expect(v).toBeGreaterThan(3.5);
+  });
+
+  it('a relay coil gets its diode', () => {
+    const doc = blank(['b', 'bat?s=3&p=6', 0, 0], ['k', 'relay40', 40, 0]);
+    wire(doc, 'b.+', 'k.86');
+    wire(doc, 'k.85', 'b.-');
+    const issue = issues(doc).find((i) => i.code === 'needs-flyback')!;
+    applyFix(doc, fixesFor(doc, defs, issue)[0]!);
+    expect(issues(doc).some((i) => i.code === 'needs-flyback')).toBe(false);
+  });
+
+  it('5 V into a Pi pin can also take a divider', () => {
+    const doc = blank(['p', 'pi5', 0, 0], ['s', 'hcsr04', 0, -30]);
+    wire(doc, 's.ECHO', 'p.P11');
+    const issue = issues(doc).find((i) => i.code === 'drives-into')!;
+    const fix = fixesFor(doc, defs, issue).find((f) => f.label.startsWith('Put a divider'))!;
+    applyFix(doc, fix);
+    expect(issues(doc).some((i) => i.code === 'drives-into')).toBe(false);
+  });
+});
+
+describe('SENNEP V2, the whole machine', () => {
+  const machine = () => {
+    const doc = sennepV2();
+    seatSennepShifter(doc);
+    arrange(doc, defs);
+    return doc;
+  };
+
+  it('passes every check', () => {
+    const doc = machine();
+    expect(runChecks(doc, defs, computeNets(doc, defs)).map((i) => `${i.code}: ${i.text}`)).toEqual([]);
+  });
+
+  it('powers up: Pi, Mega, LiDAR, GPS, radio and the LED node run; nothing is over its limit', () => {
+    const doc = machine();
+    const s = simulate(doc, defs, { motors: 'run' });
+    for (const id of ['pi', 'mega', 'lidar', 'gps', 'nrf', 'nano', 'tof0', 'dfl', 'mfl']) expect(s.parts.get(id), id).toBe('on');
+    expect(s.findings.filter((f) => f.sev === 'error')).toEqual([]);
+  });
+
+  it('with all four motors held still, a fuse blows before a wire burns', () => {
+    const s = simulate(machine(), defs, { motors: 'stall' });
+    expect(s.tripped.length).toBeGreaterThan(0);
+    expect(s.findings.filter((f) => f.wires.length && f.sev === 'error')).toEqual([]);
+  });
+
+  it('pressing the e-stop drops the relay: the motor bus goes dead, the Pi stays on', () => {
+    const doc = machine();
+    doc.parts.find((p) => p.id === 'estop')!.open = true;
+    const s = simulate(doc, defs, { motors: 'run' });
+    expect(s.volts.get('mfl.M+') ?? 0).toBeLessThan(0.1);
+    expect(s.parts.get('pi')).toBe('on');
+    expect(s.volts.get('mega.A4') ?? 0).toBeLessThan(0.1);
   });
 });

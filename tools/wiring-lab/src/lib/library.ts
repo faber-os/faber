@@ -7,6 +7,7 @@
  * that into a part; the same settings always give the same part.
  */
 import { edgePins } from './parts';
+import { BLADE_PARAMS, bladeFuse, CAP_PARAMS, capacitor, FUSE_PARAMS, fuse, PASSIVES, RESISTOR_PARAMS, resistor } from './passives';
 import type { Cap, Dir, ParamDef, PartDef, PinDef } from './types';
 
 type P = Omit<PinDef, 'id' | 'label' | 'x' | 'y' | 'd'> & { id?: string; label?: string };
@@ -99,7 +100,10 @@ function battery(v: Record<string, number>): PartDef {
   };
 }
 
-const BUCK_PARAMS: ParamDef[] = [{ id: 'v', label: 'Output', unit: 'V', min: 1.25, max: 30, step: 0.1, default: 5.1 }];
+const BUCK_PARAMS: ParamDef[] = [
+  { id: 'v', label: 'Output', unit: 'V', min: 1.25, max: 30, step: 0.1, default: 5.1 },
+  { id: 'a', label: 'Most current out', unit: 'A', min: 0.5, max: 20, step: 0.5, default: 3 },
+];
 
 function buck(v: Record<string, number>): PartDef {
   return {
@@ -114,10 +118,10 @@ function buck(v: Record<string, number>): PartDef {
     pins: [
       { id: 'IN+', label: 'IN+', x: 0, y: 6, d: 3, kind: 'power-in', min: v.v! + 1.5, max: 36, terminal: true },
       { id: 'IN-', label: 'IN−', x: 0, y: 12, d: 3, kind: 'gnd', terminal: true },
-      { id: 'OUT+', label: 'OUT+', x: 34, y: 6, d: 1, kind: 'supply', volts: v.v!, terminal: true, maxMa: 3000 },
+      { id: 'OUT+', label: 'OUT+', x: 34, y: 6, d: 1, kind: 'supply', volts: v.v!, terminal: true, maxMa: (v.a ?? 3) * 1000 },
       { id: 'OUT-', label: 'OUT−', x: 34, y: 12, d: 1, kind: 'gnd', terminal: true },
     ],
-    notes: ['Set the output with the trim pot and a multimeter before anything is connected to it.'],
+    notes: ['Set the output with the trim pot and a multimeter before anything is connected to it.', 'An LM2596 module gives about 3 A; the XL4015-type 5 A modules 4–5 A with cooling.'],
   };
 }
 
@@ -172,6 +176,10 @@ const PARAMETRIC: Parametric[] = [
   { base: 'buck5', params: BUCK_PARAMS, make: buck },
   { base: 'ws2812', params: STRIP_PARAMS, make: strip },
   { base: 'mb102', params: MB102_PARAMS, make: mb102 },
+  { base: 'res', params: RESISTOR_PARAMS, make: resistor },
+  { base: 'cap', params: CAP_PARAMS, make: capacitor },
+  { base: 'fuse', params: FUSE_PARAMS, make: fuse },
+  { base: 'blade', params: BLADE_PARAMS, make: bladeFuse },
 ];
 
 /** `bat?s=4&p=2` → that battery. Missing settings take their defaults. */
@@ -231,7 +239,7 @@ export const LIBRARY: PartDef[] = [
     ['B+', 'left', pass({ terminal: true })],
     ['P+', 'right', pass({ terminal: true })],
     ['P-', 'right', pass({ label: 'P−', terminal: true })],
-  ], { passes: [['B+', 'P+'], ['B-', 'P-']], notes: ['B− to the pack\'s −, B1/B2 to the joints between the cell groups, B+ to the pack\'s +. Loads and the charger go on P+ / P−.', 'B+ and P+ are the same copper; the BMS switches the minus side.'] }),
+  ], { passes: [['B+', 'P+'], ['B-', 'P-']], trip: 40, notes: ['B− to the pack\'s −, B1/B2 to the joints between the cell groups, B+ to the pack\'s +. Loads and the charger go on P+ / P−.', 'B+ and P+ are the same copper; the BMS switches the minus side.'] }),
   mod('charger3s', 'Charger 3S 12.6 V', '2 A · EU plug', 'adapter', 24, 14, [
     ['+', 'right', { kind: 'supply', volts: 12.6, terminal: true, maxMa: 2000 }],
     ['-', 'right', { ...gnd, label: '−', terminal: true }],
@@ -263,7 +271,7 @@ export const LIBRARY: PartDef[] = [
     ['ON', 'bottom', pass({ optional: true, label: 'ON/OFF' })],
   ], { notes: ['A bare chip: it needs the inductor, Schottky diode and capacitors from its datasheet. FB goes to OUT, ON/OFF to GND to run.'] }),
   mod('irfz44n', 'MOSFET (N, 55 V)', 'IRFZ44N · TO-220 · not logic level', 'to220', 12, 14, [
-    ['G', 'bottom', sig(['io'], { caution: 'The IRFZ44N needs about 10 V on its gate to switch fully. From a 5 V pin it is half on and runs hot: use a logic-level MOSFET or a gate driver.' })],
+    ['G', 'bottom', sig(['io'], { pull: 'down', caution: 'The IRFZ44N needs about 10 V on its gate to switch fully. From a 5 V pin it is half on and runs hot: use a logic-level MOSFET or a gate driver.' })],
     ['D', 'bottom', pass({ label: 'D (load −)' })],
     ['S', 'bottom', gnd],
   ], { notes: ['The load goes between + and D; S to GND. Add 10 kΩ from G to S so it stays off while the board boots.'] }),
@@ -273,11 +281,7 @@ export const LIBRARY: PartDef[] = [
     ['30', 'top', pass({ terminal: true })],
     ['87', 'top', pass({ terminal: true })],
     ['87a', 'top', pass({ terminal: true, optional: true })],
-  ], { passes: [['30', '87']], switch: 'toggle', notes: ['A 12 V coil draws about 150 mA: switch 85 through a MOSFET, never straight from a board pin, and put a diode across the coil.', 'Drawn on: 30 joins 87. In power mode, click it to drop out (30 joins 87a).'] }),
-  mod('fuse', 'Fuse holder', '5×20 mm glass fuse', 'fuse', 22, 8, [
-    ['A', 'left', pass({ terminal: true })],
-    ['B', 'right', pass({ terminal: true })],
-  ], { passes: [['A', 'B']], notes: ['As close to the battery as it goes.'] }),
+  ], { passes: [['30', '87']], notes: ['With 12 V on its coil (86 + to 85 −) it pulls in: 30 joins 87. Without, 30 joins 87a. In power mode it follows its coil, so an e-stop in the coil wire cuts the motors.', 'The coil draws about 150 mA: switch it through a MOSFET or an e-stop, never straight from a board pin, and put a 1N4007 across it (stripe to 86) for the spike when it lets go.'] }),
   mod('xt60', 'XT60 connector', 'Male + female pair', 'xt60', 16, 10, [
     ['+A', 'left', pass({ label: '+' })],
     ['-A', 'left', pass({ label: '−' })],
@@ -459,10 +463,6 @@ export const LIBRARY: PartDef[] = [
     ['+', 'left', { kind: 'power-in', min: 3, max: 3.6, ma: 700 }],
     ['-', 'left', { ...gnd, label: '−' }],
   ], { notes: ['Needs a constant-current driver (or a resistor and a MOSFET), never a board pin.'] }),
-  mod('irled', 'IR LED 940 nm', 'Needs a series resistor', 'irled', 8, 10, [
-    ['A', 'bottom', sig(['io'], { label: 'A (+)', caution: 'An LED without a resistor burns out the LED or the pin: put about 100 Ω in series at 5 V.' })],
-    ['K', 'bottom', { ...gnd, label: 'K (−)' }],
-  ]),
   mod('joystick', 'Joystick', 'KY-023 · XY + button', 'joystick', 20, 20, [
     ['GND', 'left', gnd],
     ['+5V', 'left', vcc(3.3, 5.5)],
@@ -470,6 +470,7 @@ export const LIBRARY: PartDef[] = [
     ['VRy', 'left', sig(['analog'], { out: true })],
     ['SW', 'left', sig(['io'], { out: true })],
   ], { notes: ['The button needs INPUT_PULLUP.'] }),
+  ...PASSIVES,
   mod('pot', 'Potentiometer', '10 kΩ', 'pot', 14, 12, [
     ['1', 'bottom', { kind: 'power-in', min: 0, max: 50, label: '1 (+)' }],
     ['W', 'bottom', sig(['analog'], { label: 'wiper', out: true })],
@@ -485,4 +486,14 @@ export const PRESETS: { id: string; name: string; covers: string }[] = [
   { id: 'buck5?v=5.1', name: 'Buck converter', covers: 'Adjustable output · LM2596 / 5 A DC-DC' },
   { id: 'ws2812?n=150', name: 'LED strip', covers: 'WS2812B · 5 m, 30 a metre' },
   { id: 'mb102?top=5&bottom=3.3', name: 'Breadboard power supply', covers: 'MB102 · 5 V and 3.3 V rails' },
+  { id: 'res?ohms=220&w=0.25', name: 'Resistor 220 Ω', covers: 'For an LED from 5 V' },
+  { id: 'res?ohms=1000&w=0.25', name: 'Resistor 1 kΩ', covers: 'Series resistor, dividers' },
+  { id: 'res?ohms=10000&w=0.25', name: 'Resistor 10 kΩ', covers: 'Pull-up, pull-down, dividers' },
+  { id: 'res?ohms=47000&w=0.25', name: 'Resistor 47 kΩ', covers: 'The top of SENNEP’s battery divider' },
+  { id: 'cap?uf=0.1&v=50&polar=0', name: 'Capacitor 100 nF', covers: 'Ceramic · next to a chip or across a motor' },
+  { id: 'cap?uf=10&v=25&polar=1', name: 'Capacitor 10 µF', covers: 'Electrolytic · on an NRF24 or a regulator' },
+  { id: 'cap?uf=2200&v=25&polar=1', name: 'Capacitor 2200 µF', covers: 'Electrolytic · on SENNEP’s motor bus' },
+  { id: 'fuse?a=5', name: 'Fuse 5 A', covers: '5×20 mm glass fuse in a holder' },
+  { id: 'blade?a=15', name: 'Blade fuse 15 A', covers: 'Per motor driver' },
+  { id: 'blade?a=30', name: 'Blade fuse 30 A', covers: 'Main fuse at the battery' },
 ];

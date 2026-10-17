@@ -149,6 +149,7 @@
         if (q) origin.set(q, [q.x, q.y]);
       }
       drag = { kind: 'parts', start: toWorld(e), origin, moved: false, before: JSON.stringify($state.snapshot(lab.doc)), clicked: p, toggle };
+      lab.dragging = new Set(ids);
       svg.setPointerCapture(e.pointerId);
       return;
     }
@@ -194,6 +195,7 @@
     const d = drag;
     drag = null;
     panning = false;
+    lab.dragging = null;
     if (!d) return;
     if (d.kind === 'box') {
       if (d.moved && box) {
@@ -281,9 +283,8 @@
     const lines = describe(p);
     const sim = lab.sim;
     if (sim) {
-      const n = sim.nets.of.get(pin);
-      const v = n ? sim.live.get(n.id) : undefined;
-      lines.unshift(v !== undefined ? `Live: ${v} V` : 'No power here');
+      const v = sim.volts.get(pin);
+      lines.unshift(v !== undefined && Math.abs(v) > 0.02 ? `Now: ${v.toFixed(2)} V` : 'No voltage here');
     }
     tip = { x: Math.min(e.clientX - r.left + 14, r.width - 270), y: e.clientY - r.top + 14, title: `${part.name} ${p.label}`, lines };
   }
@@ -395,7 +396,7 @@
     {#each items as { part, d, g } (part.id)}
       {#if d.kind === 'breadboard'}
         <g data-part={part.id} class="part" opacity={lit(part.id) ? 1 : 0.18}>
-          <g transform="translate({part.x * G} {part.y * G}) {transformOf(d, part.rot, part.flip)}">{@html art(d)}</g>
+          <g transform="translate({part.x * G} {part.y * G}) {transformOf(d, part.rot)}">{@html art(d)}</g>
           {#if selected.has(part.id)}
             <rect x={g.x0 * G - 5} y={g.y0 * G - 5} width={g.w * G + 10} height={g.h * G + 10} rx="12" fill="none" stroke="var(--select)" stroke-width="2.5" stroke-dasharray="7 5" />
           {/if}
@@ -419,7 +420,7 @@
           {:else if st === 'over' || st === 'tripped'}
             <rect x={g.x0 * G - 4} y={g.y0 * G - 4} width={g.w * G + 8} height={g.h * G + 8} rx="10" fill="#ef4444" opacity="0.3" class="pulse" />
           {/if}
-          <g transform="translate({part.x * G} {part.y * G}) {transformOf(d, part.rot, part.flip)}">{@html art(d)}</g>
+          <g transform="translate({part.x * G} {part.y * G}) {transformOf(d, part.rot)}">{@html art(d)}</g>
           {#if selected.has(part.id)}
             <rect x={g.x0 * G - 5} y={g.y0 * G - 5} width={g.w * G + 10} height={g.h * G + 10} rx="12" fill="none" stroke="var(--select)" stroke-width="2.5" stroke-dasharray="7 5" />
           {/if}

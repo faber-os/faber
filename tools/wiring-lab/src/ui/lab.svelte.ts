@@ -8,14 +8,15 @@ import { listed, lookup } from '../lib/catalog';
 import { runChecks } from '../lib/checks';
 import { connectOptions, type ConnectOption } from '../lib/connect';
 import { seatShifter, sennepExample } from '../lib/example';
+import { seatSennepShifter, sennepV2 } from '../lib/sennep';
 import { applyFix, fixesFor, type Fix } from '../lib/fixes';
 import { geom } from '../lib/geometry';
 import { isParametric, paramValues, variantId } from '../lib/library';
-import { arrange, mountedOn, overlapsAny, settle, snapToBreadboard } from '../lib/layout';
+import { arrange, mirrorLayout, mountedOn, overlapsAny, settle, snapToBreadboard } from '../lib/layout';
 import { computeNets } from '../lib/nets';
 import { simulate } from '../lib/power';
-import { routeAll } from '../lib/router';
-import type { Diagram, Dir, Part, PartDef, Wire } from '../lib/types';
+import { quickRoutes, routeAll, type Routing } from '../lib/router';
+import type { Diagram, Dir, Gauge, Part, PartDef, Wire } from '../lib/types';
 import { splitKey } from '../lib/types';
 import { wirePaths } from './draw';
 import { G } from './looks';
@@ -43,9 +44,11 @@ function keep(key: string, value: unknown): void {
   }
 }
 
-function example(): Diagram {
-  const doc = sennepExample();
-  seatShifter(doc);
+/** The examples: SENNEP V2 whole, or one corner of it (small enough to read at a glance). */
+function example(which: 'machine' | 'corner' = 'machine'): Diagram {
+  const doc = which === 'machine' ? sennepV2() : sennepExample();
+  if (which === 'machine') seatSennepShifter(doc);
+  else seatShifter(doc);
   arrange(doc, lookup());
   return doc;
 }
@@ -53,8 +56,12 @@ function example(): Diagram {
 /** Drawings saved by an older lab: renamed parts, and parts it no longer knows. */
 function migrate(doc: Diagram, custom: PartDef[]): Diagram {
   const look = lookup(custom);
-  const renamed: Record<string, string> = { bat3s: 'bat?s=3&p=6&cell=4.2&nom=3.6&mah=3400', buck5: 'buck5?v=5.1' };
-  for (const p of doc.parts) p.def = renamed[p.def] ?? p.def;
+  const renamed: Record<string, string> = { bat3s: 'bat?s=3&p=6&cell=4.2&nom=3.6&mah=3400', buck5: 'buck5?v=5.1', fuse: 'fuse?a=5' };
+  for (const p of doc.parts) {
+    p.def = renamed[p.def] ?? p.def;
+    // Parts used to be mirrorable; a real board can't be, so an old mirrored part is put back.
+    delete (p as Part & { flip?: boolean }).flip;
+  }
   const known = new Set(doc.parts.filter((p) => look(p.def)).map((p) => p.id));
   doc.parts = doc.parts.filter((p) => known.has(p.id));
   doc.wires = doc.wires.filter((w) => {
@@ -90,6 +97,8 @@ class Lab {
   view = $state({ tx: 0, ty: 0, k: 1 });
   hint = $state('');
   power = $state(false);
+  /** Power mode's motors: off, driving freely, or held still (the worst case for wires and fuses). */
+  motors = $state<'off' | 'run' | 'stall'>('off');
   panels = $state(load<{ left: number; right: number; leftOpen: boolean; rightOpen: boolean }>(PANELS_KEY) ?? { left: 236, right: 340, leftOpen: true, rightOpen: true });
   menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
   newPartOpen = $state(false);
@@ -103,11 +112,19 @@ class Lab {
   /** A plain copy of the diagram: the routing reads it thousands of times, so not through proxies. */
   snap = $derived.by(() => $state.snapshot(this.doc) as Diagram);
   nets = $derived.by(() => computeNets(this.snap, this.defs));
-  routing = $derived.by(() => routeAll(this.snap, this.defs, this.nets));
+  /** Parts being dragged: their wires are drawn straight until the drop (routing a big machine is slow). */
+  dragging = $state<Set<string> | null>(null);
+  private lastRouting: Routing | null = null;
+  routing = $derived.by(() => {
+    if (this.dragging && this.lastRouting) return quickRoutes(this.snap, this.defs, this.lastRouting, this.dragging);
+    const r = routeAll(this.snap, this.defs, this.nets);
+    this.lastRouting = r;
+    return r;
+  });
   issues = $derived.by(() => runChecks(this.snap, this.defs, this.nets, this.routing));
   paths = $derived.by(() => wirePaths(this.snap, this.nets, this.routing));
   steps = $derived.by(() => buildSteps(this.snap, this.defs, this.nets));
-  sim = $derived.by(() => (this.power ? simulate(this.snap, this.defs) : null));
+  sim = $derived.by(() => (this.power ? simulate(this.snap, this.defs, { motors: this.motors }) : null));
 
   constructor() {
     $effect.root(() => {
@@ -286,29 +303,20 @@ class Lab {
     if (parts.length === 1 && !mountedOn(this.doc, this.defs).has(parts[0]!.id)) settle(this.doc, this.defs, parts[0]!);
   }
 
-  /** Mirrors the selection left–right (`h`) or top–bottom (`v`). */
+  /**
+   * Mirrors the layout of the selection left–right (`h`) or top–bottom (`v`): where the parts sit,
+   * not the parts. A real board can't have its pins mirrored, so every part keeps its own face and
+   * turn; parts on a breadboard move with it.
+   */
   mirror(axis: 'h' | 'v', ids = this.selParts): void {
-    const parts = ids.map((id) => this.part(id)).filter((p): p is Part => !!p && this.defs(p.def)?.kind !== 'breadboard');
-    if (!parts.length) return;
-    this.remember();
-    const { cx, cy } = this.around(parts.map((p) => p.id));
-    for (const p of parts) {
-      const g = geom(p, this.defs);
-      // `flip` mirrors the part's own left–right. A mirror the other way is that plus a half turn;
-      // a quarter-turned part has its own left–right running up and down.
-      const turned = (p.rot & 1) === 1;
-      const halfTurn = axis === 'h' ? turned : !turned;
-      p.flip = !p.flip;
-      if (halfTurn) p.rot = ((p.rot + 2) & 3) as Dir;
-      const g2 = geom(p, this.defs);
-      const mx = g.x0 + g.w / 2;
-      const my = g.y0 + g.h / 2;
-      const tx = axis === 'h' ? 2 * cx - mx : mx;
-      const ty = axis === 'v' ? 2 * cy - my : my;
-      p.x = even(tx - g2.w / 2);
-      p.y = even(ty - g2.h / 2);
+    const parts = ids.map((id) => this.part(id)).filter((p): p is Part => !!p);
+    if (parts.length < 2) {
+      this.say('Mirroring moves parts around each other, so select two or more. A part itself can’t be mirrored: its pins sit where they sit.');
+      return;
     }
-    this.say(axis === 'h' ? 'Mirrored left to right.' : 'Mirrored top to bottom.');
+    this.remember();
+    mirrorLayout(this.doc, this.defs, parts.map((p) => p.id), axis);
+    this.say(axis === 'h' ? 'Mirrored the layout left to right. The parts keep their own pins.' : 'Mirrored the layout top to bottom. The parts keep their own pins.');
   }
 
   nudge(dx: number, dy: number): void {
@@ -398,6 +406,15 @@ class Lab {
   removeSelection(): void {
     if (this.selWire) this.removeWire(this.selWire);
     else this.removeParts(this.selParts);
+  }
+
+  /** A wire's gauge and real length, for the current it can carry and the voltage it loses. */
+  setWire(id: string, change: { gauge?: Gauge; len?: number }): void {
+    const w = this.doc.wires.find((x) => x.id === id);
+    if (!w) return;
+    this.remember();
+    if (change.gauge) w.gauge = change.gauge;
+    if (change.len !== undefined && change.len > 0) w.len = change.len;
   }
 
   rename(id: string, name: string): void {
@@ -529,9 +546,9 @@ class Lab {
     }
   }
 
-  reset(): void {
+  reset(which: 'machine' | 'corner' = 'machine'): void {
     this.remember();
-    this.doc = example();
+    this.doc = example(which);
     this.clearSelection();
   }
 
