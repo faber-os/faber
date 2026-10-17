@@ -21,9 +21,14 @@ fi
 pi="$1"
 
 # On Windows, use Windows' own OpenSSH: it talks to the Windows ssh-agent, so a key with a
-# passphrase works without asking (Git Bash's ssh has no agent of its own).
+# passphrase works without asking (Git Bash's ssh has no agent of its own). It can't read a Git
+# Bash pipe, so files go over as one archive with scp, never piped through ssh.
 if [ -x /c/Windows/System32/OpenSSH/ssh.exe ]; then
     ssh() { /c/Windows/System32/OpenSSH/ssh.exe "$@"; }
+    scp() { /c/Windows/System32/OpenSSH/scp.exe "$@"; }
+    native() { cygpath -w "$1"; }
+else
+    native() { echo "$1"; }
 fi
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo"
@@ -36,9 +41,12 @@ echo "== Building the shell"
 npm --prefix shell run build
 
 echo "== Sending $(git rev-parse --short HEAD) to $pi"
-ssh "$pi" 'rm -rf ~/faber/src && mkdir -p ~/faber/src'
-git archive HEAD | ssh "$pi" 'tar -x -C ~/faber/src'
-tar -C shell -c dist | ssh "$pi" 'tar -x -C ~/faber/src/shell'
+bundle="$(mktemp -d)"
+trap 'rm -rf "$bundle"' EXIT
+git archive --format=tar -o "$bundle/src.tar" HEAD
+tar -C shell -cf "$bundle/dist.tar" dist
+scp -q "$(native "$bundle/src.tar")" "$(native "$bundle/dist.tar")" "$pi:/tmp/"
+ssh "$pi" 'rm -rf ~/faber/src && mkdir -p ~/faber/src && tar -xf /tmp/src.tar -C ~/faber/src && tar -xf /tmp/dist.tar -C ~/faber/src/shell && rm /tmp/src.tar /tmp/dist.tar'
 
 if [ "$setup" = 1 ]; then
     echo "== Setting up the Pi"
