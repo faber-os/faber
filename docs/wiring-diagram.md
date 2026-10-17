@@ -1,6 +1,6 @@
 # The wiring diagram
 
-Status: **proposed (D60)**. Prototype: `docs/prototypes/wiring-canvas.html`, published as an artifact
+Status: **D60 accepted with changes** (§5): one diagram per machine, breadboards in, right-click "Connect to…". Being built as a standalone app in `tools/wiring-lab` first. Prototype: `docs/prototypes/wiring-canvas.html`, published as an artifact
 for Mikkel on 2026-10-17. Nothing of this is in the shell yet.
 
 ## 1. The idea
@@ -77,7 +77,14 @@ machine (several boards, the Pi in the middle). The core serves the plan; the sh
 routing (it is drawing, not machine state), so nothing new crosses the API except the `[drawing]`
 tables. A person's moves and colour picks are saved with the plan.
 
-## 5. Not decided (for D60)
+## 5. Decided (D60, Mikkel 2026-10-17)
+
+1. Faber ships SVGs for its own parts; packages may bring theirs. (As recommended.)
+2. **One diagram for the whole machine**: the Pi, every board and their links (USB, UART through a level shifter) on one canvas.
+3. **Breadboards are in**: a part placed on a breadboard plugs its pins into the holes, and the holes' strips join them.
+4. A right-click menu on a part offers **Connect to…** each part it can connect to, and adds the wires on free, fitting pins.
+
+The options as they were put:
 
 1. **Ship the drawings or make them?** Recommended: Faber ships simple SVGs for its own parts
    (from the parts' datasheet sizes) and accepts SVGs in community packages. Uploading pictures in
