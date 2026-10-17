@@ -7,6 +7,7 @@ See also the "Later" section of `docs/roadmap.md`.
 - (low) ROS 2 bridge.
 
 ## Core
+- **(High) Name who holds a busy port.** On Linux, "Device or resource busy" should say which program has it (read `/proc/*/fd`, e.g. "used by sennep-lidar, pid 1302") and, for a systemd service, how to stop it. Mikkel hit this on day one on the Pi (2026-10-17).
 - (high, before the Pi image) Port problems on Linux ("plugged in, but the computer can't talk to it"; Windows works, `core/src/ports/usb_problems.rs`). A USB device that fails to enumerate gets no sysfs entry and no udev event; the only trace is the kernel log (`usb 1-1.2: device descriptor read/64, error -71`, `device not accepting address`, `unable to enumerate USB device`). Plan: give the core service `CAP_SYSLOG` (Debian sets `kernel.dmesg_restrict=1`), follow `/dev/kmsg` from the last boot, map those lines to the same `PortProblem` codes, and clear an entry when a device later enumerates on the same hub port or after a timeout. Check first whether newer kernels' `/sys/bus/usb/devices/*/usb*-port*/state` shows a port that sees a connection but no device: that would be cheaper and need no capability.
 
 ## Shell
