@@ -120,6 +120,10 @@ fn diagnostic(d: &Diagnostic) -> dto::SketchDiagnostic {
 }
 
 fn compile_result(r: &CompileReport) -> dto::CompileResult {
+    compile_result_with(r, false)
+}
+
+fn compile_result_with(r: &CompileReport, hex: bool) -> dto::CompileResult {
     dto::CompileResult {
         ok: r.ok,
         board: r.board.id.into(),
@@ -134,6 +138,7 @@ fn compile_result(r: &CompileReport) -> dto::CompileResult {
         }),
         diagnostics: r.diagnostics.iter().map(diagnostic).collect(),
         message: r.message.clone(),
+        hex: if hex { r.hex().map(str::to_string) } else { None },
     }
 }
 
@@ -209,8 +214,9 @@ async fn compile(
     State(s): State<AppState>,
     ApiJson(body): ApiJson<dto::CompileRequest>,
 ) -> Result<Json<dto::CompileResult>, Failure> {
+    let hex = body.hex.unwrap_or(false);
     let r = blocking(move || s.machine.compile_sketch(&body.sketch, &body.board)).await??;
-    Ok(Json(compile_result(&r)))
+    Ok(Json(compile_result_with(&r, hex)))
 }
 
 /// Compiles, then flashes with the flasher (its errors, e.g. `409 port-used-by-bridge`), and

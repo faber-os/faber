@@ -468,6 +468,17 @@ async fn a_sketch_from_a_template_compiles_with_its_size_and_the_faberlink_libra
     assert_eq!(r["diagnostics"], json!([]), "the Arduino core's own warnings are left out");
     let build_id = r["buildId"].as_str().unwrap();
     assert_eq!(build_id.len(), 16);
+    assert!(r.get("hex").is_none(), "the program only comes back when asked for");
+    // Circuits asks for the program to run it in the browser.
+    let (s, h) = call(
+        &c.app,
+        "POST",
+        "/api/v0/arduino/compile",
+        Some(json!({"sketch": path, "board": "uno", "hex": true})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{h}");
+    assert!(h["hex"].as_str().unwrap().starts_with(':'), "{h}");
 
     let job = c.cli.last_job.lock().unwrap().clone().unwrap();
     assert_eq!(format!("{:016x}", job.build_id), build_id, "compiled with the build id it reports");

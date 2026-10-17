@@ -14,4 +14,8 @@ buildId: string, size?: SketchSize, diagnostics: Array<SketchDiagnostic>,
 /**
  * What went wrong when no error names a file.
  */
-message?: string, };
+message?: string, 
+/**
+ * The program as Intel HEX, when the request asked for it and the compile worked.
+ */
+hex?: string, };

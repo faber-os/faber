@@ -541,8 +541,9 @@ export class CoreState {
     return this.call(() => this.http.newSketch({ name, template }));
   }
 
-  compileSketch(sketch: string, board: string): Promise<Result<CompileResult>> {
-    return this.call(() => this.http.compileSketch({ sketch, board }));
+  /** `hex`: send the program back too (Circuits runs it in the browser). */
+  compileSketch(sketch: string, board: string, hex = false): Promise<Result<CompileResult>> {
+    return this.call(() => this.http.compileSketch({ sketch, board, ...(hex ? { hex } : {}) }));
   }
 
   /** Compiles and puts the sketch on the board on `port`. Only ever after the user confirmed it. */

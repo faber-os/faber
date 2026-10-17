@@ -1,6 +1,6 @@
 # The wiring diagram
 
-Status: **D60 accepted with changes** (§5): one diagram per machine, breadboards in, right-click "Connect to…". Being built as a standalone app in `tools/wiring-lab` first. Prototype: `docs/prototypes/wiring-canvas.html`, published as an artifact
+Status: **D60 accepted with changes** (§5): one diagram per machine, breadboards in, right-click "Connect to…". Now the shell program Circuits (D61, [circuits.md](circuits.md)). Prototype: `docs/prototypes/wiring-canvas.html`, published as an artifact
 for Mikkel on 2026-10-17. Nothing of this is in the shell yet.
 
 ## 1. The idea

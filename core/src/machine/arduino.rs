@@ -117,6 +117,13 @@ pub struct CompileReport {
     hex: Option<String>,
 }
 
+impl CompileReport {
+    /// The program as Intel HEX, if the compile worked.
+    pub fn hex(&self) -> Option<&str> {
+        if self.ok { self.hex.as_deref() } else { None }
+    }
+}
+
 /// An upload: the compile, then (if it worked) the flash and the record of it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UploadReport {

@@ -147,6 +147,8 @@ export class CircuitStore {
   motors = $state<'off' | 'run' | 'stall'>('off');
   /** Board pins set by running code (the emulator) or a live board, for power mode. */
   pins = $state.raw<Map<string, PinState>>(new Map());
+  /** The real parts' state in Faber, by part name (running, failed …): a part on the drawing with the same name shows it. */
+  live = $state.raw<Map<string, string>>(new Map());
   panels = $state(loadPanels());
   menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
   newPartOpen = $state(false);

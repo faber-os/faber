@@ -143,6 +143,11 @@ pub struct CompileRequest {
     /// The sketch's `.ino`, another of its files, or its folder.
     pub sketch: String,
     pub board: String,
+    /// Send the program back as Intel HEX (`hex` in the result), for running it in the browser
+    /// (Circuits' emulator, docs/circuits.md).
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hex: Option<bool>,
 }
 
 /// Body of `POST /api/v0/arduino/upload`.
@@ -178,6 +183,10 @@ pub struct CompileResult {
     #[ts(optional)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// The program as Intel HEX, when the request asked for it and the compile worked.
+    #[ts(optional)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hex: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]

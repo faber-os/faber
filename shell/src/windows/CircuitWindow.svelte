@@ -25,6 +25,10 @@
   import CircuitEditor from './circuit/CircuitEditor.svelte';
   import type { MenuItem } from './circuit/menu';
   import { faberParts } from './circuit/faberParts';
+  import { SketchRunner } from './circuit/runner.svelte';
+  import { emulatedBoard } from '../lib/circuit/avr';
+  import { SKETCHBOOK } from '../lib/desktop/arduino';
+  import { openInArduino } from '../components/arduinoWindow';
 
   /**
    * A Circuits window (docs/circuits.md): one drawing, kept as a `.fbcircuit` file in Files.
@@ -47,7 +51,15 @@
   provideCircuit(lab);
 
   let error = $state.raw<ErrorBody | null>(null);
-  let picker = $state<'open' | 'save' | null>(null);
+  let picker = $state<'open' | 'save' | 'sketch' | null>(null);
+  const runner = new SketchRunner(lab);
+  /** The board a sketch is being picked for, and the sketch that runs. */
+  let runOn = $state<string | null>(null);
+  let sketchPath = $state<string | null>(null);
+  let compiling = $state(false);
+  let showSerial = $state(true);
+  let toSend = $state('');
+  $effect(() => () => runner.stop());
   let closing = $state(false);
   let afterSave: (() => void) | null = null;
 
@@ -89,6 +101,11 @@
       title: t('circuit.window.title', { name: lab.dirty ? `${name} •` : name }),
       key: path ?? `circuit:new:${n}`,
     });
+  });
+
+  // What the real parts are doing: a part with the same name on the drawing shows it.
+  $effect(() => {
+    lab.live = new Map((core.parts ?? []).map((p) => [p.name, p.state.kind]));
   });
 
   $effect(() =>
@@ -187,17 +204,129 @@
     code: (): MenuItem[] => codeMenu(),
   };
 
+  const COMPILE_BOARD: Record<string, string> = { uno: 'uno', nano: 'nano', mega: 'mega2560' };
+
   function codeMenu(): MenuItem[] {
-    return [{ label: t('circuit.code.soon'), disabled: true }];
+    const boards = lab.doc.parts.filter((p) => emulatedBoard(lab.defs(p.def)?.id ?? ''));
+    if (!boards.length)
+      return [
+        { label: t('circuit.code.noBoard'), hint: t('circuit.code.noBoardHint'), disabled: true },
+      ];
+    const items: MenuItem[] = boards.map((b) => ({
+      label: t('circuit.code.run', { board: b.name }),
+      hint: t('circuit.code.runHint'),
+      action: () => {
+        runOn = b.id;
+        picker = 'sketch';
+      },
+    }));
+    if (runner.running) {
+      items.push({ separator: true, label: '' });
+      items.push({ label: t('circuit.code.stop'), action: () => runner.stop() });
+      if (sketchPath)
+        items.push({
+          label: t('circuit.code.edit'),
+          action: () => openInArduino(desktop, sketchPath!),
+        });
+    }
+    return items;
+  }
+
+  async function runSketch(path: string) {
+    const part = lab.part(runOn ?? '');
+    const board = part ? emulatedBoard(lab.defs(part.def)?.id ?? '') : null;
+    if (!part || !board) return;
+    error = null;
+    compiling = true;
+    const r = await core.compileSketch(path, COMPILE_BOARD[board]!, true);
+    compiling = false;
+    if (!r.ok) {
+      error = r.error;
+      return;
+    }
+    if (!r.value.ok || !r.value.hex) {
+      const first = r.value.diagnostics.find((d) => d.severity === 'error');
+      error = {
+        code: 'compile-failed',
+        message: t('circuit.code.failed', { sketch: r.value.sketchName }),
+        hint: first
+          ? `${first.file ?? ''}${first.line ? `:${first.line}` : ''} ${first.message}`.trim()
+          : (r.value.message ?? ''),
+      };
+      return;
+    }
+    sketchPath = path;
+    runner.start(part.id, board, r.value.hex, r.value.sketchName);
+    lab.say(t('circuit.code.started', { sketch: r.value.sketchName, board: part.name }));
   }
 </script>
 
 <div class="circuit-window">
   {#if error}<div class="err"><ErrorNotice {error} /></div>{/if}
+  {#if runner.part}
+    <div class="run" class:stopped={!runner.running}>
+      <span class="dot" aria-hidden="true"></span>
+      <b
+        >{runner.running
+          ? t('circuit.run.running', {
+              sketch: runner.sketch,
+              board: lab.part(runner.part)?.name ?? '',
+            })
+          : t('circuit.run.stopped', { sketch: runner.sketch })}</b
+      >
+      <span class="muted"
+        >{t('circuit.run.time', {
+          seconds: runner.seconds.toFixed(1),
+          speed: Math.round(runner.speed * 100),
+        })}</span
+      >
+      <span class="spacer"></span>
+      <button class="btn quiet" onclick={() => (showSerial = !showSerial)}
+        >{showSerial ? t('circuit.run.hideSerial') : t('circuit.run.showSerial')}</button
+      >
+      {#if runner.running}
+        <button class="btn" onclick={() => runner.stop()}>{t('circuit.code.stop')}</button>
+      {:else}
+        <button class="btn" onclick={() => (runner.part = null)}>{t('circuit.run.close')}</button>
+      {/if}
+    </div>
+    {#if showSerial}
+      <div class="serial">
+        <pre aria-label={t('circuit.run.serial')}>{runner.serial || t('circuit.run.noSerial')}</pre>
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            runner.write(`${toSend}\n`);
+            toSend = '';
+          }}
+        >
+          <input
+            bind:value={toSend}
+            placeholder={t('circuit.run.send')}
+            aria-label={t('circuit.run.send')}
+            disabled={!runner.running}
+          />
+        </form>
+      </div>
+    {/if}
+  {/if}
+  {#if compiling}<div class="run">
+      <span class="muted">{t('circuit.code.compilingShort')}</span>
+    </div>{/if}
   <CircuitEditor {menus} onsave={() => void save()} />
 </div>
 
-{#if picker}
+{#if picker === 'sketch'}
+  <FilePicker
+    mode="open"
+    start={(sketchPath && parentPath(sketchPath)) || SKETCHBOOK}
+    oncancel={() => (picker = null)}
+    onpick={(p) => {
+      picker = null;
+      void runSketch(p);
+    }}
+  />
+{:else if picker}
   <FilePicker
     mode={picker}
     start={(path && parentPath(path)) || 'home:/Documents'}
@@ -248,5 +377,54 @@
   }
   .err {
     padding: var(--space-2) var(--space-3) 0;
+  }
+  .run {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    font-size: var(--text-sm);
+  }
+  .run .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 99px;
+    background: var(--ok);
+  }
+  .run.stopped .dot {
+    background: var(--text-faint);
+  }
+  .muted {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .spacer {
+    flex: 1;
+  }
+  .serial {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .serial pre {
+    margin: 0;
+    max-height: 120px;
+    overflow: auto;
+    padding: var(--space-2) var(--space-3);
+    font-family: var(--font-data);
+    font-size: var(--text-xs);
+    white-space: pre-wrap;
+  }
+  .serial input {
+    border: 0;
+    border-top: 1px solid var(--line);
+    padding: var(--space-1) var(--space-3);
+    background: var(--surface-2);
+    width: 100%;
+    font-family: var(--font-data);
   }
 </style>

@@ -10,6 +10,8 @@
  *   src/components/, src/windows/   Svelte UI       may import: state, desktop, viewers, i18n,
  *                                                   never api
  *
+ *   src/lib/circuit/    Circuits' logic             may import: nothing (pure TypeScript and avr8js)
+ *
  * `src/test/` holds shared test fakes and is only imported by *.test.ts files.
  *
  *   ../sdk/js/shell/src/protocol.ts   the app protocol (docs/apps.md §9), shared with the
@@ -57,6 +59,14 @@ module.exports = {
       severity: 'error',
       from: { path: '^src/lib/viewers/', pathNot: '\.test\.ts$' },
       to: { pathNot: '^src/lib/(viewers|i18n)/' },
+    },
+    {
+      name: 'circuit-imports-nothing',
+      comment:
+        'src/lib/circuit is the logic of Circuits (docs/circuits.md): no other shell folder, no Svelte.',
+      severity: 'error',
+      from: { path: '^src/lib/circuit/' },
+      to: { path: '^src/', pathNot: '^src/lib/circuit/' },
     },
     {
       name: 'ui-never-imports-api',

@@ -7,4 +7,9 @@ export type CompileRequest = {
 /**
  * The sketch's `.ino`, another of its files, or its folder.
  */
-sketch: string, board: string, };
+sketch: string, board: string, 
+/**
+ * Send the program back as Intel HEX (`hex` in the result), for running it in the browser
+ * (Circuits' emulator, docs/circuits.md).
+ */
+hex?: boolean, };

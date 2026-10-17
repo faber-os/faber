@@ -809,6 +809,25 @@
             >
           </g>
         {/if}
+        {@const real = lab.live.get(part.name)}
+        {#if real}
+          {@const ok = real === 'running'}
+          {@const lt = t('circuit.live.badge', { state: real })}
+          <g pointer-events="none">
+            <title>{t('circuit.live.title', { state: real })}</title>
+            <rect
+              x={g.x0 * G - 6}
+              y={g.y0 * G - 9}
+              width={lt.length * 6.2 + 12}
+              height="16"
+              rx="8"
+              fill={ok ? '#0e7490' : real === 'failed' ? '#dc2626' : '#6b7280'}
+            />
+            <text x={g.x0 * G + lt.length * 3.1} y={g.y0 * G + 3} text-anchor="middle" class="badge"
+              >{lt}</text
+            >
+          </g>
+        {/if}
         {#if st && BADGE[st]}
           {@const b = BADGE[st]!}
           {@const bt = b.text()}

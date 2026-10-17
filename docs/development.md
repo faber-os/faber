@@ -88,6 +88,7 @@ points up or sideways. Every module that does I/O does it behind a trait, so its
 | `src/lib/state/` | App state as Svelte 5 runes (parts, ports, windows) | `api`, `i18n` |
 | `src/lib/desktop/` | Plain TypeScript logic for the desktop and its accessories (windows, icons, menus, file paths, the Notes document), no Svelte | `i18n` |
 | `src/lib/viewers/` | Canvas drawing for capability viewers, and the display units (`units.ts`), as pure functions | `i18n` |
+| `src/lib/circuit/` | Circuits' logic ([circuits.md](circuits.md)): parts, routing, checks, the circuit simulation, the AVR emulator (avr8js) | nothing (its texts are English data for now) |
 | `src/components/`, `src/windows/` | Svelte UI | `state`, `desktop`, `viewers`, `i18n`, never `api` directly |
 | `../sdk/js/shell/src/protocol.ts` | The app protocol's types, shared with the SDK | nothing; only the app window host (`src/lib/state/appHost.ts`) imports it, never the SDK itself |
 

@@ -121,6 +121,9 @@ export function diagramFromParts(
         wire(`${id}.VIN`, `${hostId}.P1`);
         wire(`${id}.GND`, `${hostId}.P9`);
       }
+    } else if (has(p, 'distance')) {
+      // A distance part that doesn't say how it is wired: the sonar is the commonest.
+      add(p.name, 'hcsr04', p.name);
     } else if (has(p, 'imu')) {
       const id = add(p.name, 'mpu6050', p.name);
       if (board)
