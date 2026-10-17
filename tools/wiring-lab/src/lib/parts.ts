@@ -16,6 +16,9 @@ interface BoardPins {
   scl: number;
   tx: Set<number>;
   rx: Set<number>;
+  sck: number;
+  mosi: number;
+  miso: number;
 }
 
 function digital(n: number, x: number, y: number, d: Dir, b: BoardPins, extra?: Partial<PinDef>): PinDef {
@@ -26,6 +29,9 @@ function digital(n: number, x: number, y: number, d: Dir, b: BoardPins, extra?: 
   if (n === b.scl) caps.push('scl');
   if (b.tx.has(n)) caps.push('tx');
   if (b.rx.has(n)) caps.push('rx');
+  if (n === b.sck) caps.push('sck');
+  if (n === b.mosi) caps.push('mosi');
+  if (n === b.miso) caps.push('miso');
   return pin('D' + n, x, y, d, { kind: 'io', caps, logic: 5, label: 'D' + n, serial: n <= 1, ...extra });
 }
 
@@ -36,9 +42,10 @@ function powerHeader(x0: number, y: number): PinDef[] {
     const place = 'power header';
     const at = x0 + 2 * i;
     if (n === '3V3') return pin(ids[i]!, at, y, 2, { kind: 'supply', volts: 3.3, label: n, place });
-    if (n === '5V') return pin(ids[i]!, at, y, 2, { kind: 'supply', volts: 5, label: n, place });
+    if (n === '5V') return pin(ids[i]!, at, y, 2, { kind: 'supply', volts: 5, label: n, place, maxMa: 500 });
     if (n === 'GND') return pin(ids[i]!, at, y, 2, { kind: 'gnd', label: n, place });
-    if (n === 'VIN') return pin(ids[i]!, at, y, 2, { kind: 'vin', min: 7, max: 12, label: n, place });
+    // Arduino: 7–12 V recommended, 6–20 V the limits; above 12 V the regulator runs hot.
+    if (n === 'VIN') return pin(ids[i]!, at, y, 2, { kind: 'vin', min: 7, max: 12, limit: 20, label: n, place, ma: 100 });
     return pin(ids[i]!, at, y, 2, { kind: 'other', label: n, place });
   });
 }
@@ -51,10 +58,13 @@ function mega(): PartDef {
     scl: 21,
     tx: new Set([1, 14, 16, 18]),
     rx: new Set([0, 15, 17, 19]),
+    sck: 52,
+    mosi: 51,
+    miso: 50,
   };
   const top = { place: 'top header' };
   const P: PinDef[] = [
-    pin('USB', 0, 10, 3, { kind: 'usb-device', label: 'USB', place: 'USB-B socket' }),
+    pin('USB', 0, 10, 3, { kind: 'port', port: 'usb', host: false, label: 'USB', place: 'USB-B socket', ma: 200 }),
     pin('SCL', 18, 2, 0, { kind: 'io', caps: ['io', 'scl'], logic: 5, ...top }),
     pin('SDA', 20, 2, 0, { kind: 'io', caps: ['io', 'sda'], logic: 5, ...top }),
     pin('AREF', 22, 2, 0, { kind: 'other', ...top }),
@@ -97,10 +107,10 @@ function mega(): PartDef {
 }
 
 function uno(): PartDef {
-  const b: BoardPins = { pwm: new Set([3, 5, 6, 9, 10, 11]), int: new Set([2, 3]), sda: -1, scl: -1, tx: new Set([1]), rx: new Set([0]) };
+  const b: BoardPins = { pwm: new Set([3, 5, 6, 9, 10, 11]), int: new Set([2, 3]), sda: -1, scl: -1, tx: new Set([1]), rx: new Set([0]), sck: 13, mosi: 11, miso: 12 };
   const top = { place: 'top header' };
   const P: PinDef[] = [
-    pin('USB', 0, 10, 3, { kind: 'usb-device', label: 'USB', place: 'USB-B socket' }),
+    pin('USB', 0, 10, 3, { kind: 'port', port: 'usb', host: false, label: 'USB', place: 'USB-B socket', ma: 200 }),
     pin('SCL', 14, 2, 0, { kind: 'io', caps: ['io', 'scl'], logic: 5, ...top }),
     pin('SDA', 16, 2, 0, { kind: 'io', caps: ['io', 'sda'], logic: 5, ...top }),
     pin('AREF', 18, 2, 0, { kind: 'other', ...top }),
@@ -158,13 +168,20 @@ function pi5(): PartDef {
       if (name === 'GPIO3') caps.push('scl');
       if (name === 'GPIO14') caps.push('tx');
       if (name === 'GPIO15') caps.push('rx');
+      if (name === 'GPIO11') caps.push('sck');
+      if (name === 'GPIO10') caps.push('mosi');
+      if (name === 'GPIO9') caps.push('miso');
       P.push(pin('P' + n, x, y, 0, { ...base, kind: 'io', caps, logic: 3.3 }));
     }
   }
-  const usb = (id: string, y: number, label: string) => pin(id, 68, y, 1, { kind: 'usb-host', label, place: 'USB ports' });
+  const usb = (id: string, y: number, label: string) => pin(id, 68, y, 1, { kind: 'port', port: 'usb', host: true, volts: 5, label, place: 'USB ports', maxMa: 1600 });
   P.push(usb('USB1', 6, 'USB 3'), usb('USB2', 12, 'USB 3'), usb('USB3', 22, 'USB 2'), usb('USB4', 28, 'USB 2'));
-  P.push(pin('PWR', 14, 44, 2, { kind: 'power-in', min: 4.75, max: 5.25, label: 'USB-C 5V', place: 'USB-C power', inlet: true }));
-  P.push(pin('PWR-', 16, 44, 2, { kind: 'gnd', label: 'GND', place: 'USB-C power', hideLabel: true, inlet: true }));
+  // The Pi 5 wants 5.1 V at up to 5 A through its USB-C socket.
+  P.push(pin('USBC', 14, 44, 2, { kind: 'port', port: 'usbc-power', host: false, min: 4.75, max: 5.25, label: 'USB-C power', place: 'USB-C power socket', ma: 3000 }));
+  P.push(pin('HDMI0', 26, 44, 2, { kind: 'port', port: 'hdmi', host: true, label: 'HDMI 0', place: 'micro-HDMI 0' }));
+  P.push(pin('HDMI1', 34, 44, 2, { kind: 'port', port: 'hdmi', host: true, label: 'HDMI 1', place: 'micro-HDMI 1' }));
+  P.push(pin('CAM0', 46, 44, 2, { kind: 'port', port: 'csi', host: true, label: 'CAM 0', place: 'camera socket 0' }));
+  P.push(pin('CAM1', 52, 44, 2, { kind: 'port', port: 'csi', host: true, label: 'CAM 1', place: 'camera socket 1' }));
   return {
     id: 'pi5',
     name: 'Raspberry Pi 5',
@@ -180,7 +197,7 @@ function pi5(): PartDef {
 }
 
 /** Pins centred on their edges, 0.1 in apart, on even positions. */
-export function edgePins(list: [string, 'top' | 'right' | 'bottom' | 'left', Omit<PinDef, 'id' | 'label' | 'x' | 'y' | 'd'> & { id?: string }][], w: number, h: number): PinDef[] {
+export function edgePins(list: [string, 'top' | 'right' | 'bottom' | 'left', Omit<PinDef, 'id' | 'label' | 'x' | 'y' | 'd'> & { id?: string; label?: string }][], w: number, h: number): PinDef[] {
   const dirs = { top: 0, right: 1, bottom: 2, left: 3 } as const;
   const byEdge = new Map<string, typeof list>();
   for (const p of list) byEdge.set(p[1], [...(byEdge.get(p[1]) ?? []), p]);
@@ -205,9 +222,10 @@ export function edgePins(list: [string, 'top' | 'right' | 'bottom' | 'left', Omi
 function breadboard(): PartDef {
   const cols = 30;
   const W = 66;
-  const H = 44;
+  const H = 46;
   const rows = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
-  const rowY = [12, 14, 16, 18, 20, 24, 26, 28, 30, 32];
+  // 0.3 in between rows e and f, as on a real breadboard, so a DIP chip straddles the gap.
+  const rowY = [12, 14, 16, 18, 20, 26, 28, 30, 32, 34];
   const pins: PinDef[] = [];
   const buses: string[][] = [];
   const x = (c: number) => 4 + 2 * c;
@@ -221,7 +239,7 @@ function breadboard(): PartDef {
     });
     buses.push(top, bottom);
   }
-  const rails: [string, number, string][] = [['T+', 4, 'top + rail'], ['T-', 6, 'top − rail'], ['B+', 38, 'bottom + rail'], ['B-', 40, 'bottom − rail']];
+  const rails: [string, number, string][] = [['T+', 4, 'top + rail'], ['T-', 6, 'top − rail'], ['B+', 40, 'bottom + rail'], ['B-', 42, 'bottom − rail']];
   for (const [name, y, place] of rails) {
     const bus: string[] = [];
     for (let c = 0; c < cols; c++) {
@@ -325,7 +343,7 @@ export const BUILTIN: PartDef[] = [
   {
     id: 'dcmotor',
     name: 'DC gear motor',
-    covers: 'Brushed, 12 V',
+    covers: 'Brushed 12 V · RS PRO 834-7641 49:1',
     kind: 'part',
     look: 'motor',
     w: 44,
@@ -349,7 +367,7 @@ export const BUILTIN: PartDef[] = [
   {
     id: 'button',
     name: 'Push button',
-    covers: 'Momentary, to GND (input pull-up)',
+    covers: 'PBS-110 · momentary, to GND (pull-up)',
     kind: 'part',
     look: 'button',
     w: 10,
@@ -391,32 +409,6 @@ export const BUILTIN: PartDef[] = [
     ],
     channels: [['LV1', 'HV1'], ['LV2', 'HV2'], ['LV3', 'HV3'], ['LV4', 'HV4']],
   },
-  {
-    id: 'buck5',
-    name: 'Buck converter 5 V',
-    covers: 'XL4015 / LM2596 · in 6–36 V',
-    kind: 'part',
-    look: 'buck',
-    w: 34,
-    h: 18,
-    pins: [
-      pin('IN+', 0, 6, 3, { kind: 'power-in', min: 6, max: 36, terminal: true }),
-      pin('IN-', 0, 12, 3, { kind: 'gnd', label: 'IN−', terminal: true }),
-      pin('OUT+', 34, 6, 1, { kind: 'supply', volts: 5.1, terminal: true }),
-      pin('OUT-', 34, 12, 1, { kind: 'gnd', label: 'OUT−', terminal: true }),
-    ],
-  },
-  {
-    id: 'bat3s',
-    name: 'Battery 3S',
-    covers: '18650 Li-ion · 11.1 V · 12.6 V full',
-    kind: 'part',
-    look: 'battery',
-    w: 60,
-    h: 26,
-    pins: [
-      pin('+', 60, 10, 1, { kind: 'supply', volts: 12.6, terminal: true }),
-      pin('-', 60, 16, 1, { kind: 'gnd', label: '−', terminal: true }),
-    ],
-  },
+
+
 ];

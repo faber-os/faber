@@ -119,7 +119,7 @@
     <dl class="kv">
       <dt>From</dt><dd>{pinName(lab.snap, lab.defs, wire.a)}</dd>
       <dt>To</dt><dd>{pinName(lab.snap, lab.defs, wire.b)}</dd>
-      <dt>Carries</dt><dd>{net?.kind === 'power' ? `${net.volts} V` : net?.kind === 'gnd' ? 'Ground' : net?.kind === 'motor' ? 'Motor current' : net?.kind === 'usb' ? 'USB' : 'A signal'}</dd>
+      <dt>Carries</dt><dd>{net?.kind === 'power' ? `${net.volts} V` : net?.kind === 'gnd' ? 'Ground' : net?.kind === 'motor' ? 'Motor current' : net?.kind === 'cable' ? 'A cable' : 'A signal'}</dd>
       <dt>On paper</dt><dd class="mono">{wireLength(wire.id)} mm</dd>
     </dl>
     <div class="row">

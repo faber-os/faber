@@ -72,7 +72,7 @@ export function wirePaths(doc: Diagram, nets: NetIndex, routing: Routing): WireP
       const xs = verts.filter((v) => v.net !== net?.id && v.x > lo + 4 && v.x < hi - 4 && a[1] > v.y0 && a[1] < v.y1).map((v) => v.x);
       if (xs.length) hops.set(i, [...new Set(xs)].sort((p, q) => (b[0] > a[0] ? p - q : q - p)));
     }
-    const width = kind === 'usb' ? 6 : kind === 'power' && (net?.volts ?? 0) > 6 ? 4.2 : kind === 'motor' ? 3.8 : 3;
+    const width = kind === 'cable' ? 6 : kind === 'power' && (net?.volts ?? 0) > 6 ? 4.2 : kind === 'motor' ? 3.8 : 3;
     return [{ id: w.id, d: pathD(pts, hops), color, width, kind, failed: false }];
   });
 }

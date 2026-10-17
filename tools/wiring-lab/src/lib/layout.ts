@@ -308,3 +308,37 @@ export function arrange(doc: Diagram, defs: DefLookup): void {
     });
   }
 }
+
+/**
+ * A part set down over a breadboard drops into the nearest spot where its legs land in holes
+ * (within 6 units, about 7.6 mm): all its legs if it can, as many as it can otherwise.
+ * Returns whether it is now plugged in.
+ */
+export function snapToBreadboard(doc: Diagram, defs: DefLookup, part: Part): boolean {
+  const d = defs(part.def);
+  if (!d || (d.kind !== 'part' && !d.pluggable)) return false;
+  const g = geom(part, defs);
+  const legs = Object.values(g.pins).filter((p) => !p.pin.terminal && p.pin.kind !== 'port');
+  if (!legs.length) return false;
+  const holes = new Set<string>();
+  for (const b of doc.parts) {
+    if (defs(b.def)?.kind !== 'breadboard') continue;
+    const bg = geom(b, defs);
+    if (!tooClose(bg, g, 6)) continue;
+    for (const h of Object.values(bg.pins)) holes.add(`${h.x},${h.y}`);
+  }
+  if (!holes.size) return false;
+  let best: { dx: number; dy: number; n: number } | undefined;
+  for (let dy = -6; dy <= 6; dy += 2) {
+    for (let dx = -6; dx <= 6; dx += 2) {
+      const n = legs.filter((p) => holes.has(`${p.x + dx},${p.y + dy}`)).length;
+      if (!n) continue;
+      const score = n * 100 - Math.abs(dx) - Math.abs(dy);
+      if (!best || score > best.n * 100 - Math.abs(best.dx) - Math.abs(best.dy)) best = { dx, dy, n };
+    }
+  }
+  if (!best || best.n < Math.min(2, legs.length)) return false;
+  part.x += best.dx;
+  part.y += best.dy;
+  return true;
+}

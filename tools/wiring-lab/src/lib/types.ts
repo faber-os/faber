@@ -7,7 +7,10 @@
 export type Dir = 0 | 1 | 2 | 3;
 
 /** What a board pin can do. */
-export type Cap = 'io' | 'pwm' | 'analog' | 'sda' | 'scl' | 'int' | 'tx' | 'rx';
+export type Cap = 'io' | 'pwm' | 'analog' | 'sda' | 'scl' | 'int' | 'tx' | 'rx' | 'sck' | 'mosi' | 'miso' | 'audio';
+
+/** A socket a cable plugs into. `usb` carries data and 5 V from the host; `usbc-power` only power. */
+export type PortType = 'usb' | 'usbc-power' | 'hdmi' | 'csi';
 
 export type PinKind =
   /** A board's general pin (see `caps`). */
@@ -27,10 +30,15 @@ export type PinKind =
   | 'power-in'
   | 'motor-out'
   | 'motor-in'
-  | 'usb-host'
-  | 'usb-device'
+  /** A socket (see `port` and `host`). */
+  | 'port'
   /** A breadboard hole. */
-  | 'hole';
+  | 'hole'
+  /** Only conducts, through the part to its partner (see `passes`): a fuse's ends, a BMS's B+ and P+. */
+  | 'pass'
+  /** Out to a speaker, and the speaker's own pins. */
+  | 'speaker-out'
+  | 'speaker-in';
 
 export interface PinDef {
   id: string;
@@ -65,8 +73,18 @@ export interface PinDef {
   pairLabel?: string;
   /** A screw terminal rather than a header pin. */
   terminal?: boolean;
-  /** Part of a power inlet (the Pi's USB-C): only for powering the board, never a pin to share. */
+  /** Part of a power inlet: only for powering the board, never a pin to share. */
   inlet?: boolean;
+  /** `port` pins: the kind of socket, and whether it is the host end (gives power). */
+  port?: PortType;
+  host?: boolean;
+  /** Current drawn (power-in pins) or the most a supply pin gives, in mA. */
+  ma?: number;
+  maxMa?: number;
+  /** The highest voltage that does no harm (above `max` only warns). */
+  limit?: number;
+  /** Something to know the moment this pin is wired (a MOSFET that isn't logic level). */
+  caution?: string;
 }
 
 export type PartKind = 'board' | 'part' | 'breadboard';
@@ -91,15 +109,40 @@ export interface PartDef {
   buses?: string[][];
   /** Pins that pass a signal through: a level shifter's LVn and HVn. */
   channels?: [string, string][];
+  /** Pins joined through the part while it is closed (a fuse, a switch, a connector). */
+  passes?: [string, string][];
+  /** Whether a click in power mode opens and closes it, and if it is open by default. */
+  switch?: 'toggle' | 'push';
+  /** A board with legs: it plugs into a breadboard (a Nano). */
+  pluggable?: boolean;
+  /** Settings that change the part (a battery's cells): see parts.ts `variant`. */
+  params?: ParamDef[];
+  /** Notes shown in the inspector. */
+  notes?: string[];
+}
+
+export interface ParamDef {
+  id: string;
+  label: string;
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  default: number;
 }
 
 export interface Part {
   id: string;
+  /** The part type; a parametric one carries its settings: `bat?s=3&p=6&cell=4.2`. */
   def: string;
   name: string;
   x: number;
   y: number;
   rot: Dir;
+  /** Mirrored left to right (before the rotation). */
+  flip?: boolean;
+  /** A switch or button that is open (power mode). */
+  open?: boolean;
 }
 
 /** A wire between two pins, each `partId.pinId`. */

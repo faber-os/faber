@@ -41,7 +41,7 @@ export function buildSteps(doc: Diagram, defs: DefLookup, nets: NetIndex): StepG
   const rank = (id: string) => {
     const w = doc.wires.find((x) => x.id === id)!;
     const k = nets.of.get(w.a)?.kind;
-    return k === 'usb' ? -1 : k === 'gnd' ? 0 : k === 'power' ? 1 : 2;
+    return k === 'cable' ? -1 : k === 'gnd' ? 0 : k === 'power' ? 1 : 2;
   };
   const order = doc.parts.slice().sort((a, b) => {
     const ka = defs(a.def)?.kind;
@@ -69,7 +69,7 @@ export function buildSteps(doc: Diagram, defs: DefLookup, nets: NetIndex): StepG
       const kind = nets.of.get(w.a)?.kind;
       const where = farRef?.pin.place ?? '';
       const shared = (meet.get(far) ?? 0) > 1 && farRef?.pin.kind !== 'hole' ? ` · ${meet.get(far)} wires meet here: use a Wago or a breadboard rail` : '';
-      const what = kind === 'usb' ? 'USB cable' : `${COLOR_NAMES[color] ?? 'A'} wire`;
+      const what = kind === 'cable' ? 'Cable' : `${COLOR_NAMES[color] ?? 'A'} wire`;
       steps.push({
         id: w.id,
         text: `${nearRef?.pin.label ?? near} → ${pinName(doc, defs, far)}`,

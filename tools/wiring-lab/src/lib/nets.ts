@@ -6,7 +6,7 @@ import { geom } from './geometry';
 import type { DefLookup, Diagram, PinDef } from './types';
 import { splitKey } from './types';
 
-export type NetKind = 'power' | 'gnd' | 'short' | 'signal' | 'motor' | 'usb' | 'empty';
+export type NetKind = 'power' | 'gnd' | 'short' | 'signal' | 'motor' | 'speaker' | 'cable' | 'empty';
 
 export interface Net {
   id: number;
@@ -52,12 +52,12 @@ export function findPlugs(doc: Diagram, defs: DefLookup): [string, string][] {
   const out: [string, string][] = [];
   for (const part of doc.parts) {
     const d = defs(part.def);
-    // Only modules plug in; an Uno or a Pi has sockets, not legs.
-    if (!d || d.kind !== 'part') continue;
+    // Only modules (and a Nano) plug in; an Uno or a Pi has sockets, not legs.
+    if (!d || (d.kind !== 'part' && !d.pluggable)) continue;
     const g = geom(part, defs);
     for (const id in g.pins) {
       const p = g.pins[id]!;
-      if (p.pin.terminal || p.pin.kind === 'usb-host' || p.pin.kind === 'usb-device') continue;
+      if (p.pin.terminal || p.pin.kind === 'port') continue;
       const hole = holes.get(`${p.x},${p.y}`);
       if (hole) out.push([`${part.id}.${id}`, hole]);
     }
@@ -95,6 +95,16 @@ export function computeNets(doc: Diagram, defs: DefLookup): NetIndex {
   for (const w of doc.wires) join(w.a, w.b);
   const plugs = findPlugs(doc, defs);
   for (const [a, b] of plugs) join(a, b);
+  // A closed fuse, switch or connector joins its two sides (an open switch doesn't).
+  for (const part of doc.parts) {
+    const d = defs(part.def);
+    if (!d?.passes || part.open) continue;
+    for (const [a, b] of d.passes) {
+      const ka = `${part.id}.${a}`;
+      const kb = `${part.id}.${b}`;
+      if (parent.has(ka) || parent.has(kb)) join(ka, kb);
+    }
+  }
   // A breadboard strip joins only what is on it: a strip with nothing on it is no net.
   for (const part of doc.parts) {
     const d = defs(part.def);
@@ -134,8 +144,8 @@ export function computeNets(doc: Diagram, defs: DefLookup): NetIndex {
     const pins = net.keys.map((k) => pinDef(doc, defs, k)).filter((p): p is PinDef => !!p && p.kind !== 'hole');
     const sup = pins.filter((p) => p.kind === 'supply');
     const gnd = pins.some((p) => p.kind === 'gnd');
-    if (pins.some((p) => p.kind === 'usb-host' || p.kind === 'usb-device')) {
-      net.kind = 'usb';
+    if (pins.some((p) => p.kind === 'port')) {
+      net.kind = 'cable';
       net.color = USB_COLOR;
     } else if (sup.length && gnd) {
       net.kind = 'short';
@@ -151,7 +161,7 @@ export function computeNets(doc: Diagram, defs: DefLookup): NetIndex {
       net.kind = 'empty';
       net.color = '#94a3b8';
     } else {
-      net.kind = pins.some((p) => p.kind === 'motor-in' || p.kind === 'motor-out') ? 'motor' : 'signal';
+      net.kind = pins.some((p) => p.kind === 'motor-in' || p.kind === 'motor-out') ? 'motor' : pins.some((p) => p.kind === 'speaker-in' || p.kind === 'speaker-out') ? 'speaker' : 'signal';
       net.color = SIGNAL_COLORS[signal % SIGNAL_COLORS.length]!;
       signal += 1;
     }

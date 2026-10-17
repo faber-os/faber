@@ -73,24 +73,31 @@ const cache = new Map<string, { key: string; g: PartGeo }>();
 export function geom(part: Part, defs: DefLookup): PartGeo {
   const d = defs(part.def);
   if (!d) throw new Error(`unknown part type ${part.def}`);
-  const key = `${part.def}|${part.x}|${part.y}|${part.rot}|${d.w}|${d.h}|${d.pins.length}`;
+  const key = `${part.def}|${part.x}|${part.y}|${part.rot}|${part.flip ? 1 : 0}|${d.w}|${d.h}|${d.pins.length}`;
   const hit = cache.get(part.id);
   if (hit && hit.key === key && hit.g.def === d) return hit.g;
   const odd = part.rot & 1;
   const w = odd ? d.h : d.w;
   const h = odd ? d.w : d.h;
   const pins: Record<string, PinGeo> = {};
-  for (const p of d.pins) {
+  for (const p0 of d.pins) {
+    const p = part.flip ? mirrored(d, p0) : p0;
     const [px, py] = rotPt(d, part.rot, p.x, p.y);
     const stub = stubOf(d, p).map(([sx, sy]): Cell => {
       const [rx, ry] = rotPt(d, part.rot, sx, sy);
       return [part.x + rx, part.y + ry];
     });
-    pins[p.id] = { x: part.x + px, y: part.y + py, d: ((p.d + part.rot) & 3) as Dir, stub, pin: p };
+    pins[p.id] = { x: part.x + px, y: part.y + py, d: ((p.d + part.rot) & 3) as Dir, stub, pin: p0 };
   }
   const g: PartGeo = { x0: part.x, y0: part.y, x1: part.x + w, y1: part.y + h, w, h, pins, def: d };
   cache.set(part.id, { key, g });
   return g;
+}
+
+/** A pin as it sits on the part mirrored left to right. */
+export function mirrored(d: PartDef, p: PinDef): PinDef {
+  const dir = (p.d === 1 ? 3 : p.d === 3 ? 1 : p.d) as Dir;
+  return { ...p, x: d.w - p.x, d: dir, jog: p.jog ? [-p.jog[0], p.jog[1]] : undefined };
 }
 
 /** Two parts' bodies come closer than `margin` units. */

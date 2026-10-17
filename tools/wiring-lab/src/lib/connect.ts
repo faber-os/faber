@@ -5,6 +5,7 @@
  * pins near the part win.
  */
 import { geom } from './geometry';
+import { computeNets, type NetIndex } from './nets';
 import type { Cap, DefLookup, Diagram, Part, PartDef, PinDef } from './types';
 import { splitKey } from './types';
 
@@ -22,15 +23,18 @@ export type ConnectResult = { ok: true; options: ConnectOption[] } | { ok: false
 const POWER_IN = new Set(['vcc', 'vin', 'power-in']);
 const RARE: Cap[] = ['pwm', 'int', 'tx', 'rx', 'sda', 'scl', 'analog'];
 
-interface Ctx {
+export interface Ctx {
   doc: Diagram;
   defs: DefLookup;
   used: Set<string>;
   /** I²C buses already wired: board pin key → the need it carries. */
   bus: Map<string, Cap>;
+  nets: NetIndex;
+  /** Things to say about the wires picked (a regulator that will run warm). */
+  said: string[];
 }
 
-function context(doc: Diagram, defs: DefLookup): Ctx {
+export function context(doc: Diagram, defs: DefLookup): Ctx {
   const used = new Set<string>();
   const bus = new Map<string, Cap>();
   for (const w of doc.wires) {
@@ -42,7 +46,7 @@ function context(doc: Diagram, defs: DefLookup): Ctx {
       if (need) bus.set(far, need);
     }
   }
-  return { doc, defs, used, bus };
+  return { doc, defs, used, bus, nets: computeNets(doc, defs), said: [] };
 }
 
 function pinOf(doc: Diagram, defs: DefLookup, key: string): PinDef | undefined {
@@ -51,7 +55,7 @@ function pinOf(doc: Diagram, defs: DefLookup, key: string): PinDef | undefined {
   return part ? defs(part.def)?.pins.find((p) => p.id === pn) : undefined;
 }
 
-function centre(ctx: Ctx, part: Part): [number, number] {
+export function centre(ctx: Ctx, part: Part): [number, number] {
   const g = geom(part, ctx.defs);
   return [(g.x0 + g.x1) / 2, (g.y0 + g.y1) / 2];
 }
@@ -62,7 +66,7 @@ function distance(ctx: Ctx, host: Part, pinId: string, to: [number, number]): nu
 }
 
 /** The best free board pin for a part's signal pin, or why there is none. */
-function pickIo(ctx: Ctx, host: Part, hostDef: PartDef, sig: PinDef, near: [number, number], taken: Set<string>): string | { reason: string } {
+export function pickIo(ctx: Ctx, host: Part, hostDef: PartDef, sig: PinDef, near: [number, number], taken: Set<string>): string | { reason: string } {
   const needs = sig.needs ?? ['io'];
   const i2c = needs.find((n) => n === 'sda' || n === 'scl');
   if (i2c) {
@@ -81,12 +85,27 @@ function pickIo(ctx: Ctx, host: Part, hostDef: PartDef, sig: PinDef, near: [numb
     if (!best || score < best.score) best = { key, score };
   }
   if (best) return best.key;
-  const what = needs.filter((n) => n !== 'io').map((n) => ({ pwm: 'PWM', int: 'interrupt', analog: 'analog', sda: 'I²C SDA', scl: 'I²C SCL', tx: 'TX', rx: 'RX', io: 'digital' })[n]);
+  const what = needs.filter((n) => n !== 'io').map((n) => ({ pwm: 'PWM', int: 'interrupt', analog: 'analog', sda: 'I²C SDA', scl: 'I²C SCL', tx: 'TX', rx: 'RX', io: 'digital', sck: 'SPI SCK', mosi: 'SPI MOSI', miso: 'SPI MISO', audio: 'audio' })[n]);
   return { reason: `${hostDef.name} has no free ${what.length ? what.join('/') + ' ' : ''}pin left for ${sig.label}` };
 }
 
-function pickSupply(ctx: Ctx, host: Part, hostDef: PartDef, sink: PinDef, near: [number, number]): string | undefined {
-  const fits = hostDef.pins.filter((p) => p.kind === 'supply' && !p.inlet && (p.volts ?? 0) >= (sink.min ?? 0) - 0.05 && (p.volts ?? 0) <= (sink.max ?? 99) + 0.05);
+/** A pin that gives power: a supply, or a fuse's or BMS's pass-through already carrying it. */
+function volts(ctx: Ctx, host: Part, p: PinDef): number | undefined {
+  if (p.kind === 'supply' && !p.inlet) return p.volts;
+  if (p.kind === 'pass') {
+    const net = ctx.nets.of.get(`${host.id}.${p.id}`);
+    if (net?.kind === 'power') return net.volts;
+  }
+  return undefined;
+}
+
+export function pickSupply(ctx: Ctx, host: Part, hostDef: PartDef, sink: PinDef, near: [number, number]): string | undefined {
+  const all = hostDef.pins.filter((p) => volts(ctx, host, p) !== undefined).map((p) => ({ ...p, volts: volts(ctx, host, p) }));
+  let fits = all.filter((p) => (p.volts ?? 0) >= (sink.min ?? 0) - 0.05 && (p.volts ?? 0) <= (sink.max ?? 99) + 0.05);
+  if (!fits.length && sink.limit !== undefined) {
+    fits = all.filter((p) => (p.volts ?? 0) >= (sink.min ?? 0) && (p.volts ?? 0) <= sink.limit!);
+    if (fits.length) ctx.said.push(`${sink.label} gets ${fits[0]!.volts} V: it works, but its regulator runs warm`);
+  }
   if (!fits.length) return undefined;
   // Prefer 5 V when the part takes it, then a free pin, then the nearest.
   const want = fits.some((p) => Math.abs((p.volts ?? 0) - 5) < 0.2) ? 5 : Math.max(...fits.map((p) => p.volts ?? 0));
@@ -96,9 +115,9 @@ function pickSupply(ctx: Ctx, host: Part, hostDef: PartDef, sink: PinDef, near: 
     .sort((a, b) => Number(ctx.used.has(a.key)) - Number(ctx.used.has(b.key)) || distance(ctx, host, a.p.id, near) - distance(ctx, host, b.p.id, near))[0]?.key;
 }
 
-function pickGnd(ctx: Ctx, host: Part, hostDef: PartDef, near: [number, number]): string | undefined {
+export function pickGnd(ctx: Ctx, host: Part, hostDef: PartDef, near: [number, number]): string | undefined {
   return hostDef.pins
-    .filter((p) => p.kind === 'gnd' && !p.inlet)
+    .filter((p) => (p.kind === 'gnd' && !p.inlet) || (p.kind === 'pass' && ctx.nets.of.get(`${host.id}.${p.id}`)?.kind === 'gnd'))
     .map((p) => ({ key: `${host.id}.${p.id}`, p }))
     .sort((a, b) => Number(ctx.used.has(a.key)) - Number(ctx.used.has(b.key)) || distance(ctx, host, a.p.id, near) - distance(ctx, host, b.p.id, near))[0]?.key;
 }
@@ -129,13 +148,30 @@ function matchPins(ctx: Ctx, a: Part, b: Part): { wires: [string, string][]; not
       const s = pickSupply(ctx, host, hdef, p, near);
       if (s) wires.push([`${dev.id}.${p.id}`, s]);
     }
-    // Motor wires, in order.
-    const outs = hdef.pins.filter((x) => x.kind === 'motor-out' && free(host, x));
-    const ins = ddef.pins.filter((x) => x.kind === 'motor-in' && free(dev, x));
-    if (outs.length && ins.length && outs.length >= ins.length) ins.forEach((p, i) => wires.push([`${dev.id}.${p.id}`, `${host.id}.${outs[i]!.id}`]));
-    // USB.
-    for (const p of ddef.pins.filter((x) => x.kind === 'usb-device' && free(dev, x))) {
-      const port = hdef.pins.find((x) => x.kind === 'usb-host' && free(host, x) && !taken.has(`${host.id}.${x.id}`));
+    // A fuse, switch or BMS takes the power in on its first free side: + (or an unmarked end)
+    // from a supply, − from ground.
+    if (ddef.passes && !ddef.passes.some(([x, y]) => !free(dev, ddef.pins.find((p) => p.id === x)!) || !free(dev, ddef.pins.find((p) => p.id === y)!))) {
+      const ends = ddef.passes.map(([x]) => ddef.pins.find((p) => p.id === x)!);
+      for (const e of ends) {
+        const minus = /-|−/.test(e.id + e.label);
+        if (minus) {
+          const g = pickGnd(ctx, host, hdef, near);
+          if (g) wires.push([`${dev.id}.${e.id}`, g]);
+        } else {
+          const sup = hdef.pins.find((p) => volts(ctx, host, p) !== undefined && !taken.has(`${host.id}.${p.id}`));
+          if (sup) wires.push([`${dev.id}.${e.id}`, `${host.id}.${sup.id}`]);
+        }
+      }
+    }
+    // Motor and speaker wires, in order.
+    for (const [o, i] of [['motor-out', 'motor-in'], ['speaker-out', 'speaker-in']] as const) {
+      const outs = hdef.pins.filter((x) => x.kind === o && free(host, x));
+      const ins = ddef.pins.filter((x) => x.kind === i && free(dev, x));
+      if (outs.length && ins.length && outs.length >= ins.length) ins.forEach((p, n) => wires.push([`${dev.id}.${p.id}`, `${host.id}.${outs[n]!.id}`]));
+    }
+    // Cables: a device socket to a free host socket of the same kind.
+    for (const p of ddef.pins.filter((x) => x.kind === 'port' && !x.host && free(dev, x))) {
+      const port = hdef.pins.find((x) => x.kind === 'port' && x.host && x.port === p.port && free(host, x) && !taken.has(`${host.id}.${x.id}`));
       if (port) {
         wires.push([`${dev.id}.${p.id}`, `${host.id}.${port.id}`]);
         taken.add(`${host.id}.${port.id}`);
@@ -144,11 +180,16 @@ function matchPins(ctx: Ctx, a: Part, b: Part): { wires: [string, string][]; not
   }
   // One ground wire, once something else joins them. Each side uses the ground beside the pin
   // that carries the power (a driver's B− beside B+, the Pi's USB-C ground beside its 5 V).
-  if (wires.length && !wires.every(([x, y]) => isUsb(ctx, x) || isUsb(ctx, y))) {
+  const minus = (k: string) => {
+    const p = pinOf(ctx.doc, ctx.defs, k);
+    return p?.kind === 'gnd' || (p?.kind === 'pass' && /-|−/.test(p.id));
+  };
+  const grounded = wires.some(([x, y]) => minus(x) && minus(y));
+  if (wires.length && !grounded && !wires.every(([x, y]) => isPort(ctx, x) || isPort(ctx, y))) {
     const ground = (part: Part, d: PartDef): string | undefined => {
       const mine = wires.flat().filter((k) => splitKey(k)[0] === part.id).map((k) => d.pins.find((p) => p.id === splitKey(k)[1])!);
-      const power = mine.find((p) => p.kind === 'supply' || POWER_IN.has(p.kind));
-      const gnds = d.pins.filter((p) => p.kind === 'gnd');
+      const power = mine.find((p) => p.kind === 'supply' || POWER_IN.has(p.kind) || p.kind === 'pass');
+      const gnds = d.pins.filter((p) => (p.kind === 'gnd' && !p.inlet) || (p.kind === 'pass' && /-|−/.test(p.id) && (!mine.includes(p))));
       if (!gnds.length) return undefined;
       if (power) {
         const g = gnds.slice().sort((x, y) => Math.abs(x.x - power.x) + Math.abs(x.y - power.y) - (Math.abs(y.x - power.x) + Math.abs(y.y - power.y)))[0]!;
@@ -163,6 +204,12 @@ function matchPins(ctx: Ctx, a: Part, b: Part): { wires: [string, string][]; not
     const already = ga && gb && ctx.doc.wires.some((w) => (w.a === ga && w.b === gb) || (w.a === gb && w.b === ga));
     if (ga && gb && !already && !(ctx.used.has(ga) && ctx.used.has(gb) && da.kind === 'part' && db.kind === 'part')) wires.push([ga, gb]);
   }
+  // A ground already made by the pass-through step needs no second one.
+  for (let i = wires.length - 1; i >= 0; i--) {
+    const [x, y] = wires[i]!;
+    if (wires.findIndex(([p, q]) => (p === x && q === y) || (p === y && q === x)) !== i) wires.splice(i, 1);
+  }
+  notes.push(...ctx.said);
   for (const [dev, ddef] of [[a, da], [b, db]] as const) {
     if (ddef.kind !== 'part') continue;
     const missing = ddef.pins.filter((p) => !p.optional && free(dev, p) && !wires.some(([x, y]) => x === `${dev.id}.${p.id}` || y === `${dev.id}.${p.id}`));
@@ -171,13 +218,12 @@ function matchPins(ctx: Ctx, a: Part, b: Part): { wires: [string, string][]; not
   return { wires, notes, blocked };
 }
 
-function isUsb(ctx: Ctx, key: string): boolean {
-  const k = pinOf(ctx.doc, ctx.defs, key)?.kind;
-  return k === 'usb-host' || k === 'usb-device';
+function isPort(ctx: Ctx, key: string): boolean {
+  return pinOf(ctx.doc, ctx.defs, key)?.kind === 'port';
 }
 
 /** The serial port's RX that goes with a TX pin (Mega TX1 18 ↔ RX1 19, Pi GPIO14 ↔ GPIO15). */
-function partnerRx(d: PartDef, tx: PinDef): PinDef | undefined {
+export function partnerRx(d: PartDef, tx: PinDef): PinDef | undefined {
   const m = /^(D|GPIO)(\d+)$/.exec(tx.label);
   if (!m) return undefined;
   const label = m[1] + String(Number(m[2]) + 1);
@@ -267,7 +313,11 @@ export function connectOptions(doc: Diagram, defs: DefLookup, fromId: string, to
   const reasons: string[] = [];
   if (da.kind === 'board' && db.kind === 'board') {
     const m = matchPins(ctx, a, b);
-    if (m.wires.length) options.push({ label: 'USB cable', wires: m.wires, addParts: [], notes: [`${db.pins.some((p) => p.kind === 'usb-device') ? b.name : a.name} gets its power and the Faber link through it`] });
+    if (m.wires.length) {
+      const dev = m.wires.flat().map((k) => pinOf(doc, defs, k)).find((p) => p?.kind === 'port' && !p.host);
+      const label = dev?.port === 'usb' ? 'USB cable' : dev?.port === 'hdmi' ? 'HDMI cable' : dev?.port === 'csi' ? 'Camera ribbon' : 'Cable';
+      options.push({ label, wires: m.wires, addParts: [], notes: dev?.port === 'usb' ? [`${db.pins.some((p) => p.kind === 'port' && p.port === 'usb' && !p.host) ? b.name : a.name} gets its power and the Faber link through it`] : [] });
+    }
     const u = uart(ctx, a, b);
     if ('wires' in u) options.push(u);
     else reasons.push(u.reason);
@@ -278,4 +328,53 @@ export function connectOptions(doc: Diagram, defs: DefLookup, fromId: string, to
   }
   if (!options.length) return { ok: false, reason: reasons[0] ?? `Nothing on ${a.name} fits ${b.name}` };
   return { ok: true, options };
+}
+
+/**
+ * A level shifter between a 3.3 V pin and a 5 V pin: `lo` on an LV channel, `hi` on its HV
+ * side, the shifter powered from each side's board. Uses a shifter on the drawing with a free
+ * channel, or adds one between them.
+ */
+export function levelBridge(ctx: Ctx, lo: string, hi: string): { wires: [string, string][]; addParts: Part[] } | undefined {
+  const [loId] = splitKey(lo);
+  const [hiId] = splitKey(hi);
+  const loPart = ctx.doc.parts.find((p) => p.id === loId);
+  const hiPart = ctx.doc.parts.find((p) => p.id === hiId);
+  if (!loPart || !hiPart) return undefined;
+  const addParts: Part[] = [];
+  let shifter = ctx.doc.parts.find((p) => {
+    const d = ctx.defs(p.def);
+    return d?.channels?.some(([l, h]) => !ctx.used.has(`${p.id}.${l}`) && !ctx.used.has(`${p.id}.${h}`));
+  });
+  if (!shifter) {
+    const [ax, ay] = centre(ctx, loPart);
+    const [bx, by] = centre(ctx, hiPart);
+    let n = 1;
+    while (ctx.doc.parts.some((p) => p.name === `shifter${n > 1 ? '-' + n : ''}`)) n += 1;
+    shifter = { id: `p${Date.now().toString(36)}b`, def: 'shifter', name: `shifter${n > 1 ? '-' + n : ''}`, x: Math.round((ax + bx) / 4) * 2, y: Math.round((ay + by) / 4) * 2 + 30, rot: 0 };
+    addParts.push(shifter);
+  }
+  const sd = ctx.defs(shifter.def)!;
+  const [l, h] = sd.channels!.find(([a, b]) => !ctx.used.has(`${shifter.id}.${a}`) && !ctx.used.has(`${shifter.id}.${b}`))!;
+  const s = (id: string) => `${shifter.id}.${id}`;
+  const wires: [string, string][] = [[lo, s(l)], [s(h), hi]];
+  // Power each side from where its pin lives: the 3.3 V board, and the 5 V side's own supply.
+  const loDef = ctx.defs(loPart.def)!;
+  const hiDef = ctx.defs(hiPart.def)!;
+  const hiHost = hiDef.kind === 'board' ? hiPart : ctx.doc.parts.find((p) => ctx.defs(p.def)?.kind === 'board' && ctx.defs(p.def)?.pins.some((x) => x.kind === 'supply' && x.volts === 5)) ?? hiPart;
+  const hiHostDef = ctx.defs(hiHost.def)!;
+  const near = centre(ctx, shifter);
+  if (!ctx.used.has(s('LV'))) {
+    const p = pickSupply(ctx, loPart, loDef, sd.pins.find((x) => x.id === 'LV')!, near);
+    if (p) wires.push([s('LV'), p]);
+  }
+  if (!ctx.used.has(s('HV'))) {
+    const p = pickSupply(ctx, hiHost, hiHostDef, sd.pins.find((x) => x.id === 'HV')!, near);
+    if (p) wires.push([s('HV'), p]);
+  }
+  const lg = pickGnd(ctx, loPart, loDef, near);
+  const hg = pickGnd(ctx, hiHost, hiHostDef, near);
+  if (!ctx.used.has(s('LGND')) && lg) wires.push([s('LGND'), lg]);
+  if (!ctx.used.has(s('HGND')) && hg) wires.push([s('HGND'), hg]);
+  return { wires, addParts };
 }

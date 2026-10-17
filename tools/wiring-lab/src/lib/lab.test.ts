@@ -6,11 +6,14 @@ import { seatShifter, sennepExample } from './example';
 import { geom, tooClose } from './geometry';
 import { arrange, mountedOn } from './layout';
 import { computeNets } from './nets';
-import { BUILTIN } from './parts';
+import { CATALOG, listed, lookup } from './catalog';
+import { applyFix, fixesFor } from './fixes';
+import { simulate } from './power';
+import { snapToBreadboard } from './layout';
 import { routeAll } from './router';
 import type { Diagram, Part } from './types';
 
-const defs = (id: string) => BUILTIN.find((d) => d.id === id);
+const defs = lookup();
 
 function example(): Diagram {
   const doc = sennepExample();
@@ -40,7 +43,7 @@ function errors(doc: Diagram) {
 
 describe('parts', () => {
   it('sit on the 0.1 in grid, so they plug into a breadboard', () => {
-    for (const d of BUILTIN) {
+    for (const d of listed()) {
       expect(d.w % 2, d.id).toBe(0);
       expect(d.h % 2, d.id).toBe(0);
       for (const p of d.pins) {
@@ -108,6 +111,16 @@ describe('the SENNEP example', () => {
 });
 
 describe('checks', () => {
+  it('catch a battery on a Mega: VIN runs hot on 12.6 V, its 5 V pin cannot take it', () => {
+    const doc = blank(['m', 'mega', 0, 0], ['b', 'bat?s=3&p=1', -100, 0]);
+    wire(doc, 'b.+', 'm.VIN');
+    const nets = computeNets(doc, defs);
+    expect(runChecks(doc, defs, nets).map((i) => i.code)).toContain('hot-regulator');
+    const doc2 = blank(['m', 'mega', 0, 0], ['b', 'bat?s=3&p=1', -100, 0]);
+    wire(doc2, 'b.+', 'm.5V1');
+    expect(errors(doc2)).toContain('Two supplies fight: 5 V and 12.6 V are joined');
+  });
+
   it('catch 5 V logic into a Pi pin', () => {
     const doc = blank(['pi', 'pi5', 0, 0], ['s', 'hcsr04', 0, -40]);
     wire(doc, 's.ECHO', 'pi.P11');
@@ -116,7 +129,7 @@ describe('checks', () => {
   });
 
   it('catch two supplies joined and a part over its voltage', () => {
-    const doc = blank(['m', 'mega', 0, 0], ['b', 'bat3s', -100, 0], ['s', 'hcsr04', 0, -40]);
+    const doc = blank(['m', 'mega', 0, 0], ['b', 'bat?s=3&p=6', -100, 0], ['s', 'hcsr04', 0, -40]);
     wire(doc, 'b.+', 'm.5V1');
     wire(doc, 's.VCC', 'b.+');
     const e = errors(doc);
@@ -206,7 +219,7 @@ describe('connect to', () => {
   });
 
   it('joins a battery to a driver by B+ and B−', () => {
-    const doc = blank(['b', 'bat3s', -100, 0], ['d', 'bts7960', 0, 0]);
+    const doc = blank(['b', 'bat?s=3&p=6', -100, 0], ['d', 'bts7960', 0, 0]);
     const r = connectOptions(doc, defs, 'b', 'd');
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -220,5 +233,144 @@ describe('connect to', () => {
     const doc = blank(['s', 'hcsr04', 0, 0], ['l', 'led', 40, 0]);
     const r = connectOptions(doc, defs, 's', 'l');
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('parametric parts', () => {
+  it('make a battery from its settings', () => {
+    const b = defs('bat?s=4&p=2&cell=4.2&nom=3.6&mah=3000')!;
+    expect(b.name).toBe('Battery 4S2P');
+    expect(b.pins.find((p) => p.id === '+')!.volts).toBe(16.8);
+    expect(b.covers).toContain('6 Ah');
+  });
+
+  it('cover every electrical part in SENNEP\'s parts list', () => {
+    const ids = CATALOG.map((d) => d.id);
+    for (const id of ['nano', 'l298n', 'bms3s', 'charger3s', 'l7805', 'ld1117', 'irfz44n', 'relay40', 'fuse', 'xt60', 'estop', 'e18', 'qmc5883l', 'neo6m', 'ina219', 'tsl2561', 'ds3231', 'mic', 'vs1838b', 'doorswitch', 'ld19', 'cp2102', 'aicam', 'nrf24', 'esp01', 'tca9548a', 'screen7', 'lcd2004', 'lcd1602', 'keypad', 'voltmeter', 'dfplayer', 'speaker', 'pam8403', 'led3w', 'irled', 'joystick', 'pot', 'keyswitch', 'toggle', 'adapter12', 'buckusb', 'shifter', 'hcsr04', 'vl53l0x', 'mpu6050', 'bts7960']) {
+      expect(ids, id).toContain(id);
+    }
+    expect(defs('ws2812?n=150')).toBeDefined();
+    expect(defs('mb102?top=5&bottom=3.3')).toBeDefined();
+  });
+});
+
+describe('connect to, through the power chain', () => {
+  it('puts a battery on a BMS: + to B+, − to B−', () => {
+    const doc = blank(['b', 'bat?s=3&p=6', -100, 0], ['m', 'bms3s', 0, 0]);
+    const r = connectOptions(doc, defs, 'b', 'm');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.options[0]!.wires.sort()).toEqual([['b.+', 'm.B+'], ['b.-', 'm.B-']].map((w) => w.slice().reverse()).sort().length ? r.options[0]!.wires.sort() : []);
+    const flat = r.options[0]!.wires.map((w) => w.slice().sort().join('|')).sort();
+    expect(flat).toEqual(['b.+|m.B+', 'b.-|m.B-'].sort());
+  });
+
+  it('powers a driver from a fuse that already carries the battery', () => {
+    const doc = blank(['b', 'bat?s=3&p=6', -100, 0], ['f', 'fuse', -40, 0], ['d', 'bts7960', 40, 0]);
+    wire(doc, 'b.+', 'f.A');
+    const r = connectOptions(doc, defs, 'd', 'f');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.options[0]!.wires).toContainEqual(['d.B+', 'f.B']);
+  });
+
+  it('plugs a LiDAR into its USB adapter', () => {
+    const doc = blank(['l', 'ld19', 0, 0], ['u', 'cp2102', 60, 0]);
+    const r = connectOptions(doc, defs, 'l', 'u');
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const w = r.options[0]!.wires;
+    expect(w).toContainEqual(['l.TX', 'u.RXD']);
+    expect(w).toContainEqual(['l.P5V', 'u.5V']);
+  });
+});
+
+describe('fixes', () => {
+  it('move a PWM job to a pin that can do it', () => {
+    const doc = blank(['m', 'mega', 0, 0], ['d', 'bts7960', 0, -60]);
+    wire(doc, 'd.RPWM', 'm.D22');
+    const issue = runChecks(doc, defs, computeNets(doc, defs)).find((i) => i.code === 'needs-cap')!;
+    const fixes = fixesFor(doc, defs, issue);
+    expect(fixes.length).toBeGreaterThan(0);
+    applyFix(doc, fixes[0]!);
+    expect(runChecks(doc, defs, computeNets(doc, defs)).some((i) => i.code === 'needs-cap')).toBe(false);
+  });
+
+  it('put a level shifter between a Pi and a Mega joined directly', () => {
+    const doc = blank(['pi', 'pi5', -120, 0], ['m', 'mega', 0, 0]);
+    wire(doc, 'pi.P8', 'm.D19');
+    const issue = runChecks(doc, defs, computeNets(doc, defs)).find((i) => i.code === 'logic-joined')!;
+    const fix = fixesFor(doc, defs, issue).find((f) => f.label === 'Put a level shifter between')!;
+    expect(fix.addParts?.map((p) => p.def)).toEqual(['shifter']);
+    applyFix(doc, fix);
+    expect(errors(doc)).toEqual([]);
+  });
+
+  it('offer several supplies for a part with no power, each one working', () => {
+    const doc = blank(['m', 'mega', 0, 0], ['s', 'hcsr04', 0, -40]);
+    wire(doc, 's.TRIG', 'm.D30');
+    wire(doc, 's.ECHO', 'm.D31');
+    wire(doc, 's.GND', 'm.GND1');
+    wire(doc, 's.VCC', 'm.3V3');
+    const issue = runChecks(doc, defs, computeNets(doc, defs)).find((i) => i.code === 'under-voltage')!;
+    const fixes = fixesFor(doc, defs, issue);
+    expect(fixes.length).toBeGreaterThan(1);
+    expect(fixes.every((f) => f.label.startsWith('Power it from m 5V'))).toBe(true);
+  });
+});
+
+describe('power mode', () => {
+  it('switches the SENNEP example on: Pi, Mega and LiDAR run, current flows away from the battery', () => {
+    const doc = example();
+    const s = simulate(doc, defs);
+    for (const id of ['pi', 'mega', 'lidar', 'sl', 'drv', 'buck', 'usb']) expect(s.parts.get(id), id).toBe('on');
+    expect(s.shorts.size).toBe(0);
+    const w = doc.wires.find((x) => x.a === 'bat.+' && x.b === 'bms.B+')!;
+    expect(s.flow.get(w.id)).toBe(1);
+    const g = doc.wires.find((x) => x.a === 'bat.-' && x.b === 'bms.B-')!;
+    expect(s.flow.get(g.id)).toBe(-1);
+  });
+
+  it('pressing the e-stop cuts the driver, not the Pi', () => {
+    const doc = example();
+    doc.parts.find((p) => p.id === 'estop')!.open = true;
+    const s = simulate(doc, defs);
+    expect(s.parts.get('drv')).toBe('on'); // its logic side runs off the Mega's 5 V
+    const bplus = computeNets(doc, defs).of.get('drv.B+')!;
+    expect(s.live.has(bplus.id)).toBe(false);
+    expect(s.parts.get('pi')).toBe('on');
+  });
+
+
+  it('a short after the BMS trips it', () => {
+    const doc = example();
+    wire(doc, 'fuse.B', 'mega.GND1');
+    const s = simulate(doc, defs);
+    expect(s.tripped.length).toBeGreaterThan(0);
+    expect(s.messages[0]!.sev).toBe('error');
+  });
+});
+
+describe('the breadboard', () => {
+  it('pulls a module dropped near the holes into them', () => {
+    const doc = blank(['bb', 'breadboard', 0, 0], ['l', 'led', 0, 0]);
+    const led = doc.parts[1]!;
+    led.rot = 2;
+    led.x = 4 + 2 * 9 - 2 + 2;
+    led.y = 20 + 2;
+    expect(snapToBreadboard(doc, defs, led)).toBe(true);
+    expect(computeNets(doc, defs).plugs.length).toBe(2);
+  });
+});
+
+describe('mirroring', () => {
+  it("swaps a part's left and right pins", () => {
+    const doc = blank(['d', 'bts7960', 0, 0]);
+    const plain = geom(doc.parts[0]!, defs).pins['RPWM']!;
+    doc.parts[0]!.flip = true;
+    const flipped = geom(doc.parts[0]!, defs).pins['RPWM']!;
+    expect(plain.x).toBe(0);
+    expect(flipped.x).toBe(40);
+    expect(flipped.d).toBe(1);
   });
 });

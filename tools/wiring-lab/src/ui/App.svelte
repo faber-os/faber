@@ -17,7 +17,7 @@
     if (kinds.has('5v')) out.push(['#ef4444', '5 V']);
     if (kinds.has('3v3')) out.push(['#f97316', '3.3 V']);
     if (kinds.has('gnd')) out.push(['#202328', 'GND']);
-    if (kinds.has('usb')) out.push(['#8b939c', 'USB']);
+    if (kinds.has('cable')) out.push(['#8b939c', 'Cables']);
     out.push(['linear-gradient(90deg,#3b82f6,#facc15,#c084fc)', 'Signals']);
     return out;
   });

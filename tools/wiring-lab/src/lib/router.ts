@@ -231,7 +231,7 @@ export function routeAll(doc: Diagram, defs: DefLookup, nets: NetIndex): Routing
   };
   const rank = (w: Wire) => {
     const k = nets.of.get(w.a)?.kind;
-    return k === 'signal' || k === 'empty' ? 0 : k === 'motor' || k === 'usb' ? 1 : 2;
+    return k === 'signal' || k === 'empty' ? 0 : k === 'motor' || k === 'speaker' || k === 'cable' ? 1 : 2;
   };
   const order = doc.wires.slice().sort((x, y) => rank(x) - rank(y) || length(x) - length(y));
   const edges = new Map<number, Set<string>>();

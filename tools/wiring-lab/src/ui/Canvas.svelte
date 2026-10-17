@@ -366,7 +366,7 @@
             <path d={w.d} fill="none" stroke="var(--select)" stroke-width={w.width + 5} stroke-linecap="round" stroke-linejoin="round" opacity="0.6" />
           {/if}
           <path d={w.d} fill="none" stroke={w.color} stroke-width={w.width} stroke-linecap="round" stroke-linejoin="round" />
-          {#if w.kind === 'usb'}
+          {#if w.kind === 'cable'}
             <path d={w.d} fill="none" stroke="#5f666e" stroke-width="1.2" stroke-dasharray="1 5" stroke-linecap="round" />
           {/if}
         {/if}
