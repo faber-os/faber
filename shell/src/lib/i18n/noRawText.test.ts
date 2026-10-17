@@ -74,10 +74,12 @@ const SOURCES = {
  * lib/state/diagnostics.ts: "Copy diagnostics" is a report for a bug tracker, kept in English on
  * purpose so maintainers can read every report (docs/translations.md). And the Arduino editor's
  * API catalogue (components/editor/arduinoApi.ts, faberlinkApi.ts): documentation of code, in
- * English like the code it describes (docs/arduino-editor.md).
+ * English like the code it describes (docs/arduino-editor.md). And the circuit lab's catalogue
+ * (lib/circuit/): part names, their notes and the electronics it explains, English data for now
+ * like the Arduino catalogue (docs/circuits.md, "Texts").
  */
 const SKIPPED =
-  /^\/src\/(test\/|lib\/api\/generated\/|lib\/i18n\/|lib\/state\/diagnostics\.ts$|components\/editor\/(arduinoApi|faberlinkApi)\.ts$)/;
+  /^\/src\/(test\/|lib\/api\/generated\/|lib\/i18n\/|lib\/state\/diagnostics\.ts$|components\/editor\/(arduinoApi|faberlinkApi)\.ts$|lib\/circuit\/)/;
 
 /** A catalogue key such as `settings.nav.units`, passed around to be translated later. */
 const KEY = /^[a-z][\w-]*(\.[\w-]+)+$/;

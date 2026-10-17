@@ -43,6 +43,7 @@ describe('Start menu', () => {
       'Serial monitor',
       'Arduino flasher',
       'Arduino',
+      'Circuits',
       'I2C scanner',
       'GPIO panel',
       'Ports',
@@ -90,7 +91,7 @@ describe('Start menu', () => {
         .getAllByRole('menuitem')
         .map((m) => m.textContent),
     ).toEqual([expect.stringContaining('drive-test.md'), expect.stringContaining('wiring.txt')]);
-    await userEvent.keyboard('wir');
+    await userEvent.keyboard('wiri');
     expect(within(menu).getAllByRole('menuitem')).toHaveLength(1);
     expect(within(menu).getByRole('menuitem')).toHaveTextContent('wiring.txt');
   });

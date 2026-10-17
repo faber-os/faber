@@ -39,6 +39,7 @@ const BY_EXTENSION: Record<string, FileType> = {
   js: 'code',
   ts: 'code',
   fbcap: 'recording',
+  fbcircuit: 'config',
   faberpkg: 'package',
   png: 'image',
   jpg: 'image',

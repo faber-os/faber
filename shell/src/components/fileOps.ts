@@ -32,7 +32,14 @@ export function openEntry(desktop: DesktopController, entry: FileEntry): void {
     openProperties(desktop, entry);
   } else if (isPackageFile(entry.name)) openPackage(desktop, entry.path);
   else if (extension(entry.name) === 'ino') openInArduino(desktop, entry.path);
+  else if (extension(entry.name) === 'fbcircuit') openInCircuits(desktop, entry.path);
   else openInNotes(desktop, entry.path);
+}
+
+/** A circuit drawing opens in its own Circuits window (the one that has it, if open). */
+export function openInCircuits(desktop: DesktopController, path: string): void {
+  desktop.noteRecent(path);
+  desktop.open('circuit', { key: path, params: { path } });
 }
 
 export function openFolder(desktop: DesktopController, path: string): void {

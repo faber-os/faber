@@ -21,6 +21,7 @@ import SerialMonitorWindow from './SerialMonitorWindow.svelte';
 import SettingsWindow from './SettingsWindow.svelte';
 import WorldWindow from './WorldWindow.svelte';
 import WiringWindow from './WiringWindow.svelte';
+import CircuitWindow from './CircuitWindow.svelte';
 import TemperatureWindow from './TemperatureWindow.svelte';
 import LevelWindow from './LevelWindow.svelte';
 import FractionWindow from './FractionWindow.svelte';
@@ -255,6 +256,24 @@ export const WINDOW_DEFS: WindowDef[] = [
     defaultSize: { w: 880, h: 540 },
     minSize: { w: 380, h: 340 },
     component: ArduinoWindow,
+  },
+  {
+    // A wiring drawing with power you can switch on (docs/circuits.md), kept as a .fbcircuit file.
+    kind: 'circuit',
+    get title() {
+      return t('programs.circuit.title');
+    },
+    get description() {
+      return t('programs.circuit.description');
+    },
+    icon: 'plug',
+    menu: 'tools',
+    program: 'tool:circuit',
+    colour: 'parts',
+    multiple: true,
+    defaultSize: { w: 1100, h: 680 },
+    minSize: { w: 560, h: 380 },
+    component: CircuitWindow,
   },
   {
     kind: 'temperature',
