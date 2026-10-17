@@ -1,0 +1,19 @@
+# faber-core on a Raspberry Pi (tools/pi/setup.sh installs it; @USER@ is filled in there).
+# Listens on every address so other computers on the network can sign in; the core asks for an
+# admin to be created on first start.
+[Unit]
+Description=Faber core
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/usr/local/bin/faber-core
+
+[Service]
+User=@USER@
+SupplementaryGroups=dialout i2c spi gpio
+WorkingDirectory=/var/lib/faber
+ExecStart=/usr/local/bin/faber-core --data /var/lib/faber --listen 0.0.0.0:7878
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

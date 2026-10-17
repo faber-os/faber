@@ -148,3 +148,19 @@ The shell and the core each carry a fingerprint of the generated API types. If a
 core built from a different API (an old core still running, say), it shows "Restart the Faber
 core" instead of failing with 404s. Both sides compute it the same way: `core/build/api_fingerprint.rs`
 and `shell/apiFingerprint.ts`, tested against one fixture (`fixtures/api-fingerprint`).
+
+## Running it on a Raspberry Pi
+
+Until the Faber image exists (Phase 6), a Pi runs Raspberry Pi OS (64-bit) with faber-core as a
+systemd service. Flash the card with Raspberry Pi Imager (SSH on, public-key only, your user and
+Wi-Fi set there), then from this repository:
+
+```bash
+tools/pi/deploy.sh --setup mikkel@sennep.local
+```
+
+`--setup` runs `tools/pi/setup.sh` on the Pi once: build tools, Rust, I²C and SPI on, the GPIO
+UART freed from the login console (for an Arduino on pins 8/10), and the `faber-core` service
+(data in `/var/lib/faber`, listening on `0.0.0.0:7878`). Reboot the Pi once after it. Later
+deploys leave out `--setup`: the shell is built here, the committed source is sent over, and the
+core is built on the Pi with the shell compiled in and restarted. Logs: `journalctl -u faber-core -f`.
