@@ -1,0 +1,1983 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Faber Wiring Canvas</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;600&family=Atkinson+Hyperlegible+Next:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a workbench. Parts drawer left, the cutting-mat canvas in the middle, the inspector right.
+   Colours and type are the Faber shell's own tokens (shell/src/styles/tokens.css). */
+:root {
+  --surface: oklch(0.993 0.001 250);
+  --surface-2: oklch(0.974 0.002 250);
+  --surface-3: oklch(0.948 0.003 250);
+  --line: oklch(0.888 0.004 250);
+  --line-strong: oklch(0.8 0.006 250);
+  --text: oklch(0.235 0.008 250);
+  --muted: oklch(0.46 0.01 250);
+  --faint: oklch(0.6 0.008 250);
+  --accent: oklch(0.487 0.083 186);
+  --accent-text: oklch(0.99 0.004 186);
+  --accent-soft: oklch(0.56 0.09 186 / 0.11);
+  --accent-ink: oklch(0.44 0.078 186);
+  --ok: oklch(0.47 0.11 152);
+  --ok-soft: oklch(0.6 0.11 152 / 0.13);
+  --warn: oklch(0.5 0.11 70);
+  --warn-soft: oklch(0.72 0.12 78 / 0.18);
+  --danger: oklch(0.5 0.18 27);
+  --danger-soft: oklch(0.6 0.18 27 / 0.12);
+  --mat: oklch(0.43 0.05 158);
+  --mat-major: oklch(0.93 0.03 150 / 0.24);
+  --mat-minor: oklch(0.93 0.03 150 / 0.09);
+  --wire-gnd: #202328;
+  --shadow: 0 1px 2px oklch(0.2 0.01 250 / 0.08), 0 4px 16px oklch(0.2 0.01 250 / 0.06);
+  --font-ui: 'Atkinson Hyperlegible Next', ui-sans-serif, system-ui, sans-serif;
+  --font-data: 'Atkinson Hyperlegible Mono', ui-monospace, 'Cascadia Mono', monospace;
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 11px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: oklch(0.238 0.003 250);
+    --surface-2: oklch(0.215 0.003 250);
+    --surface-3: oklch(0.29 0.004 250);
+    --line: oklch(0.335 0.004 250);
+    --line-strong: oklch(0.42 0.006 250);
+    --text: oklch(0.94 0.003 250);
+    --muted: oklch(0.76 0.006 250);
+    --faint: oklch(0.63 0.006 250);
+    --accent: oklch(0.74 0.095 184);
+    --accent-text: oklch(0.2 0.03 184);
+    --accent-soft: oklch(0.74 0.095 184 / 0.14);
+    --accent-ink: oklch(0.8 0.085 184);
+    --ok: oklch(0.8 0.12 152);
+    --ok-soft: oklch(0.8 0.12 152 / 0.14);
+    --warn: oklch(0.84 0.12 82);
+    --warn-soft: oklch(0.84 0.12 82 / 0.14);
+    --danger: oklch(0.76 0.14 25);
+    --danger-soft: oklch(0.76 0.14 25 / 0.14);
+    --mat: oklch(0.29 0.035 160);
+    --mat-major: oklch(0.9 0.03 150 / 0.16);
+    --mat-minor: oklch(0.9 0.03 150 / 0.06);
+    --wire-gnd: #15171a;
+    --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 6px 20px oklch(0 0 0 / 0.25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --surface: oklch(0.238 0.003 250);
+  --surface-2: oklch(0.215 0.003 250);
+  --surface-3: oklch(0.29 0.004 250);
+  --line: oklch(0.335 0.004 250);
+  --line-strong: oklch(0.42 0.006 250);
+  --text: oklch(0.94 0.003 250);
+  --muted: oklch(0.76 0.006 250);
+  --faint: oklch(0.63 0.006 250);
+  --accent: oklch(0.74 0.095 184);
+  --accent-text: oklch(0.2 0.03 184);
+  --accent-soft: oklch(0.74 0.095 184 / 0.14);
+  --accent-ink: oklch(0.8 0.085 184);
+  --ok: oklch(0.8 0.12 152);
+  --ok-soft: oklch(0.8 0.12 152 / 0.14);
+  --warn: oklch(0.84 0.12 82);
+  --warn-soft: oklch(0.84 0.12 82 / 0.14);
+  --danger: oklch(0.76 0.14 25);
+  --danger-soft: oklch(0.76 0.14 25 / 0.14);
+  --mat: oklch(0.29 0.035 160);
+  --mat-major: oklch(0.9 0.03 150 / 0.16);
+  --mat-minor: oklch(0.9 0.03 150 / 0.06);
+  --wire-gnd: #15171a;
+  --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 6px 20px oklch(0 0 0 / 0.25);
+  color-scheme: dark;
+}
+
+html, body { height: 100%; }
+body {
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px;
+  box-sizing: border-box;
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr) 320px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+.bar {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.bar h1 { font-size: 17px; font-weight: 700; margin: 0; letter-spacing: 0.01em; }
+.bar .doc { font-family: var(--font-data); font-size: 12.5px; color: var(--muted); }
+.bar .spacer { flex: 1; }
+.bar .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  border-radius: var(--r-md);
+  padding: 6px 11px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--surface-3); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.danger { color: var(--danger); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px;
+  font-variant-numeric: tabular-nums;
+}
+.chip.err { background: var(--danger-soft); color: var(--danger); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panel h2 {
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+  margin: 0; font-weight: 700;
+}
+.lib-head { padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); }
+.lib-head input {
+  width: 100%; border: 1px solid var(--line-strong); border-radius: var(--r-md);
+  padding: 6px 9px; background: var(--surface-2); font-size: 13px;
+}
+.lib-list { overflow: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.lib-item {
+  display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 10px; align-items: center;
+  text-align: left; border: 0; background: none; border-radius: var(--r-md); padding: 6px; cursor: pointer;
+}
+.lib-item:hover { background: var(--surface-3); }
+.lib-item svg { width: 48px; height: 36px; display: block; }
+.lib-item b { display: block; font-size: 13px; font-weight: 600; }
+.lib-item span { display: block; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-foot { margin-top: auto; padding: 10px 12px; border-top: 1px solid var(--line); }
+.lib-foot .btn { width: 100%; justify-content: center; }
+
+.stage {
+  position: relative;
+  min-height: 0;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--mat);
+  box-shadow: var(--shadow);
+  touch-action: none;
+}
+#cv { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; }
+#cv.panning { cursor: grabbing; }
+#cv.connecting { cursor: crosshair; }
+.overlay {
+  position: absolute; display: flex; gap: 6px; align-items: center;
+  font-size: 12px; color: oklch(0.97 0.01 150);
+}
+.legend {
+  left: 10px; bottom: 10px; flex-wrap: wrap; max-width: calc(100% - 120px);
+  background: oklch(0.2 0.02 160 / 0.55); padding: 6px 10px; border-radius: var(--r-md);
+  backdrop-filter: blur(4px); gap: 4px 12px;
+}
+.legend i { display: inline-block; width: 16px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.legend .scale { font-family: var(--font-data); opacity: 0.85; }
+.zoom { right: 10px; bottom: 10px; }
+.zoom button {
+  width: 32px; height: 32px; border-radius: var(--r-md); border: 0; cursor: pointer;
+  background: oklch(0.2 0.02 160 / 0.6); color: oklch(0.97 0.01 150); font-size: 16px; font-weight: 600;
+}
+.hint {
+  left: 50%; top: 10px; transform: translateX(-50%);
+  background: oklch(0.2 0.02 160 / 0.7); padding: 6px 12px; border-radius: 99px; white-space: nowrap;
+}
+.tip {
+  position: absolute; pointer-events: none; z-index: 5;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line-strong);
+  border-radius: var(--r-md); padding: 6px 9px; font-size: 12px; box-shadow: var(--shadow); max-width: 240px;
+}
+.tip b { font-family: var(--font-data); }
+.tip span { color: var(--muted); display: block; }
+
+.tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); }
+.tab {
+  border: 0; background: none; padding: 7px 10px 9px; font-size: 13px; font-weight: 600; cursor: pointer;
+  color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; display: flex; gap: 6px; align-items: center;
+}
+.tab[aria-selected="true"] { color: var(--text); border-color: var(--accent); }
+.tabbody { overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.field input, .field select, .field textarea {
+  border: 1px solid var(--line-strong); border-radius: var(--r-md); padding: 6px 9px;
+  background: var(--surface-2); color: var(--text); font-size: 13.5px; width: 100%;
+}
+.field textarea { font-family: var(--font-data); font-size: 12.5px; min-height: 150px; resize: vertical; line-height: 1.5; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row > .field { flex: 1; min-width: 90px; }
+.pins { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pins td { padding: 5px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+.pins td:first-child { font-family: var(--font-data); font-weight: 600; white-space: nowrap; }
+.pins td.to { color: var(--muted); }
+.pins tr.on td.to { color: var(--text); }
+.dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; }
+.note { font-size: 12.5px; color: var(--muted); }
+.note b { color: var(--text); font-weight: 600; }
+.issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.issue {
+  display: grid; grid-template-columns: 4px minmax(0, 1fr); gap: 10px; padding: 8px 10px 8px 0;
+  border-radius: var(--r-md); background: var(--surface-2); cursor: pointer; border: 1px solid transparent; font-size: 13px;
+}
+.issue:hover { border-color: var(--line-strong); }
+.issue::before { content: ''; border-radius: 0 3px 3px 0; }
+.issue.error::before { background: var(--danger); }
+.issue.warn::before { background: var(--warn); }
+.issue.ok::before { background: var(--ok); }
+.issue small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.steps h3 { font-size: 12.5px; margin: 12px 0 4px; display: flex; justify-content: space-between; gap: 8px; }
+.steps h3 span { color: var(--muted); font-weight: 500; font-family: var(--font-data); }
+.step {
+  display: grid; grid-template-columns: 20px 14px minmax(0, 1fr); gap: 8px; align-items: start;
+  padding: 6px; border-radius: var(--r-md); cursor: pointer; font-size: 13px;
+}
+.step:hover { background: var(--surface-3); }
+.step input { margin: 2px 0 0; accent-color: var(--accent); }
+.step .sw { width: 14px; height: 5px; border-radius: 3px; margin-top: 7px; }
+.step.done span { color: var(--faint); text-decoration: line-through; }
+.step small { display: block; color: var(--muted); font-size: 12px; }
+.progress { height: 6px; background: var(--surface-3); border-radius: 99px; overflow: hidden; }
+.progress div { height: 100%; background: var(--accent); border-radius: 99px; transition: width 0.2s; }
+code, .mono { font-family: var(--font-data); font-size: 12.5px; }
+
+.modal-back {
+  position: fixed; inset: 0; background: oklch(0.15 0.01 250 / 0.45); z-index: 20;
+  display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.modal {
+  width: min(860px, 100%); max-height: 100%; overflow: auto; background: var(--surface);
+  border-radius: var(--r-lg); border: 1px solid var(--line); box-shadow: var(--shadow);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; padding: 18px;
+}
+.modal h2 { grid-column: 1 / -1; font-size: 16px; margin: 0; text-transform: none; letter-spacing: 0; color: var(--text); }
+.modal .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.preview { background: var(--mat); border-radius: var(--r-md); min-height: 200px; display: grid; place-items: center; padding: 10px; }
+.preview svg { max-width: 100%; max-height: 260px; }
+pre.snippet {
+  margin: 0; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 10px; font-family: var(--font-data); font-size: 11.5px; overflow: auto; max-height: 220px; line-height: 1.5;
+}
+.modal .actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+.err-text { color: var(--danger); font-size: 12.5px; }
+
+@media (max-width: 900px) {
+  .app { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 62vh auto auto; }
+  .stage { min-height: 360px; order: 1; }
+  .bar { order: 0; }
+  .app > aside[aria-label="Inspector"] { order: 2; }
+  .app > aside[aria-label="Parts"] { order: 3; }
+  .lib-list { max-height: 260px; }
+  .modal { grid-template-columns: minmax(0, 1fr); }
+  .legend { max-width: calc(100% - 100px); font-size: 11px; }
+  .legend .scale { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .progress div { transition: none; } }
+</style>
+
+<div class="app">
+  <header class="bar">
+    <h1>Wiring</h1>
+    <span class="doc" id="docName">SENNEP · front corner</span>
+    <span id="statusChip"></span>
+    <span class="spacer"></span>
+    <div class="tools">
+      <button class="btn primary" id="btnArrange" title="Place every part around the board and route the wires">Arrange</button>
+      <button class="btn" id="btnUndo" title="Undo (Ctrl+Z)">Undo</button>
+      <button class="btn" id="btnFit">Fit</button>
+      <button class="btn" id="btnReset" title="Back to the SENNEP example">Example</button>
+      <button class="btn" id="btnCopy" title="Copy the diagram as JSON">Copy JSON</button>
+    </div>
+  </header>
+
+  <aside class="panel" aria-label="Parts">
+    <div class="lib-head">
+      <h2>Parts</h2>
+      <input id="libSearch" type="search" placeholder="Search parts" aria-label="Search parts">
+    </div>
+    <div class="lib-list" id="libList"></div>
+    <div class="lib-foot"><button class="btn" id="btnNewPart">New part…</button></div>
+  </aside>
+
+  <main class="stage" id="stage">
+    <svg id="cv" aria-label="Wiring diagram"></svg>
+    <div class="overlay hint" id="hint" hidden></div>
+    <div class="overlay legend" id="legend"></div>
+    <div class="overlay zoom">
+      <button id="zoomOut" aria-label="Zoom out">−</button>
+      <button id="zoomIn" aria-label="Zoom in">+</button>
+    </div>
+    <div class="tip" id="tip" hidden></div>
+  </main>
+
+  <aside class="panel" aria-label="Inspector">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tabSel" aria-selected="true">Selected</button>
+      <button class="tab" role="tab" id="tabChecks" aria-selected="false">Checks <span id="checksChip"></span></button>
+      <button class="tab" role="tab" id="tabBuild" aria-selected="false">Build</button>
+    </div>
+    <div class="tabbody" id="side"></div>
+  </aside>
+</div>
+
+<div class="modal-back" id="modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <h2 id="mTitle">New part</h2>
+    <div class="col">
+      <div class="row">
+        <label class="field">Name<input id="mName" value="Line sensor (3 channel)"></label>
+      </div>
+      <div class="row">
+        <label class="field">Width (mm)<input id="mW" type="number" min="5" max="300" value="40"></label>
+        <label class="field">Height (mm)<input id="mH" type="number" min="5" max="300" value="14"></label>
+        <label class="field">Board colour
+          <select id="mColor">
+            <option value="#1d4f9a">Blue PCB</option>
+            <option value="#1f6e3d">Green PCB</option>
+            <option value="#a3322b">Red PCB</option>
+            <option value="#4b2f86">Purple PCB</option>
+            <option value="#24272c">Black</option>
+          </select>
+        </label>
+      </div>
+      <label class="field">Pins, one per line: name, edge, kind, details
+        <textarea id="mPins" spellcheck="false">VCC  bottom  vcc  3.3-5.5
+GND  bottom  gnd
+L    bottom  io
+C    bottom  io
+R    bottom  io</textarea>
+      </label>
+      <p class="note">Edges: <code>top</code> <code>bottom</code> <code>left</code> <code>right</code>. Kinds: <code>vcc 3.3-5.5</code> (power in), <code>gnd</code>, <code>io</code>, <code>pwm</code>, <code>analog</code>, <code>sda</code>, <code>scl</code>, <code>supply 12.6</code> (power out), <code>motor</code>. Add <code>drives=5</code> for a pin that outputs 5 V logic, and <code>optional</code> for a pin that may stay free. Pins sit 2.54 mm apart, centred on their edge.</p>
+      <label class="field">Drawing (optional): an SVG or PNG of the top view
+        <input id="mArt" type="file" accept="image/svg+xml,image/png,image/jpeg,image/webp">
+      </label>
+      <div class="err-text" id="mErr"></div>
+    </div>
+    <div class="col">
+      <div class="preview" id="mPreview"></div>
+      <div class="note">What a contributor adds to the part's file (<code>parts/*.toml</code>):</div>
+      <pre class="snippet" id="mSnippet"></pre>
+    </div>
+    <div class="actions">
+      <button class="btn" id="mCancel">Cancel</button>
+      <button class="btn primary" id="mAdd">Add to parts</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ---------------------------------------------------------------------------------------------
+// Units: 1 grid unit = 0.05 inch = 1.27 mm, half a header pitch, so wires can pass between pins.
+const G = 8; // px per unit at zoom 1
+const MM = 1.27;
+const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up, right, down, left
+const EDGE_DIR = { top: 0, right: 1, bottom: 2, left: 3 };
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private window */ } },
+};
+
+// ---------------------------------------------------------------------------------------------
+// Part definitions. Pins: x, y in units from the body's top-left; d = the way the wire leaves.
+// Board pins say what they can do (caps, logic volts, supply volts); part pins say what they need.
+function pin(id, x, y, d, props) { return Object.assign({ id, label: id, x, y, d }, props || {}); }
+
+function digital(n, x, y, d, board, extra) {
+  const caps = ['io'];
+  if (board.pwm.has(n)) caps.push('pwm');
+  if (board.int.has(n)) caps.push('int');
+  if (n === board.sda) caps.push('sda');
+  if (n === board.scl) caps.push('scl');
+  const props = { kind: 'io', caps, logic: 5, label: 'D' + n };
+  if (n <= 1) props.serial = true;
+  return pin('D' + n, x, y, d, Object.assign(props, extra || {}));
+}
+
+function powerHeader(x0, y) {
+  const names = ['NC', 'IOREF', 'RESET', '3V3', '5V', 'GND', 'GND', 'VIN'];
+  const ids = ['NC', 'IOREF', 'RESET', '3V3', '5V1', 'GND2', 'GND3', 'VIN'];
+  return names.map((n, i) => {
+    const p = { label: n, kind: 'other', place: 'power header' };
+    if (n === '3V3') Object.assign(p, { kind: 'supply', volts: 3.3 });
+    if (n === '5V') Object.assign(p, { kind: 'supply', volts: 5 });
+    if (n === 'GND') p.kind = 'gnd';
+    if (n === 'VIN') Object.assign(p, { kind: 'vin', min: 7, max: 12 });
+    return pin(ids[i], x0 + 2 * i, y, 2, p);
+  });
+}
+
+function makeMega() {
+  const b = { pwm: new Set([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 44, 45, 46]), int: new Set([2, 3, 18, 19, 20, 21]), sda: 20, scl: 21 };
+  const P = [];
+  const top = { place: 'top header' };
+  P.push(pin('SCL', 18, 2, 0, { kind: 'io', caps: ['io', 'scl'], logic: 5, place: 'top header' }));
+  P.push(pin('SDA', 20, 2, 0, { kind: 'io', caps: ['io', 'sda'], logic: 5, place: 'top header' }));
+  P.push(pin('AREF', 22, 2, 0, { kind: 'other', place: 'top header' }));
+  P.push(pin('GND1', 24, 2, 0, { kind: 'gnd', label: 'GND', place: 'top header' }));
+  [13, 12, 11, 10, 9, 8].forEach((n, i) => P.push(digital(n, 26 + 2 * i, 2, 0, b, top)));
+  [7, 6, 5, 4, 3, 2, 1, 0].forEach((n, i) => P.push(digital(n, 40 + 2 * i, 2, 0, b, top)));
+  [14, 15, 16, 17, 18, 19, 20, 21].forEach((n, i) => P.push(digital(n, 58 + 2 * i, 2, 0, b, top)));
+  P.push(...powerHeader(22, 40));
+  for (let i = 0; i < 16; i++) {
+    const caps = ['io', 'analog'];
+    P.push(pin('A' + i, (i < 8 ? 40 : 58) + 2 * (i % 8), 40, 2, { kind: 'io', caps, logic: 5, place: 'analog header' }));
+  }
+  const dbl = { place: 'right double header' };
+  for (let r = 0; r < 18; r++) {
+    const y = 4 + 2 * r;
+    if (r === 0) {
+      P.push(pin('5V2', 76, y, 1, { kind: 'supply', volts: 5, label: '5V', jog: [0, -1], place: dbl.place }));
+      P.push(pin('5V3', 78, y, 1, { kind: 'supply', volts: 5, label: '5V', place: dbl.place }));
+    } else if (r === 17) {
+      P.push(pin('GND4', 76, y, 1, { kind: 'gnd', label: 'GND', jog: [0, 1], place: dbl.place }));
+      P.push(pin('GND5', 78, y, 1, { kind: 'gnd', label: 'GND', place: dbl.place }));
+    } else {
+      const a = 22 + 2 * (r - 1);
+      P.push(digital(a, 76, y, 1, b, { jog: [0, -1], place: dbl.place, pairLabel: 'D' + a + ' · ' + (a + 1) }));
+      P.push(digital(a + 1, 78, y, 1, b, Object.assign({ hideLabel: true }, dbl)));
+    }
+  }
+  return {
+    id: 'mega', name: 'Arduino Mega 2560', covers: 'ATmega2560 · 5 V logic', kind: 'board', look: 'arduino',
+    w: 80, h: 42, logic: 5, title: 'MEGA 2560',
+    strips: [[17, 1, 37, 3], [39, 1, 55, 3], [57, 1, 73, 3], [21, 39, 37, 41], [39, 39, 55, 41], [57, 39, 73, 41], [75, 3, 79, 39]],
+    pins: P,
+  };
+}
+
+function makeUno() {
+  const b = { pwm: new Set([3, 5, 6, 9, 10, 11]), int: new Set([2, 3]), sda: -1, scl: -1 };
+  const P = [];
+  const top = { place: 'top header' };
+  P.push(pin('SCL', 14, 2, 0, { kind: 'io', caps: ['io', 'scl'], logic: 5, place: 'top header' }));
+  P.push(pin('SDA', 16, 2, 0, { kind: 'io', caps: ['io', 'sda'], logic: 5, place: 'top header' }));
+  P.push(pin('AREF', 18, 2, 0, { kind: 'other', place: 'top header' }));
+  P.push(pin('GND1', 20, 2, 0, { kind: 'gnd', label: 'GND', place: 'top header' }));
+  [13, 12, 11, 10, 9, 8].forEach((n, i) => P.push(digital(n, 22 + 2 * i, 2, 0, b, top)));
+  [7, 6, 5, 4, 3, 2, 1, 0].forEach((n, i) => P.push(digital(n, 36 + 2 * i, 2, 0, b, top)));
+  P.push(...powerHeader(18, 40));
+  for (let i = 0; i < 6; i++) {
+    const caps = ['io', 'analog'];
+    if (i === 4) caps.push('sda');
+    if (i === 5) caps.push('scl');
+    P.push(pin('A' + i, 36 + 2 * i, 40, 2, { kind: 'io', caps, logic: 5, place: 'analog header' }));
+  }
+  return {
+    id: 'uno', name: 'Arduino Uno R3', covers: 'ATmega328P · 5 V logic', kind: 'board', look: 'arduino',
+    w: 54, h: 42, logic: 5, title: 'UNO',
+    strips: [[13, 1, 33, 3], [35, 1, 51, 3], [17, 39, 33, 41], [35, 39, 47, 41]],
+    pins: P,
+  };
+}
+
+function makePi5() {
+  const names = [null, '3V3', '5V', 'GPIO2', '5V', 'GPIO3', 'GND', 'GPIO4', 'GPIO14', 'GND', 'GPIO15', 'GPIO17', 'GPIO18',
+    'GPIO27', 'GND', 'GPIO22', 'GPIO23', '3V3', 'GPIO24', 'GPIO10', 'GND', 'GPIO9', 'GPIO25', 'GPIO11', 'GPIO8', 'GND',
+    'GPIO7', 'GPIO0', 'GPIO1', 'GPIO5', 'GND', 'GPIO6', 'GPIO12', 'GPIO13', 'GND', 'GPIO19', 'GPIO16', 'GPIO26', 'GPIO20',
+    'GND', 'GPIO21'];
+  const pwm = new Set(['GPIO12', 'GPIO13', 'GPIO18', 'GPIO19']);
+  const P = [];
+  for (let n = 1; n <= 40; n++) {
+    const k = Math.floor((n - 1) / 2);
+    const inner = n % 2 === 1;
+    const x = 8 + 2 * k;
+    const y = inner ? 4 : 2;
+    const name = names[n];
+    const p = { label: name, place: 'GPIO header, pin ' + n, phys: n };
+    if (inner) { p.jog = [1, 0]; p.hideLabel = false; } else { p.hideLabel = true; }
+    if (name === '3V3') Object.assign(p, { kind: 'supply', volts: 3.3 });
+    else if (name === '5V') Object.assign(p, { kind: 'supply', volts: 5 });
+    else if (name === 'GND') p.kind = 'gnd';
+    else {
+      const caps = ['io'];
+      if (pwm.has(name)) caps.push('pwm');
+      if (name === 'GPIO2') caps.push('sda');
+      if (name === 'GPIO3') caps.push('scl');
+      Object.assign(p, { kind: 'io', caps, logic: 3.3 });
+    }
+    P.push(pin('P' + n, x, y, 0, p));
+  }
+  return {
+    id: 'pi5', name: 'Raspberry Pi 5', covers: '40-pin header · 3.3 V logic', kind: 'board', look: 'pi',
+    w: 67, h: 44, logic: 3.3, title: 'Raspberry Pi 5', strips: [[7, 1, 47, 5]], pins: P,
+  };
+}
+
+function edgePins(list, w, h) {
+  // [label, edge, props] → pins centred on their edge, 2 units (2.54 mm) apart.
+  const byEdge = {};
+  list.forEach((p) => { (byEdge[p[1]] = byEdge[p[1]] || []).push(p); });
+  const out = [];
+  for (const edge in byEdge) {
+    const ps = byEdge[edge];
+    const len = edge === 'top' || edge === 'bottom' ? w : h;
+    let start = Math.round((len - 2 * (ps.length - 1)) / 2);
+    if (start % 2) start -= 1;
+    if (start < 1) start = 1;
+    ps.forEach(([label, , props], i) => {
+      const at = start + 2 * i;
+      const x = edge === 'left' ? 0 : edge === 'right' ? w : at;
+      const y = edge === 'top' ? 0 : edge === 'bottom' ? h : at;
+      out.push(pin(props && props.id || label, x, y, EDGE_DIR[edge], Object.assign({ label }, props || {})));
+    });
+  }
+  return out;
+}
+
+const BUILTIN = [
+  makeMega(), makeUno(), makePi5(),
+  {
+    id: 'hcsr04', name: 'Ultrasonic sensor', covers: 'HC-SR04 · 2 cm to 4 m', look: 'sonar', w: 36, h: 16,
+    pins: [
+      pin('VCC', 15, 16, 2, { kind: 'vcc', min: 4.5, max: 5.5 }),
+      pin('TRIG', 17, 16, 2, { kind: 'sig', needs: ['io'] }),
+      pin('ECHO', 19, 16, 2, { kind: 'sig', needs: ['io'], drives: 5 }),
+      pin('GND', 21, 16, 2, { kind: 'gnd' }),
+    ],
+  },
+  {
+    id: 'vl53l0x', name: 'ToF distance sensor', covers: 'VL53L0X · I²C · up to 2 m', look: 'tof', w: 20, h: 14,
+    pins: edgePins([
+      ['VIN', 'bottom', { kind: 'vcc', min: 2.6, max: 5.5 }], ['GND', 'bottom', { kind: 'gnd' }],
+      ['SCL', 'bottom', { kind: 'sig', needs: ['scl'] }], ['SDA', 'bottom', { kind: 'sig', needs: ['sda'] }],
+      ['GPIO1', 'bottom', { kind: 'sig', needs: ['io'], optional: true }], ['XSHUT', 'bottom', { kind: 'sig', needs: ['io'], optional: true }],
+    ], 20, 14),
+  },
+  {
+    id: 'mpu6050', name: 'IMU (gyro + accel)', covers: 'MPU-6050 · GY-521 · I²C', look: 'imu', w: 18, h: 13,
+    pins: edgePins([
+      ['VCC', 'bottom', { kind: 'vcc', min: 3.3, max: 5.5 }], ['GND', 'bottom', { kind: 'gnd' }],
+      ['SCL', 'bottom', { kind: 'sig', needs: ['scl'] }], ['SDA', 'bottom', { kind: 'sig', needs: ['sda'] }],
+      ['XDA', 'bottom', { kind: 'sig', optional: true }], ['XCL', 'bottom', { kind: 'sig', optional: true }],
+      ['AD0', 'bottom', { kind: 'sig', needs: ['io'], optional: true }], ['INT', 'bottom', { kind: 'sig', needs: ['int'], optional: true }],
+    ], 18, 13),
+  },
+  {
+    id: 'bts7960', name: 'Motor driver 43 A', covers: 'BTS7960 · IBT-2 · 6–27 V', look: 'bts', w: 40, h: 40,
+    pins: [
+      pin('RPWM', 0, 12, 3, { kind: 'sig', needs: ['pwm'] }),
+      pin('LPWM', 0, 14, 3, { kind: 'sig', needs: ['pwm'] }),
+      pin('R_EN', 0, 16, 3, { kind: 'sig', needs: ['io'] }),
+      pin('L_EN', 0, 18, 3, { kind: 'sig', needs: ['io'] }),
+      pin('R_IS', 0, 20, 3, { kind: 'sig', needs: ['analog'], optional: true }),
+      pin('L_IS', 0, 22, 3, { kind: 'sig', needs: ['analog'], optional: true }),
+      pin('VCC', 0, 24, 3, { kind: 'vcc', min: 3.3, max: 5.5 }),
+      pin('GND', 0, 26, 3, { kind: 'gnd' }),
+      pin('B+', 40, 8, 1, { kind: 'power-in', min: 6, max: 27, terminal: true }),
+      pin('B-', 40, 14, 1, { kind: 'gnd', label: 'B−', terminal: true }),
+      pin('M+', 40, 26, 1, { kind: 'motor-out', terminal: true }),
+      pin('M-', 40, 32, 1, { kind: 'motor-out', label: 'M−', terminal: true }),
+    ],
+  },
+  {
+    id: 'dcmotor', name: 'DC gear motor', covers: 'Brushed, 12 V', look: 'motor', w: 44, h: 22,
+    pins: [pin('M+', 0, 8, 3, { kind: 'motor-in' }), pin('M-', 0, 14, 3, { kind: 'motor-in', label: 'M−' })],
+  },
+  {
+    id: 'sg90', name: 'Servo', covers: 'SG90 · MG90S · 4.8–6 V', look: 'servo', w: 26, h: 12,
+    pins: [pin('GND', 0, 4, 3, { kind: 'gnd' }), pin('V+', 0, 6, 3, { kind: 'vcc', min: 4.8, max: 6 }), pin('SIG', 0, 8, 3, { kind: 'sig', needs: ['io'] })],
+  },
+  {
+    id: 'button', name: 'Push button', covers: 'Momentary, to GND (input pull-up)', look: 'button', w: 10, h: 10,
+    pins: [pin('1', 3, 10, 2, { kind: 'sig', needs: ['io'], label: 'IN' }), pin('2', 7, 10, 2, { kind: 'gnd', label: 'GND' })],
+  },
+  {
+    id: 'led', name: 'LED with resistor', covers: 'Status light, 5 mm', look: 'led', w: 8, h: 12,
+    pins: [pin('SIG', 2, 12, 2, { kind: 'sig', needs: ['io'] }), pin('GND', 6, 12, 2, { kind: 'gnd' })],
+  },
+  {
+    id: 'bat3s', name: 'Battery 3S', covers: '18650 Li-ion · 11.1 V · 12.6 V full', look: 'battery', w: 60, h: 26,
+    pins: [pin('+', 60, 10, 1, { kind: 'supply', volts: 12.6, terminal: true }), pin('-', 60, 16, 1, { kind: 'gnd', label: '−', terminal: true })],
+  },
+];
+
+let customDefs = store.get('faber-wiring-custom') || [];
+function allDefs() { return BUILTIN.concat(customDefs); }
+function def(id) { return allDefs().find((d) => d.id === id); }
+
+// ---------------------------------------------------------------------------------------------
+// The diagram. The example is SENNEP's front-left corner: two sonars, the IMU, one wheel's driver.
+function exampleState() {
+  const parts = [
+    { id: 'mega', def: 'mega', name: 'mega', x: 0, y: 0, rot: 0 },
+    { id: 'sl', def: 'hcsr04', name: 'front-left', x: 0, y: 0, rot: 0 },
+    { id: 'sr', def: 'hcsr04', name: 'front-right', x: 0, y: 0, rot: 0 },
+    { id: 'imu', def: 'mpu6050', name: 'imu', x: 0, y: 0, rot: 0 },
+    { id: 'drv', def: 'bts7960', name: 'drive-fl', x: 0, y: 0, rot: 0 },
+    { id: 'mot', def: 'dcmotor', name: 'wheel-fl', x: 0, y: 0, rot: 0 },
+    { id: 'bat', def: 'bat3s', name: 'battery', x: 0, y: 0, rot: 0 },
+    { id: 'arm', def: 'button', name: 'arm', x: 0, y: 0, rot: 0 },
+    { id: 'led', def: 'led', name: 'status', x: 0, y: 0, rot: 0 },
+  ];
+  const W = (a, b, extra) => Object.assign({ a, b }, extra || {});
+  const wires = [
+    W('sl.TRIG', 'mega.D7'), W('sl.ECHO', 'mega.D6'), W('sl.VCC', 'mega.5V3'), W('sl.GND', 'mega.GND1'),
+    W('sr.TRIG', 'mega.D5'), W('sr.ECHO', 'mega.D4'), W('sr.VCC', 'mega.5V3'), W('sr.GND', 'mega.GND1'),
+    W('imu.SDA', 'mega.D20'), W('imu.SCL', 'mega.D21'), W('imu.VCC', 'mega.5V3'), W('imu.GND', 'mega.GND1'),
+    W('drv.RPWM', 'mega.D9'), W('drv.LPWM', 'mega.D10'), W('drv.R_EN', 'mega.D11'), W('drv.L_EN', 'mega.D12'),
+    W('drv.VCC', 'mega.5V1'), W('drv.GND', 'mega.GND2'),
+    W('drv.M+', 'mot.M+'), W('drv.M-', 'mot.M-'),
+    W('bat.+', 'drv.B+'), W('bat.-', 'drv.B-'), W('bat.-', 'mega.GND3'),
+    W('arm.1', 'mega.D2'), W('arm.2', 'mega.GND1'),
+    W('led.SIG', 'mega.D13'), W('led.GND', 'mega.GND1'),
+  ];
+  wires.forEach((w, i) => { w.id = 'w' + (i + 1); });
+  return { name: 'SENNEP · front corner', parts, wires, done: {}, seq: wires.length + 1 };
+}
+
+let state = store.get('faber-wiring-state-v2');
+const view = { tx: 0, ty: 0, k: 1 };
+let sel = null; // { part } | { wire }
+let hl = null; // { parts: Set, wires: Set }
+let connecting = null; // { key }
+let routes = {}; // wire id → { pts, failed }
+let junctions = [];
+let netOf = {};
+let nets = {};
+let history = [];
+
+function save() { store.set('faber-wiring-state-v2', state); }
+function snapshot() {
+  history.push(JSON.stringify(state));
+  if (history.length > 60) history.shift();
+}
+function partById(id) { return state.parts.find((p) => p.id === id); }
+function splitKey(key) { const i = key.indexOf('.'); return [key.slice(0, i), key.slice(i + 1)]; }
+function pinOf(key) {
+  const [pid, pn] = splitKey(key);
+  const p = partById(pid);
+  if (!p) return null;
+  const d = def(p.def);
+  if (!d) return null;
+  const pi = d.pins.find((x) => x.id === pn);
+  return pi ? { part: p, def: d, pin: pi } : null;
+}
+function pinName(key) {
+  const r = pinOf(key);
+  if (!r) return key;
+  return r.part.name + ' ' + r.pin.label;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Geometry: a part's body, pins and wire stubs in world units, after rotation (quarter turns cw).
+function rotPt(d, rot, x, y) {
+  switch (rot & 3) {
+    case 1: return [d.h - y, x];
+    case 2: return [d.w - x, d.h - y];
+    case 3: return [y, d.w - x];
+    default: return [x, y];
+  }
+}
+function stubOf(d, p) {
+  // From the pin out to two units past the body: wires start there. A pin in an inner header row
+  // first steps sideways into the gap between the outer row's pins.
+  const cells = [];
+  let x = p.x;
+  let y = p.y;
+  if (p.jog) { x += p.jog[0]; y += p.jog[1]; cells.push([x, y]); }
+  const [dx, dy] = DIRS[p.d];
+  const out = (cx, cy) => (p.d === 0 ? cy <= -2 : p.d === 2 ? cy >= d.h + 2 : p.d === 1 ? cx >= d.w + 2 : cx <= -2);
+  do { x += dx; y += dy; cells.push([x, y]); } while (!out(x, y));
+  return cells;
+}
+const geoCache = new Map();
+function geom(part) {
+  const d = def(part.def);
+  const key = part.def + '|' + part.x + '|' + part.y + '|' + part.rot;
+  const hit = geoCache.get(part.id);
+  if (hit && hit.key === key) return hit;
+  const odd = part.rot & 1;
+  const w = odd ? d.h : d.w;
+  const h = odd ? d.w : d.h;
+  const pins = {};
+  for (const p of d.pins) {
+    const [px, py] = rotPt(d, part.rot, p.x, p.y);
+    const stub = stubOf(d, p).map(([sx, sy]) => {
+      const [rx, ry] = rotPt(d, part.rot, sx, sy);
+      return [part.x + rx, part.y + ry];
+    });
+    pins[p.id] = { x: part.x + px, y: part.y + py, d: (p.d + part.rot) & 3, stub, pin: p };
+  }
+  const g = { key, x0: part.x, y0: part.y, x1: part.x + w, y1: part.y + h, w, h, pins, def: d };
+  geoCache.set(part.id, g);
+  return g;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Nets: pins joined by wires. A net's colour follows what it carries.
+const SIGNAL_COLORS = ['#3b82f6', '#facc15', '#f5f5f4', '#c084fc', '#22d3ee', '#f472b6', '#a3e635', '#b07a43', '#94a3b8', '#60a5fa', '#fde047', '#e879f9', '#2dd4bf', '#fb7185'];
+const POWER_COLORS = { 5: '#ef4444', 3.3: '#f97316' };
+function computeNets() {
+  const parent = {};
+  const find = (k) => { while (parent[k] !== k) { parent[k] = parent[parent[k]]; k = parent[k]; } return k; };
+  const add = (k) => { if (!(k in parent)) parent[k] = k; };
+  for (const w of state.wires) { add(w.a); add(w.b); const ra = find(w.a); const rb = find(w.b); if (ra !== rb) parent[ra] = rb; }
+  netOf = {};
+  nets = {};
+  let n = 0;
+  let sig = 0;
+  for (const w of state.wires) {
+    for (const k of [w.a, w.b]) {
+      const r = find(k);
+      if (!(r in nets)) {
+        n += 1;
+        nets[r] = { id: n, keys: [], kind: 'signal', volts: 0, color: '' };
+      }
+      if (!nets[r].keys.includes(k)) nets[r].keys.push(k);
+      netOf[k] = nets[r];
+    }
+  }
+  for (const r in nets) {
+    const net = nets[r];
+    const infos = net.keys.map(pinOf).filter(Boolean);
+    const sup = infos.find((i) => i.pin.kind === 'supply');
+    const gnd = infos.find((i) => i.pin.kind === 'gnd');
+    const motor = infos.find((i) => i.pin.kind === 'motor-out' || i.pin.kind === 'motor-in');
+    if (sup && !gnd) { net.kind = 'power'; net.volts = sup.pin.volts; net.color = POWER_COLORS[sup.pin.volts] || '#be123c'; }
+    else if (gnd && !sup) { net.kind = 'gnd'; net.color = 'var(--wire-gnd)'; }
+    else if (sup && gnd) { net.kind = 'short'; net.color = '#ef4444'; }
+    else { net.kind = motor ? 'motor' : 'signal'; net.color = SIGNAL_COLORS[sig % SIGNAL_COLORS.length]; sig += 1; }
+  }
+}
+function wireColor(w) {
+  if (w.color) return w.color;
+  const n = netOf[w.a];
+  return n ? n.color : '#94a3b8';
+}
+
+// ---------------------------------------------------------------------------------------------
+// Router: A* on the unit grid. Parts (plus one unit of clearance) are walls. Wires of different
+// nets never share a cell in the same direction, never bend where another wire runs, and cross
+// only at right angles (drawn with a hop). Wires of the same net may share track: that makes buses.
+const COST = { step: 1, share: 0.25, bend: 3, cross: 4, near: 0.6 };
+function routeAll() {
+  computeNets();
+  const geos = state.parts.map(geom);
+  if (!geos.length) { routes = {}; junctions = []; return; }
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  for (const g of geos) {
+    minx = Math.min(minx, g.x0); miny = Math.min(miny, g.y0); maxx = Math.max(maxx, g.x1); maxy = Math.max(maxy, g.y1);
+  }
+  const PAD = 34;
+  const ox = minx - PAD, oy = miny - PAD;
+  const W = maxx - minx + 2 * PAD + 1, H = maxy - miny + 2 * PAD + 1;
+  const N = W * H;
+  const wall = new Uint8Array(N);
+  const hNet = new Int32Array(N), vNet = new Int32Array(N), node = new Int32Array(N);
+  const idx = (x, y) => (x < ox || y < oy || x >= ox + W || y >= oy + H ? -1 : (x - ox) + (y - oy) * W);
+  for (const g of geos) {
+    for (let y = g.y0 - 1; y <= g.y1 + 1; y++) for (let x = g.x0 - 1; x <= g.x1 + 1; x++) { const i = idx(x, y); if (i >= 0) wall[i] = 1; }
+  }
+  const stubFor = (key) => {
+    const [pid, pn] = splitKey(key);
+    const part = partById(pid);
+    if (!part) return null;
+    const p = geom(part).pins[pn];
+    return p || null;
+  };
+  for (const w of state.wires) {
+    for (const k of [w.a, w.b]) {
+      const p = stubFor(k);
+      if (!p) continue;
+      const net = netOf[k].id;
+      for (const [x, y] of p.stub) { const i = idx(x, y); if (i >= 0) { wall[i] = 0; node[i] = net; } }
+    }
+  }
+  // Signals first, shortest first; then power and ground, which may share each other's track.
+  const order = state.wires.slice().sort((a, b) => {
+    const pa = netOf[a.a].kind === 'signal' ? 0 : 1, pb = netOf[b.a].kind === 'signal' ? 0 : 1;
+    if (pa !== pb) return pa - pb;
+    return manhattan(a) - manhattan(b);
+  });
+  function manhattan(w) { const a = stubFor(w.a), b = stubFor(w.b); return a && b ? Math.abs(a.x - b.x) + Math.abs(a.y - b.y) : 0; }
+
+  const S = N * 4;
+  const gScore = new Float32Array(S);
+  const seen = new Int32Array(S);
+  const done = new Int32Array(S);
+  const prev = new Int32Array(S);
+  let stamp = 0;
+
+  function astar(sx, sy, sd, gx, gy, net) {
+    stamp += 1;
+    const start = idx(sx, sy), goal = idx(gx, gy);
+    if (start < 0 || goal < 0) return null;
+    const heap = new Heap();
+    const s0 = start * 4 + sd;
+    gScore[s0] = 0; seen[s0] = stamp; prev[s0] = -1;
+    heap.push(s0, Math.abs(sx - gx) + Math.abs(sy - gy));
+    let guard = 0;
+    while (heap.size) {
+      const st = heap.pop();
+      if (done[st] === stamp) continue;
+      done[st] = stamp;
+      const cell = st >> 2, d = st & 3;
+      if (cell === goal) {
+        const out = [];
+        for (let s = st; s >= 0; s = prev[s]) out.push(s >> 2);
+        return out.reverse().map((c) => [ox + (c % W), oy + ((c / W) | 0)]);
+      }
+      if (++guard > 400000) return null;
+      const cx = cell % W, cy = (cell / W) | 0;
+      for (let nd = 0; nd < 4; nd++) {
+        if (nd === ((d + 2) & 3)) continue;
+        const nx = cx + DIRS[nd][0], ny = cy + DIRS[nd][1];
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const ni = nx + ny * W;
+        if (wall[ni]) continue;
+        if (node[ni] && node[ni] !== net) continue;
+        const horiz = nd & 1;
+        const same = horiz ? hNet[ni] : vNet[ni];
+        const cross = horiz ? vNet[ni] : hNet[ni];
+        if (same && same !== net) continue;
+        let cost = COST.step;
+        if (same === net || node[ni] === net) cost = COST.share;
+        else if (cross && cross !== net) cost += COST.cross;
+        if (nd !== d) {
+          if ((hNet[cell] && hNet[cell] !== net) || (vNet[cell] && vNet[cell] !== net)) continue;
+          cost += COST.bend;
+        }
+        if (cost !== COST.share) {
+          for (const o of [-1, 1]) {
+            const j = horiz ? ni + o * W : ni + o;
+            if (j >= 0 && j < N) { const q = horiz ? hNet[j] : vNet[j]; if (q && q !== net) cost += COST.near; }
+          }
+        }
+        const ns = ni * 4 + nd;
+        const ng = gScore[st] + cost;
+        if (seen[ns] !== stamp || ng < gScore[ns]) {
+          seen[ns] = stamp; gScore[ns] = ng; prev[ns] = st;
+          heap.push(ns, ng + Math.abs(nx + ox - gx) + Math.abs(ny + oy - gy));
+        }
+      }
+    }
+    return null;
+  }
+
+  routes = {};
+  const segs = {}; // net id → Set of "i|j" cell edges, for junction dots
+  for (const w of order) {
+    const a = stubFor(w.a), b = stubFor(w.b);
+    if (!a || !b) continue;
+    const net = netOf[w.a].id;
+    const sa = a.stub[a.stub.length - 1], sb = b.stub[b.stub.length - 1];
+    const lastA = a.stub.length > 1 ? a.stub[a.stub.length - 2] : [a.x, a.y];
+    const sd = dirBetween(lastA, sa);
+    const path = astar(sa[0], sa[1], sd, sb[0], sb[1], net);
+    const full = [[a.x, a.y], ...a.stub.slice(0, -1), ...(path || [sa, sb]), ...b.stub.slice(0, -1).reverse(), [b.x, b.y]];
+    if (!path) { routes[w.id] = { pts: [[a.x, a.y], sa, sb, [b.x, b.y]], failed: true }; continue; }
+    for (let i = 0; i < full.length - 1; i++) {
+      const c1 = full[i], c2 = full[i + 1];
+      const horiz = c1[1] === c2[1];
+      for (const c of [c1, c2]) { const j = idx(c[0], c[1]); if (j >= 0) { if (horiz) hNet[j] = net; else vNet[j] = net; } }
+      const i1 = idx(c1[0], c1[1]), i2 = idx(c2[0], c2[1]);
+      (segs[net] = segs[net] || new Set()).add(Math.min(i1, i2) + '|' + Math.max(i1, i2));
+    }
+    for (let i = 1; i < full.length - 1; i++) {
+      const p0 = full[i - 1], p1 = full[i], p2 = full[i + 1];
+      if ((p0[1] === p1[1]) !== (p1[1] === p2[1])) { const j = idx(p1[0], p1[1]); if (j >= 0) node[j] = net; }
+    }
+    routes[w.id] = { pts: simplify(full), failed: false };
+  }
+  junctions = [];
+  for (const net in segs) {
+    const deg = new Map();
+    for (const e of segs[net]) { const [i, j] = e.split('|').map(Number); deg.set(i, (deg.get(i) || 0) + 1); deg.set(j, (deg.get(j) || 0) + 1); }
+    for (const [c, n] of deg) if (n >= 3) junctions.push({ x: ox + (c % W), y: oy + ((c / W) | 0), net: +net });
+  }
+}
+function dirBetween(a, b) { if (b[0] > a[0]) return 1; if (b[0] < a[0]) return 3; if (b[1] > a[1]) return 2; return 0; }
+function simplify(pts) {
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = out[out.length - 1], b = pts[i], c = pts[i + 1];
+    if ((a[0] === b[0] && b[0] === c[0]) || (a[1] === b[1] && b[1] === c[1])) continue;
+    out.push(b);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+class Heap {
+  constructor() { this.k = []; this.v = []; }
+  get size() { return this.k.length; }
+  push(val, key) {
+    const k = this.k, v = this.v;
+    let i = k.length; k.push(key); v.push(val);
+    while (i > 0) { const p = (i - 1) >> 1; if (k[p] <= key) break; k[i] = k[p]; v[i] = v[p]; i = p; }
+    k[i] = key; v[i] = val;
+  }
+  pop() {
+    const k = this.k, v = this.v;
+    const top = v[0];
+    const lk = k.pop(), lv = v.pop();
+    if (k.length) {
+      let i = 0;
+      const n = k.length;
+      for (;;) {
+        let c = 2 * i + 1;
+        if (c >= n) break;
+        if (c + 1 < n && k[c + 1] < k[c]) c += 1;
+        if (k[c] >= lk) break;
+        k[i] = k[c]; v[i] = v[c]; i = c;
+      }
+      k[i] = lk; v[i] = lv;
+    }
+    return top;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Auto-arrange: the board in the middle; each part on the side where its board pins are, turned
+// so its pins face the board, in the order of those pins; parts that only meet other parts go
+// further out beyond them. Rows that grow much wider than the board spill to the sides.
+function arrange() {
+  if (!state.parts.length) return;
+  computeNets();
+  const board = state.parts.find((p) => def(p.def).kind === 'board') || state.parts[0];
+  board.x = 0; board.y = 0; board.rot = 0;
+  const bg = geom(board);
+  const links = (part) => state.wires.flatMap((w) => {
+    const [pa] = splitKey(w.a), [pb] = splitKey(w.b);
+    if (pa === part.id && pb !== part.id) return [{ mine: w.b === w.a ? null : splitKey(w.a)[1], other: w.b }];
+    if (pb === part.id && pa !== part.id) return [{ mine: splitKey(w.b)[1], other: w.a }];
+    return [];
+  });
+  const isPower = (key) => { const r = pinOf(key); return r && (r.pin.kind === 'gnd' || r.pin.kind === 'supply'); };
+  const sides = { 0: [], 1: [], 2: [], 3: [] };
+  const placed = new Set([board.id]);
+  const tier2 = [];
+  const loose = [];
+  for (const part of state.parts) {
+    if (part === board) continue;
+    const ls = links(part);
+    const toBoard = ls.filter((l) => splitKey(l.other)[0] === board.id);
+    if (!toBoard.length) { (ls.length ? tier2 : loose).push(part); continue; }
+    // A part that meets the board only through power or ground but has more wires to another part
+    // (a battery feeding a driver) belongs next to that part.
+    if (toBoard.every((l) => isPower(l.other)) && ls.length > toBoard.length * 1.5) { tier2.push(part); continue; }
+    const pick = toBoard.filter((l) => !isPower(l.other));
+    const use = pick.length ? pick : toBoard;
+    const count = [0, 0, 0, 0];
+    let sx = 0, sy = 0;
+    for (const l of use) { const bp = bg.pins[splitKey(l.other)[1]]; count[bp.d] += 1; sx += bp.x; sy += bp.y; }
+    const side = count.indexOf(Math.max(...count));
+    part._want = [sx / use.length, sy / use.length];
+    part._mine = toBoard.map((l) => l.mine);
+    part._wires = toBoard.length;
+    sides[side].push(part);
+  }
+  // Turn each part so the pins it uses face the side's way back to the board.
+  const face = (part, towards) => {
+    const d = def(part.def);
+    const count = [0, 0, 0, 0];
+    for (const m of part._mine || []) { const p = d.pins.find((x) => x.id === m); if (p) count[p.d] += 1; }
+    const dom = count.indexOf(Math.max(...count));
+    part.rot = (towards - dom + 4) & 3;
+  };
+  // Spill: a top or bottom row much wider than the board sends its outermost parts to the sides.
+  const width = (list, horizontal) => list.reduce((s, p) => {
+    const d = def(p.def); return s + (horizontal ? Math.max(d.w, d.h) : Math.max(d.w, d.h)) + 8;
+  }, -8);
+  for (const s of [0, 2]) {
+    let guard = 0;
+    while (sides[s].length > 1 && width(sides[s], true) > bg.w * 1.7 && guard++ < 20) {
+      const cx = bg.x0 + bg.w / 2;
+      const list = sides[s].slice().sort((a, b) => a._want[0] - b._want[0]);
+      const lft = list[0], rgt = list[list.length - 1];
+      const take = cx - lft._want[0] > rgt._want[0] - cx ? lft : rgt;
+      sides[s].splice(sides[s].indexOf(take), 1);
+      sides[take === lft ? 3 : 1].push(take);
+    }
+  }
+  const sideWires = (s) => sides[s].reduce((n, p) => n + p._wires, 0);
+  const gapFor = (s) => { let g = 10 + Math.min(26, Math.round(sideWires(s) * 1.4)); return g + (g & 1); };
+  for (const s of [0, 1, 2, 3]) {
+    const list = sides[s];
+    if (!list.length) continue;
+    const towards = (s + 2) & 3;
+    list.forEach((p) => face(p, towards));
+    const horizontal = s === 0 || s === 2;
+    list.sort((a, b) => (horizontal ? a._want[0] - b._want[0] : (s === 3 ? b._want[0] - a._want[0] : a._want[0] - b._want[0])));
+    const gap = gapFor(s);
+    pack(list, s, gap, bg, horizontal);
+    list.forEach((p) => placed.add(p.id));
+  }
+  // Parts that only meet other parts: beyond their busiest partner, facing it.
+  let guard = 0;
+  while (tier2.length && guard++ < 50) {
+    const part = tier2.shift();
+    const ls = links(part);
+    const partners = {};
+    for (const l of ls) { const o = splitKey(l.other)[0]; if (placed.has(o)) partners[o] = (partners[o] || 0) + 1; }
+    const best = Object.keys(partners).sort((a, b) => partners[b] - partners[a])[0];
+    if (!best) { tier2.push(part); if (tier2.every((p) => !links(p).some((l) => placed.has(splitKey(l.other)[0])))) break; continue; }
+    const host = partById(best);
+    const hg = geom(host);
+    const pinsUsed = ls.filter((l) => splitKey(l.other)[0] === best);
+    const count = [0, 0, 0, 0];
+    for (const l of pinsUsed) count[hg.pins[splitKey(l.other)[1]].d] += 1;
+    const outDir = count.indexOf(Math.max(...count));
+    part._mine = pinsUsed.map((l) => l.mine);
+    face(part, (outDir + 2) & 3);
+    const g = geom(part);
+    const ys = pinsUsed.map((l) => hg.pins[splitKey(l.other)[1]]);
+    const my = ys.reduce((s, p) => s + p.y, 0) / ys.length, mx = ys.reduce((s, p) => s + p.x, 0) / ys.length;
+    const gap = 14 + pinsUsed.length * 2;
+    if (outDir === 3) { part.x = hg.x0 - gap - g.w; part.y = Math.round(my - g.h / 2); }
+    if (outDir === 1) { part.x = hg.x1 + gap; part.y = Math.round(my - g.h / 2); }
+    if (outDir === 0) { part.y = hg.y0 - gap - g.h; part.x = Math.round(mx - g.w / 2); }
+    if (outDir === 2) { part.y = hg.y1 + gap; part.x = Math.round(mx - g.w / 2); }
+    part.x -= part.x & 1; part.y -= part.y & 1;
+    settle(part, outDir);
+    placed.add(part.id);
+  }
+  // Anything unconnected waits in a row under the board.
+  let x = bg.x0;
+  for (const part of loose.concat(tier2.filter((p) => !placed.has(p.id)))) {
+    part.rot = 0;
+    const g = geom(part);
+    part.x = x; part.y = bg.y1 + 40; x += g.w + 10;
+    settle(part, 2);
+  }
+  for (const p of state.parts) { delete p._want; delete p._mine; delete p._wires; }
+}
+function pack(list, s, gap, bg, horizontal) {
+  // Place along the side in order, each as close to where its pins are as the previous allows,
+  // then shift the row back toward the middle of those wishes.
+  let cursor = -Infinity;
+  const pos = [];
+  for (const p of list) {
+    const g = geom(p);
+    const len = horizontal ? g.w : g.h;
+    let want = Math.round((horizontal ? p._want[0] : bg.y0 + bg.h / 2) - len / 2);
+    if (!horizontal) want = cursor === -Infinity ? Math.round(bg.y0 + bg.h / 2 - totalLen(list) / 2) : want;
+    const at = Math.max(want, cursor);
+    pos.push(at);
+    cursor = at + len + 8;
+  }
+  if (horizontal) {
+    const wish = list.map((p) => p._want[0]).reduce((a, b) => a + b, 0) / list.length;
+    const lens = list.map((p) => geom(p).w);
+    const mid = (pos[0] + pos[pos.length - 1] + lens[lens.length - 1]) / 2;
+    const shift = Math.round(wish - mid);
+    for (let i = 0; i < pos.length; i++) pos[i] += shift;
+  }
+  list.forEach((p, i) => {
+    const g = geom(p);
+    if (s === 0) { p.x = pos[i]; p.y = bg.y0 - gap - g.h; }
+    if (s === 2) { p.x = pos[i]; p.y = bg.y1 + gap; }
+    if (s === 3) { p.y = pos[i]; p.x = bg.x0 - gap - g.w; }
+    if (s === 1) { p.y = pos[i]; p.x = bg.x1 + gap; }
+    p.x -= p.x & 1; p.y -= p.y & 1;
+  });
+  function totalLen(l) { return l.reduce((n, p) => n + geom(p).h + 8, -8); }
+}
+function overlaps(part, margin) {
+  const g = geom(part);
+  return state.parts.some((o) => {
+    if (o === part) return false;
+    const h = geom(o);
+    return g.x0 < h.x1 + margin && g.x1 + margin > h.x0 && g.y0 < h.y1 + margin && g.y1 + margin > h.y0;
+  });
+}
+function settle(part, dir) {
+  // Nudge a part outward (or spiral around) until it keeps clear of every other part.
+  const M = 8;
+  if (!overlaps(part, M)) return;
+  const ox = part.x, oy = part.y;
+  if (dir !== undefined) {
+    for (let i = 1; i < 80; i++) {
+      part.x = ox + DIRS[dir][0] * i * 2; part.y = oy + DIRS[dir][1] * i * 2;
+      if (!overlaps(part, M)) return;
+    }
+  }
+  for (let r = 2; r < 200; r += 2) {
+    for (let a = -r; a <= r; a += 2) {
+      for (const [dx, dy] of [[a, -r], [a, r], [-r, a], [r, a]]) {
+        part.x = ox + dx; part.y = oy + dy;
+        if (!overlaps(part, M)) return;
+      }
+    }
+  }
+  part.x = ox; part.y = oy;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Checks: what Faber would refuse or warn about before anyone plugs in a battery.
+function pairVerdict(ka, kb) {
+  const A = pinOf(ka), B = pinOf(kb);
+  if (!A || !B) return 'bad';
+  if (A.part === B.part) return 'bad';
+  const k = [A.pin.kind, B.pin.kind];
+  const has = (x) => k.includes(x);
+  const both = (x) => k[0] === x && k[1] === x;
+  const other = (x) => (k[0] === x ? B : A);
+  if (both('gnd')) return 'ok';
+  if (has('gnd') && (has('supply') || has('vcc') || has('vin') || has('power-in'))) return 'bad';
+  if (has('gnd')) return has('sig') && other('gnd').pin.needs ? 'bad' : 'warn';
+  if (has('motor-in')) return has('motor-out') ? 'ok' : 'bad';
+  if (has('motor-out')) return 'bad';
+  if (both('supply')) return A.pin.volts === B.pin.volts ? 'warn' : 'bad';
+  if (has('supply')) {
+    const s = A.pin.kind === 'supply' ? A : B, c = s === A ? B : A;
+    if (['vcc', 'vin', 'power-in'].includes(c.pin.kind)) return s.pin.volts >= c.pin.min - 0.05 && s.pin.volts <= c.pin.max + 0.05 ? 'ok' : 'bad';
+    return 'bad';
+  }
+  if (has('sig') && has('io')) {
+    const s = A.pin.kind === 'sig' ? A : B, io = s === A ? B : A;
+    const need = s.pin.needs || ['io'];
+    if (!need.every((n) => io.pin.caps.includes(n))) return 'bad';
+    if (s.pin.drives && s.pin.drives > io.pin.logic + 0.3) return 'bad';
+    return io.pin.serial ? 'warn' : 'ok';
+  }
+  if (both('sig')) return 'warn';
+  return 'warn';
+}
+function runChecks() {
+  const out = [];
+  const used = new Set();
+  for (const w of state.wires) { used.add(w.a); used.add(w.b); }
+  for (const r in nets) {
+    const net = nets[r];
+    const infos = net.keys.map((k) => Object.assign({ key: k }, pinOf(k))).filter((i) => i.pin);
+    const parts = [...new Set(infos.map((i) => i.part.id))];
+    const wires = state.wires.filter((w) => net.keys.includes(w.a)).map((w) => w.id);
+    const sup = infos.filter((i) => i.pin.kind === 'supply');
+    const gnd = infos.filter((i) => i.pin.kind === 'gnd');
+    const ios = infos.filter((i) => i.pin.kind === 'io');
+    const tag = (s) => s.part.name + ' ' + s.pin.label;
+    if (sup.length && gnd.length) out.push({ sev: 'error', text: 'Short circuit: ' + tag(sup[0]) + ' is wired to ground', more: 'Nothing may join a supply to GND. Remove the wire that crosses over.', parts, wires });
+    const volts = [...new Set(sup.map((s) => s.pin.volts))];
+    if (volts.length > 1) out.push({ sev: 'error', text: 'Two supplies fight: ' + volts.map((v) => v + ' V').join(' and ') + ' are joined', more: sup.map(tag).join(', '), parts, wires });
+    for (const c of infos.filter((i) => ['vcc', 'vin', 'power-in'].includes(i.pin.kind))) {
+      if (!sup.length) { out.push({ sev: 'error', text: tag(c) + ' has no power', more: 'Wire it to a supply (' + c.pin.min + '–' + c.pin.max + ' V).', parts: [c.part.id], wires }); continue; }
+      const v = sup[0].pin.volts;
+      if (v > c.pin.max + 0.05) out.push({ sev: 'error', text: tag(c) + ' gets ' + v + ' V, more than its ' + c.pin.max + ' V', more: 'This can destroy it. Use a ' + (c.pin.max >= 5 ? '5 V' : '3.3 V') + ' supply.', parts: [c.part.id], wires });
+      else if (v < c.pin.min - 0.05) out.push({ sev: 'warn', text: tag(c) + ' gets ' + v + ' V, less than its ' + c.pin.min + ' V', more: 'It may not start or may read wrong.', parts: [c.part.id], wires });
+    }
+    for (const s of infos.filter((i) => i.pin.kind === 'sig')) {
+      if (sup.length || gnd.length) { out.push({ sev: 'error', text: tag(s) + ' is wired to ' + (sup.length ? 'power' : 'ground'), more: 'A signal pin goes to a board pin.', parts: [s.part.id], wires }); continue; }
+      if (!ios.length) { if (!s.pin.optional) out.push({ sev: 'warn', text: tag(s) + ' doesn\'t reach a board pin', more: 'Signals go to the board, or the code can\'t see them.', parts: [s.part.id], wires }); continue; }
+      const io = ios[0];
+      const need = (s.pin.needs || ['io']).filter((n) => !io.pin.caps.includes(n));
+      if (need.length) {
+        const fit = def(io.part.def).pins.filter((p) => p.kind === 'io' && (s.pin.needs || []).every((n) => p.caps.includes(n))).map((p) => p.label);
+        out.push({ sev: 'error', text: tag(s) + ' needs ' + need.map(capName).join(', ') + '; ' + io.pin.label + ' can\'t', more: fit.length ? 'Pins that can: ' + fit.slice(0, 12).join(', ') + (fit.length > 12 ? ' …' : '') : 'This board has no such pin.', parts: [s.part.id, io.part.id], wires });
+      }
+      if (s.pin.drives && s.pin.drives > io.pin.logic + 0.3) out.push({ sev: 'error', text: tag(s) + ' sends ' + s.pin.drives + ' V into ' + io.pin.label + ' (' + io.pin.logic + ' V pin)', more: 'Put a level shifter or a divider between them, or the board pin may die.', parts: [s.part.id, io.part.id], wires });
+      if (io.pin.serial) out.push({ sev: 'warn', text: io.pin.label + ' is the USB link to Faber', more: 'Pick another pin, or uploads and the link stop working.', parts: [io.part.id], wires });
+    }
+    if (ios.length > 1) out.push({ sev: 'warn', text: 'One net joins ' + ios.map((i) => i.pin.label).join(' and '), more: 'Two board pins wired together fight when both are outputs. Keep one.', parts, wires });
+    const sigs = infos.filter((i) => i.pin.kind === 'sig' && !(i.pin.needs || []).some((n) => n === 'sda' || n === 'scl'));
+    if (ios.length && sigs.length > 1) out.push({ sev: 'warn', text: sigs.length + ' parts share ' + ios[0].pin.label, more: sigs.map(tag).join(', ') + '. Only an I²C bus is meant to be shared.', parts, wires });
+    for (const m of infos.filter((i) => i.pin.kind === 'motor-in')) {
+      if (!infos.some((i) => i.pin.kind === 'motor-out')) out.push({ sev: 'error', text: tag(m) + ' must go to a motor driver', more: 'A motor pulls amps; a board pin gives 20 mA.', parts: [m.part.id], wires });
+    }
+  }
+  // Every pin a part needs, connected.
+  for (const part of state.parts) {
+    const d = def(part.def);
+    if (d.kind === 'board') continue;
+    const missing = d.pins.filter((p) => !p.optional && !used.has(part.id + '.' + p.id)).map((p) => p.label);
+    if (missing.length) out.push({ sev: 'warn', text: part.name + ': ' + missing.join(', ') + ' not connected', more: d.name, parts: [part.id], wires: [] });
+  }
+  // A battery's minus must meet the board's ground, or signals have no reference.
+  for (const part of state.parts.filter((p) => def(p.def).pins.some((x) => x.kind === 'supply') && def(p.def).kind !== 'board')) {
+    const g = def(part.def).pins.find((x) => x.kind === 'gnd');
+    if (!g) continue;
+    const net = netOf[part.id + '.' + g.id];
+    const boardGnd = net && net.keys.some((k) => { const r = pinOf(k); return r && r.def.kind === 'board' && r.pin.kind === 'gnd'; });
+    if (!boardGnd) out.push({ sev: 'warn', text: part.name + ' − doesn\'t meet the board\'s GND', more: 'Join the grounds, or drivers read the board\'s signals wrong.', parts: [part.id], wires: [] });
+  }
+  for (const w of state.wires) if (routes[w.id] && routes[w.id].failed) out.push({ sev: 'warn', text: 'No clear path for ' + pinName(w.a) + ' → ' + pinName(w.b), more: 'Move the parts apart, or press Arrange.', parts: [], wires: [w.id] });
+  out.sort((a, b) => (a.sev === b.sev ? 0 : a.sev === 'error' ? -1 : 1));
+  return out;
+}
+function capName(c) { return { pwm: 'PWM', analog: 'analog in', sda: 'I²C SDA', scl: 'I²C SCL', int: 'an interrupt', io: 'a digital pin' }[c] || c; }
+
+// ---------------------------------------------------------------------------------------------
+// Drawing.
+const svg = $('#cv');
+function art(d, x, y, rot) {
+  const W = d.w * G, H = d.h * G;
+  let t = '';
+  if (rot === 1) t = `translate(${d.h * G} 0) rotate(90)`;
+  if (rot === 2) t = `translate(${W} ${H}) rotate(180)`;
+  if (rot === 3) t = `translate(0 ${d.w * G}) rotate(270)`;
+  return `<g transform="translate(${x * G} ${y * G}) ${t}">${(LOOKS[d.look] || LOOKS.generic)(d, W, H)}</g>`;
+}
+const strip = (d) => (d.strips || []).map(([x0, y0, x1, y1]) => `<rect x="${x0 * G}" y="${y0 * G}" width="${(x1 - x0) * G}" height="${(y1 - y0) * G}" rx="2" fill="#121315"/>`).join('');
+const LOOKS = {
+  arduino(d, W, H) {
+    return `<rect width="${W}" height="${H}" rx="10" fill="#0b7d84" stroke="#065a5f" stroke-width="2"/>
+      <rect x="2" y="${H * 0.16}" width="${G * 9}" height="${G * 6}" rx="2" fill="#c3c8ce" stroke="#8a9097"/>
+      <rect x="2" y="${H * 0.64}" width="${G * 7}" height="${G * 5}" rx="3" fill="#17191c"/>
+      ${[[0.07, 0.1], [0.07, 0.9], [0.68, 0.88], [0.62, 0.12]].map(([a, b]) => `<circle cx="${W * a}" cy="${H * b}" r="6" fill="#d8dde2" stroke="#065a5f" stroke-width="2"/>`).join('')}
+      <rect x="${W * 0.5 - 30}" y="${H * 0.5 - 30}" width="60" height="60" fill="#1a1c1f" transform="rotate(45 ${W * 0.5} ${H * 0.5})"/>
+      <text x="${W * 0.28}" y="${H * 0.5 + 7}" text-anchor="middle" font-family="Atkinson Hyperlegible Next, sans-serif" font-weight="700" font-size="${d.w > 60 ? 22 : 18}" fill="#e9fbfb" letter-spacing="1">${esc(d.title)}</text>
+      ${strip(d)}`;
+  },
+  pi(d, W, H) {
+    return `<rect width="${W}" height="${H}" rx="12" fill="#1d7a3c" stroke="#145a2c" stroke-width="2"/>
+      ${[[0.06, 0.08], [0.06, 0.92], [0.76, 0.08], [0.76, 0.92]].map(([a, b]) => `<circle cx="${W * a}" cy="${H * b}" r="7" fill="#e7c76a" stroke="#145a2c" stroke-width="2"/>`).join('')}
+      <rect x="${W - G * 15}" y="${G * 3}" width="${G * 16}" height="${G * 12}" fill="#c9ced4" stroke="#8c939a"/>
+      <rect x="${W - G * 15}" y="${G * 17}" width="${G * 16}" height="${G * 11}" fill="#c9ced4" stroke="#8c939a"/>
+      <rect x="${W - G * 15}" y="${G * 30}" width="${G * 16}" height="${G * 11}" fill="#c9ced4" stroke="#8c939a"/>
+      <rect x="${W * 0.36}" y="${H * 0.36}" width="${G * 12}" height="${G * 12}" rx="3" fill="#b9bec4"/>
+      <text x="${W * 0.36}" y="${H * 0.86}" text-anchor="start" font-family="Atkinson Hyperlegible Next, sans-serif" font-weight="700" font-size="17" fill="#f2fff5">${esc(d.title)}</text>
+      ${strip(d)}`;
+  },
+  sonar(d, W, H) {
+    const can = (cx) => `<circle cx="${cx}" cy="${H * 0.46}" r="${G * 7.4}" fill="#c9ced4" stroke="#7e858c" stroke-width="2"/><circle cx="${cx}" cy="${H * 0.46}" r="${G * 5.6}" fill="#3b3f45"/><circle cx="${cx}" cy="${H * 0.46}" r="${G * 5.6}" fill="url(#mesh)"/>`;
+    return `<rect width="${W}" height="${H}" rx="5" fill="#1d4f9a" stroke="#13386f" stroke-width="2"/>${can(W * 0.24)}${can(W * 0.76)}
+      <rect x="${W / 2 - G * 3}" y="${G * 2}" width="${G * 6}" height="${G * 3}" rx="2" fill="#d9dde2"/>`;
+  },
+  tof(d, W, H) {
+    return `<rect width="${W}" height="${H}" rx="5" fill="#4b2f86" stroke="#341f61" stroke-width="2"/>
+      <rect x="${W / 2 - G * 2.5}" y="${G * 2.5}" width="${G * 5}" height="${G * 3}" rx="2" fill="#141518"/><circle cx="${W / 2 - G}" cy="${G * 4}" r="3" fill="#7a6aa8"/><circle cx="${W / 2 + G}" cy="${G * 4}" r="3" fill="#5b4b89"/>`;
+  },
+  imu(d, W, H) {
+    return `<rect width="${W}" height="${H}" rx="5" fill="#22408f" stroke="#162b63" stroke-width="2"/>
+      <rect x="${W / 2 - G * 2.2}" y="${G * 2.4}" width="${G * 4.4}" height="${G * 4.4}" fill="#141518"/>
+      <circle cx="${G * 2}" cy="${G * 2}" r="4" fill="#d9dde2"/><circle cx="${W - G * 2}" cy="${G * 2}" r="4" fill="#d9dde2"/>`;
+  },
+  bts(d, W, H) {
+    let fins = '';
+    for (let i = 0; i < 9; i++) fins += `<rect x="${G * 7 + i * G * 2.6}" y="${G * 4}" width="${G * 1.4}" height="${H - G * 8}" rx="2" fill="#b8bfc6"/>`;
+    return `<rect width="${W}" height="${H}" rx="5" fill="#26292e" stroke="#16181b" stroke-width="2"/>
+      <rect x="${G * 6}" y="${G * 3}" width="${W - G * 11}" height="${H - G * 6}" rx="4" fill="#9aa2aa"/>${fins}
+      ${[6, 12, 24, 30].map((y) => `<rect x="${W - G * 4}" y="${y * G}" width="${G * 4}" height="${G * 4}" rx="1" fill="#2f8f4e"/>`).join('')}
+      <rect x="0" y="${G * 11}" width="${G * 2.4}" height="${G * 16}" fill="#121315"/>`;
+  },
+  motor(d, W, H) {
+    return `<rect x="0" y="${H * 0.18}" width="${W * 0.42}" height="${H * 0.64}" rx="6" fill="#b8bec5" stroke="#7e858c" stroke-width="2"/>
+      <rect x="${W * 0.42}" y="${H * 0.08}" width="${W * 0.46}" height="${H * 0.84}" rx="4" fill="#c9a227" stroke="#8a6d12" stroke-width="2"/>
+      <rect x="${W * 0.88}" y="${H * 0.44}" width="${W * 0.12}" height="${H * 0.12}" fill="#d9dde2" stroke="#7e858c"/>
+      <rect x="0" y="${G * 6}" width="${G * 2}" height="${G * 10}" fill="#d0d4d9"/>`;
+  },
+  servo(d, W, H) {
+    return `<rect x="${W * 0.14}" y="0" width="${W * 0.72}" height="${H}" rx="3" fill="#2563c9" stroke="#183f80" stroke-width="2"/>
+      <rect x="${W * 0.04}" y="${H * 0.3}" width="${W * 0.92}" height="${H * 0.4}" rx="2" fill="#2563c9" stroke="#183f80"/>
+      <circle cx="${W * 0.66}" cy="${H * 0.5}" r="${H * 0.32}" fill="#f2f3f4" stroke="#b8bec5"/>
+      <rect x="0" y="${G * 3}" width="${G * 2}" height="${G * 6}" fill="#121315"/>`;
+  },
+  button(d, W, H) {
+    return `<circle cx="${W / 2}" cy="${H / 2}" r="${W / 2 - 1}" fill="#2b2f35" stroke="#16181b" stroke-width="2"/><circle cx="${W / 2}" cy="${H / 2}" r="${W / 2 - 9}" fill="#d43a3a" stroke="#8f2020" stroke-width="2"/>`;
+  },
+  led(d, W, H) {
+    return `<rect width="${W}" height="${H}" rx="4" fill="#26292e" stroke="#16181b" stroke-width="2"/><circle cx="${W / 2}" cy="${H * 0.38}" r="${W * 0.32}" fill="#f2c037" stroke="#a37a0f" stroke-width="2"/><circle cx="${W / 2 - 4}" cy="${H * 0.33}" r="3" fill="#fff6d6"/>`;
+  },
+  battery(d, W, H) {
+    let cells = '';
+    for (let i = 0; i < 3; i++) cells += `<rect x="${G * 3 + i * (W - G * 8) / 3}" y="${G * 3}" width="${(W - G * 8) / 3 - G}" height="${H - G * 6}" rx="${G * 2}" fill="#2a5db5" stroke="#173a75" stroke-width="2"/><text x="${G * 3 + i * (W - G * 8) / 3 + ((W - G * 8) / 3 - G) / 2}" y="${H / 2 + 5}" text-anchor="middle" font-family="Atkinson Hyperlegible Mono, monospace" font-size="13" fill="#dbe7ff">G${i + 1}</text>`;
+    return `<rect width="${W}" height="${H}" rx="8" fill="#1b2a44" stroke="#0f1a2c" stroke-width="2"/>${cells}
+      <rect x="${W - G * 4}" y="${G * 8}" width="${G * 4}" height="${G * 10}" rx="1" fill="#2f8f4e"/>`;
+  },
+  generic(d, W, H) {
+    const img = d.art ? `<image href="${d.art}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="none"/>` : '';
+    return `<rect width="${W}" height="${H}" rx="5" fill="${esc(d.color || '#1d4f9a')}" stroke="#0e1726" stroke-opacity=".5" stroke-width="2"/>${img}`;
+  },
+};
+
+function pathD(pts, hops) {
+  const R = 4, Hh = 3.4;
+  let d = `M${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1], next = pts[i + 2];
+    const horiz = a[1] === b[1];
+    const len = Math.abs(horiz ? b[0] - a[0] : b[1] - a[1]);
+    const sg = Math.sign(horiz ? b[0] - a[0] : b[1] - a[1]) || 1;
+    const nlen = next ? Math.abs(b[1] === next[1] ? next[0] - b[0] : next[1] - b[1]) : 0;
+    const r = next ? Math.min(R, len / 2, nlen / 2) : 0;
+    if (horiz && hops[i]) {
+      for (const hx of hops[i]) d += ` L${hx - sg * Hh} ${a[1]} A${Hh} ${Hh} 0 0 ${sg > 0 ? 1 : 0} ${hx + sg * Hh} ${a[1]}`;
+    }
+    d += horiz ? ` L${b[0] - sg * r} ${b[1]}` : ` L${b[0]} ${b[1] - sg * r}`;
+    if (next) {
+      const h2 = b[1] === next[1];
+      const s2 = Math.sign(h2 ? next[0] - b[0] : next[1] - b[1]) || 1;
+      d += ` Q${b[0]} ${b[1]} ${h2 ? b[0] + s2 * r : b[0]} ${h2 ? b[1] : b[1] + s2 * r}`;
+    }
+  }
+  return d;
+}
+function hopsFor(wire, all) {
+  // Hops sit on horizontal runs where another net's vertical run crosses.
+  const pts = routes[wire.id].pts.map(([x, y]) => [x * G, y * G]);
+  const net = netOf[wire.a];
+  const verts = [];
+  for (const w of all) {
+    if (w === wire || netOf[w.a] === net || !routes[w.id] || routes[w.id].failed) continue;
+    const q = routes[w.id].pts;
+    for (let i = 0; i < q.length - 1; i++) if (q[i][0] === q[i + 1][0]) verts.push([q[i][0] * G, Math.min(q[i][1], q[i + 1][1]) * G, Math.max(q[i][1], q[i + 1][1]) * G]);
+  }
+  const hops = {};
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (a[1] !== b[1]) continue;
+    const lo = Math.min(a[0], b[0]), hi = Math.max(a[0], b[0]);
+    const xs = verts.filter(([x, y0, y1]) => x > lo + 4 && x < hi - 4 && a[1] > y0 && a[1] < y1).map((v) => v[0]);
+    if (xs.length) hops[i] = [...new Set(xs)].sort((p, q) => (b[0] > a[0] ? p - q : q - p));
+  }
+  return { pts, hops };
+}
+
+function labelFor(p, gp, board) {
+  if (p.hideLabel) return '';
+  const text = p.pairLabel || p.label;
+  if (!text) return '';
+  const off = 5.5;
+  const fs = board ? 6 : 6.5;
+  const x = gp.x * G, y = gp.y * G;
+  const dir = p.jog && p.pairLabel ? 1 : gp.d;
+  const base = `font-family="Atkinson Hyperlegible Mono, monospace" font-size="${fs}" fill="#f4f7f8" fill-opacity=".92"`;
+  if (dir === 0) return `<text x="${x}" y="${y + off}" ${base} text-anchor="end" dominant-baseline="central" transform="rotate(-90 ${x} ${y + off})">${esc(text)}</text>`;
+  if (dir === 2) return `<text x="${x}" y="${y - off}" ${base} text-anchor="start" dominant-baseline="central" transform="rotate(-90 ${x} ${y - off})">${esc(text)}</text>`;
+  if (dir === 1) return `<text x="${x - off}" y="${y}" ${base} text-anchor="end" dominant-baseline="central">${esc(text)}</text>`;
+  return `<text x="${x + off}" y="${y}" ${base} text-anchor="start" dominant-baseline="central">${esc(text)}</text>`;
+}
+
+function render() {
+  const parts = [], wires = [], pins = [], labels = [], titles = [];
+  const dim = (on) => (hl && !on ? ' opacity=".18"' : '');
+  const connectedKeys = new Set();
+  for (const w of state.wires) { connectedKeys.add(w.a); connectedKeys.add(w.b); }
+  const verdicts = connecting ? {} : null;
+  for (const part of state.parts) {
+    const d = def(part.def);
+    if (!d) continue;
+    const g = geom(part);
+    const on = !hl || hl.parts.has(part.id);
+    const selected = sel && sel.part === part.id;
+    parts.push(`<g data-part="${esc(part.id)}" class="part"${dim(on)}>${art(d, part.x, part.y, part.rot)}${selected ? `<rect x="${g.x0 * G - 5}" y="${g.y0 * G - 5}" width="${g.w * G + 10}" height="${g.h * G + 10}" rx="12" fill="none" stroke="#7ef0e6" stroke-width="2.5" stroke-dasharray="7 5"/>` : ''}<rect x="${g.x0 * G}" y="${g.y0 * G}" width="${g.w * G}" height="${g.h * G}" fill="transparent"/></g>`);
+    for (const p of d.pins) {
+      const gp = g.pins[p.id];
+      const key = part.id + '.' + p.id;
+      const isOn = connectedKeys.has(key);
+      let ring = '';
+      if (connecting) {
+        const v = key === connecting.key ? 'self' : pairVerdict(connecting.key, key);
+        verdicts[key] = v;
+        if (v === 'ok') ring = `<circle cx="${gp.x * G}" cy="${gp.y * G}" r="7" fill="none" stroke="#5eead4" stroke-width="2.4"/>`;
+        else if (v === 'warn') ring = `<circle cx="${gp.x * G}" cy="${gp.y * G}" r="7" fill="none" stroke="#facc15" stroke-width="2"/>`;
+        else if (v === 'self') ring = `<circle cx="${gp.x * G}" cy="${gp.y * G}" r="8" fill="none" stroke="#ffffff" stroke-width="2.4"/>`;
+      }
+      const big = p.terminal ? 6 : 4.2;
+      const pad = p.terminal
+        ? `<circle cx="${gp.x * G}" cy="${gp.y * G}" r="${big}" fill="#d9dde2" stroke="#4a5058" stroke-width="1.5"/><line x1="${gp.x * G - 3}" y1="${gp.y * G}" x2="${gp.x * G + 3}" y2="${gp.y * G}" stroke="#4a5058" stroke-width="1.5"/>`
+        : d.kind === 'board'
+          ? `<rect x="${gp.x * G - big}" y="${gp.y * G - big}" width="${big * 2}" height="${big * 2}" fill="#0b0c0d"/><rect x="${gp.x * G - 1.8}" y="${gp.y * G - 1.8}" width="3.6" height="3.6" fill="${isOn ? '#e6c35c' : '#3a3d42'}"/>`
+          : `<rect x="${gp.x * G - 3.4}" y="${gp.y * G - 3.4}" width="6.8" height="6.8" rx="1" fill="#e2bd52" stroke="#8f6f17" stroke-width="1"/>`;
+      const dimPin = connecting && verdicts[key] === 'bad' ? ' opacity=".35"' : dim(on);
+      pins.push(`<g data-pin="${esc(key)}"${dimPin}>${pad}${ring}<circle cx="${gp.x * G}" cy="${gp.y * G}" r="7" fill="transparent" class="hit"/></g>`);
+      labels.push(`<g${dim(on)} pointer-events="none">${labelFor(p, gp, d.kind === 'board')}</g>`);
+    }
+    if (d.kind !== 'board') {
+      const small = Math.min(g.w, g.h) < 16;
+      let tx = (g.x0 + g.w / 2) * G, ty = (g.y0 + g.h / 2) * G;
+      if (small) {
+        // Small parts carry their name outside, away from their pins.
+        const ds = d.pins.map((p) => g.pins[p.id].d);
+        const dom = [0, 1, 2, 3].sort((a, b) => ds.filter((x) => x === b).length - ds.filter((x) => x === a).length)[0];
+        const away = (dom + 2) & 3;
+        if (away === 0) ty = g.y0 * G - 16;
+        if (away === 2) ty = g.y1 * G + 16;
+        if (away === 1) { tx = g.x1 * G + 6; }
+        if (away === 3) { tx = g.x0 * G - 6; }
+        titles.push(titleTag(part, d, tx, ty, away === 1 ? 'start' : away === 3 ? 'end' : 'middle', on));
+      } else titles.push(titleTag(part, d, tx, ty, 'middle', on));
+    }
+  }
+  const order = state.wires.slice();
+  for (const w of order) {
+    const r = routes[w.id];
+    if (!r) continue;
+    const on = !hl || hl.wires.has(w.id);
+    const color = wireColor(w);
+    const selected = sel && sel.wire === w.id;
+    if (r.failed) {
+      const pts = r.pts.map(([x, y]) => [x * G, y * G]);
+      wires.push(`<g data-wire="${w.id}"${dim(on)}><polyline points="${pts.map((p) => p.join(',')).join(' ')}" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-dasharray="6 5"/><polyline points="${pts.map((p) => p.join(',')).join(' ')}" fill="none" stroke="transparent" stroke-width="12"/></g>`);
+      continue;
+    }
+    const { pts, hops } = hopsFor(w, order);
+    const d = pathD(pts, hops);
+    const net = netOf[w.a];
+    const wide = net && net.kind === 'power' && net.volts > 6 ? 4.2 : net && net.kind === 'motor' ? 3.8 : 3;
+    wires.push(`<g data-wire="${w.id}"${dim(on)}>
+      <path d="${d}" fill="none" stroke="var(--mat)" stroke-width="${wide + 4}" stroke-linecap="round" stroke-linejoin="round"/>
+      ${net && net.kind === 'gnd' && !w.color ? `<path d="${d}" fill="none" stroke="#9aa3ad" stroke-width="${wide + 1.6}" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+      ${selected ? `<path d="${d}" fill="none" stroke="#7ef0e6" stroke-width="${wide + 5}" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/>` : ''}
+      <path d="${d}" fill="none" stroke="${color}" stroke-width="${wide}" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="${d}" fill="none" stroke="transparent" stroke-width="12"/></g>`);
+  }
+  const dots = junctions.map((j) => {
+    const w = state.wires.find((x) => netOf[x.a] && netOf[x.a].id === j.net);
+    const on = !hl || (w && state.wires.some((x) => netOf[x.a] && netOf[x.a].id === j.net && hl.wires.has(x.id)));
+    return `<circle cx="${j.x * G}" cy="${j.y * G}" r="4.6" fill="${w ? wireColor(w) : '#fff'}" stroke="var(--mat)" stroke-width="1.6"${dim(on)}/>`;
+  });
+  svg.innerHTML = `
+    <defs>
+      <pattern id="mat" width="${20 * G}" height="${20 * G}" patternUnits="userSpaceOnUse">
+        <path d="M ${20 * G} 0 L 0 0 0 ${20 * G}" fill="none" stroke="var(--mat-major)" stroke-width="1.2"/>
+        ${[4, 8, 12, 16].map((u) => `<path d="M ${u * G} 0 V ${20 * G} M 0 ${u * G} H ${20 * G}" stroke="var(--mat-minor)" stroke-width="1"/>`).join('')}
+      </pattern>
+      <pattern id="mesh" width="4" height="4" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="0.9" fill="#6f757c"/></pattern>
+    </defs>
+    <g id="world" transform="translate(${view.tx} ${view.ty}) scale(${view.k})">
+      <rect x="-40000" y="-40000" width="80000" height="80000" fill="url(#mat)" data-bg="1"/>
+      ${parts.join('')}${wires.join('')}${dots.join('')}${pins.join('')}${labels.join('')}${titles.join('')}
+      <path id="rubber" fill="none" stroke="#ffffff" stroke-width="2" stroke-dasharray="5 4" pointer-events="none"/>
+    </g>`;
+}
+function titleTag(part, d, x, y, anchor, on) {
+  const name = esc(part.name);
+  const sub = esc(d.name);
+  const w = Math.max(name.length * 6.6, sub.length * 5.1) + 14;
+  const bx = anchor === 'middle' ? x - w / 2 : anchor === 'start' ? x - 4 : x - w + 4;
+  return `<g pointer-events="none"${hl && !on ? ' opacity=".18"' : ''}><rect x="${bx}" y="${y - 15}" width="${w}" height="30" rx="6" fill="#0d1014" fill-opacity=".62"/>
+    <text x="${anchor === 'middle' ? x : anchor === 'start' ? x + 3 : x - 3}" y="${y - 2}" text-anchor="${anchor}" font-family="Atkinson Hyperlegible Next, sans-serif" font-size="11.5" font-weight="700" fill="#ffffff">${name}</text>
+    <text x="${anchor === 'middle' ? x : anchor === 'start' ? x + 3 : x - 3}" y="${y + 10}" text-anchor="${anchor}" font-family="Atkinson Hyperlegible Next, sans-serif" font-size="9" fill="#d5dde3">${sub}</text></g>`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Side panels.
+let tab = 'sel';
+let checks = [];
+function refresh(reroute) {
+  if (reroute !== false) routeAll();
+  else computeNets();
+  checks = runChecks();
+  render();
+  renderSide();
+  renderStatus();
+  renderLegend();
+  save();
+}
+function renderStatus() {
+  const e = checks.filter((c) => c.sev === 'error').length, w = checks.filter((c) => c.sev === 'warn').length;
+  const chip = e ? `<span class="chip err">${e} problem${e > 1 ? 's' : ''}</span>` : w ? `<span class="chip warn">${w} to look at</span>` : '<span class="chip ok">Ready to build</span>';
+  $('#statusChip').innerHTML = chip;
+  $('#checksChip').innerHTML = e ? `<span class="chip err">${e}</span>` : w ? `<span class="chip warn">${w}</span>` : '<span class="chip ok">✓</span>';
+  $('#docName').textContent = state.name + ' · ' + state.parts.length + ' parts · ' + state.wires.length + ' wires';
+}
+function renderLegend() {
+  const kinds = new Set(Object.values(nets).map((n) => (n.kind === 'power' ? 'p' + n.volts : n.kind)));
+  const items = [];
+  if ([...kinds].some((k) => k === 'p12.6' || (k[0] === 'p' && +k.slice(1) > 6))) items.push(['#be123c', 'Battery']);
+  if (kinds.has('p5')) items.push(['#ef4444', '5 V']);
+  if (kinds.has('p3.3')) items.push(['#f97316', '3.3 V']);
+  if (kinds.has('gnd')) items.push(['#202328', 'GND']);
+  items.push(['linear-gradient(90deg,#3b82f6,#facc15,#c084fc)', 'Signals']);
+  $('#legend').innerHTML = items.map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('') + '<span class="scale">Big squares 1 in (25.4 mm)</span>';
+}
+function setTab(t) {
+  tab = t;
+  for (const [id, k] of [['#tabSel', 'sel'], ['#tabChecks', 'checks'], ['#tabBuild', 'build']]) $(id).setAttribute('aria-selected', String(k === t));
+  renderSide();
+}
+function renderSide() {
+  const side = $('#side');
+  if (tab === 'checks') {
+    if (!checks.length) { side.innerHTML = '<ul class="issues"><li class="issue ok"><span>Every wire checks out.<small>Power, ground, pin types and voltages all match.</small></span></li></ul>'; return; }
+    side.innerHTML = `<ul class="issues">${checks.map((c, i) => `<li class="issue ${c.sev}" data-issue="${i}" tabindex="0"><span>${esc(c.text)}<small>${esc(c.more || '')}</small></span></li>`).join('')}</ul>
+      <p class="note">Click a line to see it on the canvas. Faber runs the same checks before it writes code to a board.</p>`;
+    return;
+  }
+  if (tab === 'build') { side.innerHTML = buildHtml(); return; }
+  if (sel && sel.part) {
+    const part = partById(sel.part);
+    if (!part) { sel = null; return renderSide(); }
+    const d = def(part.def);
+    const rows = d.pins.map((p) => {
+      const key = part.id + '.' + p.id;
+      const ws = state.wires.filter((w) => w.a === key || w.b === key);
+      const to = ws.map((w) => pinName(w.a === key ? w.b : w.a)).join(', ');
+      const color = ws.length ? wireColor(ws[0]) : '';
+      return `<tr class="${ws.length ? 'on' : ''}"><td>${esc(p.label)}</td><td>${ws.length ? `<span class="dot" style="background:${color}"></span>` : ''}</td><td class="to">${ws.length ? esc(to) : p.optional ? 'free (optional)' : d.kind === 'board' ? '' : 'not connected'}</td></tr>`;
+    }).filter((r) => d.kind !== 'board' || r.includes('dot')).join('');
+    side.innerHTML = `
+      <label class="field">Name<input id="partName" value="${esc(part.name)}"></label>
+      <dl class="kv"><dt>Part</dt><dd>${esc(d.name)}</dd><dt>Covers</dt><dd>${esc(d.covers || '—')}</dd><dt>Size</dt><dd class="mono">${(d.w * MM).toFixed(1)} × ${(d.h * MM).toFixed(1)} mm</dd></dl>
+      <div class="row"><button class="btn" id="btnRotate">Rotate</button><button class="btn danger" id="btnDelPart">Remove</button></div>
+      <div><h2>Pins${d.kind === 'board' ? ' in use' : ''}</h2><table class="pins">${rows || '<tr><td colspan="3" class="to">No wires yet. Click a pin on the canvas to start one.</td></tr>'}</table></div>`;
+    $('#partName').addEventListener('change', (e) => { snapshot(); part.name = e.target.value.trim() || part.name; refresh(false); });
+    $('#btnRotate').addEventListener('click', () => rotateSel());
+    $('#btnDelPart').addEventListener('click', () => deleteSel());
+    return;
+  }
+  if (sel && sel.wire) {
+    const w = state.wires.find((x) => x.id === sel.wire);
+    if (!w) { sel = null; return renderSide(); }
+    const r = routes[w.id];
+    let len = 0;
+    if (r) for (let i = 0; i < r.pts.length - 1; i++) len += Math.abs(r.pts[i + 1][0] - r.pts[i][0]) + Math.abs(r.pts[i + 1][1] - r.pts[i][1]);
+    const net = netOf[w.a];
+    side.innerHTML = `
+      <dl class="kv"><dt>From</dt><dd>${esc(pinName(w.a))}</dd><dt>To</dt><dd>${esc(pinName(w.b))}</dd>
+      <dt>Carries</dt><dd>${net.kind === 'power' ? net.volts + ' V' : net.kind === 'gnd' ? 'Ground' : net.kind === 'motor' ? 'Motor current' : 'A signal'}</dd>
+      <dt>On paper</dt><dd class="mono">${Math.round(len * MM)} mm</dd></dl>
+      <label class="field">Wire colour
+        <select id="wireColor">${[['', 'By what it carries'], ['#ef4444', 'Red'], ['#202328', 'Black'], ['#3b82f6', 'Blue'], ['#facc15', 'Yellow'], ['#22c55e', 'Green'], ['#f5f5f4', 'White'], ['#f97316', 'Orange'], ['#c084fc', 'Purple'], ['#b07a43', 'Brown']].map(([v, t]) => `<option value="${v}"${(w.color || '') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      </label>
+      <div class="row"><button class="btn danger" id="btnDelWire">Remove wire</button></div>
+      <p class="note">The colour you pick is the colour the build steps ask for, so it matches the wire in your hand.</p>`;
+    $('#wireColor').addEventListener('change', (e) => { snapshot(); w.color = e.target.value || undefined; refresh(false); });
+    $('#btnDelWire').addEventListener('click', () => deleteSel());
+    return;
+  }
+  side.innerHTML = `
+    <div><h2>How it works</h2></div>
+    <p class="note"><b>Wire:</b> click a pin, then another. Pins that fit glow green, doubtful ones yellow; the rest fade out.</p>
+    <p class="note"><b>Move:</b> drag a part. Wires find their own way around parts, never run on top of each other, and hop where they cross.</p>
+    <p class="note"><b>Arrange</b> puts each part on the side of the board its pins are on, turned to face it.</p>
+    <p class="note"><b>Checks</b> lists what would break something: short circuits, wrong voltages, a PWM job on a pin that can't, 5 V into a 3.3 V pin.</p>
+    <p class="note"><b>Build</b> turns the diagram into wiring steps you tick off with the parts in your hand.</p>
+    <div><h2>In Faber</h2></div>
+    <p class="note">A guided board already knows its parts and pins, so Faber draws this from the plan and keeps it in step. After you wire it up, Faber tests the parts one at a time from the Build list.</p>`;
+}
+function buildHtml() {
+  // Ground first, then power, then signals; one group per part, the board last.
+  const groups = [];
+  for (const part of state.parts) {
+    if (def(part.def).kind === 'board') continue;
+    const mine = state.wires.filter((w) => splitKey(w.a)[0] === part.id || splitKey(w.b)[0] === part.id);
+    if (!mine.length) continue;
+    const rank = (w) => { const n = netOf[w.a]; return n.kind === 'gnd' ? 0 : n.kind === 'power' ? 1 : 2; };
+    mine.sort((a, b) => rank(a) - rank(b));
+    groups.push({ part, wires: mine });
+  }
+  const seenWire = new Set();
+  let total = 0, done = 0;
+  const meet = {};
+  for (const w of state.wires) for (const k of [w.a, w.b]) meet[k] = (meet[k] || 0) + 1;
+  const html = groups.map((g) => {
+    const items = g.wires.filter((w) => !seenWire.has(w.id)).map((w) => {
+      seenWire.add(w.id);
+      total += 1;
+      const isDone = !!state.done[w.id];
+      if (isDone) done += 1;
+      const mineFirst = splitKey(w.a)[0] === g.part.id ? [w.a, w.b] : [w.b, w.a];
+      const far = pinOf(mineFirst[1]);
+      const where = far && far.pin.place ? far.pin.place : far ? far.part.name : '';
+      const shared = meet[mineFirst[1]] > 1 ? ` · ${meet[mineFirst[1]]} wires meet here: use a Wago or a breadboard rail` : '';
+      return `<li class="step${isDone ? ' done' : ''}" data-step="${w.id}"><input type="checkbox" aria-label="Done"${isDone ? ' checked' : ''}><i class="sw" style="background:${wireColor(w)}"></i><span>${esc(pinOf(mineFirst[0]).pin.label)} → ${esc(pinName(mineFirst[1]))}<small>${esc(colourName(w))} wire${where ? ' · ' + esc(where) : ''}${esc(shared)}</small></span></li>`;
+    }).join('');
+    if (!items) return '';
+    return `<h3>${esc(g.part.name)} <span>${esc(def(g.part.def).name)}</span></h3>${items}`;
+  }).join('');
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  return `<div class="progress" aria-label="${done} of ${total} wires done"><div style="width:${pct}%"></div></div>
+    <p class="note"><b>${done} of ${total} wires.</b> Unplug the battery and the USB cable before you start.</p>
+    <ul class="steps">${html}</ul>
+    <p class="note">Then plug in USB. In Faber, each part is tested as soon as its wires are ticked: the sonar reads a distance, the motor turns a little (wheels off the ground).</p>`;
+}
+function colourName(w) {
+  const c = wireColor(w);
+  return { '#ef4444': 'Red', '#f97316': 'Orange', '#be123c': 'Red (thick)', 'var(--wire-gnd)': 'Black', '#202328': 'Black', '#3b82f6': 'Blue', '#facc15': 'Yellow', '#f5f5f4': 'White', '#c084fc': 'Purple', '#22d3ee': 'Cyan', '#f472b6': 'Pink', '#a3e635': 'Lime', '#b07a43': 'Brown', '#94a3b8': 'Grey', '#22c55e': 'Green', '#60a5fa': 'Light blue', '#fde047': 'Light yellow', '#e879f9': 'Magenta', '#2dd4bf': 'Teal', '#fb7185': 'Rose' }[c] || 'A';
+}
+
+// ---------------------------------------------------------------------------------------------
+// Library.
+function miniSvg(d) {
+  const pad = 6;
+  const W = d.w * G, H = d.h * G;
+  return `<svg viewBox="${-pad} ${-pad} ${W + pad * 2} ${H + pad * 2}" aria-hidden="true">${(LOOKS[d.look] || LOOKS.generic)(d, W, H)}</svg>`;
+}
+function renderLib() {
+  const q = $('#libSearch').value.trim().toLowerCase();
+  const list = allDefs().filter((d) => !q || (d.name + ' ' + (d.covers || '')).toLowerCase().includes(q));
+  $('#libList').innerHTML = list.map((d) => `<button class="lib-item" data-def="${esc(d.id)}" title="Add ${esc(d.name)}">${miniSvg(d)}<span><b>${esc(d.name)}</b><span>${esc(d.covers || '')}</span></span></button>`).join('') || '<p class="note" style="padding:8px">No part matches. Make it with New part.</p>';
+}
+function addPart(defId) {
+  const d = def(defId);
+  snapshot();
+  const base = d.id === 'hcsr04' ? 'sonar' : d.id;
+  let n = 1;
+  while (state.parts.some((p) => p.name === base + (n > 1 ? '-' + n : ''))) n += 1;
+  const id = 'p' + Date.now().toString(36);
+  const rect = svg.getBoundingClientRect();
+  const cx = Math.round(((rect.width / 2 - view.tx) / view.k) / G), cy = Math.round(((rect.height / 2 - view.ty) / view.k) / G);
+  const part = { id, def: d.id, name: base + (n > 1 ? '-' + n : ''), x: cx - (cx & 1) - Math.round(d.w / 2), y: cy - (cy & 1) - Math.round(d.h / 2), rot: 0 };
+  part.x -= part.x & 1; part.y -= part.y & 1;
+  state.parts.push(part);
+  settle(part);
+  sel = { part: id };
+  setTab('sel');
+  refresh();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pointer handling: drag parts, pan the mat, click pins to wire, wheel to zoom.
+let drag = null;
+function toWorld(e) {
+  const r = svg.getBoundingClientRect();
+  return [(e.clientX - r.left - view.tx) / view.k, (e.clientY - r.top - view.ty) / view.k];
+}
+let rafPending = false;
+function scheduleRoute() {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => { rafPending = false; routeAll(); render(); });
+}
+svg.addEventListener('pointerdown', (e) => {
+  const pinEl = e.target.closest('[data-pin]');
+  const partEl = e.target.closest('[data-part]');
+  const wireEl = e.target.closest('[data-wire]');
+  hideTip();
+  if (pinEl) {
+    const key = pinEl.getAttribute('data-pin');
+    if (!connecting) { connecting = { key }; svg.classList.add('connecting'); showHint('Now click the pin to connect ' + pinName(key) + ' to. Esc cancels.'); render(); return; }
+    if (key === connecting.key) { stopConnecting(); return; }
+    const verdict = pairVerdict(connecting.key, key);
+    if (verdict === 'bad') { showHint('That would harm a part or can\'t work. Pick a glowing pin.'); return; }
+    snapshot();
+    const w = { id: 'w' + state.seq++, a: connecting.key, b: key };
+    state.wires.push(w);
+    stopConnecting();
+    sel = { wire: w.id };
+    setTab('sel');
+    refresh();
+    return;
+  }
+  if (connecting && !partEl) { stopConnecting(); return; }
+  if (partEl && !connecting) {
+    const part = partById(partEl.getAttribute('data-part'));
+    const [wx, wy] = toWorld(e);
+    drag = { kind: 'part', part, ox: wx / G - part.x, oy: wy / G - part.y, sx: part.x, sy: part.y, moved: false, before: JSON.stringify(state) };
+    svg.setPointerCapture(e.pointerId);
+    return;
+  }
+  if (wireEl && !connecting) {
+    sel = { wire: wireEl.getAttribute('data-wire') };
+    hl = null;
+    setTab('sel');
+    render();
+    return;
+  }
+  drag = { kind: 'pan', x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, moved: false };
+  svg.classList.add('panning');
+  svg.setPointerCapture(e.pointerId);
+});
+svg.addEventListener('pointermove', (e) => {
+  if (connecting) {
+    const from = pinOf(connecting.key);
+    if (from) {
+      const gp = geom(from.part).pins[from.pin.id];
+      const [wx, wy] = toWorld(e);
+      const rb = document.getElementById('rubber');
+      if (rb) rb.setAttribute('d', `M${gp.x * G} ${gp.y * G} L${wx} ${wy}`);
+    }
+  }
+  if (!drag) { maybeTip(e); return; }
+  if (drag.kind === 'pan') {
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    view.tx = drag.tx + dx; view.ty = drag.ty + dy;
+    const wEl = document.getElementById('world');
+    if (wEl) wEl.setAttribute('transform', `translate(${view.tx} ${view.ty}) scale(${view.k})`);
+    return;
+  }
+  const [wx, wy] = toWorld(e);
+  let nx = Math.round(wx / G - drag.ox), ny = Math.round(wy / G - drag.oy);
+  nx -= nx & 1; ny -= ny & 1;
+  if (nx !== drag.part.x || ny !== drag.part.y) {
+    drag.moved = true;
+    drag.part.x = nx; drag.part.y = ny;
+    scheduleRoute();
+  }
+});
+svg.addEventListener('pointerup', () => {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+  svg.classList.remove('panning');
+  if (d.kind === 'pan') { if (!d.moved) { sel = null; hl = null; setTab(tab === 'sel' ? 'sel' : tab); render(); } return; }
+  if (d.moved) {
+    history.push(d.before);
+    settle(d.part);
+    refresh();
+  } else {
+    sel = { part: d.part.id };
+    hl = null;
+    setTab('sel');
+    render();
+  }
+});
+svg.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const r = svg.getBoundingClientRect();
+  zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015));
+}, { passive: false });
+function zoomAt(sx, sy, f) {
+  const k = Math.min(4, Math.max(0.2, view.k * f));
+  view.tx = sx - ((sx - view.tx) / view.k) * k;
+  view.ty = sy - ((sy - view.ty) / view.k) * k;
+  view.k = k;
+  render();
+}
+function fit() {
+  if (!state.parts.length) return;
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  const grow = (x, y) => { minx = Math.min(minx, x); miny = Math.min(miny, y); maxx = Math.max(maxx, x); maxy = Math.max(maxy, y); };
+  for (const p of state.parts) { const g = geom(p); grow(g.x0, g.y0); grow(g.x1, g.y1); }
+  for (const id in routes) for (const [x, y] of routes[id].pts) grow(x, y);
+  const r = svg.getBoundingClientRect();
+  const pad = 30;
+  const k = Math.min((r.width - pad * 2) / ((maxx - minx) * G), (r.height - pad * 2 - 30) / ((maxy - miny) * G), 2.2);
+  view.k = k;
+  view.tx = r.width / 2 - ((minx + maxx) / 2) * G * k;
+  view.ty = (r.height - 30) / 2 - ((miny + maxy) / 2) * G * k;
+  render();
+}
+function stopConnecting() { connecting = null; svg.classList.remove('connecting'); hideHint(); render(); }
+let hintTimer = 0;
+function showHint(t) { const h = $('#hint'); h.textContent = t; h.hidden = false; clearTimeout(hintTimer); if (!connecting) hintTimer = setTimeout(hideHint, 3500); }
+function hideHint() { $('#hint').hidden = true; }
+function maybeTip(e) {
+  const pinEl = e.target.closest && e.target.closest('[data-pin]');
+  if (!pinEl) { hideTip(); return; }
+  const r = pinOf(pinEl.getAttribute('data-pin'));
+  if (!r) return;
+  const p = r.pin;
+  const what = p.kind === 'io' ? p.caps.map(capName).join(', ') + ' · ' + p.logic + ' V logic'
+    : p.kind === 'supply' ? p.volts + ' V out' : p.kind === 'gnd' ? 'Ground'
+    : p.kind === 'vcc' || p.kind === 'vin' || p.kind === 'power-in' ? 'Power in, ' + p.min + '–' + p.max + ' V'
+    : p.kind === 'sig' ? 'Needs ' + (p.needs || ['io']).map(capName).join(', ') + (p.drives ? ' · outputs ' + p.drives + ' V' : '') + (p.optional ? ' · optional' : '')
+    : p.kind === 'motor-out' ? 'To the motor' : p.kind === 'motor-in' ? 'From a motor driver' : 'Not for wiring';
+  const tip = $('#tip');
+  tip.innerHTML = `<b>${esc(r.part.name)} ${esc(p.label)}</b><span>${esc(what)}</span>${p.place ? `<span>${esc(p.place)}</span>` : ''}`;
+  const sr = $('#stage').getBoundingClientRect();
+  tip.style.left = Math.min(e.clientX - sr.left + 14, sr.width - 250) + 'px';
+  tip.style.top = (e.clientY - sr.top + 14) + 'px';
+  tip.hidden = false;
+}
+function hideTip() { $('#tip').hidden = true; }
+
+function rotateSel() {
+  if (!sel || !sel.part) return;
+  const p = partById(sel.part);
+  snapshot();
+  const g = geom(p);
+  const cx = g.x0 + g.w / 2, cy = g.y0 + g.h / 2;
+  p.rot = (p.rot + 1) & 3;
+  const g2 = geom(p);
+  p.x = Math.round(cx - g2.w / 2); p.y = Math.round(cy - g2.h / 2);
+  p.x -= p.x & 1; p.y -= p.y & 1;
+  settle(p);
+  refresh();
+}
+function deleteSel() {
+  if (!sel) return;
+  snapshot();
+  if (sel.part) {
+    const id = sel.part;
+    state.parts = state.parts.filter((p) => p.id !== id);
+    state.wires = state.wires.filter((w) => splitKey(w.a)[0] !== id && splitKey(w.b)[0] !== id);
+    geoCache.delete(id);
+  } else if (sel.wire) {
+    state.wires = state.wires.filter((w) => w.id !== sel.wire);
+  }
+  sel = null;
+  refresh();
+}
+function undo() {
+  const prev = history.pop();
+  if (!prev) return;
+  state = JSON.parse(prev);
+  geoCache.clear();
+  sel = null; hl = null;
+  refresh();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, textarea, select')) return;
+  if (e.key === 'Escape') { if (connecting) stopConnecting(); else if (!$('#modal').hidden) closeModal(); else { sel = null; hl = null; render(); renderSide(); } }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && sel) { e.preventDefault(); deleteSel(); }
+  if ((e.key === 'r' || e.key === 'R') && sel && sel.part) rotateSel();
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+});
+$('#side').addEventListener('click', (e) => {
+  const iss = e.target.closest('[data-issue]');
+  if (iss) {
+    const c = checks[+iss.getAttribute('data-issue')];
+    hl = { parts: new Set(c.parts), wires: new Set(c.wires) };
+    render();
+    return;
+  }
+  const step = e.target.closest('[data-step]');
+  if (step) {
+    const id = step.getAttribute('data-step');
+    if (e.target.matches('input')) { state.done[id] = e.target.checked; save(); renderSide(); }
+    const w = state.wires.find((x) => x.id === id);
+    if (w) hl = { parts: new Set([splitKey(w.a)[0], splitKey(w.b)[0]]), wires: new Set([id]) };
+    render();
+  }
+});
+$('#tabSel').addEventListener('click', () => { hl = null; setTab('sel'); render(); });
+$('#tabChecks').addEventListener('click', () => setTab('checks'));
+$('#tabBuild').addEventListener('click', () => setTab('build'));
+$('#libList').addEventListener('click', (e) => { const b = e.target.closest('[data-def]'); if (b) addPart(b.getAttribute('data-def')); });
+$('#libSearch').addEventListener('input', renderLib);
+$('#btnArrange').addEventListener('click', () => { snapshot(); geoCache.clear(); arrange(); refresh(); fit(); });
+$('#btnUndo').addEventListener('click', undo);
+$('#btnFit').addEventListener('click', fit);
+$('#zoomIn').addEventListener('click', () => { const r = svg.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.25); });
+$('#zoomOut').addEventListener('click', () => { const r = svg.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 0.8); });
+$('#btnReset').addEventListener('click', () => { snapshot(); state = exampleState(); geoCache.clear(); sel = null; hl = null; arrange(); refresh(); fit(); });
+$('#btnCopy').addEventListener('click', async () => {
+  const text = JSON.stringify({ name: state.name, parts: state.parts, wires: state.wires.map(({ id, a, b, color }) => ({ id, a, b, color })) }, null, 2);
+  try { await navigator.clipboard.writeText(text); showHint('Diagram copied as JSON.'); } catch (err) { showHint('Copy was blocked here. The diagram is also saved in this browser.'); }
+});
+
+// ---------------------------------------------------------------------------------------------
+// New part: a generic drawing with pins on its edges, or a picture of the real board.
+let modalArt = null;
+function parsePins(text) {
+  const errors = [];
+  const list = [];
+  text.split('\n').forEach((line, i) => {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) return;
+    const words = t.split(/\s+/);
+    const [label, edge, kind] = words;
+    if (!EDGE_DIR.hasOwnProperty(edge || '')) { errors.push(`Line ${i + 1}: the edge must be top, bottom, left or right.`); return; }
+    const props = { optional: words.includes('optional') };
+    const extra = words.slice(3).filter((w) => w !== 'optional');
+    const drives = extra.find((w) => w.startsWith('drives='));
+    if (drives) props.drives = parseFloat(drives.slice(7));
+    const num = extra.find((w) => /^[\d.]+(-[\d.]+)?$/.test(w));
+    switch (kind) {
+      case 'vcc': {
+        const [a, b] = (num || '3.3-5.5').split('-').map(parseFloat);
+        Object.assign(props, { kind: 'vcc', min: a, max: b === undefined ? a : b });
+        break;
+      }
+      case 'gnd': props.kind = 'gnd'; break;
+      case 'io': Object.assign(props, { kind: 'sig', needs: ['io'] }); break;
+      case 'pwm': Object.assign(props, { kind: 'sig', needs: ['pwm'] }); break;
+      case 'analog': Object.assign(props, { kind: 'sig', needs: ['analog'] }); break;
+      case 'sda': Object.assign(props, { kind: 'sig', needs: ['sda'] }); break;
+      case 'scl': Object.assign(props, { kind: 'sig', needs: ['scl'] }); break;
+      case 'supply': Object.assign(props, { kind: 'supply', volts: parseFloat(num || '5'), terminal: true }); break;
+      case 'motor': Object.assign(props, { kind: 'motor-in' }); break;
+      default: errors.push(`Line ${i + 1}: unknown kind "${kind || ''}".`); return;
+    }
+    list.push([label, edge, props]);
+  });
+  const ids = list.map((p) => p[0]);
+  if (new Set(ids).size !== ids.length) errors.push('Two pins have the same name.');
+  return { list, errors };
+}
+function modalDef() {
+  const name = $('#mName').value.trim() || 'New part';
+  const { list, errors } = parsePins($('#mPins').value);
+  const counts = { top: 0, bottom: 0, left: 0, right: 0 };
+  list.forEach((p) => { counts[p[1]] += 1; });
+  let w = Math.max(6, Math.round((+$('#mW').value || 20) / MM));
+  let h = Math.max(6, Math.round((+$('#mH').value || 10) / MM));
+  w = Math.max(w, 2 * Math.max(counts.top, counts.bottom) + 2);
+  h = Math.max(h, 2 * Math.max(counts.left, counts.right) + 2);
+  w += w & 1; h += h & 1;
+  const id = 'custom-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return { def: { id, name, covers: 'Your part', look: 'generic', color: $('#mColor').value, art: modalArt, w, h, pins: edgePins(list, w, h) }, errors };
+}
+function renderModal() {
+  const { def: d, errors } = modalDef();
+  $('#mErr').textContent = errors.join(' ');
+  const pad = 40;
+  const W = d.w * G, H = d.h * G;
+  const pins = d.pins.map((p) => {
+    const cells = stubOf(d, p);
+    const end = cells[cells.length - 1];
+    return `<line x1="${p.x * G}" y1="${p.y * G}" x2="${end[0] * G}" y2="${end[1] * G}" stroke="#facc15" stroke-width="2.5"/><rect x="${p.x * G - 3.4}" y="${p.y * G - 3.4}" width="6.8" height="6.8" rx="1" fill="#e2bd52" stroke="#8f6f17"/>${labelFor(p, { x: p.x, y: p.y, d: p.d }, false)}`;
+  }).join('');
+  $('#mPreview').innerHTML = `<svg viewBox="${-pad} ${-pad} ${W + pad * 2} ${H + pad * 2}" width="${W + pad * 2}">${LOOKS.generic(d, W, H)}${pins}</svg>`;
+  const lines = d.pins.map((p) => {
+    const edge = ['top', 'right', 'bottom', 'left'][p.d];
+    const at = (edge === 'top' || edge === 'bottom' ? p.x : p.y) * MM;
+    return `  { id = "${p.label}", edge = "${edge}", at-mm = ${at.toFixed(2)} },`;
+  });
+  $('#mSnippet').textContent = `[drawing]\nsize-mm = [${(d.w * MM).toFixed(1)}, ${(d.h * MM).toFixed(1)}]\n${modalArt ? 'art = "top-view.svg"   # shipped beside the part file\n' : 'colour = "' + d.color + '"\n'}pins = [\n${lines.join('\n')}\n]`;
+  $('#mAdd').disabled = errors.length > 0 || !d.pins.length;
+}
+function openModal() { $('#modal').hidden = false; modalArt = null; $('#mArt').value = ''; renderModal(); $('#mName').focus(); }
+function closeModal() { $('#modal').hidden = true; }
+$('#btnNewPart').addEventListener('click', openModal);
+$('#mCancel').addEventListener('click', closeModal);
+$('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
+for (const id of ['#mName', '#mW', '#mH', '#mColor', '#mPins']) $(id).addEventListener('input', renderModal);
+$('#mArt').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) { modalArt = null; renderModal(); return; }
+  if (f.size > 1.5e6) { $('#mErr').textContent = 'That picture is over 1.5 MB. Use a smaller one.'; return; }
+  const r = new FileReader();
+  r.onload = () => { modalArt = r.result; renderModal(); };
+  r.readAsDataURL(f);
+});
+$('#mAdd').addEventListener('click', () => {
+  const { def: d, errors } = modalDef();
+  if (errors.length) return;
+  customDefs = customDefs.filter((x) => x.id !== d.id).concat([d]);
+  store.set('faber-wiring-custom', customDefs);
+  closeModal();
+  renderLib();
+  addPart(d.id);
+});
+
+// ---------------------------------------------------------------------------------------------
+function start() {
+  const fresh = !state || !state.parts;
+  if (fresh) state = exampleState();
+  state.parts = state.parts.filter((p) => def(p.def));
+  if (fresh) arrange();
+  renderLib();
+  refresh();
+  fit();
+}
+window.addEventListener('resize', () => { render(); });
+document.fonts && document.fonts.ready.then(() => render());
+start();
+</script>
